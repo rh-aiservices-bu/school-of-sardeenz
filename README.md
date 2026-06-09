@@ -14,12 +14,12 @@ Instead of letting Kubernetes allocate accelerators per-workload at the infrastr
 
 The platform comprises four decoupled components:
 
-| Component | Role |
-| --- | --- |
-| **Routing Proxy** | High-performance request routing with connection parking |
-| **Control Plane** | Orchestration, scheduling, device memory management |
-| **Admin Dashboard** | Web UI for model management and cluster monitoring |
-| **Engine Runners** | Abstraction layer for different inference engines (vLLM, Triton, etc.) |
+| Component           | Role                                                                   |
+| ------------------- | ---------------------------------------------------------------------- |
+| **Routing Proxy**   | High-performance request routing with connection parking               |
+| **Control Plane**   | Orchestration, scheduling, device memory management                    |
+| **Admin Dashboard** | Web UI for model management and cluster monitoring                     |
+| **Engine Runners**  | Abstraction layer for different inference engines (vLLM, Triton, etc.) |
 
 For the full architecture description, diagrams, and request flows, see the [Architecture Overview](docs/architecture/overview.md).
 

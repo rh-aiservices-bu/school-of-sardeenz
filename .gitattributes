@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+*.rs text diff=rust
+*.ts text diff=typescript
+*.tsx text diff=typescript
+
+packages/types/src/generated/** linguist-generated=true

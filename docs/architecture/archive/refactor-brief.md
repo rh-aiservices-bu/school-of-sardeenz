@@ -41,6 +41,7 @@ The system is split into four strictly decoupled, specialized boundaries to enfo
 > The original design proposed streaming OpenAI-compliant placeholder chunks (`delta.content` with status text) to keep connections alive during wake-up. However, this approach **corrupts structured output responses.** When clients use `response_format: { type: "json_object" }`, function calling, or tool use, the accumulated `delta.content` from all chunks is expected to form valid JSON. Injected status text ("Model waking up...") prepended to the real response breaks client-side parsing.
 >
 > **Approaches to explore:**
+>
 > - **Distinct role signaling:** Use `choices[0].delta.role: "system"` or a non-standard role for parking chunks, which clients may not concatenate into the final assistant content. Requires validation against major SDKs (Python `openai`, JS `openai`, LangChain, LiteLLM).
 > - **Delayed stream start:** Don't begin the SSE stream until the model is ready. Rely on TCP keepalive and generous timeouts. Simpler, but the client sees a long hang with no feedback.
 > - **Header-based signaling:** Return `X-Sardeenz-Model-State: waking` on the initial response. Smart clients can show a spinner; standard clients just wait for the stream to begin.
@@ -86,6 +87,7 @@ The system is split into four strictly decoupled, specialized boundaries to enfo
 > **[TO BE DEFINED] Engine Contract**
 >
 > Each engine plugin must provide:
+>
 > - **Health check interface:** How to determine readiness (HTTP endpoint, process signal, etc.)
 > - **Memory reporting:** How the engine reports current VRAM consumption
 > - **Sleep/wake support:** Whether the engine supports memory offload, and the API to trigger it (optional — not all engines will support this)
@@ -107,7 +109,7 @@ The Highlander runtime modules and the Sardeenz orchestrator live in **separate 
 
 ```
 Highlander repo              CephFS (ROX mount)           Sardeenz control plane
-                                                          
+
 easyconfigs/                  /modules/                    engine plugin (vLLM)
   vllm-0.19.1.eb  →build→      vllm/0.19.1/               → module load vllm/0.19.1
   vllm-0.20.0.eb  →build→      vllm/0.20.0/               → module load vllm/0.20.0
@@ -125,20 +127,20 @@ To minimize model loading times and eliminate container image pull as the primar
 
 The cluster operates over a high-performance **CephFS / OpenShift Data Foundation (ODF)** backend, backed by NVMe or NVMe-over-TCP distributed nodes across a high-speed unified network fabric (25GbE / 100GbE). Storage is split cleanly into two profiles:
 
-| Profile | Access Mode | Purpose |
-|---|---|---|
-| **Model Weights Mount** | Read-Write Many (RWX) | Stores raw, immutable model weights (strictly `.safetensors` to allow efficient file mapping and protect against Python execution exploits). Multiple workers stream from this shared filesystem concurrently. |
-| **Application Modules Mount** | Read-Only Many (ROX) | Stores the compiled Highlander environment modules (Lmod/EasyBuild application libraries). |
+| Profile                       | Access Mode           | Purpose                                                                                                                                                                                                        |
+| ----------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Model Weights Mount**       | Read-Write Many (RWX) | Stores raw, immutable model weights (strictly `.safetensors` to allow efficient file mapping and protect against Python execution exploits). Multiple workers stream from this shared filesystem concurrently. |
+| **Application Modules Mount** | Read-Only Many (ROX)  | Stores the compiled Highlander environment modules (Lmod/EasyBuild application libraries).                                                                                                                     |
 
 > **Honest assessment of network-loaded model weights:**
 >
 > Loading model weights over network storage is bounded by network bandwidth. Expected load times for the raw data transfer alone (before CUDA initialization and graph capture):
 >
-> | Model Size | 25 GbE (~3 GB/s) | 100 GbE (~12 GB/s) |
-> |---|---|---|
-> | 1B (~2 GB fp16) | < 1s | < 1s |
-> | 7B (~14 GB fp16) | ~5s | ~1s |
-> | 70B (~140 GB fp16) | ~47s | ~12s |
+> | Model Size         | 25 GbE (~3 GB/s) | 100 GbE (~12 GB/s) |
+> | ------------------ | ---------------- | ------------------ |
+> | 1B (~2 GB fp16)    | < 1s             | < 1s               |
+> | 7B (~14 GB fp16)   | ~5s              | ~1s                |
+> | 70B (~140 GB fp16) | ~47s             | ~12s               |
 >
 > For small-to-medium models on a fast fabric, this is competitive with local NVMe. For large models (70B+), the network transfer adds meaningful latency. **Local NVMe caching is not eliminated as a possibility** — it is an optimization that can be layered in for specific deployment profiles where large model cold-start latency is critical. The architecture should not preclude it.
 
@@ -199,11 +201,11 @@ The Rust proxy and TypeScript control plane share type definitions through **Ope
 
 **Code generation pipeline:**
 
-| Target | Tooling | Output |
-|---|---|---|
-| **Rust proxy** | `openapi-generator` or `utoipa` (compile-time) | Rust structs + (de)serialization for routing map, health status, proxy ↔ control plane API |
-| **TypeScript control plane** | `openapi-typescript` | TypeScript types for the control plane API surface |
-| **TypeScript dashboard** | `openapi-typescript` | TypeScript types + fetch client for dashboard ↔ control plane communication |
+| Target                       | Tooling                                        | Output                                                                                     |
+| ---------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Rust proxy**               | `openapi-generator` or `utoipa` (compile-time) | Rust structs + (de)serialization for routing map, health status, proxy ↔ control plane API |
+| **TypeScript control plane** | `openapi-typescript`                           | TypeScript types for the control plane API surface                                         |
+| **TypeScript dashboard**     | `openapi-typescript`                           | TypeScript types + fetch client for dashboard ↔ control plane communication                |
 
 **Contracts cover:**
 
@@ -250,6 +252,7 @@ This platform is delivered in phases, each independently valuable and validatabl
 **Rationale:** The v1 frontend is tightly coupled to a single-instance Fastify backend that serves both API and static assets. The new platform has a fundamentally different communication architecture (Rust proxy, separate control plane, Highlander workers), different state model (sleep levels, engine plugin types, VRAM budgets, module versions, canary traffic splits), and different auth topology. Retrofitting these changes into the existing app costs more than a fresh build and produces a worse result. Six months of customer demos have validated which UI patterns work — those are carried forward; the plumbing is not.
 
 **Approach:**
+
 - Clean Vite + React + PatternFly 6 scaffold
 - Navigation and page structure designed for the new domain model from day one
 - Data layer built for the new API surface (control plane endpoints, proxy health/metrics, Highlander module state)
@@ -272,11 +275,11 @@ This platform is delivered in phases, each independently valuable and validatabl
 
 ## 7. Open Questions & Future Work
 
-| Item | Status | Notes |
-|---|---|---|
-| Connection parking and structured output compatibility | **Open design problem** | Must be resolved before Phase 1 proxy design is finalized. Prototype against Python/JS OpenAI SDKs. |
-| Eviction priority tiers and model pinning | **Future work** | LRU is sufficient initially. Interface should be pluggable. |
-| Multi-accelerator support (AMD, Intel) | **Future work** | Highlander's module system is accelerator-agnostic in principle, but CUDA-specific assumptions exist throughout. |
-| Local NVMe caching for large models | **Future work** | Not precluded by the architecture. Worth evaluating for 70B+ models on 25GbE fabrics. |
-| Admission control and backpressure | **Not yet addressed** | What happens when the cluster is at full VRAM capacity and LRU eviction itself takes 30+ seconds? Queue depth limits, timeout policies, and rejection strategies need definition. |
-| kvcached generalization | **Future work** | Currently vLLM-specific. If other engines can benefit from shared KV caches, the IPC interface may need abstraction. |
+| Item                                                   | Status                  | Notes                                                                                                                                                                             |
+| ------------------------------------------------------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connection parking and structured output compatibility | **Open design problem** | Must be resolved before Phase 1 proxy design is finalized. Prototype against Python/JS OpenAI SDKs.                                                                               |
+| Eviction priority tiers and model pinning              | **Future work**         | LRU is sufficient initially. Interface should be pluggable.                                                                                                                       |
+| Multi-accelerator support (AMD, Intel)                 | **Future work**         | Highlander's module system is accelerator-agnostic in principle, but CUDA-specific assumptions exist throughout.                                                                  |
+| Local NVMe caching for large models                    | **Future work**         | Not precluded by the architecture. Worth evaluating for 70B+ models on 25GbE fabrics.                                                                                             |
+| Admission control and backpressure                     | **Not yet addressed**   | What happens when the cluster is at full VRAM capacity and LRU eviction itself takes 30+ seconds? Queue depth limits, timeout policies, and rejection strategies need definition. |
+| kvcached generalization                                | **Future work**         | Currently vLLM-specific. If other engines can benefit from shared KV caches, the IPC interface may need abstraction.                                                              |

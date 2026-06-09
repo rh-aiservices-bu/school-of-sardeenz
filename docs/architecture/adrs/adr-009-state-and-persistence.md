@@ -18,11 +18,11 @@ Routing all of these through the control plane API would make it a bottleneck an
 
 Data is split across three purpose-matched stores:
 
-| Store | Data | Access Pattern |
-| --- | --- | --- |
+| Store              | Data                                                                                                                      | Access Pattern                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | **Redis / Valkey** | Routing map, model states, device memory budgets, worker-reported device memory usage, cluster topology, real-time events | High-frequency reads by proxy and dashboard. Written by the control plane and workers. Pub/sub for state change notifications. |
-| **PostgreSQL** | Configurations, benchmarks, memory profiles, persistent settings | Low-frequency reads/writes. Must survive full cluster restarts. Queried by the control plane and dashboard backend. |
-| **Prometheus** | Inference metrics, device utilization, proxy stats, component health | Time-series collection via scrape endpoints. Read directly by the dashboard backend for monitoring views. |
+| **PostgreSQL**     | Configurations, benchmarks, memory profiles, persistent settings                                                          | Low-frequency reads/writes. Must survive full cluster restarts. Queried by the control plane and dashboard backend.            |
+| **Prometheus**     | Inference metrics, device utilization, proxy stats, component health                                                      | Time-series collection via scrape endpoints. Read directly by the dashboard backend for monitoring views.                      |
 
 ### Why Redis/Valkey for Real-Time State
 

@@ -10,12 +10,12 @@
 
 Four strictly decoupled components:
 
-| Component | Directory | Language | Role |
-| --- | --- | --- | --- |
-| Routing Proxy | `proxy/` | Rust (axum/tokio) | Stateless OpenAI-compatible proxy, connection parking, thundering herd dedup |
-| Control Plane | `control-plane/` | TypeScript (Fastify) | VRAM budget tracking, LRU eviction, sleep/wake orchestration, model lifecycle |
-| Admin Dashboard | `dashboard/` | TypeScript (React + PatternFly 6, Vite) | Model management, VRAM visualization, cluster monitoring |
-| Engine Runners | `runners/` | TBD | Engine abstraction (vLLM reference impl first, then Triton, diffusion, etc.) |
+| Component       | Directory        | Language                                | Role                                                                          |
+| --------------- | ---------------- | --------------------------------------- | ----------------------------------------------------------------------------- |
+| Routing Proxy   | `proxy/`         | Rust (axum/tokio)                       | Stateless OpenAI-compatible proxy, connection parking, thundering herd dedup  |
+| Control Plane   | `control-plane/` | TypeScript (Fastify)                    | VRAM budget tracking, LRU eviction, sleep/wake orchestration, model lifecycle |
+| Admin Dashboard | `dashboard/`     | TypeScript (React + PatternFly 6, Vite) | Model management, VRAM visualization, cluster monitoring                      |
+| Engine Runners  | `runners/`       | TBD                                     | Engine abstraction (vLLM reference impl first, then Triton, diffusion, etc.)  |
 
 **Cross-language contracts:** OpenAPI specs in `packages/contracts/` are the single source of truth. Code generation produces Rust structs and TypeScript types.
 

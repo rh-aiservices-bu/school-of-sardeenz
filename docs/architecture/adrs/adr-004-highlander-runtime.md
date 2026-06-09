@@ -22,10 +22,10 @@ Sardeenz integrates the Highlander runtime model into its worker containers. Eng
 
 The storage layout uses two mount profiles:
 
-| Mount | Access | Purpose |
-| --- | --- | --- |
-| **Model weights** | Read-Write Many (RWX) | Shared model weight storage, `.safetensors` format |
-| **Application modules** | Read-Only Many (ROX) | Compiled Lmod modules (engine runtimes, libraries) |
+| Mount                   | Access                | Purpose                                            |
+| ----------------------- | --------------------- | -------------------------------------------------- |
+| **Model weights**       | Read-Write Many (RWX) | Shared model weight storage, `.safetensors` format |
+| **Application modules** | Read-Only Many (ROX)  | Compiled Lmod modules (engine runtimes, libraries) |
 
 ## Consequences
 

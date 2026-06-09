@@ -81,11 +81,11 @@ The platform comprises four main components, three data stores, and a shared sto
 
 ### Routing Proxy
 
-| | |
-| --- | --- |
-| **Language** | Rust (axum / tokio) |
-| **Role** | Stateless, high-performance request routing |
-| **Scaling** | Multiple replicas behind a load balancer |
+|              |                                             |
+| ------------ | ------------------------------------------- |
+| **Language** | Rust (axum / tokio)                         |
+| **Role**     | Stateless, high-performance request routing |
+| **Scaling**  | Multiple replicas behind a load balancer    |
 
 The proxy sits on the critical path of every inference request. It reads a routing map from Redis/Valkey to resolve which worker and runner should handle each request, then forwards the traffic.
 
@@ -100,11 +100,11 @@ Key capabilities:
 
 ### Control Plane
 
-| | |
-| --- | --- |
-| **Language** | TypeScript (Fastify) |
-| **Role** | Orchestration, scheduling, lifecycle management |
-| **Scaling** | Single leader with standby failover (K8s Lease) |
+|              |                                                 |
+| ------------ | ----------------------------------------------- |
+| **Language** | TypeScript (Fastify)                            |
+| **Role**     | Orchestration, scheduling, lifecycle management |
+| **Scaling**  | Single leader with standby failover (K8s Lease) |
 
 The control plane is the brain of the system. It does not serve inference traffic — it makes decisions about where workloads run and how device memory is allocated.
 
@@ -120,11 +120,11 @@ Key responsibilities:
 
 ### Admin Dashboard
 
-| | |
-| --- | --- |
-| **Frontend** | React 18 + PatternFly 6 + Vite |
-| **Backend** | TypeScript (Fastify) — BFF pattern |
-| **Scaling** | Single replica by default, stateless, scalable on demand |
+|              |                                                          |
+| ------------ | -------------------------------------------------------- |
+| **Frontend** | React 18 + PatternFly 6 + Vite                           |
+| **Backend**  | TypeScript (Fastify) — BFF pattern                       |
+| **Scaling**  | Single replica by default, stateless, scalable on demand |
 
 The dashboard is a backend + frontend pair. The backend acts as a BFF (backend-for-frontend), aggregating data from multiple sources independently — it is not a pass-through to the control plane.
 
@@ -138,10 +138,10 @@ This independence means the dashboard can display cluster state and metrics even
 
 ### Engine Runners
 
-| | |
-| --- | --- |
-| **Role** | Engine-specific workload execution |
-| **First implementation** | vLLM runner (reference) |
+|                          |                                    |
+| ------------------------ | ---------------------------------- |
+| **Role**                 | Engine-specific workload execution |
+| **First implementation** | vLLM runner (reference)            |
 
 A **runner** is a process within a worker that runs a single workload using a specific engine. Each **runner type** implements a common contract that the control plane uses to manage its lifecycle.
 
@@ -208,11 +208,11 @@ graph LR
 
 Data is split across three purpose-matched stores:
 
-| Store | What | Why |
-| --- | --- | --- |
+| Store              | What                                                                                                    | Why                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Redis / Valkey** | Routing map, model states, device memory budgets, worker-reported device memory usage, cluster topology | Sub-millisecond reads for the proxy. Pub/sub for state change notifications. Workers push their own device memory data, inverting v1's polling model. |
-| **PostgreSQL** | Configurations, benchmarks, memory profiles, persistent settings | Durability, queryability, transactional guarantees for data that must survive restarts. |
-| **Prometheus** | Inference metrics, device utilization, proxy stats, component health | Time-series collection via scrape endpoints. Dashboard reads directly for monitoring views. |
+| **PostgreSQL**     | Configurations, benchmarks, memory profiles, persistent settings                                        | Durability, queryability, transactional guarantees for data that must survive restarts.                                                               |
+| **Prometheus**     | Inference metrics, device utilization, proxy stats, component health                                    | Time-series collection via scrape endpoints. Dashboard reads directly for monitoring views.                                                           |
 
 > See [ADR-009](adrs/adr-009-state-and-persistence.md) for the full rationale.
 
@@ -461,12 +461,12 @@ graph TB
 
 Each component scales according to its workload profile:
 
-| Component | Strategy | Rationale |
-| --- | --- | --- |
-| **Routing Proxy** | Multiple stateless replicas behind a load balancer | On the critical path of every request. Horizontally scalable. |
-| **Control Plane** | Single leader with standby failover (K8s Lease) | Coordination workload is moderate. Leader/standby avoids multi-writer complexity. Inference continues during failover. |
-| **Admin Dashboard** | Single replica by default, stateless and scalable | Doesn't affect inference. Scales to multiple replicas without code changes if needed. |
-| **Workers** | Dynamic pool, manual provisioning initially | Workers join/leave without control plane restart. Extensible to autoscaling later. |
+| Component           | Strategy                                           | Rationale                                                                                                              |
+| ------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Routing Proxy**   | Multiple stateless replicas behind a load balancer | On the critical path of every request. Horizontally scalable.                                                          |
+| **Control Plane**   | Single leader with standby failover (K8s Lease)    | Coordination workload is moderate. Leader/standby avoids multi-writer complexity. Inference continues during failover. |
+| **Admin Dashboard** | Single replica by default, stateless and scalable  | Doesn't affect inference. Scales to multiple replicas without code changes if needed.                                  |
+| **Workers**         | Dynamic pool, manual provisioning initially        | Workers join/leave without control plane restart. Extensible to autoscaling later.                                     |
 
 > See [ADR-007](adrs/adr-007-redundancy-and-scaling.md) for the full scaling rationale.
 
@@ -495,20 +495,20 @@ The workflow: edit the OpenAPI spec → run code generation → both Rust and Ty
 
 ## ADR Index
 
-| ADR | Decision |
-| --- | --- |
-| [ADR-001](adrs/adr-001-l7-vram-scheduling.md) | Software-defined device memory scheduling at Layer 7 |
-| [ADR-002](adrs/adr-002-four-component-split.md) | Four-component architecture split |
-| [ADR-003](adrs/adr-003-rust-proxy.md) | Rust for the routing proxy |
-| [ADR-004](adrs/adr-004-highlander-runtime.md) | Highlander runtime integration with self-contained easyconfigs |
-| [ADR-005](adrs/adr-005-openapi-contracts.md) | OpenAPI as cross-language contract |
-| [ADR-006](adrs/adr-006-new-platform.md) | New platform vs. v1 refactor |
-| [ADR-007](adrs/adr-007-redundancy-and-scaling.md) | Redundancy and scaling strategy |
-| [ADR-008](adrs/adr-008-monorepo.md) | Monorepo structure |
-| [ADR-009](adrs/adr-009-state-and-persistence.md) | Shared state and persistence strategy |
-| [ADR-010](adrs/adr-010-engine-runners.md) | Engine runners |
-| [ADR-011](adrs/adr-011-worker-capabilities-and-placement.md) | Worker capabilities and workload placement |
-| [ADR-012](adrs/adr-012-typescript-stack.md) | TypeScript stack for control plane and dashboard |
+| ADR                                                          | Decision                                                       |
+| ------------------------------------------------------------ | -------------------------------------------------------------- |
+| [ADR-001](adrs/adr-001-l7-vram-scheduling.md)                | Software-defined device memory scheduling at Layer 7           |
+| [ADR-002](adrs/adr-002-four-component-split.md)              | Four-component architecture split                              |
+| [ADR-003](adrs/adr-003-rust-proxy.md)                        | Rust for the routing proxy                                     |
+| [ADR-004](adrs/adr-004-highlander-runtime.md)                | Highlander runtime integration with self-contained easyconfigs |
+| [ADR-005](adrs/adr-005-openapi-contracts.md)                 | OpenAPI as cross-language contract                             |
+| [ADR-006](adrs/adr-006-new-platform.md)                      | New platform vs. v1 refactor                                   |
+| [ADR-007](adrs/adr-007-redundancy-and-scaling.md)            | Redundancy and scaling strategy                                |
+| [ADR-008](adrs/adr-008-monorepo.md)                          | Monorepo structure                                             |
+| [ADR-009](adrs/adr-009-state-and-persistence.md)             | Shared state and persistence strategy                          |
+| [ADR-010](adrs/adr-010-engine-runners.md)                    | Engine runners                                                 |
+| [ADR-011](adrs/adr-011-worker-capabilities-and-placement.md) | Worker capabilities and workload placement                     |
+| [ADR-012](adrs/adr-012-typescript-stack.md)                  | TypeScript stack for control plane and dashboard               |
 
 ---
 

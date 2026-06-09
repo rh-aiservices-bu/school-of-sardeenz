@@ -16,11 +16,11 @@ OpenAPI specifications maintained in `packages/contracts/` are the **single sour
 
 Code generation pipeline:
 
-| Target | Tooling | Output |
-| --- | --- | --- |
-| Rust (proxy) | `openapi-generator` or `utoipa` | Rust structs + (de)serialization |
-| TypeScript (control plane) | `openapi-typescript` | TypeScript types |
-| TypeScript (dashboard) | `openapi-typescript` | TypeScript types + fetch client |
+| Target                     | Tooling                         | Output                           |
+| -------------------------- | ------------------------------- | -------------------------------- |
+| Rust (proxy)               | `openapi-generator` or `utoipa` | Rust structs + (de)serialization |
+| TypeScript (control plane) | `openapi-typescript`            | TypeScript types                 |
+| TypeScript (dashboard)     | `openapi-typescript`            | TypeScript types + fetch client  |
 
 The contracts cover:
 
