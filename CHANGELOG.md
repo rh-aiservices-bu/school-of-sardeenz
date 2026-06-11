@@ -17,3 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Comprehensive project plan with deliverables, definitions of done, risks, and dependencies for all five phases
 - CLAUDE.md: project status, workflow rules (CHANGELOG, npm, commit hygiene)
 - Phase 0 planning document with task breakdown, scope, and open questions
+
+### Changed
+
+- CLAUDE.md project status now links directly to phase0.md for current work
+- Aligned runner contract spec filename to `engine-runner.yaml` across all docs

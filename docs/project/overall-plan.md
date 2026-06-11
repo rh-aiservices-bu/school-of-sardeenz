@@ -45,7 +45,7 @@ Phases are sequential because each depends on the output of the previous one. Ph
 
 | # | Deliverable | Format |
 | --- | --- | --- |
-| 0.1 | Runner contract OpenAPI specification | `packages/contracts/specs/runner-contract.yaml` |
+| 0.1 | Runner contract OpenAPI specification | `packages/contracts/specs/engine-runner.yaml` |
 | 0.2 | Generated TypeScript types from the spec | `packages/types/src/generated/` |
 | 0.3 | Runner contract design document | `docs/architecture/components/runner-contract.md` |
 
