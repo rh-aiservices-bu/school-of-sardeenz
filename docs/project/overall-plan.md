@@ -51,22 +51,23 @@ Phases are sequential because each depends on the output of the previous one. Ph
 
 #### Scope
 
-The contract must define interfaces for:
+The contract defines the HTTP endpoints each runner exposes:
 
-- **Lifecycle management** — start, stop, graceful drain
-- **Health checking** — readiness probes, loading progress
-- **Memory reporting** — current device memory consumption per runner
+- **Health checking** — readiness probes, state reporting, loading progress
+- **Memory reporting** — per-device memory consumption
 - **Sleep/wake** — memory offload commands with level support (L1: offload to host RAM; future levels TBD)
-- **Log and progress extraction** — structured log format, model loading progress
+- **Progress reporting** — structured loading progress
 - **Capability declaration** — what a runner type supports (tensor parallelism, KV cache offload, specific sleep levels, supported model types)
+
+Lifecycle management (drain, stop) is a worker-level concern — the control plane manages the routing map, the worker manages runner processes via signals.
 
 #### Definition of Done
 
-- [ ] OpenAPI spec passes `redocly lint` with zero errors
-- [ ] Generated TypeScript types compile cleanly (`make typecheck`)
-- [ ] Design document covers all six interface areas listed above
-- [ ] Contract reviewed against the Sardeenz v1 vLLM integration to confirm no capability gaps
-- [ ] At least one walkthrough with the team confirming the contract supports the vLLM, Triton, and CPU-only runner scenarios from the architecture overview
+- [x] OpenAPI spec passes `redocly lint` with zero errors
+- [x] Generated TypeScript types compile cleanly (`make typecheck`)
+- [x] Design document covers all five interface areas listed above
+- [x] Contract reviewed against the Sardeenz v1 vLLM integration to confirm no capability gaps
+- [x] At least one walkthrough with the team confirming the contract supports the vLLM, Triton, and CPU-only runner scenarios from the architecture overview
 
 #### Risks
 

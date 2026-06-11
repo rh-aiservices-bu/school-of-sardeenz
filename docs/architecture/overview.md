@@ -145,16 +145,17 @@ This independence means the dashboard can display cluster state and metrics even
 
 A **runner** is a process within a worker that runs a single workload using a specific engine. Each **runner type** implements a common contract that the control plane uses to manage its lifecycle.
 
-The runner contract defines:
+The runner contract defines the HTTP endpoints each runner exposes:
 
-- **Lifecycle management** — start, stop, drain
-- **Health checking** — readiness detection
-- **Memory reporting** — current device memory consumption
+- **Health checking** — readiness detection, state reporting
+- **Memory reporting** — per-device memory consumption
 - **Sleep/wake support** — memory offload API (optional, not all engines support this)
-- **Log format / progress reporting** — loading progress and error extraction
-- **Capability declaration** — supported platform features (kvcached, tensor parallelism, specific sleep levels)
+- **Progress reporting** — structured loading progress
+- **Capability declaration** — supported platform features (tensor parallelism, sleep levels, model types)
 
-> See [ADR-010](adrs/adr-010-engine-runners.md) for the runner abstraction design.
+Process lifecycle (start, stop, drain) is a worker-level concern — the worker manages runner processes, and the control plane manages the routing map.
+
+> See [ADR-010](adrs/adr-010-engine-runners.md) for the runner abstraction design. See [`components/runner-contract.md`](components/runner-contract.md) for the full contract specification.
 
 ## Data Architecture
 

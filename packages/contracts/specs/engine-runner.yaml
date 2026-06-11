@@ -1,0 +1,704 @@
+openapi: 3.1.0
+info:
+  title: Sardeenz Engine Runner Contract
+  version: 0.1.0
+  description: |
+    Contract that every inference engine runner must implement for the Sardeenz
+    control plane to manage its lifecycle. A runner is a process within a worker
+    that runs a single workload (model, pipeline) using a specific engine.
+
+    This contract defines HTTP endpoints the runner exposes. The control plane
+    calls these endpoints to check health, report memory, manage sleep/wake,
+    and query capabilities. Inference traffic flows separately through the
+    engine's native endpoints (e.g., OpenAI-compatible /v1/chat/completions)
+    and is not part of this contract.
+
+    ## Interface Areas
+
+    1. **Health checking** — readiness probes, state reporting
+    2. **Memory reporting** — per-device memory consumption
+    3. **Sleep/wake** — memory offload and reload commands
+    4. **Progress reporting** — structured loading progress
+    5. **Capability declaration** — supported features and hardware requirements
+
+    Lifecycle management (drain, stop) is a worker-level concern — the
+    control plane updates the routing map to stop traffic, then the worker
+    sends SIGTERM to the runner process. These operations are not part of
+    the runner HTTP contract.
+
+tags:
+  - name: Health
+    description: Runner state and readiness
+  - name: Memory
+    description: Device memory consumption reporting
+  - name: Sleep
+    description: Memory offload and reload
+  - name: Progress
+    description: Loading progress during startup
+  - name: Capabilities
+    description: Feature and hardware declarations
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Get runner health and state
+      description: |
+        Returns the current runner state and, when starting, loading progress.
+        The control plane polls this endpoint to detect readiness and monitor
+        state transitions.
+
+        **HTTP status codes:**
+        - `200` — runner is in a known state (check `state` field)
+        - `503` — runner process is alive but not yet initialized
+
+        A `200` response does NOT mean the runner is ready for inference — check
+        the `state` field. Only `READY` and `BUSY` states accept inference traffic.
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Runner state retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Runner is not yet initialized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /memory-report:
+    get:
+      operationId: getMemoryReport
+      summary: Get device memory consumption
+      description: |
+        Returns current memory consumption broken down by device. For
+        tensor-parallel models spanning multiple devices, each device is
+        reported separately.
+
+        This endpoint is only meaningful when the runner is in `READY`, `BUSY`,
+        or `SLEEPING` state. During `STARTING`, memory is still being allocated
+        and the report may be incomplete or unavailable.
+      tags:
+        - Memory
+      responses:
+        "200":
+          description: Memory report retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryReport"
+        "409":
+          description: Runner is not in a state that can report memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sleep:
+    post:
+      operationId: sleep
+      summary: Put the runner to sleep
+      description: |
+        Commands the runner to offload memory according to the requested sleep
+        level. The runner transitions from `READY` to `SLEEPING`.
+
+        This is a synchronous operation — the response is returned after the
+        offload completes. The control plane should set an appropriate timeout
+        (offload duration depends on model size and sleep level).
+
+        Only runners that declare sleep support in their capabilities can
+        receive this command. Sending it to a runner without sleep support
+        returns `409`.
+      tags:
+        - Sleep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SleepRequest"
+      responses:
+        "200":
+          description: Runner is now sleeping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SleepResponse"
+        "400":
+          description: Invalid request (e.g., unsupported sleep level)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Runner cannot sleep from its current state (only valid from
+            `READY`), or sleep is not supported by this runner type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /wake:
+    post:
+      operationId: wake
+      summary: Wake the runner from sleep
+      description: |
+        Commands the runner to reload offloaded memory and return to the
+        `READY` state. The response is returned after the reload completes
+        and the runner is ready for inference.
+
+        The control plane should set an appropriate timeout (reload duration
+        depends on model size and the level from which the runner is waking).
+      tags:
+        - Sleep
+      responses:
+        "200":
+          description: Runner is now awake and ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WakeResponse"
+        "409":
+          description: Runner is not sleeping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sleep-status:
+    get:
+      operationId: getSleepStatus
+      summary: Get current sleep state
+      description: |
+        Returns whether the runner is sleeping and, if so, at what level.
+        The control plane uses this to verify sleep state and to decide
+        eviction strategies.
+      tags:
+        - Sleep
+      responses:
+        "200":
+          description: Sleep status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SleepStatus"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /progress:
+    get:
+      operationId: getProgress
+      summary: Get loading progress
+      description: |
+        Returns structured loading progress during runner startup. This
+        replaces the fragile log-parsing approach from v1 with an explicit
+        contract endpoint.
+
+        The response includes a loading phase and a completion percentage.
+        Once the runner reaches `READY` state, this endpoint returns phase
+        `READY` with 100% completion.
+
+        Runners that do not track granular progress may report only the
+        phase transitions (with `percentComplete` jumping between phase
+        boundaries rather than incrementing smoothly).
+      tags:
+        - Progress
+      responses:
+        "200":
+          description: Progress retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoadingProgress"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /capabilities:
+    get:
+      operationId: getCapabilities
+      summary: Get runner capabilities
+      description: |
+        Returns the runner's capability declaration — what features it
+        supports, what hardware it requires, and what workload types it
+        can serve. The control plane calls this once after the runner starts
+        and caches the result for placement and orchestration decisions.
+
+        Capabilities are static for the lifetime of the runner process.
+        They do not change based on the loaded model or runtime conditions.
+      tags:
+        - Capabilities
+      responses:
+        "200":
+          description: Capabilities retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerCapabilities"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal runner error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    # ---------------------------------------------------------------------------
+    # Enums
+    # ---------------------------------------------------------------------------
+
+    RunnerState:
+      type: string
+      description: |
+        Current state of the runner process.
+
+        - `STARTING` — runner is initializing, loading model weights, allocating memory
+        - `READY` — runner is ready to accept inference requests
+        - `BUSY` — runner is at capacity; it is healthy but should not receive new requests
+        - `SLEEPING` — runner has offloaded memory and is not serving inference
+        - `ERROR` — runner has encountered an unrecoverable error
+      enum:
+        - STARTING
+        - READY
+        - BUSY
+        - SLEEPING
+        - ERROR
+
+    SleepLevel:
+      type: string
+      description: |
+        Level of memory offload during sleep.
+
+        - `L1_HOST_RAM` — offload model weights to host RAM. Device memory is
+          freed but host memory is consumed. Wake is fast (memory copy back to
+          device). This is the only level defined in v0.1 of the contract.
+
+        Future levels (e.g., L2 for disk offload) will be added as the enum
+        grows. Runners declare which levels they support in their capabilities.
+      enum:
+        - L1_HOST_RAM
+
+    DeviceType:
+      type: string
+      description: |
+        Type of compute device used by the runner.
+
+        - `CUDA` — NVIDIA GPU via CUDA
+        - `ROCM` — AMD GPU via ROCm
+        - `CPU` — CPU-only compute
+        - `OTHER` — other accelerator types (e.g., Intel Gaudi, custom ASICs)
+      enum:
+        - CUDA
+        - ROCM
+        - CPU
+        - OTHER
+
+    ModelType:
+      type: string
+      description: |
+        Category of workload the runner can serve. Used by the control plane
+        for runner type selection during workload placement.
+
+        - `LLM` — large language model inference (autoregressive text generation)
+        - `DIFFUSION` — diffusion model inference (image/video generation)
+        - `PREDICTIVE` — traditional ML model inference (classification, regression)
+        - `EMBEDDING` — embedding model inference (text/image embeddings)
+        - `OTHER` — workload types not covered by the above categories
+      enum:
+        - LLM
+        - DIFFUSION
+        - PREDICTIVE
+        - EMBEDDING
+        - OTHER
+
+    LoadingPhase:
+      type: string
+      description: |
+        Current phase of the model loading process. Phases progress in order
+        from `INITIALIZING` to `READY`. Not all runners will pass through
+        every phase — engines with different loading pipelines may skip phases
+        that don't apply.
+
+        - `INITIALIZING` — runner process started, preparing to load
+        - `LOADING_WEIGHTS` — loading model weights from storage
+        - `ALLOCATING_MEMORY` — allocating device memory, KV cache, etc.
+        - `CAPTURING_GRAPHS` — capturing CUDA graphs or equivalent optimizations
+        - `WARMING_UP` — running warm-up inference or final initialization
+        - `READY` — loading complete, runner is ready for inference
+      enum:
+        - INITIALIZING
+        - LOADING_WEIGHTS
+        - ALLOCATING_MEMORY
+        - CAPTURING_GRAPHS
+        - WARMING_UP
+        - READY
+
+    # ---------------------------------------------------------------------------
+    # Health
+    # ---------------------------------------------------------------------------
+
+    HealthStatus:
+      type: object
+      description: Runner health and state information.
+      required:
+        - state
+      properties:
+        state:
+          $ref: "#/components/schemas/RunnerState"
+        message:
+          type: string
+          description: |
+            Optional human-readable message providing context about the current
+            state. Useful for error details when state is `ERROR`, or loading
+            status when state is `STARTING`.
+        progress:
+          $ref: "#/components/schemas/LoadingProgress"
+        activeRequests:
+          type: integer
+          minimum: 0
+          description: |
+            Number of inference requests currently being processed. The control
+            plane uses this to determine when in-flight work has completed
+            (e.g., before telling the worker to stop the runner process).
+            Only meaningful in `READY` and `BUSY` states.
+
+    # ---------------------------------------------------------------------------
+    # Memory
+    # ---------------------------------------------------------------------------
+
+    DeviceMemoryUsage:
+      type: object
+      description: Memory consumption for a single compute device.
+      required:
+        - deviceIndex
+        - deviceType
+        - memoryUsedBytes
+        - memoryTotalBytes
+      properties:
+        deviceIndex:
+          type: integer
+          minimum: 0
+          description: |
+            Zero-based index of the device as seen by the runner process. For
+            CUDA devices, this corresponds to the CUDA device ordinal (which
+            may differ from the physical GPU index if CUDA_VISIBLE_DEVICES
+            is set).
+        deviceType:
+          $ref: "#/components/schemas/DeviceType"
+        memoryUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Bytes of device memory currently used by this runner on this device.
+            Includes model weights, KV cache, CUDA graphs, and runtime overhead.
+        memoryTotalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Total device memory capacity in bytes for this device. The control
+            plane uses this alongside `memoryUsedBytes` to compute utilization.
+
+    MemoryReport:
+      type: object
+      description: |
+        Aggregate memory consumption across all devices used by this runner.
+        For single-device runners, the `devices` array has one entry. For
+        tensor-parallel runners spanning multiple devices, each device is
+        listed separately.
+      required:
+        - devices
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceMemoryUsage"
+          description: Per-device memory breakdown.
+          minItems: 1
+        breakdown:
+          $ref: "#/components/schemas/MemoryBreakdown"
+
+    MemoryBreakdown:
+      type: object
+      description: |
+        Optional detailed breakdown of memory usage by category. Not all
+        runners can provide this level of detail — it depends on the engine's
+        introspection capabilities.
+      properties:
+        weightsBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Memory consumed by model weights.
+        kvCacheBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Memory consumed by KV cache (LLM runners).
+        activationBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Memory consumed by activations and CUDA graphs.
+        overheadBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Runtime overhead not accounted for by the above categories
+            (CUDA context, memory allocator fragmentation, etc.).
+
+    # ---------------------------------------------------------------------------
+    # Sleep / Wake
+    # ---------------------------------------------------------------------------
+
+    SleepRequest:
+      type: object
+      description: Request to put the runner to sleep.
+      required:
+        - level
+      properties:
+        level:
+          $ref: "#/components/schemas/SleepLevel"
+
+    SleepResponse:
+      type: object
+      description: Response after the runner has entered sleep state.
+      required:
+        - state
+        - level
+      properties:
+        state:
+          $ref: "#/components/schemas/RunnerState"
+        level:
+          $ref: "#/components/schemas/SleepLevel"
+        deviceMemoryFreedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Bytes of device memory freed by the sleep operation. The control
+            plane uses this to update available capacity for placement decisions.
+
+    WakeResponse:
+      type: object
+      description: Response after the runner has woken up and is ready.
+      required:
+        - state
+      properties:
+        state:
+          $ref: "#/components/schemas/RunnerState"
+
+    SleepStatus:
+      type: object
+      description: Current sleep state of the runner.
+      required:
+        - isSleeping
+      properties:
+        isSleeping:
+          type: boolean
+          description: Whether the runner is currently sleeping.
+        level:
+          $ref: "#/components/schemas/SleepLevel"
+
+    # ---------------------------------------------------------------------------
+    # Progress
+    # ---------------------------------------------------------------------------
+
+    LoadingProgress:
+      type: object
+      description: |
+        Structured loading progress during runner startup. Replaces the
+        fragile log-parsing approach with an explicit contract endpoint.
+      required:
+        - phase
+        - percentComplete
+      properties:
+        phase:
+          $ref: "#/components/schemas/LoadingPhase"
+        percentComplete:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Overall loading completion percentage (0–100). May not increment
+            smoothly — some runners only report phase transitions, causing
+            the percentage to jump between phase boundaries.
+        message:
+          type: string
+          description: |
+            Optional human-readable description of what the runner is
+            currently doing (e.g., "Loading layer 12/32").
+        estimatedRemainingSeconds:
+          type: integer
+          minimum: 0
+          description: |
+            Estimated seconds until loading completes. This is a best-effort
+            estimate and may not be available from all runners.
+
+    # ---------------------------------------------------------------------------
+    # Capabilities
+    # ---------------------------------------------------------------------------
+
+    RunnerCapabilities:
+      type: object
+      description: |
+        Static capability declaration for a runner. Returned once after startup
+        and cached by the control plane. Capabilities describe what the runner
+        can do, not what it is currently doing.
+      required:
+        - runnerType
+        - engineName
+        - engineVersion
+        - supportedModelTypes
+        - supportedDeviceTypes
+      properties:
+        runnerType:
+          type: string
+          description: |
+            Identifier for this runner type (e.g., "vllm", "triton",
+            "mlserver"). Used by the control plane for runner type selection
+            during workload placement.
+        engineName:
+          type: string
+          description: |
+            Human-readable name of the inference engine (e.g., "vLLM",
+            "Triton Inference Server", "MLServer").
+        engineVersion:
+          type: string
+          description: |
+            Version of the inference engine (e.g., "0.19.1", "2.42.0").
+        supportedModelTypes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelType"
+          minItems: 1
+          description: |
+            Workload types this runner can serve. The control plane uses this
+            to match deployment requests to compatible runner types.
+        supportedDeviceTypes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceType"
+          minItems: 1
+          description: |
+            Device types this runner can use. A runner listing only `CPU`
+            will never be placed on a GPU worker. A runner listing `CUDA`
+            requires an NVIDIA GPU.
+        supportedSleepLevels:
+          type: array
+          items:
+            $ref: "#/components/schemas/SleepLevel"
+          description: |
+            Sleep levels this runner supports. An empty array or absent field
+            means the runner does not support sleep — the control plane will
+            use full stop/start instead of sleep/wake for eviction.
+        maxTensorParallelism:
+          type: integer
+          minimum: 1
+          description: |
+            Maximum number of devices this runner can span for tensor
+            parallelism. Defaults to 1 (single device) if not specified.
+            The control plane uses this to validate placement requests.
+          default: 1
+        features:
+          type: object
+          description: |
+            Optional feature flags for engine-specific capabilities. The
+            control plane may use these for fine-grained placement or to
+            enable engine-specific optimizations.
+
+            Well-known keys (runners should use these when applicable):
+            - `kvCacheOffload` (boolean) — supports KV cache offload to host
+            - `prefixCaching` (boolean) — supports prefix caching
+            - `streamingInference` (boolean) — supports SSE streaming responses
+            - `chatTemplate` (boolean) — supports chat template formatting
+            - `toolUse` (boolean) — supports function/tool calling
+          additionalProperties: true
+
+    # ---------------------------------------------------------------------------
+    # Common
+    # ---------------------------------------------------------------------------
+
+    ErrorResponse:
+      type: object
+      description: Error response returned by any endpoint on failure.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+        code:
+          type: string
+          description: |
+            Machine-readable error code for programmatic handling. Optional
+            but recommended for common error conditions.
+        details:
+          type: object
+          description: |
+            Additional structured error details. The shape depends on the
+            error type and is not standardized.
+          additionalProperties: true

@@ -22,14 +22,15 @@ The abstraction unit is the **runner**. A runner is a process-level component th
 - **Runner:** A process within a worker that runs a specific workload using a specific engine. One runner per model/workload. Short-lived relative to the worker — runners are started, stopped, slept, and woken by the control plane.
 - **Runner type:** The engine-specific implementation of the runner contract (e.g., vLLM runner, Triton runner). Defines how to operate that particular engine.
 
-**The runner contract** defines the interface between the control plane and any engine. Each runner type must provide:
+**The runner contract** defines the HTTP endpoints each runner exposes for the control plane to query and command. Each runner type must provide:
 
-- **Lifecycle management:** How to start, stop, and drain the engine process
-- **Health checking:** How to determine readiness (HTTP endpoint, process signal, etc.)
-- **Memory reporting:** How the engine reports current device memory consumption
-- **Sleep/wake support:** Whether the engine supports memory offload, and the API to trigger it (optional — not all engines support this)
-- **Log format / progress reporting:** How to extract loading progress and error information
-- **Capability declaration:** Which platform features the runner can leverage (e.g., kvcached, tensor parallelism, specific sleep levels)
+- **Health checking:** State reporting and readiness detection
+- **Memory reporting:** Per-device memory consumption
+- **Sleep/wake support:** Memory offload and reload commands (optional — not all engines support this)
+- **Progress reporting:** Structured loading progress during startup
+- **Capability declaration:** Supported features, hardware requirements, and workload types
+
+Process lifecycle (start, stop, drain) is a worker-level concern — the worker manages runner processes via signals, and the control plane manages the routing map to control traffic flow. See [`components/runner-contract.md`](../components/runner-contract.md) for the full contract specification.
 
 The vLLM runner, extracted from Sardeenz v1's existing integration, serves as the reference implementation.
 

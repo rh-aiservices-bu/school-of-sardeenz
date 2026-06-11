@@ -17,8 +17,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Comprehensive project plan with deliverables, definitions of done, risks, and dependencies for all five phases
 - CLAUDE.md: project status, workflow rules (CHANGELOG, npm, commit hygiene)
 - Phase 0 planning document with task breakdown, scope, and open questions
+- Engine runner contract OpenAPI spec (`packages/contracts/specs/engine-runner.yaml`):
+  7 endpoints across 5 interface areas (health, memory, sleep/wake, progress, capabilities),
+  5-state runner model (STARTING, READY, BUSY, SLEEPING, ERROR), per-device memory reporting,
+  extensible sleep levels, structured loading progress, capability declaration for placement
+- Generated TypeScript types from runner contract (`packages/types/src/generated/engine-runner.ts`)
+- Runner contract design document (`docs/architecture/components/runner-contract.md`):
+  state model with Mermaid diagram, communication patterns, scenario validation (vLLM/Triton/MLServer)
+- Architecture components directory (`docs/architecture/components/`)
 
 ### Changed
 
 - CLAUDE.md project status now links directly to phase0.md for current work
 - Aligned runner contract spec filename to `engine-runner.yaml` across all docs
+- `packages/types/src/index.ts` re-exports generated engine runner types and enums
+- `packages/types/package.json` codegen script now generates from engine-runner.yaml
+- `packages/contracts/redocly.yaml` disables rules inappropriate for internal contracts
+  (no-empty-servers, security-defined, info-license)

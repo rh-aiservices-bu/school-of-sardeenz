@@ -8,14 +8,15 @@ Define the contract that every inference engine runner must implement so the res
 
 ### In scope
 
-The runner contract covers six interface areas for a **running** runner process:
+The runner contract covers five interface areas for a **running** runner process:
 
-1. **Lifecycle management** — stop, graceful drain
-2. **Health checking** — readiness probes, loading progress
-3. **Memory reporting** — current device memory consumption per runner
-4. **Sleep/wake** — memory offload commands with level support (L1: offload to host RAM; future levels TBD)
-5. **Log and progress extraction** — structured log format, model loading progress
-6. **Capability declaration** — supported platform features (tensor parallelism, KV cache offload, specific sleep levels, supported model types)
+1. **Health checking** — readiness probes, loading progress
+2. **Memory reporting** — current device memory consumption per runner
+3. **Sleep/wake** — memory offload commands with level support (L1: offload to host RAM; future levels TBD)
+4. **Progress reporting** — structured loading progress
+5. **Capability declaration** — supported platform features (tensor parallelism, KV cache offload, specific sleep levels, supported model types)
+
+Lifecycle management (drain, stop) is a worker-level concern — the control plane updates the routing map to stop traffic, then the worker sends SIGTERM to the runner process.
 
 ### Out of scope
 
@@ -26,20 +27,20 @@ The runner contract covers six interface areas for a **running** runner process:
 ## Approach
 
 1. Study the v1 vLLM integration to extract real-world patterns
-2. Design and write the OpenAPI spec covering all six interface areas
+2. Design and write the OpenAPI spec covering all five interface areas
 3. Wire up code generation and produce TypeScript types
 4. Write a design document explaining rationale and usage patterns
 5. Validate the contract against three runner scenarios (vLLM, Triton, CPU-only)
 
 ## Tasks
 
-| #   | Task                                   | Status  | Output                                                       |
-| --- | -------------------------------------- | ------- | ------------------------------------------------------------ |
-| 0.1 | Study v1 vLLM integration             | Pending | Reference notes (internal)                                   |
-| 0.2 | Write runner contract OpenAPI spec     | Pending | `packages/contracts/specs/engine-runner.yaml`                |
-| 0.3 | Set up codegen and generate types      | Pending | `packages/types/src/generated/engine-runner.ts`              |
-| 0.4 | Write runner contract design document  | Pending | `docs/architecture/components/runner-contract.md`            |
-| 0.5 | Scenario validation                    | Pending | Confirmed coverage of vLLM, Triton, CPU-only                |
+| #   | Task                                   | Status   | Output                                                       |
+| --- | -------------------------------------- | -------- | ------------------------------------------------------------ |
+| 0.1 | Study v1 vLLM integration             | Complete | Reference notes (internal)                                   |
+| 0.2 | Write runner contract OpenAPI spec     | Complete | `packages/contracts/specs/engine-runner.yaml`                |
+| 0.3 | Set up codegen and generate types      | Complete | `packages/types/src/generated/engine-runner.ts`              |
+| 0.4 | Write runner contract design document  | Complete | `docs/architecture/components/runner-contract.md`            |
+| 0.5 | Scenario validation                    | Complete | Confirmed coverage of vLLM, Triton, CPU-only                |
 
 ## Task Details
 
@@ -62,14 +63,14 @@ This produces internal reference notes, not a deliverable. The notes inform Task
 
 **Depends on:** Task 0.1
 
-The core deliverable. Design and write an OpenAPI 3.1 specification at `packages/contracts/specs/engine-runner.yaml` covering all six interface areas.
+The core deliverable. Design and write an OpenAPI 3.1 specification at `packages/contracts/specs/engine-runner.yaml` covering all five interface areas.
 
 **Conventions** (from [`docs/development/coding-standards.md`](../development/coding-standards.md)):
 
 - Endpoint paths: `kebab-case` (e.g., `/health`, `/memory-report`)
 - Schema names: `PascalCase` (e.g., `HealthStatus`, `MemoryReport`)
 - Field names: `camelCase` (e.g., `deviceMemoryUsed`, `sleepLevel`)
-- Enum values: `SCREAMING_SNAKE_CASE` (e.g., `READY`, `DRAINING`)
+- Enum values: `SCREAMING_SNAKE_CASE` (e.g., `READY`, `SLEEPING`)
 - Every endpoint: document 200, 400, 500 responses
 - Every field: include a `description`
 
@@ -124,19 +125,17 @@ For each scenario, confirm:
 
 From the [overall project plan](overall-plan.md#phase-0-engine-runner-contract-design):
 
-- [ ] OpenAPI spec passes `redocly lint` with zero errors
-- [ ] Generated TypeScript types compile cleanly (`make typecheck`)
-- [ ] Design document covers all six interface areas
-- [ ] Contract reviewed against the Sardeenz v1 vLLM integration to confirm no capability gaps
-- [ ] Contract validated against vLLM, Triton, and CPU-only runner scenarios
+- [x] OpenAPI spec passes `redocly lint` with zero errors
+- [x] Generated TypeScript types compile cleanly (`make typecheck`)
+- [x] Design document covers all five interface areas
+- [x] Contract reviewed against the Sardeenz v1 vLLM integration to confirm no capability gaps
+- [x] Contract validated against vLLM, Triton, and CPU-only runner scenarios
 
-## Open Questions
+## Open Questions (Resolved)
 
-Questions to resolve during the work — updated as we go.
-
-- **Memory reporting granularity:** Should each runner report per-device memory, or aggregate across all devices it uses (relevant for tensor-parallel models spanning multiple GPUs)?
-- **Sleep level extensibility:** Should the spec define a fixed enum of sleep levels (L1, L2, ...) or allow engine-specific levels?
-- **Log format transport:** Should the contract define a log streaming endpoint, or is log extraction a worker-level concern (reading stdout/stderr)?
+- **Memory reporting granularity:** Per-device. The control plane needs per-device data for placement on tensor-parallel models. The `MemoryReport` includes a `devices` array with one entry per device.
+- **Sleep level extensibility:** Fixed enum with capability declaration. `SleepLevel` enum defines `L1_HOST_RAM`. Runners declare which levels they support in `GET /capabilities`. Future levels added to the enum.
+- **Log format transport:** Structured progress endpoint. The contract defines `GET /progress` for loading phase/percentage. Raw log capture (stdout/stderr) is a worker-level concern, not part of the runner HTTP contract.
 
 ## References
 

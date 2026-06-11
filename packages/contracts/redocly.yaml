@@ -3,3 +3,8 @@ extends:
 
 rules:
   no-unused-components: warn
+  # Runner contract is an internal interface — no fixed server or auth scheme
+  no-empty-servers: off
+  security-defined: off
+  # License is in the repo root, not repeated per spec
+  info-license: off
