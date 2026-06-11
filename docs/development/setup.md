@@ -4,20 +4,24 @@
 
 Sardeenz development uses a containerized environment ([ccbox](https://github.com/guimou/ccbox)) that provides all required tooling. If working outside the container, install:
 
-- **Node.js** >= 22 with npm
+- **Node.js** >= 22 with npm (version pinned in `.nvmrc`)
 - **Rust** stable toolchain (via [rustup](https://rustup.rs/)) with `rust-analyzer`, `clippy`, and `rustfmt` components
-- **Prettier** (`npm install -g prettier`)
+- **direnv** (recommended — auto-switches Node version on `cd` via `.envrc`)
 - **ripgrep** (recommended for fast code search)
 
 ## First-Time Setup
 
 ```bash
+# If using direnv, trust the project .envrc (one-time)
+direnv allow
+
 # Install all npm workspace dependencies
+# .npmrc enforces engine-strict — npm will refuse to install on Node < 22
 npm install
 
 # Verify the setup
-make typecheck  # TypeScript type checking
-make lint       # ESLint + clippy (if Rust available)
+make all        # Type-check + lint (includes OpenAPI spec validation)
+make test       # Run test suites (Vitest)
 make format-check  # Prettier + rustfmt (if Rust available)
 ```
 
@@ -46,16 +50,18 @@ make dev-proxy      # Proxy (cargo watch, requires Rust)
 
 ## Common Commands
 
-| Command             | Description                              |
-| ------------------- | ---------------------------------------- |
-| `make all`          | Type-check and lint everything           |
-| `make lint`         | ESLint + clippy                          |
-| `make format`       | Auto-format all files                    |
-| `make format-check` | Check formatting (CI-safe)               |
-| `make typecheck`    | TypeScript `tsc --build` + `cargo check` |
-| `make test`         | Run all test suites                      |
-| `make codegen`      | Regenerate types from OpenAPI specs      |
-| `make clean`        | Remove all build artifacts               |
+| Command              | Description                               |
+| -------------------- | ----------------------------------------- |
+| `make all`           | Type-check and lint everything            |
+| `make lint`          | ESLint + clippy + OpenAPI spec validation |
+| `make lint-specs`    | Validate OpenAPI specs only (Redocly)     |
+| `make format`        | Auto-format all files                     |
+| `make format-check`  | Check formatting (CI-safe)                |
+| `make typecheck`     | TypeScript `tsc --build` + `cargo check`  |
+| `make test`          | Run all test suites (Vitest + cargo test) |
+| `make test-coverage` | Run tests with V8 coverage                |
+| `make codegen`       | Regenerate types from OpenAPI specs       |
+| `make clean`         | Remove all build artifacts                |
 
 ## Logs
 
@@ -67,6 +73,22 @@ Each component pipes its output to a separate log file:
 # Example: start the control plane and capture logs
 npm run dev -w @sardeenz/control-plane > logs/control-plane.log 2>&1 &
 ```
+
+## Tooling Overview
+
+| Tool               | Purpose                      | Config file                       |
+| ------------------ | ---------------------------- | --------------------------------- |
+| TypeScript 5.x     | Type checking                | `tsconfig.base.json`              |
+| ESLint 9           | Linting (flat config)        | `eslint.config.js`                |
+| Prettier           | Code formatting              | `.prettierrc.json`                |
+| Vitest             | Testing                      | `vitest.config.ts`                |
+| Redocly            | OpenAPI spec validation      | `packages/contracts/redocly.yaml` |
+| openapi-typescript | Generate TS types from specs | —                                 |
+| Cargo / clippy     | Rust build and linting       | `proxy/Cargo.toml`                |
+
+## Versioning
+
+The project uses a single version in the root `package.json`. Sub-packages are all `private: true` and do not carry their own version fields.
 
 ## IDE Configuration
 

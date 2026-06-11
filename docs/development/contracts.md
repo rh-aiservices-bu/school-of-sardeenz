@@ -4,17 +4,17 @@ The OpenAPI specifications in `packages/contracts/` are the **single source of t
 
 ## Contract Files
 
-| File                           | Covers                           |
-| ------------------------------ | -------------------------------- |
-| `proxy-control-plane.yaml`     | Proxy ↔ Control Plane API        |
-| `dashboard-control-plane.yaml` | Dashboard ↔ Control Plane API    |
-| `engine-runner.yaml`           | Engine runner lifecycle contract |
+| File                                 | Covers                           |
+| ------------------------------------ | -------------------------------- |
+| `specs/proxy-control-plane.yaml`     | Proxy ↔ Control Plane API        |
+| `specs/dashboard-control-plane.yaml` | Dashboard ↔ Control Plane API    |
+| `specs/engine-runner.yaml`           | Engine runner lifecycle contract |
 
 ## Making Changes
 
 ### 1. Edit the OpenAPI spec
 
-Modify the relevant YAML file in `packages/contracts/`. Start with the spec, not the code.
+Modify the relevant YAML file in `packages/contracts/specs/`. Start with the spec, not the code.
 
 ### 2. Validate
 

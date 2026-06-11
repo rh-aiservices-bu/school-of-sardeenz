@@ -26,6 +26,8 @@ export default tseslint.config(
       '**/target/',
       '**/coverage/',
       'packages/types/src/generated/',
+      'vitest.config.ts',
+      'vitest.workspace.ts',
     ],
   },
 );

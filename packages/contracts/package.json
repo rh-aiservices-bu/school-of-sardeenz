@@ -1,9 +1,8 @@
 {
   "name": "@sardeenz/contracts",
   "private": true,
-  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "validate": "echo \"No OpenAPI specs to validate yet\""
+    "validate": "ls specs/*.yaml >/dev/null 2>&1 && redocly lint specs/*.yaml || echo 'No specs to validate yet'"
   }
 }

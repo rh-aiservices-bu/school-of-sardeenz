@@ -1,17 +1,20 @@
 CARGO := $(shell command -v cargo 2>/dev/null)
 
-.PHONY: all lint format format-check typecheck test codegen clean \
-        dev-cp dev-dashboard dev-proxy
+.PHONY: all lint lint-specs format format-check typecheck test test-coverage \
+        codegen clean dev-cp dev-dashboard dev-proxy
 
 all: typecheck lint
 
 # --- Linting ---
 
-lint:
+lint: lint-specs
 	npm run lint
 ifdef CARGO
 	cd proxy && cargo clippy --all-targets -- -D warnings
 endif
+
+lint-specs:
+	npm run validate -w @sardeenz/contracts
 
 # --- Formatting ---
 
@@ -42,6 +45,9 @@ test:
 ifdef CARGO
 	cd proxy && cargo test
 endif
+
+test-coverage:
+	npm run test:coverage
 
 # --- Code generation ---
 
