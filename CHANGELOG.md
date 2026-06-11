@@ -16,3 +16,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documentation rule: every Markdown file must be linked from its parent README
 - Comprehensive project plan with deliverables, definitions of done, risks, and dependencies for all five phases
 - CLAUDE.md: project status, workflow rules (CHANGELOG, npm, commit hygiene)
+- Phase 0 planning document with task breakdown, scope, and open questions
