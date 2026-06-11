@@ -14,3 +14,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Build infrastructure: Makefile, npm workspaces, tsconfig project references
 - README index in every `docs/` directory for GitHub navigation
 - Documentation rule: every Markdown file must be linked from its parent README
+- Comprehensive project plan with deliverables, definitions of done, risks, and dependencies for all five phases
