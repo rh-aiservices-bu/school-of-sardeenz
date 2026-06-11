@@ -73,3 +73,9 @@ OpenAPI contracts bridge the Rust and TypeScript sides. Naming conventions diffe
 | `LOADING`       | `ModelState.LOADING` | `ModelState::Loading` |
 
 `serde` rename attributes handle the Rust ↔ JSON mapping automatically. TypeScript types are generated and match JSON conventions directly.
+
+## Documentation
+
+- Every directory under `docs/` must have a `README.md` that serves as an index for that folder.
+- Every Markdown file must be linked from the `README.md` of its parent directory. No orphan docs — if it's not referenced, it's invisible.
+- Keep README index entries short: a link and a one-line description, not a full summary.

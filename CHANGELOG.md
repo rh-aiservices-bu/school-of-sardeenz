@@ -12,3 +12,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Development tooling: TypeScript, ESLint, Prettier, Vitest, Redocly
 - OpenAPI contract workflow with codegen pipeline
 - Build infrastructure: Makefile, npm workspaces, tsconfig project references
+- README index in every `docs/` directory for GitHub navigation
+- Documentation rule: every Markdown file must be linked from its parent README
