@@ -66,6 +66,16 @@ Details in [`docs/project/`](docs/project/).
 - Context7 is fine for React, Axios, React Router, Vitest, and other non-PF libraries
 - All PF classes must use `pf-v6-` prefix; use `--pf-t--` semantic design tokens only
 
+## Project Status
+
+The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. No runtime code has been written yet. Current phase: **Phase 0** (engine runner contract design). See [`docs/project/overall-plan.md`](docs/project/overall-plan.md) for the full plan with deliverables and definitions of done.
+
+## Workflow Rules
+
+- **CHANGELOG:** Always update `CHANGELOG.md` (under `[Unreleased]`) before committing changes.
+- **Package manager:** Use npm, not pnpm. pnpm's hardlink store breaks across the container/host mount boundary.
+- **Commit hygiene:** Run lint/typecheck before marking work complete. Stage specific files, not `git add -A`.
+
 ## Sardeenz v1 Reference
 
 The [v1 codebase](https://github.com/rh-aiservices-bu/sardeenz) remains a living reference for cherry-picking UI components and implementation patterns. It is not being refactored — this is a new platform.
