@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Control plane admin API OpenAPI spec (`packages/contracts/specs/control-plane.yaml`):
+  model lifecycle CRUD (deploy/sleep/wake/delete), worker management, cluster state/memory,
+  SSE events stream, `ModelLifecycleState` enum (8 states), `WorkerStatus` and `ClusterEventType` enums
+- Generated TypeScript types from control plane spec (`packages/types/src/generated/control-plane.ts`)
+- Control plane Fastify scaffold (`control-plane/src/`): config from env vars, typed error hierarchy
+  (`ControlPlaneError` with error codes), Redis/PostgreSQL/runner HTTP clients, Prometheus metrics
+  (13 metrics: models, workers, memory, placement, eviction, sleep/wake, state transitions, leader),
+  health probes (`/healthz`, `/readyz`), structured JSON logging, graceful shutdown
 - Phase 2 project plan (`docs/project/phase2.md`): detailed task breakdown for control plane sleep/wake orchestration — 18 tasks covering OpenAPI specs, Fastify scaffold, PostgreSQL schema, model lifecycle state machine, placement pipeline, LRU eviction, sleep/wake coordination, routing map management, worker pool, leader election, health/metrics, container image, and integration tests
 - Backward-compatibility policy in ADR-005: semver rules for pre-1.0 specs, breaking vs. non-breaking change definitions, simultaneous rollout guarantee, version mismatch detection via startup logging (#13)
 - Runner BUSY state routing mapping in runner contract docs: BUSY sets endpoint weight to 0 (model stays ACTIVE, endpoint stays healthy), full RunnerState-to-ModelState mapping table (#14)
