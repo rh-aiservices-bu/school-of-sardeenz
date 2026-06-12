@@ -54,6 +54,38 @@ stateDiagram-v2
 - **→ [*] (stopped):** The control plane removes the runner from the routing map (stopping new traffic), monitors `activeRequests` in `GET /health` until in-flight work completes, then tells the worker to send SIGTERM. The runner does not receive an HTTP command to stop — process lifecycle is a worker concern.
 - **→ ERROR:** Self-reported by the runner. Can occur from any active state. The control plane detects it via health polling and decides whether to restart or escalate.
 
+### Runner State to Routing Map Mapping
+
+The runner contract defines per-runner states (`RunnerState`), while the proxy routing map operates on per-model states (`ModelState`) with per-endpoint fields (`healthy`, `weight`). The control plane translates between the two.
+
+#### BUSY → weight: 0
+
+When a runner reports `BUSY`, the control plane sets `weight: 0` on that runner's endpoint in the routing map. The endpoint remains in the list with `healthy: true` and the model stays in `ACTIVE` state.
+
+This design reflects three properties of the BUSY state:
+
+1. **BUSY is per-replica, not per-model.** If one of three replicas is busy, the model is still active — the other two serve traffic. Changing the model-level state would incorrectly affect all replicas.
+2. **BUSY is healthy.** The runner is functioning correctly — it's just at capacity. Setting `healthy: false` would conflate saturation with failure and could trigger unnecessary circuit breaker or alerting logic.
+3. **weight: 0 is already designed for this.** The proxy's weighted round-robin naturally skips weight-0 endpoints without removing them from the routing entry.
+
+When the runner transitions back to `READY`, the control plane restores the endpoint's original weight.
+
+#### All replicas BUSY
+
+If all endpoints for a model reach `weight: 0`, the proxy has no routable endpoints. It returns HTTP 503 to the client — the correct behavior for a fully saturated model. The control plane may use all-replicas-BUSY as a signal to trigger scaling decisions (wake another replica, start a new one), but that is an orchestration concern independent of the routing map.
+
+#### Full mapping table
+
+| RunnerState | ModelState | Endpoint healthy | Endpoint weight | Proxy behavior |
+| --- | --- | --- | --- | --- |
+| `STARTING` | `STARTING` | N/A (no endpoint yet) | N/A | Park connections, no wake trigger |
+| `READY` | `ACTIVE` | `true` | configured weight | Forward requests (round-robin) |
+| `BUSY` | `ACTIVE` | `true` | `0` | Skip this endpoint in round-robin |
+| `SLEEPING` | `SLEEPING` | N/A (no endpoint) | N/A | Park connections, fire wake trigger |
+| `ERROR` | `ERROR` | N/A (no endpoint) | N/A | Return 503 |
+
+The `DRAINING` model state is set explicitly by the control plane before sleep or shutdown — it is not derived from a runner state. During draining, endpoints remain with their current weight but the proxy stops routing new requests; in-flight requests complete normally.
+
 ## Interface Areas
 
 ### Health Checking
