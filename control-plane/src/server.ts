@@ -3,14 +3,22 @@ import Fastify from 'fastify';
 import type { Config } from './config.js';
 import type { Redis } from './clients/redis.js';
 import type { DatabasePool } from './clients/database.js';
+import type { RouteDeps } from './routes/deps.js';
 import { ControlPlaneError } from './errors.js';
 import { registerProbes } from './health/probes.js';
 import { registerMetricsRoute } from './health/metrics.js';
+import { registerModelRoutes } from './routes/models.js';
+import { registerWorkerRoutes } from './routes/workers.js';
+import { registerClusterRoutes } from './routes/cluster.js';
+import { registerInternalRoutes } from './routes/internal.js';
+import { registerEventRoutes } from './routes/events.js';
 
 export interface ServerDeps {
   config: Config;
   redis: Redis;
+  subscriber: Redis;
   db: DatabasePool;
+  routes: RouteDeps;
 }
 
 export async function buildServer(deps: ServerDeps) {
@@ -40,6 +48,12 @@ export async function buildServer(deps: ServerDeps) {
 
   registerProbes(app, { redis: deps.redis, db: deps.db });
   registerMetricsRoute(app);
+
+  registerModelRoutes(app, deps.routes);
+  registerWorkerRoutes(app, deps.routes);
+  registerClusterRoutes(app, deps.routes);
+  registerInternalRoutes(app, deps.routes);
+  registerEventRoutes(app, deps.subscriber, deps.config.redisKeyPrefix);
 
   return app;
 }

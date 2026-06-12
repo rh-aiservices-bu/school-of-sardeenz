@@ -1,22 +1,92 @@
 import { loadConfig, redactUrl } from './config.js';
 import { createRedisClient } from './clients/redis.js';
 import { createDatabasePool } from './clients/database.js';
+import { RunnerClient } from './clients/runner.js';
 import { buildServer } from './server.js';
+import { ModelRepository } from './services/model-repository.js';
+import { ModelLifecycleService } from './services/model-lifecycle.js';
+import { MemoryBudgetService } from './services/memory-budget.js';
+import { WorkerPoolService } from './services/worker-pool.js';
+import { RoutingMapService } from './services/routing-map.js';
+import { PlacementPipeline } from './services/placement.js';
+import { EvictionEngine } from './services/eviction.js';
+import { SleepWakeService } from './services/sleep-wake.js';
+import { LeaderElectionService } from './services/leader-election.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
 
   const redis = createRedisClient(config);
+  const subscriber = createRedisClient(config);
   const db = createDatabasePool(config);
 
   await redis.connect();
+  await subscriber.connect();
 
-  const app = await buildServer({ config, redis, db });
+  const modelRepository = new ModelRepository(db);
+  const lifecycle = new ModelLifecycleService(redis, config.redisKeyPrefix);
+  const memoryBudget = new MemoryBudgetService(
+    redis,
+    config.redisKeyPrefix,
+    config.workerHeartbeatTimeoutSecs,
+  );
+  const workerPool = new WorkerPoolService(
+    redis,
+    config.redisKeyPrefix,
+    config.workerHeartbeatTimeoutSecs,
+  );
+  const routingMap = new RoutingMapService(redis, config.redisKeyPrefix);
+  const placement = new PlacementPipeline();
+  const eviction = new EvictionEngine(undefined, {
+    maxPerCycle: config.evictionMaxPerCycle,
+    minActiveTimeSecs: 60,
+    circuitBreakerThreshold: 5,
+    circuitBreakerWindowSecs: 60,
+  });
+  const sleepWake = new SleepWakeService(
+    lifecycle,
+    routingMap,
+    config.sleepTimeoutSecs * 1000,
+    config.wakeTimeoutSecs * 1000,
+    config.healthCheckIntervalSecs * 1000,
+  );
+  const leaderElection = new LeaderElectionService({
+    leaseName: config.leaseName,
+    leaseNamespace: config.leaseNamespace,
+    renewIntervalMs: 10_000,
+    leaseDurationMs: 30_000,
+  });
+
+  const app = await buildServer({
+    config,
+    redis,
+    subscriber,
+    db,
+    routes: {
+      config,
+      modelRepository,
+      lifecycle,
+      memoryBudget,
+      workerPool,
+      routingMap,
+      placement,
+      eviction,
+      sleepWake,
+      leaderElection,
+      createRunnerClient: (host, port) => new RunnerClient({ host, port }),
+    },
+  });
+
+  await leaderElection.start();
+  await workerPool.discoverWorkers();
+  await memoryBudget.refreshAll();
 
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'Shutting down');
+    await leaderElection.stop();
     await app.close();
     redis.disconnect();
+    subscriber.disconnect();
     await db.end();
     process.exit(0);
   };
@@ -30,6 +100,7 @@ async function main(): Promise<void> {
       address: `${config.listenAddr}:${config.listenPort}`,
       redisUrl: redactUrl(config.redisUrl),
       databaseUrl: redactUrl(config.databaseUrl),
+      isLeader: leaderElection.isLeader,
     },
     'Control plane started',
   );
