@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Runner contract design document (`docs/architecture/components/runner-contract.md`):
   state model with Mermaid diagram, communication patterns, scenario validation (vLLM/Triton/MLServer)
 - Architecture components directory (`docs/architecture/components/`)
+- Phase 1 planning document with 12-task breakdown for the Rust proxy (`docs/project/phase1.md`)
+- Podman Compose dev environment (`compose.yaml`) with Valkey 8 for Redis-compatible state store
+- Makefile targets `services` and `services-stop` for dev service lifecycle
 
 ### Changed
 

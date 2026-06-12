@@ -1,0 +1,22 @@
+# Dev environment services for Sardeenz v2.
+# Start:  podman compose up -d
+# Stop:   podman compose down
+# Reset:  podman compose down -v   (removes data volumes)
+#
+# Also works with: docker compose up -d
+
+services:
+  redis:
+    image: docker.io/valkey/valkey:8
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

@@ -68,7 +68,7 @@ Details in [`docs/project/`](docs/project/).
 
 ## Project Status
 
-The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. No runtime code has been written yet. Current phase: **Phase 0** (engine runner contract design). Task breakdown and progress: [`docs/project/phase0.md`](docs/project/phase0.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
+The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phase 0 (engine runner contract) is complete. Current phase: **Phase 1** (Rust proxy with connection parking). Task breakdown and progress: [`docs/project/phase1.md`](docs/project/phase1.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
 ## Workflow Rules
 

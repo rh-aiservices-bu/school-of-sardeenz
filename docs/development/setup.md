@@ -6,6 +6,7 @@ Sardeenz development uses a containerized environment ([ccbox](https://github.co
 
 - **Node.js** >= 22 with npm (version pinned in `.nvmrc`)
 - **Rust** stable toolchain (via [rustup](https://rustup.rs/)) with `rust-analyzer`, `clippy`, and `rustfmt` components
+- **Podman** with `podman-compose` (or Docker with Docker Compose) — for dev services (Redis/Valkey, later PostgreSQL)
 - **direnv** (recommended — auto-switches Node version on `cd` via `.envrc`)
 - **ripgrep** (recommended for fast code search)
 
@@ -18,6 +19,9 @@ direnv allow
 # Install all npm workspace dependencies
 # .npmrc enforces engine-strict — npm will refuse to install on Node < 22
 npm install
+
+# Start dev services (Redis/Valkey — see "Dev Services" below)
+podman compose up -d
 
 # Verify the setup
 make all        # Type-check + lint (includes OpenAPI spec validation)
@@ -48,6 +52,45 @@ make dev-dashboard  # Dashboard (Vite dev server)
 make dev-proxy      # Proxy (cargo watch, requires Rust)
 ```
 
+## Dev Services
+
+Backend services (Redis/Valkey, and later PostgreSQL) run via Podman Compose. The compose file is at the repo root (`compose.yaml`).
+
+```bash
+# Start all services in the background
+podman compose up -d
+
+# Check service health
+podman compose ps
+
+# View logs
+podman compose logs redis
+
+# Stop services (data is preserved in volumes)
+podman compose down
+
+# Stop and remove all data volumes (clean slate)
+podman compose down -v
+```
+
+Docker Compose works identically — replace `podman` with `docker`.
+
+### Services
+
+| Service | Image             | Default port | Used by                                                       |
+| ------- | ----------------- | ------------ | ------------------------------------------------------------- |
+| `redis` | `valkey/valkey:8` | 6379         | Proxy (routing map), control plane (state), integration tests |
+
+Additional services (PostgreSQL, Prometheus) will be added in later phases.
+
+### Connecting from code
+
+The default connection URLs match the compose defaults with no extra configuration:
+
+| Service      | Default URL              |
+| ------------ | ------------------------ |
+| Redis/Valkey | `redis://localhost:6379` |
+
 ## Common Commands
 
 | Command              | Description                               |
@@ -61,6 +104,8 @@ make dev-proxy      # Proxy (cargo watch, requires Rust)
 | `make test`          | Run all test suites (Vitest + cargo test) |
 | `make test-coverage` | Run tests with V8 coverage                |
 | `make codegen`       | Regenerate types from OpenAPI specs       |
+| `make services`      | Start dev services (Redis/Valkey)         |
+| `make services-stop` | Stop dev services                         |
 | `make clean`         | Remove all build artifacts                |
 
 ## Logs

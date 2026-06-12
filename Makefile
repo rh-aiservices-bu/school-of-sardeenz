@@ -1,7 +1,8 @@
 CARGO := $(shell command -v cargo 2>/dev/null)
+COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podman-compose"; elif command -v podman >/dev/null 2>&1; then echo "podman compose"; else echo "docker compose"; fi)
 
 .PHONY: all lint lint-specs format format-check typecheck test test-coverage \
-        codegen clean dev-cp dev-dashboard dev-proxy
+        codegen clean dev-cp dev-dashboard dev-proxy services services-stop
 
 all: typecheck lint
 
@@ -53,6 +54,14 @@ test-coverage:
 
 codegen:
 	npm run codegen -w @sardeenz/types
+
+# --- Dev services ---
+
+services:
+	$(COMPOSE) up -d
+
+services-stop:
+	$(COMPOSE) down
 
 # --- Development ---
 
