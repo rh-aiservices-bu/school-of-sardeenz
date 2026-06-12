@@ -1,3 +1,8 @@
+---
+name: contract-codegen
+description: Regenerate TypeScript types from OpenAPI specifications. Use after modifying any OpenAPI spec in packages/contracts/, or when asked to update, regenerate, or sync types/contracts.
+---
+
 # Contract Code Generation
 
 Regenerate TypeScript types (and later Rust structs) from OpenAPI specifications.

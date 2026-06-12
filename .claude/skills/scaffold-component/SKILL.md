@@ -1,3 +1,8 @@
+---
+name: scaffold-component
+description: Create a new component within the Sardeenz monorepo with correct boilerplate. Use when asked to set up, initialize, or scaffold a new TypeScript or Rust component.
+---
+
 # Scaffold Component
 
 Create a new component within the Sardeenz monorepo with correct boilerplate.
