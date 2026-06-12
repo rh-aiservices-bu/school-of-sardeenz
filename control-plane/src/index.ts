@@ -1,6 +1,10 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { loadConfig, redactUrl } from './config.js';
 import { createRedisClient } from './clients/redis.js';
 import { createDatabasePool } from './clients/database.js';
+import { runMigrations } from './clients/migrations.js';
 import { RunnerClient } from './clients/runner.js';
 import { buildServer } from './server.js';
 import { ModelRepository } from './services/model-repository.js';
@@ -22,6 +26,12 @@ async function main(): Promise<void> {
 
   await redis.connect();
   await subscriber.connect();
+
+  const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+  const applied = await runMigrations(db, migrationsDir);
+  if (applied > 0) {
+    console.log(`Applied ${applied} database migration(s)`);
+  }
 
   const modelRepository = new ModelRepository(db);
   const lifecycle = new ModelLifecycleService(redis, config.redisKeyPrefix);

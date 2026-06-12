@@ -146,7 +146,7 @@ export class MemoryBudgetService {
    */
   async refreshAll(): Promise<void> {
     const pattern = redisKey(this.keyPrefix, 'workers', '*', WORKER_MEMORY_SUBKEY);
-    const keys = await this.redis.keys(pattern);
+    const keys = await this.scanKeys(pattern);
     if (keys.length === 0) {
       this.budgets.clear();
       return;
@@ -269,6 +269,17 @@ export class MemoryBudgetService {
    * After a reservation change, patch the affected DeviceBudget in-place so
    * the Map stays consistent without requiring a full Redis round-trip.
    */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
+    return keys;
+  }
+
   private recomputeDeviceBudget(workerId: string, deviceIndex: number): void {
     const budget = this.budgets.get(workerId);
     if (!budget) return;
@@ -278,6 +289,9 @@ export class MemoryBudgetService {
 
     const reservedBytes = this.getReservation(workerId, deviceIndex);
     device.reservedBytes = reservedBytes;
-    device.availableBytes = Math.max(0, device.totalBytes - Math.max(device.usedBytes, reservedBytes));
+    device.availableBytes = Math.max(
+      0,
+      device.totalBytes - Math.max(device.usedBytes, reservedBytes),
+    );
   }
 }

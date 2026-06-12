@@ -4,29 +4,24 @@ import { redisKey } from '../clients/redis.js';
 import { ControlPlaneError } from '../errors.js';
 import { stateTransitionsTotal } from '../health/metrics.js';
 
-const VALID_TRANSITIONS: ReadonlyMap<ModelLifecycleState, readonly ModelLifecycleState[]> = new Map([
-  [ModelLifecycleState.PENDING, [ModelLifecycleState.STARTING, ModelLifecycleState.ERROR]],
-  [ModelLifecycleState.STARTING, [ModelLifecycleState.ACTIVE, ModelLifecycleState.ERROR]],
-  [ModelLifecycleState.ACTIVE, [ModelLifecycleState.DRAINING, ModelLifecycleState.ERROR]],
+const VALID_TRANSITIONS: ReadonlyMap<ModelLifecycleState, readonly ModelLifecycleState[]> = new Map(
   [
-    ModelLifecycleState.DRAINING,
+    [ModelLifecycleState.PENDING, [ModelLifecycleState.STARTING, ModelLifecycleState.ERROR]],
+    [ModelLifecycleState.STARTING, [ModelLifecycleState.ACTIVE, ModelLifecycleState.ERROR]],
+    [ModelLifecycleState.ACTIVE, [ModelLifecycleState.DRAINING, ModelLifecycleState.ERROR]],
+    [
+      ModelLifecycleState.DRAINING,
+      [ModelLifecycleState.SLEEPING, ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
+    ],
     [
       ModelLifecycleState.SLEEPING,
-      ModelLifecycleState.STOPPING,
-      ModelLifecycleState.ERROR,
+      [ModelLifecycleState.STARTING, ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
     ],
+    [ModelLifecycleState.STOPPING, [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR]],
+    [ModelLifecycleState.STOPPED, []],
+    [ModelLifecycleState.ERROR, [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING]],
   ],
-  [
-    ModelLifecycleState.SLEEPING,
-    [ModelLifecycleState.STARTING, ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
-  ],
-  [ModelLifecycleState.STOPPING, [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR]],
-  [ModelLifecycleState.STOPPED, []],
-  [
-    ModelLifecycleState.ERROR,
-    [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING],
-  ],
-]);
+);
 
 export interface ModelState {
   modelName: string;
@@ -69,7 +64,7 @@ export class ModelLifecycleService {
 
   async getAllStates(): Promise<ModelState[]> {
     const pattern = redisKey(this.keyPrefix, MODEL_STATE_PREFIX, '*');
-    const keys = await this.redis.keys(pattern);
+    const keys = await this.scanKeys(pattern);
     if (keys.length === 0) return [];
 
     const pipeline = this.redis.pipeline();
@@ -88,10 +83,18 @@ export class ModelLifecycleService {
     return states;
   }
 
-  async createModel(
-    modelName: string,
-    workerId?: string | null,
-  ): Promise<ModelState> {
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
+    return keys;
+  }
+
+  async createModel(modelName: string, workerId?: string | null): Promise<ModelState> {
     const key = modelStateKey(this.keyPrefix, modelName);
     const existing = await this.redis.get(key);
     if (existing) {
@@ -117,7 +120,9 @@ export class ModelLifecycleService {
   async transition(
     modelName: string,
     to: ModelLifecycleState,
-    updates?: Partial<Pick<ModelState, 'workerId' | 'runnerHost' | 'runnerPort' | 'runnerId' | 'errorMessage'>>,
+    updates?: Partial<
+      Pick<ModelState, 'workerId' | 'runnerHost' | 'runnerPort' | 'runnerId' | 'errorMessage'>
+    >,
   ): Promise<ModelState> {
     const key = modelStateKey(this.keyPrefix, modelName);
 
@@ -164,7 +169,7 @@ export class ModelLifecycleService {
 
       local encoded = cjson.encode(state)
       redis.call('SET', KEYS[1], encoded)
-      return encoded
+      return currentState .. '|' .. encoded
     `;
 
     const transitionsMap: Record<string, string[]> = {};
@@ -187,15 +192,22 @@ export class ModelLifecycleService {
         throw ControlPlaneError.modelNotFound(modelName);
       }
 
-      const newState = JSON.parse(result as string) as ModelState;
+      const raw = result as string;
+      const separatorIndex = raw.indexOf('|');
+      const fromState = raw.slice(0, separatorIndex);
+      const newState = JSON.parse(raw.slice(separatorIndex + 1)) as ModelState;
 
-      stateTransitionsTotal.inc({ from: newState.state === to ? 'unknown' : '', to });
+      stateTransitionsTotal.inc({ from: fromState, to });
 
       return newState;
     } catch (err) {
       if (err instanceof Error && err.message.includes('INVALID_TRANSITION')) {
         const parts = err.message.split(':');
-        throw ControlPlaneError.invalidState(modelName, parts[1] ?? 'unknown', `transition to ${to}`);
+        throw ControlPlaneError.invalidState(
+          modelName,
+          parts[1] ?? 'unknown',
+          `transition to ${to}`,
+        );
       }
       throw err;
     }

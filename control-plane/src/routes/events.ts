@@ -10,6 +10,8 @@ export function registerEventRoutes(
   const channel = redisKey(keyPrefix, 'routing-updates');
 
   app.get('/api/v1/events', async (request, reply) => {
+    await reply.hijack();
+
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -21,12 +23,13 @@ export function registerEventRoutes(
       reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
     };
 
+    const clientSubscriber = subscriber.duplicate();
+    await clientSubscriber.subscribe(channel);
+
     const onMessage = (_ch: string, message: string): void => {
       write('message', message);
     };
-
-    await subscriber.subscribe(channel);
-    subscriber.on('message', onMessage);
+    clientSubscriber.on('message', onMessage);
 
     const pingInterval = setInterval(() => {
       write('ping', new Date().toISOString());
@@ -36,8 +39,9 @@ export function registerEventRoutes(
 
     request.raw.on('close', () => {
       clearInterval(pingInterval);
-      subscriber.off('message', onMessage);
-      subscriber.unsubscribe(channel).catch(() => {});
+      clientSubscriber.off('message', onMessage);
+      clientSubscriber.unsubscribe(channel).catch(() => {});
+      clientSubscriber.disconnect();
     });
   });
 }

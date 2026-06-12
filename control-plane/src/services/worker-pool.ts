@@ -42,7 +42,6 @@ interface WorkerInfoPayload {
 // Constants
 // ---------------------------------------------------------------------------
 
-const WORKER_NAMESPACE = 'sardeenz:workers';
 const INFO_SUFFIX = 'info';
 const HEARTBEAT_SUFFIX = 'heartbeat';
 
@@ -132,7 +131,7 @@ export class WorkerPoolService {
   }
 
   private infoScanPattern(): string {
-    return redisKey(WORKER_NAMESPACE, '*', INFO_SUFFIX);
+    return redisKey(this.keyPrefix, 'workers', '*', INFO_SUFFIX);
   }
 
   // -------------------------------------------------------------------------
@@ -199,8 +198,7 @@ export class WorkerPoolService {
           const record = this.workers.get(workerId);
           if (!record) continue;
 
-          const lastHeartbeatAt =
-            !err && typeof raw === 'string' ? raw : null;
+          const lastHeartbeatAt = !err && typeof raw === 'string' ? raw : null;
 
           record.lastHeartbeatAt = lastHeartbeatAt;
           record.status = resolveHeartbeatStatus(lastHeartbeatAt, this.heartbeatTimeoutSecs);
@@ -255,9 +253,7 @@ export class WorkerPoolService {
    * Return all workers currently in OFFLINE status.
    */
   getDeadWorkers(): WorkerRecord[] {
-    return Array.from(this.workers.values()).filter(
-      (w) => w.status === WorkerStatus.OFFLINE,
-    );
+    return Array.from(this.workers.values()).filter((w) => w.status === WorkerStatus.OFFLINE);
   }
 
   /**
@@ -279,13 +275,7 @@ export class WorkerPoolService {
     let cursor = '0';
 
     do {
-      const [nextCursor, batch] = await this.redis.scan(
-        cursor,
-        'MATCH',
-        pattern,
-        'COUNT',
-        100,
-      );
+      const [nextCursor, batch] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
       cursor = nextCursor;
       keys.push(...batch);
     } while (cursor !== '0');

@@ -22,66 +22,102 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     }
 
     const body = request.body;
-    if (!body?.modelName || !body.runnerType || !body.modelPath || !body.requiredMemory) {
+    if (
+      !body?.modelName ||
+      typeof body.modelName !== 'string' ||
+      !body.runnerType ||
+      typeof body.runnerType !== 'string' ||
+      !body.modelPath ||
+      typeof body.modelPath !== 'string' ||
+      typeof body.requiredMemory !== 'number' ||
+      body.requiredMemory <= 0
+    ) {
       throw ControlPlaneError.invalidRequest(
-        'modelName, runnerType, modelPath, and requiredMemory are required',
+        'modelName (string), runnerType (string), modelPath (string), and requiredMemory (positive number) are required',
       );
     }
 
-    const existing = await deps.modelRepository.findByName(body.modelName);
-    if (existing) {
-      throw ControlPlaneError.modelAlreadyExists(body.modelName);
+    if (
+      body.tensorParallel !== undefined &&
+      (typeof body.tensorParallel !== 'number' || body.tensorParallel < 1)
+    ) {
+      throw ControlPlaneError.invalidRequest('tensorParallel must be a positive integer');
     }
 
-    await deps.modelRepository.create({
-      name: body.modelName,
-      runnerType: body.runnerType,
-      modelPath: body.modelPath,
-      requiredMemory: body.requiredMemory,
-      deviceType: body.deviceType,
-      tensorParallel: body.tensorParallel,
-      engineConfig: body.engineConfig,
-      pinned: body.pinned,
-    });
+    let dbCreated = false;
+    let redisCreated = false;
 
-    await deps.lifecycle.createModel(body.modelName);
-
-    const workers = deps.workerPool.getAllWorkers();
-    const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
-
-    const result = deps.placement.place(
-      {
-        modelName: body.modelName,
+    try {
+      await deps.modelRepository.create({
+        name: body.modelName,
         runnerType: body.runnerType,
+        modelPath: body.modelPath,
         requiredMemory: body.requiredMemory,
         deviceType: body.deviceType,
-        tensorParallel: body.tensorParallel ?? 1,
-      },
-      workers,
-      budgets,
-    );
-
-    if (!result) {
-      throw ControlPlaneError.placementFailed(body.modelName, 'No worker with sufficient capacity');
+        tensorParallel: body.tensorParallel,
+        engineConfig: body.engineConfig,
+        pinned: body.pinned,
+      });
+      dbCreated = true;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('unique')) {
+        throw ControlPlaneError.modelAlreadyExists(body.modelName);
+      }
+      throw err;
     }
 
-    for (const device of result.devices) {
-      deps.memoryBudget.reserveCapacity(
-        result.workerId,
-        device.deviceIndex,
-        body.requiredMemory / (body.tensorParallel ?? 1),
+    try {
+      await deps.lifecycle.createModel(body.modelName);
+      redisCreated = true;
+
+      const workers = deps.workerPool.getAllWorkers();
+      const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
+
+      const result = deps.placement.place(
+        {
+          modelName: body.modelName,
+          runnerType: body.runnerType,
+          requiredMemory: body.requiredMemory,
+          deviceType: body.deviceType,
+          tensorParallel: body.tensorParallel ?? 1,
+        },
+        workers,
+        budgets,
       );
+
+      if (!result) {
+        throw ControlPlaneError.placementFailed(
+          body.modelName,
+          'No worker with sufficient capacity',
+        );
+      }
+
+      for (const device of result.devices) {
+        deps.memoryBudget.reserveCapacity(
+          result.workerId,
+          device.deviceIndex,
+          body.requiredMemory / (body.tensorParallel ?? 1),
+        );
+      }
+
+      await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
+        workerId: result.workerId,
+      });
+
+      return reply.code(202).send({
+        modelName: body.modelName,
+        state: ModelLifecycleState.STARTING,
+        message: `Placed on worker ${result.workerId}`,
+      });
+    } catch (err) {
+      if (redisCreated) {
+        await deps.lifecycle.removeModel(body.modelName).catch(() => {});
+      }
+      if (dbCreated) {
+        await deps.modelRepository.delete(body.modelName).catch(() => {});
+      }
+      throw err;
     }
-
-    await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
-      workerId: result.workerId,
-    });
-
-    return reply.code(202).send({
-      modelName: body.modelName,
-      state: ModelLifecycleState.STARTING,
-      message: `Placed on worker ${result.workerId}`,
-    });
   });
 
   app.get<{ Querystring: { state?: string } }>('/api/v1/models', async (request, reply) => {
