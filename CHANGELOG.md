@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `/implement` skill (`.claude/skills/implement.md`): full quality development process
+  for phases and features — plan, implement, cross-model review/fix loop, verify
 - Project scaffolding: monorepo structure, architecture docs, ADRs
 - Development tooling: TypeScript, ESLint, Prettier, Vitest, Redocly
 - OpenAPI contract workflow with codegen pipeline
