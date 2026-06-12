@@ -68,7 +68,7 @@ Details in [`docs/project/`](docs/project/).
 
 ## Project Status
 
-The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phase 0 (engine runner contract) is complete. Current phase: **Phase 1** (Rust proxy with connection parking). Task breakdown and progress: [`docs/project/phase1.md`](docs/project/phase1.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
+The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phase 0 (engine runner contract) and Phase 1 (Rust proxy with connection parking) are complete. Phase 2 (control plane sleep/wake orchestration) is substantially complete — 17/18 tasks done, integration tests deferred. Current phase: **Phase 3** (Admin dashboard). Task breakdown and progress: [`docs/project/phase2.md`](docs/project/phase2.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
 ## Workflow Rules
 
