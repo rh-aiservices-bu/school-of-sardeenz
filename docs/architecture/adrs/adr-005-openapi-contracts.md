@@ -32,6 +32,42 @@ The contracts cover:
 
 **Workflow:** Edit the OpenAPI spec → run `make codegen` → TypeScript types are regenerated. Rust types in `proxy/src/generated/` must be updated manually to match.
 
+## Backward-Compatibility Policy
+
+### Versioning scheme
+
+Each OpenAPI spec carries its own semver version in `info.version`. While specs are pre-1.0 (`0.x.y`):
+
+- **Minor bump** (`0.1.0` → `0.2.0`): may contain breaking changes.
+- **Patch bump** (`0.1.0` → `0.1.1`): additive and backward-compatible only.
+
+After a spec reaches `1.0.0`, standard semver applies: breaking changes require a major bump.
+
+### Breaking vs. non-breaking changes
+
+| Change | Classification |
+| --- | --- |
+| Add optional field to request/response | Non-breaking |
+| Add new endpoint | Non-breaking |
+| Add new enum value (consumers must handle unknown) | Non-breaking |
+| Add optional query/header parameter | Non-breaking |
+| Remove or rename a field | **Breaking** |
+| Change a field's type | **Breaking** |
+| Make an optional field required | **Breaking** |
+| Remove an enum value | **Breaking** |
+| Change a URL path | **Breaking** |
+| Remove an endpoint | **Breaking** |
+
+### Rollout compatibility
+
+All components live in a single monorepo and are released together. There is **no N-1 compatibility window** — when a spec changes, all consumers (Rust proxy types, generated TypeScript types, dashboard client) must be updated in the same release cycle.
+
+This can be revisited if components ever deploy independently.
+
+### Version mismatch detection
+
+Each component logs the contract version it was built against at startup. There is no runtime version negotiation — the version is used for observability and debugging only.
+
 ## Consequences
 
 - **Cross-language type safety.** Schema mismatches are caught at build time, not runtime.
