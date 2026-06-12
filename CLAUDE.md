@@ -72,6 +72,7 @@ The project is in early development. Architecture docs, ADRs, and tooling scaffo
 
 ## Workflow Rules
 
+- **Branching:** `dev` is the integration branch; `main` is for releases only. Create feature/fix branches from `dev` and PR back to `dev`. See [`docs/development/setup.md`](docs/development/setup.md#branching-strategy) for details.
 - **CHANGELOG:** Always update `CHANGELOG.md` (under `[Unreleased]`) before committing changes.
 - **Package manager:** Use npm, not pnpm. pnpm's hardlink store breaks across the container/host mount boundary.
 - **Commit hygiene:** Run lint/typecheck before marking work complete. Stage specific files, not `git add -A`.

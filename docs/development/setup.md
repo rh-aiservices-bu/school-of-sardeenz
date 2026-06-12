@@ -119,6 +119,42 @@ Each component pipes its output to a separate log file:
 npm run dev -w @sardeenz/control-plane > logs/control-plane.log 2>&1 &
 ```
 
+## Branching Strategy
+
+The project uses `dev` as the integration branch and `main` as the release branch.
+
+```
+main ← stable releases only (PR from dev)
+ └── dev ← active development (PR target for features and fixes)
+      ├── feature/phase2-wake-orchestration
+      ├── feature/dashboard-model-list
+      └── fix/parking-timeout-race
+```
+
+**Rules:**
+
+- **`main`** — always releasable. Only updated via PR from `dev`.
+- **`dev`** — integration branch for all new work. Create feature and fix branches from `dev`, then PR back to `dev`.
+- **Feature branches** — one per phase, feature, or fix. Branch from `dev`, PR to `dev`. Use prefixes: `feature/`, `fix/`, `chore/`.
+- **Releases** — when `dev` is stable and tested, PR from `dev` to `main`. The merge to `main` marks a release.
+
+**Workflow:**
+
+```bash
+# Start new work
+git checkout dev
+git pull origin dev
+git checkout -b feature/my-feature
+
+# ... develop, commit, push ...
+
+# PR to dev (not main)
+gh pr create --base dev
+
+# After features accumulate on dev, release to main
+gh pr create --base main --head dev
+```
+
 ## Tooling Overview
 
 | Tool               | Purpose                      | Config file                       |
