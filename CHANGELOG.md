@@ -29,6 +29,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   leader election started, worker discovery and memory budget refresh on startup
 - Control plane container image (`containers/control-plane/Dockerfile`):
   multi-stage build (deps → build → runtime), non-root user, Node.js 22 slim base
+- Control plane test suite (54 tests): config loading and URL redaction, error hierarchy
+  serialization, state machine transition validation (16 valid + 8 invalid transitions),
+  placement pipeline (runner type/hardware/capacity/TP filtering, spread strategy, stale budget
+  rejection), LRU eviction engine (ordering, pinned exclusion, min-active-time, max-per-cycle,
+  circuit breaker)
 - Control plane admin API OpenAPI spec (`packages/contracts/specs/control-plane.yaml`):
   model lifecycle CRUD (deploy/sleep/wake/delete), worker management, cluster state/memory,
   SSE events stream, `ModelLifecycleState` enum (8 states), `WorkerStatus` and `ClusterEventType` enums
