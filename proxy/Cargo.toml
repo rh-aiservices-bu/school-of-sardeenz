@@ -49,6 +49,9 @@ bytes = "1"
 futures-util = "0.3"
 url = "2"
 
+[features]
+redis-integration = []
+
 [[test]]
 name = "integration"
 path = "tests/integration/main.rs"

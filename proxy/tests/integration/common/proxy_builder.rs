@@ -130,6 +130,7 @@ impl TestProxy {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             admin_addr: "127.0.0.1:0".parse().unwrap(),
             redis_url: "redis://test-not-connected:0".to_string(),
+            redis_key_prefix: "sardeenz".to_string(),
             control_plane_url: cfg.control_plane_url,
             log_level: "error".to_string(),
             parking: ParkingConfig {
@@ -137,6 +138,7 @@ impl TestProxy {
                 max_per_model: cfg.parking_max_per_model,
                 max_global: cfg.parking_max_global,
             },
+            upstream_timeout: Duration::from_secs(30),
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: cfg.cb_failure_threshold,
                 failure_window: cfg.cb_failure_window,

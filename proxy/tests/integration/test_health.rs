@@ -1,16 +1,13 @@
-// test_health_endpoints: /healthz returns 200 always; /readyz returns 200
-// when Redis is connected, 503 when not.
-//
-// In tests, the proxy builder sets redis_connected=true by default, so
-// /readyz should return 200. We also verify /healthz independently.
+// test_health_endpoints: /healthz returns 200 always; /readyz requires both
+// Redis connected AND routing map loaded.
 
 use reqwest::StatusCode;
+use sardeenz_proxy::routing::RoutingMapCache;
 
 use crate::common::TestProxy;
 
 #[tokio::test]
 async fn test_healthz_always_200() {
-    // /healthz is a liveness probe — it should return 200 regardless of state.
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
@@ -27,9 +24,10 @@ async fn test_healthz_always_200() {
 }
 
 #[tokio::test]
-async fn test_readyz_when_redis_connected() {
-    // Default TestProxy sets redis_connected=true.
-    let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
+async fn test_readyz_when_fully_ready() {
+    // Shared cache simulates a loaded routing map; redis_connected defaults to true.
+    let cache = RoutingMapCache::default();
+    let proxy = TestProxy::spawn_with_shared_cache("http://127.0.0.1:1", cache).await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -41,7 +39,7 @@ async fn test_readyz_when_redis_connected() {
     assert_eq!(
         resp.status(),
         StatusCode::OK,
-        "/readyz should return 200 when Redis is connected"
+        "/readyz should return 200 when Redis is connected and routing map is loaded"
     );
 
     let body = resp.text().await.unwrap();
@@ -50,7 +48,6 @@ async fn test_readyz_when_redis_connected() {
 
 #[tokio::test]
 async fn test_readyz_when_redis_disconnected() {
-    // Spawn a proxy that reports Redis as disconnected.
     let proxy = TestProxy::spawn_with_redis_disconnected("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
@@ -64,6 +61,25 @@ async fn test_readyz_when_redis_disconnected() {
         resp.status(),
         StatusCode::SERVICE_UNAVAILABLE,
         "/readyz should return 503 when Redis is not connected"
+    );
+}
+
+#[tokio::test]
+async fn test_readyz_before_routing_map_loaded() {
+    // Redis connected but no cache injected — routing map not yet loaded.
+    let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/readyz", proxy.admin_url()))
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "/readyz should return 503 before routing map is loaded"
     );
 }
 

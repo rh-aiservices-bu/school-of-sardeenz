@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "validate": "ls specs/*.yaml >/dev/null 2>&1 && redocly lint specs/*.yaml || echo 'No specs to validate yet'"
+    "validate": "if ls specs/*.yaml >/dev/null 2>&1; then redocly lint specs/*.yaml; else echo 'No specs to validate yet'; fi"
   }
 }

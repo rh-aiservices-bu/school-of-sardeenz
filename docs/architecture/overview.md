@@ -490,7 +490,7 @@ Contracts cover:
 - **Dashboard ↔ Control Plane** — model lifecycle operations, device memory budgets, cluster state, event streams
 - **Engine Runner Contract** — health check, memory reporting, lifecycle signals, capability declaration
 
-The workflow: edit the OpenAPI spec → run code generation → both Rust and TypeScript get updated types. CI ensures generated code never drifts from the spec.
+The workflow: edit the OpenAPI spec → run code generation → TypeScript types are regenerated automatically. Rust types in `proxy/src/generated/` are hand-maintained to match the specs (see `docs/project/phase1.md` task 1.3 for rationale).
 
 > See [ADR-005](adrs/adr-005-openapi-contracts.md) for the contract strategy rationale.
 

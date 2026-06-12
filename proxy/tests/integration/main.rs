@@ -20,3 +20,6 @@ mod test_model_states;
 mod test_parking_limits;
 mod test_wake_failure;
 mod test_weighted_round_robin;
+
+#[cfg(feature = "redis-integration")]
+mod test_redis;

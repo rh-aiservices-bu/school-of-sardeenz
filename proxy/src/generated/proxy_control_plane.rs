@@ -1,5 +1,5 @@
-// @generated — do not edit by hand.
-// Source: packages/contracts/specs/proxy-control-plane.yaml
+// Hand-maintained Rust types mirroring packages/contracts/specs/proxy-control-plane.yaml.
+// When the spec changes, update these types to match.
 
 use std::collections::HashMap;
 

@@ -14,6 +14,7 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::watch;
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
@@ -75,6 +76,35 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/chat/completions", post(handlers::handle_inference))
         .route("/v1/completions", post(handlers::handle_inference))
         .route("/v1/models", get(handlers::handle_models))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::http::Request<_>| {
+                    let request_id = request
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .map(String::from)
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        path = %request.uri().path(),
+                        request_id = %request_id,
+                    )
+                })
+                .on_response(
+                    |response: &axum::http::Response<_>,
+                     latency: std::time::Duration,
+                     _span: &tracing::Span| {
+                        tracing::info!(
+                            status = response.status().as_u16(),
+                            latency_ms = latency.as_millis(),
+                            "response"
+                        );
+                    },
+                ),
+        )
         .with_state(state.clone());
 
     // Admin routes (health + metrics, separate port)

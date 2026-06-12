@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use metrics::gauge;
 use tokio::sync::Mutex;
 
 use crate::config::CircuitBreakerConfig;
@@ -36,7 +37,7 @@ impl CircuitBreaker {
         }
     }
 
-    /// Returns the current state without triggering transitions.
+    #[allow(dead_code)]
     pub async fn current_state(&self, key: &str) -> CircuitState {
         let circuits = self.circuits.lock().await;
         match circuits.get(key) {
@@ -61,6 +62,7 @@ impl CircuitBreaker {
                 circuit.failures.clear();
                 circuit.last_state_change = Instant::now();
                 circuit.half_open_probe_in_flight = false;
+                Self::emit_state_gauge(key, CircuitState::Closed);
             }
         }
     }
@@ -81,6 +83,7 @@ impl CircuitBreaker {
             circuit.last_state_change = Instant::now();
             circuit.failures.clear();
             circuit.half_open_probe_in_flight = false;
+            Self::emit_state_gauge(key, CircuitState::Open);
             return;
         }
 
@@ -93,6 +96,7 @@ impl CircuitBreaker {
         if circuit.failures.len() >= self.config.failure_threshold as usize {
             circuit.state = CircuitState::Open;
             circuit.last_state_change = now;
+            Self::emit_state_gauge(key, CircuitState::Open);
         }
     }
 
@@ -114,6 +118,7 @@ impl CircuitBreaker {
                     circuit.state = CircuitState::HalfOpen;
                     circuit.last_state_change = Instant::now();
                     circuit.half_open_probe_in_flight = true;
+                    Self::emit_state_gauge(key, CircuitState::HalfOpen);
                     true
                 } else {
                     false
@@ -130,14 +135,13 @@ impl CircuitBreaker {
         }
     }
 
-    /// Get circuit breaker state as a numeric gauge value for Prometheus.
-    #[allow(dead_code)]
-    pub async fn state_gauge(&self, key: &str) -> f64 {
-        match self.current_state(key).await {
+    fn emit_state_gauge(key: &str, state: CircuitState) {
+        let value = match state {
             CircuitState::Closed => 0.0,
             CircuitState::Open => 1.0,
             CircuitState::HalfOpen => 2.0,
-        }
+        };
+        gauge!("sardeenz_proxy_circuit_breaker_state", "endpoint" => key.to_string()).set(value);
     }
 }
 

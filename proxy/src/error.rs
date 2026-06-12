@@ -31,30 +31,27 @@ pub enum ProxyError {
     Internal(#[from] anyhow::Error),
 }
 
+impl ProxyError {
+    pub fn status_code(&self) -> StatusCode {
+        match self {
+            ProxyError::ModelNotFound(_) => StatusCode::NOT_FOUND,
+            ProxyError::ModelUnavailable(_)
+            | ProxyError::ParkingTimeout(_)
+            | ProxyError::ParkingLimitReached(_)
+            | ProxyError::AllEndpointsUnhealthy(_) => StatusCode::SERVICE_UNAVAILABLE,
+            ProxyError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ProxyError::Upstream(_) => StatusCode::BAD_GATEWAY,
+            ProxyError::Redis(_) | ProxyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
 impl IntoResponse for ProxyError {
     fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            ProxyError::ModelNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
-            ProxyError::ModelUnavailable(_) => {
-                (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-            }
-            ProxyError::ParkingTimeout(_) => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
-            ProxyError::ParkingLimitReached(_) => {
-                (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-            }
-            ProxyError::AllEndpointsUnhealthy(_) => {
-                (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-            }
-            ProxyError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-            ProxyError::Upstream(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
-            ProxyError::Redis(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal error".to_string(),
-            ),
-            ProxyError::Internal(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal error".to_string(),
-            ),
+        let status = self.status_code();
+        let message = match &self {
+            ProxyError::Redis(_) | ProxyError::Internal(_) => "internal error".to_string(),
+            _ => self.to_string(),
         };
 
         let body = serde_json::json!({

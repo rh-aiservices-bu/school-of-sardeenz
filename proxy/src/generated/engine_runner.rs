@@ -1,5 +1,5 @@
-// @generated — do not edit by hand.
-// Source: packages/contracts/specs/engine-runner.yaml
+// Hand-maintained Rust types mirroring packages/contracts/specs/engine-runner.yaml.
+// When the spec changes, update these types to match.
 
 use serde::{Deserialize, Serialize};
 
