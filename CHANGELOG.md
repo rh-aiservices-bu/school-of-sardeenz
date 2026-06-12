@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   SSE event stream, internal proxy wake trigger and routing map read endpoints
 - Full service wiring in control plane entry point: all services instantiated,
   leader election started, worker discovery and memory budget refresh on startup
+- Control plane container image (`containers/control-plane/Dockerfile`):
+  multi-stage build (deps → build → runtime), non-root user, Node.js 22 slim base
 - Control plane admin API OpenAPI spec (`packages/contracts/specs/control-plane.yaml`):
   model lifecycle CRUD (deploy/sleep/wake/delete), worker management, cluster state/memory,
   SSE events stream, `ModelLifecycleState` enum (8 states), `WorkerStatus` and `ClusterEventType` enums

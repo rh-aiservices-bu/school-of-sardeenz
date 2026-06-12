@@ -1,0 +1,12 @@
+node_modules
+dist
+*.tsbuildinfo
+.git
+.claude
+docs
+proxy
+dashboard
+runners
+easyconfigs
+deployment
+containers
