@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Default proxy admin port from 9090 to 9099 to avoid conflict with Cockpit on Fedora/RHEL
+
 ### Added
 
 - `/implement` skill (`.claude/skills/implement.md`): full quality development process
@@ -39,7 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Hand-written Rust types matching both OpenAPI specs (`proxy/src/generated/`):
   engine runner types and proxy-control-plane types with serde derives
 - Rust routing proxy implementation (`proxy/src/`):
-  - axum-based HTTP server with separate proxy (8080) and admin (9090) ports
+  - axum-based HTTP server with separate proxy (8080) and admin (9099) ports
   - Request routing via in-memory routing map cache refreshed by Redis pub/sub
   - OpenAI-compatible endpoints: `/v1/chat/completions`, `/v1/completions`, `/v1/models`
   - Connection parking with configurable timeout (default 120s) and backpressure limits

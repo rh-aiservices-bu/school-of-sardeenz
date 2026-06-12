@@ -25,7 +25,7 @@ The proxy exposes three inference endpoints on its primary port (default `0.0.0.
 | `/v1/completions` | `POST` | Text completion inference (forwarded to runner) |
 | `/v1/models` | `GET` | List active and sleeping models |
 
-A separate admin server on `0.0.0.0:9090` exposes `/healthz`, `/readyz`, and `/metrics`. The admin port is never exposed outside the cluster.
+A separate admin server on `0.0.0.0:9099` exposes `/healthz`, `/readyz`, and `/metrics`. The admin port is never exposed outside the cluster.
 
 The proxy is designed to run as multiple stateless replicas behind a load balancer. Replicas share no in-process state — all coordination happens through the Redis routing map.
 
@@ -317,7 +317,7 @@ All configuration is read from environment variables at startup via `Config::fro
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `SARDEENZ_LISTEN_ADDR` | `SocketAddr` | `0.0.0.0:8080` | Inference server bind address |
-| `SARDEENZ_ADMIN_ADDR` | `SocketAddr` | `0.0.0.0:9090` | Admin server bind address (health + metrics) |
+| `SARDEENZ_ADMIN_ADDR` | `SocketAddr` | `0.0.0.0:9099` | Admin server bind address (health + metrics) |
 | `SARDEENZ_REDIS_URL` | `String` | `redis://127.0.0.1:6379` | Redis/Valkey connection URL |
 | `SARDEENZ_CONTROL_PLANE_URL` | `String` | `http://127.0.0.1:3000` | Control plane base URL for wake triggers |
 | `SARDEENZ_LOG_LEVEL` | `String` | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |

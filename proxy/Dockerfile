@@ -63,15 +63,15 @@ COPY --from=builder \
     /build/target/x86_64-unknown-linux-musl/release/sardeenz-proxy \
     /usr/local/bin/sardeenz-proxy
 
-# Proxy listens on 8080; admin/metrics endpoint on 9090
-EXPOSE 8080 9090
+# Proxy listens on 8080; admin/metrics endpoint on 9099
+EXPOSE 8080 9099
 
 # distroless/static:nonroot already sets USER 65532 (nonroot).
 # Declare it explicitly for clarity and tooling compatibility.
 USER 65532:65532
 
 # Health check:
-# The /healthz endpoint is served on the admin port (9090).
+# The /healthz endpoint is served on the admin port (9099).
 # distroless/static has no shell, curl, or wget, so exec-form CMD cannot
 # perform an HTTP request without an extra binary.
 #
@@ -81,7 +81,7 @@ USER 65532:65532
 #     livenessProbe:
 #       httpGet:
 #         path: /healthz
-#         port: 9090
+#         port: 9099
 #       initialDelaySeconds: 10
 #       periodSeconds: 30
 #       timeoutSeconds: 5

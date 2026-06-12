@@ -30,7 +30,7 @@ impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         Ok(Self {
             listen_addr: parse_env("SARDEENZ_LISTEN_ADDR", "0.0.0.0:8080")?,
-            admin_addr: parse_env("SARDEENZ_ADMIN_ADDR", "0.0.0.0:9090")?,
+            admin_addr: parse_env("SARDEENZ_ADMIN_ADDR", "0.0.0.0:9099")?,
             redis_url: std::env::var("SARDEENZ_REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
             control_plane_url: std::env::var("SARDEENZ_CONTROL_PLANE_URL")
@@ -82,7 +82,7 @@ mod tests {
         }
         let config = Config::from_env().unwrap();
         assert_eq!(config.listen_addr, "0.0.0.0:8080".parse().unwrap());
-        assert_eq!(config.admin_addr, "0.0.0.0:9090".parse().unwrap());
+        assert_eq!(config.admin_addr, "0.0.0.0:9099".parse().unwrap());
         assert_eq!(config.parking.timeout, Duration::from_secs(120));
         assert_eq!(config.parking.max_per_model, 1000);
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
