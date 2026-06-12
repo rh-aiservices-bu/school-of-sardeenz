@@ -267,6 +267,19 @@ Fields that fail JSON parsing are logged as warnings and dropped. A parse failur
 
 If the Redis connection drops, `start_redis_sync` returns an error. The main loop logs the error, marks the proxy as not ready (fails `/readyz`), and retries the connection after a 5-second back-off. The in-memory cache remains intact during the gap — it may become stale but does not clear.
 
+### Scale Assumptions
+
+The full-refresh strategy (HGETALL on every pub/sub event) is designed for the following envelope:
+
+| Dimension | Expected range | Notes |
+| --- | --- | --- |
+| Model count | 10–100 | One routing entry per deployed model |
+| Entry size | < 1 KB each | A few endpoints + metadata per model |
+| Total map size | < 100 KB | Fits comfortably in a single HGETALL |
+| Pub/sub frequency | < 1 event/second sustained | Bursts during batch operations are fine |
+
+**When to revisit:** If the model count exceeds ~500, or if pub/sub events exceed ~10/second sustained, the full-refresh approach may become a bottleneck. At that point, consider incremental delta application (using the `RoutingMapUpdate` type already defined in the spec) or per-model key reads instead of HGETALL.
+
 ### Cache Invalidation
 
 There is no TTL-based expiry. The in-memory cache is authoritative between pub/sub updates. Staleness is bounded by the latency of the pub/sub notification path (typically a few milliseconds).
@@ -321,6 +334,8 @@ All configuration is read from environment variables at startup via `Config::fro
 | `SARDEENZ_REDIS_URL` | `String` | `redis://127.0.0.1:6379` | Redis/Valkey connection URL |
 | `SARDEENZ_CONTROL_PLANE_URL` | `String` | `http://127.0.0.1:3000` | Control plane base URL for wake triggers |
 | `SARDEENZ_LOG_LEVEL` | `String` | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
+| `SARDEENZ_UPSTREAM_TIMEOUT_SECS` | `u64` | `300` | Timeout for forwarded requests to runners (includes streaming) |
+| `SARDEENZ_REDIS_KEY_PREFIX` | `String` | `sardeenz` | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`) |
 | `SARDEENZ_PARKING_TIMEOUT_SECS` | `u64` | `120` | Max time a request can be parked before returning 503 |
 | `SARDEENZ_PARKING_MAX_PER_MODEL` | `usize` | `1000` | Max concurrently parked requests per model |
 | `SARDEENZ_PARKING_MAX_GLOBAL` | `usize` | `10000` | Max concurrently parked requests across all models |
@@ -410,3 +425,29 @@ The full wake trigger schema is defined in [`packages/contracts/specs/proxy-cont
 | Per-endpoint circuit breaking | Proxy |
 | Client-facing streaming | Proxy |
 | Redis pub/sub subscription | Proxy |
+
+## Security and Trust Model
+
+The proxy trusts the routing map completely. It forwards requests to whatever `host:port` endpoints appear in the routing map entries retrieved from Redis. This is architecturally intentional — the proxy is a stateless routing layer, not a policy enforcement point.
+
+**Implication:** compromising Redis or the routing-map writer (the control plane) is equivalent to controlling all request routing. An attacker who can write to `sardeenz:routing-map` can redirect inference traffic to arbitrary endpoints (SSRF via routing map poisoning).
+
+### Trust Boundaries
+
+| Trust boundary | What it protects | Required controls |
+| --- | --- | --- |
+| Redis/Valkey access | Routing map integrity | AUTH/ACLs, network policy, TLS in transit |
+| Control plane API | Routing map writes, wake orchestration | Authentication, authorization, network isolation |
+| Proxy admin port (9099) | Health/readiness/metrics exposure | Not exposed outside the cluster |
+| Proxy ↔ runners | Inference traffic integrity | Network policy; mTLS for sensitive workloads |
+
+### Deployment Requirements
+
+A Phase 1 deployment **must** include at minimum:
+
+- **Authenticated ingress/gateway** in front of the proxy — the proxy does not authenticate clients
+- **Network policy** isolating proxy, control plane, Redis, and runners into a trusted mesh
+- **Redis AUTH** or ACLs preventing unauthorized routing-map access
+- **Admin port isolation** — port 9099 must not be exposed to untrusted networks
+
+These are not optional hardening steps — they are prerequisites for a safe deployment. Without them, the proxy is an open relay to whatever the routing map points at.

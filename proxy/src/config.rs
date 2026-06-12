@@ -8,6 +8,8 @@ pub struct Config {
     pub redis_url: String,
     pub control_plane_url: String,
     pub log_level: String,
+    pub upstream_timeout: Duration,
+    pub redis_key_prefix: String,
     pub parking: ParkingConfig,
     pub circuit_breaker: CircuitBreakerConfig,
 }
@@ -36,6 +38,12 @@ impl Config {
             control_plane_url: std::env::var("SARDEENZ_CONTROL_PLANE_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string()),
             log_level: std::env::var("SARDEENZ_LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
+            upstream_timeout: Duration::from_secs(parse_env(
+                "SARDEENZ_UPSTREAM_TIMEOUT_SECS",
+                "300",
+            )?),
+            redis_key_prefix: std::env::var("SARDEENZ_REDIS_KEY_PREFIX")
+                .unwrap_or_else(|_| "sardeenz".to_string()),
             parking: ParkingConfig {
                 timeout: Duration::from_secs(parse_env("SARDEENZ_PARKING_TIMEOUT_SECS", "120")?),
                 max_per_model: parse_env("SARDEENZ_PARKING_MAX_PER_MODEL", "1000")?,
@@ -85,6 +93,7 @@ mod tests {
         assert_eq!(config.admin_addr, "0.0.0.0:9099".parse().unwrap());
         assert_eq!(config.parking.timeout, Duration::from_secs(120));
         assert_eq!(config.parking.max_per_model, 1000);
+        assert_eq!(config.upstream_timeout, Duration::from_secs(300));
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
     }
 }

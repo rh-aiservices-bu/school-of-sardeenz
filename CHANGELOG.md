@@ -6,9 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAPI validation script now fails on lint errors instead of silently swallowing them (#1)
+- Readiness probe now requires both Redis connection AND successful routing map load (#4)
+- Response hop-by-hop headers now filtered symmetrically with request-side filtering (#9)
+
+### Added
+
+- Redis integration tests behind `redis-integration` feature flag (#5):
+  `test_redis_bootstrap`, `test_redis_pubsub_refresh`, `test_redis_malformed_entry`,
+  `test_redis_readiness_lifecycle` — each uses UUID-scoped key prefix for isolation
+- Configurable Redis key prefix (`SARDEENZ_REDIS_KEY_PREFIX`, default `sardeenz`) for test isolation (#5)
+- Request-level tracing with request ID correlation (#6): generates or propagates
+  `X-Request-ID` header, structured JSON log per request (method, path, status, latency)
+- Prometheus metric recording at all proxy call sites (#3):
+  - `sardeenz_proxy_requests_total` (counter with status label)
+  - `sardeenz_proxy_request_duration_seconds` (histogram)
+  - `sardeenz_proxy_active_connections` (gauge)
+  - `sardeenz_proxy_parked_connections` (gauge with model label)
+  - `sardeenz_proxy_wake_triggers_total` (counter with result label)
+  - `sardeenz_proxy_parking_duration_seconds` (histogram)
+  - `sardeenz_proxy_circuit_breaker_state` (gauge with endpoint label)
+
 ### Changed
 
+- Rust types in `proxy/src/generated/` now documented as hand-maintained (not auto-generated) (#2)
+- Updated ADR-005, architecture overview, and Phase 1 docs to reflect actual Rust type workflow
+- Extracted `ProxyError::status_code()` method for metrics and reuse (#3)
+- Added Security and Trust Model section to proxy architecture docs (#7, #18, #20)
+- Added configurable upstream request timeout (`SARDEENZ_UPSTREAM_TIMEOUT_SECS`, default 300s) (#8)
+- Updated Phase 1 docs with upstream timeout, Redis key prefix, hop-by-hop filtering, and Redis integration test details
+- Updated CLAUDE.md to clarify Rust types are hand-maintained (not generated)
+- Added `SARDEENZ_REDIS_KEY_PREFIX` to proxy configuration reference table
 - Default proxy admin port from 9090 to 9099 to avoid conflict with Cockpit on Fedora/RHEL
+- Suppress Redocly `no-unused-components` warning for `RoutingMapUpdate` schema (reserved for Phase 2 pub/sub)
 
 ### Added
 

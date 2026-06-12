@@ -17,7 +17,7 @@ Four strictly decoupled components:
 | Admin Dashboard | `dashboard/`     | TypeScript (React + PatternFly 6, Vite) | Model management, VRAM visualization, cluster monitoring                      |
 | Engine Runners  | `runners/`       | TBD                                     | Engine abstraction (vLLM reference impl first, then Triton, diffusion, etc.)  |
 
-**Cross-language contracts:** OpenAPI specs in `packages/contracts/` are the single source of truth. Code generation produces Rust structs and TypeScript types.
+**Cross-language contracts:** OpenAPI specs in `packages/contracts/` are the single source of truth. TypeScript types are generated via `openapi-typescript`; Rust types are hand-maintained (see ADR-005).
 
 **Highlander integration:** HPC-style Lmod/EasyBuild modules on CephFS replace container image pulls. Easyconfigs and the base worker/runner container image live in this repo — Sardeenz is fully self-contained. See [ODH Highlander](https://odh-highlander.github.io/) for the upstream module management system.
 

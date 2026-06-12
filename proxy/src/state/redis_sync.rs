@@ -15,13 +15,16 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
     state.set_redis_connected(true);
     tracing::info!("connected to Redis");
 
+    let routing_map_key = format!("{}:routing-map", state.config.redis_key_prefix);
+    let routing_updates_channel = format!("{}:routing-updates", state.config.redis_key_prefix);
+
     // Subscribe to routing map updates BEFORE loading the initial map
     // to avoid missing updates published during the HGETALL round-trip.
     let mut pubsub_conn = client.get_async_pubsub().await?;
-    pubsub_conn.subscribe("sardeenz:routing-updates").await?;
+    pubsub_conn.subscribe(&routing_updates_channel).await?;
 
     // Load the initial routing map
-    let map: HashMap<String, String> = conn.hgetall("sardeenz:routing-map").await?;
+    let map: HashMap<String, String> = conn.hgetall(&routing_map_key).await?;
     let routing_map: HashMap<String, RoutingEntry> = map
         .into_iter()
         .filter_map(|(k, v)| {
@@ -34,6 +37,7 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
 
     tracing::info!(models = routing_map.len(), "loaded routing map");
     state.routing_cache.replace(routing_map).await;
+    state.set_routing_map_loaded(true);
 
     // Process pub/sub updates
     let mut pubsub_stream = pubsub_conn.into_on_message();
@@ -51,7 +55,7 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
         // Re-fetch the full routing map on any update.
         // This is simpler than applying deltas and handles out-of-order
         // messages correctly. The map is small enough that this is fine.
-        let map: HashMap<String, String> = match conn.hgetall("sardeenz:routing-map").await {
+        let map: HashMap<String, String> = match conn.hgetall(&routing_map_key).await {
             Ok(m) => m,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to refresh routing map");

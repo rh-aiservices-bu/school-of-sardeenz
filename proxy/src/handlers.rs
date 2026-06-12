@@ -1,7 +1,8 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
+use metrics::{counter, gauge, histogram};
 
 use crate::error::ProxyError;
 use crate::generated::proxy_control_plane::ModelState;
@@ -11,7 +12,28 @@ use crate::state::AppState;
 pub async fn handle_inference(
     State(state): State<AppState>,
     request: Request<Body>,
-) -> Result<impl IntoResponse, ProxyError> {
+) -> Response {
+    let start = std::time::Instant::now();
+    gauge!("sardeenz_proxy_active_connections").increment(1);
+
+    let response = match handle_inference_inner(state, request).await {
+        Ok(resp) => resp,
+        Err(err) => err.into_response(),
+    };
+
+    let elapsed = start.elapsed().as_secs_f64();
+    let status = response.status().as_u16().to_string();
+    gauge!("sardeenz_proxy_active_connections").decrement(1);
+    counter!("sardeenz_proxy_requests_total", "status" => status).increment(1);
+    histogram!("sardeenz_proxy_request_duration_seconds").record(elapsed);
+
+    response
+}
+
+async fn handle_inference_inner(
+    state: AppState,
+    request: Request<Body>,
+) -> Result<Response, ProxyError> {
     let (parts, body) = request.into_parts();
     let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024)
         .await

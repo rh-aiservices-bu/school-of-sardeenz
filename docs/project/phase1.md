@@ -115,24 +115,22 @@ The spec covers three areas:
 
 **Validation:** `npm run validate -w @sardeenz/contracts` must pass with zero errors.
 
-### 1.3 — Set Up Rust Codegen from OpenAPI Specs
+### 1.3 — Set Up Rust Types from OpenAPI Specs
 
 **Depends on:** Task 1.2
 
-Establish the Rust code generation pipeline for OpenAPI specs. The proxy needs Rust structs with serde derive for the routing map schema and wake trigger API types.
+Provide Rust structs with serde derive for the routing map schema and wake trigger API types, mirroring the OpenAPI specs.
+
+**Decision:** Hand-maintained Rust types were chosen over automated codegen. Evaluated `openapi-generator` and `progenitor` during this task — generated output was verbose, non-idiomatic, and required extensive customization (serde rename attributes, `Option` handling, `#[serde(flatten)]` for open-ended metadata). Hand-written structs are cleaner, give full control over derives and attributes, and are a small surface (~260 lines across two files). The trade-off is manual synchronization when specs change.
 
 This task:
 
-1. Evaluates codegen approach — `openapi-generator` (spec → Rust) vs. hand-written structs validated against the spec
-2. Adds codegen tooling to `proxy/` (build script or Makefile target)
-3. Generates Rust types from `proxy-control-plane.yaml` into `proxy/src/generated/`
-4. Also generates from `engine-runner.yaml` for model state types the proxy needs
-5. Updates `make codegen` to include the Rust generation step
-6. Verifies output compiles with `cargo check`
+1. Evaluated codegen approaches — decided on hand-maintained structs
+2. Wrote Rust types from `proxy-control-plane.yaml` into `proxy/src/generated/proxy_control_plane.rs`
+3. Wrote Rust types from `engine-runner.yaml` into `proxy/src/generated/engine_runner.rs`
+4. Verified output compiles with `cargo check`
 
-Also updates the TypeScript codegen in `packages/types/` to generate from the new `proxy-control-plane.yaml` spec (the control plane will consume these types in Phase 2).
-
-Generated files are committed to the repo. Never edit them by hand — fix the spec if the output is wrong.
+Also set up TypeScript codegen in `packages/types/` to generate from both specs via `openapi-typescript` (`make codegen`).
 
 ### 1.4 — Scaffold Proxy Crate
 
@@ -146,6 +144,8 @@ Set up the proxy crate with the foundational infrastructure that all subsequent 
 - `SARDEENZ_LISTEN_ADDR` — proxy listen address (default `0.0.0.0:8080`)
 - `SARDEENZ_CONTROL_PLANE_URL` — control plane base URL for wake triggers
 - `SARDEENZ_LOG_LEVEL` — log level (default `info`)
+- `SARDEENZ_UPSTREAM_TIMEOUT_SECS` — timeout for forwarded requests (default `300`)
+- `SARDEENZ_REDIS_KEY_PREFIX` — prefix for Redis keys and pub/sub channels (default `sardeenz`)
 - Parking timeout, circuit breaker thresholds, and other tuning parameters
 
 **Structured logging** — JSON format via `tracing` + `tracing-subscriber` with request ID propagation.
@@ -269,6 +269,8 @@ Load balancing across multiple runner replicas serving the same model, with circ
 - If the probe succeeds, transitions back to `CLOSED`; if it fails, returns to `OPEN`
 - If all endpoints for a model are in `OPEN` state, return 503
 
+**Hop-by-hop header filtering:** Both request and response directions strip hop-by-hop headers (`connection`, `keep-alive`, `transfer-encoding`, `te`, `trailer`, `upgrade`, `proxy-authorization`, `proxy-authenticate`) to avoid leaking per-hop transport metadata across the proxy boundary.
+
 **Verification:** Unit tests for the round-robin algorithm and circuit breaker state machine.
 
 ### 1.8 — Implement Health and Metrics
@@ -384,7 +386,20 @@ Integration tests that validate all four request flow scenarios from the [archit
 | 7   | Unknown model           | Request for non-existent model → 404                                                     |
 | 8   | Parking timeout         | Model doesn't wake within timeout → 503 to parked clients                                |
 
-**Verification:** `cargo test --test integration` passes. Tests run in CI.
+**Redis integration tests** (feature-gated behind `redis-integration`):
+
+Tests that exercise the real Redis/Valkey sync path are in `proxy/tests/integration/test_redis.rs`, gated by the `redis-integration` Cargo feature flag so that `cargo test` works without a running Redis instance. Each test uses a UUID-scoped key prefix for isolation, enabling parallel execution.
+
+| #   | Scenario                | What it validates                                                               |
+| --- | ----------------------- | ------------------------------------------------------------------------------- |
+| 9   | Redis bootstrap         | Proxy loads routing map from Redis on startup and forwards requests             |
+| 10  | Pub/sub refresh         | Proxy picks up new routes published to Redis after startup                      |
+| 11  | Malformed entry         | Valid entries route correctly; malformed JSON entries are silently skipped       |
+| 12  | Readiness lifecycle     | `/readyz` transitions from 503 → 200 as Redis connects and routing map loads   |
+
+Run with: `cargo test --features redis-integration test_redis`
+
+**Verification:** `cargo test --test integration` passes. `cargo test --features redis-integration` passes with a running Redis/Valkey instance. Tests run in CI.
 
 ## Definition of Done
 
@@ -406,7 +421,7 @@ From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connecti
 ## Open Questions
 
 - **Routing map cache strategy:** Should the proxy cache the routing map in-memory and refresh via pub/sub, or read from Redis on every request? In-memory cache with pub/sub gives lower latency but requires careful invalidation. Read-per-request is simpler but adds ~0.1ms per request. _Leaning toward:_ in-memory cache with pub/sub refresh — the proxy is on the hot path and sub-millisecond overhead matters.
-- **Rust codegen approach:** Should we use `openapi-generator` to generate Rust structs from the spec, or hand-write structs and validate them against the spec in CI? Generated code can be verbose and hard to customize; hand-written structs are cleaner but risk drift. _Leaning toward:_ evaluate both during Task 1.3 and pick based on output quality.
+- **Rust codegen approach:** ~~Should we use `openapi-generator` to generate Rust structs from the spec, or hand-write structs and validate them against the spec in CI?~~ _Decided:_ hand-maintained structs. Codegen output was verbose and non-idiomatic; the type surface is small (~260 lines) and benefits from manual serde attribute control. Drift risk is accepted and mitigated by keeping types in a clearly labeled `generated/` directory with spec source references in each file header.
 - **Parking connection limit:** What should the default maximum parked connections be (per model and globally)? Too low and legitimate traffic gets rejected during wake-up; too high and a sleeping model with heavy traffic exhausts proxy memory. _Leaning toward:_ 1,000 per model, 10,000 global, configurable.
 - **Metrics port separation:** Should Prometheus metrics be served on the same port as the proxy traffic, or on a separate admin port? Same port is simpler; separate port keeps metrics traffic off the hot path and allows different access controls. _Leaning toward:_ separate admin port for metrics and health.
 - **Structured output passthrough vs. inspection:** Can the proxy treat structured output parameters as opaque (pure passthrough), or does it need to inspect them for routing or compatibility decisions? _Leaning toward:_ pure passthrough initially — the proxy shouldn't need to understand request semantics beyond model routing.

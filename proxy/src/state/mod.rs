@@ -23,6 +23,7 @@ pub struct AppState {
     pub forwarding_client: ForwardingClient,
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     redis_connected: Arc<AtomicBool>,
+    routing_map_loaded: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -38,6 +39,7 @@ impl AppState {
         existing_cache: Option<RoutingMapCache>,
         redis_connected: bool,
     ) -> Self {
+        let has_existing_cache = existing_cache.is_some();
         let routing_cache = existing_cache.unwrap_or_default();
         let wake_client = WakeTriggerClient::new(&config.control_plane_url);
         let resolver = Arc::new(ModelResolver::new(routing_cache.clone()));
@@ -47,6 +49,7 @@ impl AppState {
             wake_client,
         );
         let circuit_breaker = CircuitBreaker::new(config.circuit_breaker.clone());
+        let forwarding_client = ForwardingClient::new(config.upstream_timeout);
 
         Self {
             config,
@@ -55,17 +58,23 @@ impl AppState {
             parking,
             balancer: Arc::new(WeightedRoundRobin::new()),
             circuit_breaker,
-            forwarding_client: ForwardingClient::new(),
+            forwarding_client,
             metrics_handle,
             redis_connected: Arc::new(AtomicBool::new(redis_connected)),
+            routing_map_loaded: Arc::new(AtomicBool::new(has_existing_cache)),
         }
     }
 
     pub async fn is_ready(&self) -> bool {
         self.redis_connected.load(Ordering::Acquire)
+            && self.routing_map_loaded.load(Ordering::Acquire)
     }
 
     pub fn set_redis_connected(&self, connected: bool) {
         self.redis_connected.store(connected, Ordering::Release);
+    }
+
+    pub fn set_routing_map_loaded(&self, loaded: bool) {
+        self.routing_map_loaded.store(loaded, Ordering::Release);
     }
 }

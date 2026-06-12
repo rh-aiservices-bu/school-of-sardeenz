@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use metrics::{counter, gauge, histogram};
 use tokio::sync::Mutex;
 
 use crate::config::ParkingConfig;
@@ -66,7 +67,14 @@ impl ParkingManager {
     ) -> Result<(), ProxyError> {
         self.reserve_slot(model_name).await?;
 
+        let park_start = std::time::Instant::now();
+        gauge!("sardeenz_proxy_parked_connections", "model" => model_name.to_string()).increment(1);
+
         let result = self.do_park(model_name, fire_wake).await;
+
+        gauge!("sardeenz_proxy_parked_connections", "model" => model_name.to_string()).decrement(1);
+        histogram!("sardeenz_proxy_parking_duration_seconds")
+            .record(park_start.elapsed().as_secs_f64());
 
         self.release_slot(model_name).await;
         result
@@ -84,12 +92,16 @@ impl ParkingManager {
 
                 match self.wake_client.trigger_wake(model_name).await {
                     Ok(()) => {
+                        counter!("sardeenz_proxy_wake_triggers_total", "result" => "accepted")
+                            .increment(1);
                         let mut pending = self.pending_wakes.lock().await;
                         if let Some(state) = pending.get_mut(model_name) {
                             *state = WakeState::Triggered;
                         }
                     }
                     Err(e) => {
+                        counter!("sardeenz_proxy_wake_triggers_total", "result" => "failed")
+                            .increment(1);
                         self.pending_wakes.lock().await.remove(model_name);
                         return Err(ProxyError::ModelUnavailable(format!(
                             "wake trigger failed: {e}"

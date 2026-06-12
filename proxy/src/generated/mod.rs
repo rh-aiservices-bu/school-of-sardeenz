@@ -1,4 +1,5 @@
-// @generated — do not edit by hand. Fix the OpenAPI spec and re-generate.
+// Hand-maintained Rust types mirroring the OpenAPI specs in packages/contracts/specs/.
+// When the specs change, update these types to match.
 
 #[allow(dead_code)]
 pub mod engine_runner;

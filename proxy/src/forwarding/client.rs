@@ -19,16 +19,17 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 #[derive(Clone)]
 pub struct ForwardingClient {
     client: reqwest::Client,
+    timeout: std::time::Duration,
 }
 
 impl Default for ForwardingClient {
     fn default() -> Self {
-        Self::new()
+        Self::new(std::time::Duration::from_secs(300))
     }
 }
 
 impl ForwardingClient {
-    pub fn new() -> Self {
+    pub fn new(timeout: std::time::Duration) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .pool_max_idle_per_host(64)
@@ -36,6 +37,7 @@ impl ForwardingClient {
                 .tcp_nodelay(true)
                 .build()
                 .expect("failed to build HTTP client"),
+            timeout,
         }
     }
 
@@ -52,7 +54,11 @@ impl ForwardingClient {
     ) -> Result<Response<Body>, anyhow::Error> {
         let url = format!("http://{}:{}{}", endpoint.host, endpoint.port, path);
 
-        let mut req_builder = self.client.request(method, &url).body(body);
+        let mut req_builder = self
+            .client
+            .request(method, &url)
+            .timeout(self.timeout)
+            .body(body);
 
         for (key, value) in headers {
             if key == "host" {
@@ -75,6 +81,12 @@ impl ForwardingClient {
 
         let mut builder = Response::builder().status(status);
         for (key, value) in &resp_headers {
+            if HOP_BY_HOP_HEADERS
+                .iter()
+                .any(|h| key.as_str().eq_ignore_ascii_case(h))
+            {
+                continue;
+            }
             builder = builder.header(key, value);
         }
 
