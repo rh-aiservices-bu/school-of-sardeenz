@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Updated CLAUDE.md to clarify Rust types are hand-maintained (not generated)
 - Added `SARDEENZ_REDIS_KEY_PREFIX` to proxy configuration reference table
 - Default proxy admin port from 9090 to 9099 to avoid conflict with Cockpit on Fedora/RHEL
+- Suppress Redocly `no-unused-components` warning for `RoutingMapUpdate` schema (reserved for Phase 2 pub/sub)
 
 ### Added
 
