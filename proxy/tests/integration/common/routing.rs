@@ -102,6 +102,7 @@ pub async fn insert_active_model_with_metadata(
             owned_by: Some(owned_by.to_string()),
             max_model_len: None,
             engine_type: None,
+            extra: Default::default(),
         }),
     };
     cache.update_entry(model_name.to_string(), entry).await;

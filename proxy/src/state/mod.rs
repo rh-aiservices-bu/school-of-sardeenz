@@ -27,7 +27,18 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config, metrics_handle: metrics_exporter_prometheus::PrometheusHandle) -> Self {
-        let routing_cache = RoutingMapCache::new();
+        Self::new_with_cache(config, metrics_handle, None, false)
+    }
+
+    /// Create AppState with an optional pre-existing routing cache and
+    /// initial redis_connected value. Used by tests to inject a shared cache.
+    pub fn new_with_cache(
+        config: Config,
+        metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+        existing_cache: Option<RoutingMapCache>,
+        redis_connected: bool,
+    ) -> Self {
+        let routing_cache = existing_cache.unwrap_or_default();
         let wake_client = WakeTriggerClient::new(&config.control_plane_url);
         let resolver = Arc::new(ModelResolver::new(routing_cache.clone()));
         let parking = ParkingManager::new(
@@ -46,15 +57,15 @@ impl AppState {
             circuit_breaker,
             forwarding_client: ForwardingClient::new(),
             metrics_handle,
-            redis_connected: Arc::new(AtomicBool::new(false)),
+            redis_connected: Arc::new(AtomicBool::new(redis_connected)),
         }
     }
 
     pub async fn is_ready(&self) -> bool {
-        self.redis_connected.load(Ordering::Relaxed)
+        self.redis_connected.load(Ordering::Acquire)
     }
 
     pub fn set_redis_connected(&self, connected: bool) {
-        self.redis_connected.store(connected, Ordering::Relaxed);
+        self.redis_connected.store(connected, Ordering::Release);
     }
 }

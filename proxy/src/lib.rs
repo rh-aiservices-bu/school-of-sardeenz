@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 pub mod forwarding;
 pub mod generated;
+pub mod handlers;
 pub mod health;
 pub mod parking;
 pub mod protocol;

@@ -60,16 +60,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   structure and refresh strategy, circuit breaker state machine, full configuration and metrics
   reference tables, health endpoint semantics, proxy ↔ control plane responsibility split
 - Integration test suite for the Rust proxy (`proxy/tests/integration/`):
-  19 tests across 10 scenarios exercising request forwarding, SSE streaming, sleep/wake cycle,
-  thundering herd deduplication, unknown model 404, parking timeout 503, circuit breaker
-  trip/recovery, weighted round-robin, `/v1/models` aggregation, and health/readyz endpoints;
-  runs without Redis using direct RoutingMapCache injection; mock axum servers for runner
-  and control plane
+  26 tests across 13 scenarios exercising request forwarding, SSE streaming, sleep/wake cycle,
+  thundering herd deduplication, unknown model 404, missing/invalid model 400, parking timeout 503,
+  parking limit enforcement (per-model and global), wake trigger failure, draining/error model
+  states, circuit breaker trip/recovery/5xx, weighted round-robin, `/v1/models` aggregation,
+  and health/readyz endpoints; runs without Redis using direct RoutingMapCache injection;
+  mock axum servers for runner and control plane
+- Shared handler module (`proxy/src/handlers.rs`) — handler functions extracted from binary
+  crate for reuse by both production `main.rs` and integration tests
 
 ### Fixed
 
-- Proxy circuit breaker now tracks upstream 5xx responses as failures (previously
-  only transport-level errors triggered the breaker)
+- Proxy: missing/invalid `model` field now returns HTTP 400 (`invalid_request_error`)
+  instead of 500; invalid JSON body returns 400 instead of 500
+- Proxy: `RoutingEntryMetadata` preserves unknown fields via `serde(flatten)` to match
+  OpenAPI `additionalProperties` contract
+- Proxy: `ForwardingClient` eliminates double-buffering — accepts `Bytes` directly,
+  preserves query string via `path_and_query()`, filters hop-by-hop headers
+- Proxy: circuit breaker HalfOpen state limits to single probe request (prevents
+  stampede); `record_failure()` in HalfOpen immediately re-opens circuit;
+  `current_state()` is now read-only (no side effects)
+- Proxy: weighted round-robin balancer uses cumulative weight algorithm — O(n),
+  zero heap allocation, weight capped at 100
+- Proxy: parking manager cleans up `pending_wakes` on timeout exit path (prevents
+  permanent stuck state); `reserve_slot()` atomically checks+increments under
+  single mutex (TOCTOU fix); uses `SeqCst` ordering throughout
+- Proxy: Redis sync subscribes to pub/sub channel before initial `HGETALL` to
+  avoid missing updates during the load window
+- Proxy: `redis_connected` flag uses `Acquire`/`Release` ordering instead of `Relaxed`
+- Proxy: graceful shutdown uses `watch::channel` for coordinated signal to both
+  servers and Redis sync task; proper drain sequence (signal → join servers → await Redis)
+- Proxy: Redis URL credentials redacted in startup log output
 
 ### Changed
 

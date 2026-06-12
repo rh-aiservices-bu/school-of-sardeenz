@@ -2,25 +2,21 @@ mod config;
 mod error;
 mod forwarding;
 mod generated;
+mod handlers;
 mod health;
 mod parking;
 mod protocol;
 mod routing;
 mod state;
 
-use axum::body::Body;
-use axum::extract::State;
-use axum::http::{Request, StatusCode};
-use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
-use crate::error::ProxyError;
-use crate::routing::resolver::Resolution;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -41,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         listen_addr = %config.listen_addr,
         admin_addr = %config.admin_addr,
-        redis_url = %config.redis_url,
+        redis_url = %redact_url(&config.redis_url),
         "starting sardeenz-proxy"
     );
 
@@ -52,30 +48,40 @@ async fn main() -> anyhow::Result<()> {
     // App state
     let state = AppState::new(config.clone(), metrics_handle);
 
-    // Start Redis sync in background
+    // Shared shutdown signal
+    let (shutdown_tx, _) = watch::channel(());
+    let mut rx_redis = shutdown_tx.subscribe();
+
+    // Start Redis sync in background with shutdown awareness
     let redis_state = state.clone();
-    tokio::spawn(async move {
+    let redis_handle = tokio::spawn(async move {
         loop {
-            if let Err(e) = state::start_redis_sync(redis_state.clone()).await {
-                tracing::error!(error = %e, "redis sync failed, retrying in 5s");
-                redis_state.set_redis_connected(false);
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::select! {
+                biased;
+                _ = rx_redis.changed() => break,
+                result = state::start_redis_sync(redis_state.clone()) => {
+                    if let Err(e) = result {
+                        tracing::error!(error = %e, "redis sync failed, retrying in 5s");
+                        redis_state.set_redis_connected(false);
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                }
             }
         }
     });
 
     // Proxy routes (inference traffic)
     let proxy_app = Router::new()
-        .route("/v1/chat/completions", post(handle_inference))
-        .route("/v1/completions", post(handle_inference))
-        .route("/v1/models", get(handle_models))
+        .route("/v1/chat/completions", post(handlers::handle_inference))
+        .route("/v1/completions", post(handlers::handle_inference))
+        .route("/v1/models", get(handlers::handle_models))
         .with_state(state.clone());
 
     // Admin routes (health + metrics, separate port)
     let admin_app = Router::new()
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
-        .route("/metrics", get(handle_metrics))
+        .route("/metrics", get(handlers::handle_metrics))
         .with_state(state.clone());
 
     // Bind listeners
@@ -88,117 +94,45 @@ async fn main() -> anyhow::Result<()> {
         "listening"
     );
 
-    // Run both servers with graceful shutdown
-    tokio::select! {
-        result = axum::serve(proxy_listener, proxy_app)
-            .with_graceful_shutdown(shutdown_signal()) => {
-            result?;
-        }
-        result = axum::serve(admin_listener, admin_app)
-            .with_graceful_shutdown(shutdown_signal()) => {
-            result?;
-        }
+    // Run both servers with shared graceful shutdown
+    let mut rx1 = shutdown_tx.subscribe();
+    let mut rx2 = shutdown_tx.subscribe();
+
+    let proxy_handle = tokio::spawn(async move {
+        axum::serve(proxy_listener, proxy_app)
+            .with_graceful_shutdown(async move {
+                let _ = rx1.changed().await;
+            })
+            .await
+    });
+    let admin_handle = tokio::spawn(async move {
+        axum::serve(admin_listener, admin_app)
+            .with_graceful_shutdown(async move {
+                let _ = rx2.changed().await;
+            })
+            .await
+    });
+
+    // Wait for shutdown signal
+    shutdown_signal().await;
+
+    // Signal all tasks to stop
+    drop(shutdown_tx);
+
+    // Wait for both servers to drain gracefully
+    let (proxy_result, admin_result) = tokio::join!(proxy_handle, admin_handle);
+    if let Err(e) = proxy_result {
+        tracing::error!(error = %e, "proxy server task failed");
     }
+    if let Err(e) = admin_result {
+        tracing::error!(error = %e, "admin server task failed");
+    }
+
+    // Wait for Redis sync to stop
+    let _ = redis_handle.await;
 
     tracing::info!("proxy shut down");
     Ok(())
-}
-
-async fn handle_inference(
-    State(state): State<AppState>,
-    request: Request<Body>,
-) -> Result<impl IntoResponse, ProxyError> {
-    let (parts, body) = request.into_parts();
-    let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024)
-        .await
-        .map_err(|e| ProxyError::Internal(e.into()))?;
-
-    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(e.into()))?;
-
-    let model_name = protocol::extract_model_name(&body_json)
-        .ok_or_else(|| ProxyError::Internal(anyhow::anyhow!("missing model field")))?;
-
-    // Resolve model and determine flow
-    let resolution = state.resolver.resolve(&model_name).await?;
-
-    // If sleeping or starting, park the connection
-    match &resolution {
-        Resolution::Sleeping(_) => {
-            state.parking.park(&model_name, true).await?;
-        }
-        Resolution::Starting(_) => {
-            state.parking.park(&model_name, false).await?;
-        }
-        Resolution::Active(_) => {}
-    }
-
-    // At this point the model is active — get fresh routing entry
-    let entry = state
-        .routing_cache
-        .get(&model_name)
-        .await
-        .ok_or_else(|| ProxyError::ModelNotFound(model_name.clone()))?;
-
-    // Pick an endpoint via weighted round-robin, respecting circuit breaker
-    let healthy_endpoints: Vec<_> = {
-        let mut eps = Vec::new();
-        for ep in &entry.endpoints {
-            let key = format!("{}:{}", ep.host, ep.port);
-            if state.circuit_breaker.is_allowed(&key).await {
-                eps.push(ep.clone());
-            }
-        }
-        eps
-    };
-
-    let endpoint = state
-        .balancer
-        .pick(&healthy_endpoints)
-        .ok_or_else(|| ProxyError::AllEndpointsUnhealthy(model_name.clone()))?
-        .clone();
-
-    // Rebuild the request and forward
-    let forward_request = Request::from_parts(parts, Body::from(body_bytes));
-    let path = forward_request.uri().path().to_string();
-
-    let ep_key = format!("{}:{}", endpoint.host, endpoint.port);
-
-    match state
-        .forwarding_client
-        .forward(&endpoint, &path, forward_request)
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_server_error() {
-                state.circuit_breaker.record_failure(&ep_key).await;
-            } else {
-                state.circuit_breaker.record_success(&ep_key).await;
-            }
-            Ok(response)
-        }
-        Err(e) => {
-            state.circuit_breaker.record_failure(&ep_key).await;
-            Err(ProxyError::Upstream(e.to_string()))
-        }
-    }
-}
-
-async fn handle_models(State(state): State<AppState>) -> impl IntoResponse {
-    let models = protocol::list_models(&state.routing_cache).await;
-    axum::Json(models)
-}
-
-async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let body = state.metrics_handle.render();
-    (
-        StatusCode::OK,
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "text/plain; version=0.0.4; charset=utf-8",
-        )],
-        body,
-    )
 }
 
 async fn shutdown_signal() {
@@ -222,5 +156,19 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => { tracing::info!("received Ctrl+C"); }
         _ = terminate => { tracing::info!("received SIGTERM"); }
+    }
+}
+
+/// Redact credentials from a URL for safe logging.
+fn redact_url(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(mut parsed) => {
+            if parsed.password().is_some() || !parsed.username().is_empty() {
+                let _ = parsed.set_username("***");
+                let _ = parsed.set_password(Some("***"));
+            }
+            parsed.to_string()
+        }
+        Err(_) => "<invalid-url>".to_string(),
     }
 }

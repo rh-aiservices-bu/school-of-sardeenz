@@ -5,14 +5,20 @@ use redis::AsyncCommands;
 use crate::generated::proxy_control_plane::RoutingEntry;
 use crate::state::AppState;
 
-/// Start the Redis synchronization loop. Loads the initial routing map and
-/// subscribes to pub/sub updates.
+/// Start the Redis synchronization loop. Subscribes to pub/sub first, then
+/// loads the initial routing map, ensuring no updates are missed during
+/// the initial load.
 pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
     let client = redis::Client::open(state.config.redis_url.as_str())?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
     state.set_redis_connected(true);
     tracing::info!("connected to Redis");
+
+    // Subscribe to routing map updates BEFORE loading the initial map
+    // to avoid missing updates published during the HGETALL round-trip.
+    let mut pubsub_conn = client.get_async_pubsub().await?;
+    pubsub_conn.subscribe("sardeenz:routing-updates").await?;
 
     // Load the initial routing map
     let map: HashMap<String, String> = conn.hgetall("sardeenz:routing-map").await?;
@@ -29,10 +35,7 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
     tracing::info!(models = routing_map.len(), "loaded routing map");
     state.routing_cache.replace(routing_map).await;
 
-    // Subscribe to routing map updates
-    let mut pubsub_conn = client.get_async_pubsub().await?;
-    pubsub_conn.subscribe("sardeenz:routing-updates").await?;
-
+    // Process pub/sub updates
     let mut pubsub_stream = pubsub_conn.into_on_message();
     while let Some(msg) = futures_util::StreamExt::next(&mut pubsub_stream).await {
         let payload: String = match msg.get_payload() {

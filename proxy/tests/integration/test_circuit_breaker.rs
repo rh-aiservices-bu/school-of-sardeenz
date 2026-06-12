@@ -1,10 +1,9 @@
-// test_circuit_breaker_trips: after enough connection failures (unreachable
-// endpoint), the circuit breaker opens and subsequent requests return 503
-// without hitting the endpoint.
+// Circuit breaker integration tests.
 //
-// Note: the circuit breaker tracks transport-level failures (connection
-// refused, timeout), not HTTP 5xx responses from the runner. A runner
-// returning 500 is still a successful forwarding from the proxy's perspective.
+// The circuit breaker tracks both transport-level failures (connection refused,
+// timeout) and HTTP 5xx responses from runners as failures. When the failure
+// count within the sliding window reaches the configured threshold, the
+// circuit opens and subsequent requests are rejected immediately with 503.
 
 use std::time::Duration;
 
@@ -14,37 +13,30 @@ use crate::common::TestProxy;
 use crate::common::proxy_builder::TestProxyConfig;
 use sardeenz_proxy::generated::proxy_control_plane::RunnerEndpoint;
 
-/// Returns a `RunnerEndpoint` pointing at a port that is not listening (so
-/// the TCP connection will be refused immediately).
+/// Returns a port that is not listening (connection will be refused).
 fn unreachable_endpoint() -> (String, u16) {
-    // Use a port in the ephemeral range that is known not to be listening.
-    // Bind a listener momentarily to get a free port, then drop it so the
-    // port becomes unavailable again.
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
-    drop(l); // port is now closed
+    drop(l);
     ("127.0.0.1".to_string(), port)
 }
 
 #[tokio::test]
 async fn test_circuit_breaker_trips() {
-    // Use a low failure threshold to trip quickly.
     const THRESHOLD: u32 = 3;
 
     let proxy = TestProxy::spawn_with_config(TestProxyConfig {
         control_plane_url: "http://127.0.0.1:1".to_string(),
         cb_failure_threshold: THRESHOLD,
         cb_failure_window: Duration::from_secs(30),
-        cb_recovery_timeout: Duration::from_secs(60), // long — won't recover during test
+        cb_recovery_timeout: Duration::from_secs(60),
         ..Default::default()
     })
     .await;
 
-    // Register the model pointing at an endpoint that refuses connections.
     let (host, port) = unreachable_endpoint();
     let model = "circuit-breaker-test/model-v1";
 
-    // Directly insert a routing entry with the dead endpoint.
     {
         use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
         let entry = RoutingEntry {
@@ -60,7 +52,10 @@ async fn test_circuit_breaker_trips() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy.routing_cache.update_entry(model.to_string(), entry).await;
+        proxy
+            .routing_cache
+            .update_entry(model.to_string(), entry)
+            .await;
     }
 
     let client = reqwest::Client::new();
@@ -69,8 +64,6 @@ async fn test_circuit_breaker_trips() {
         "messages": [{"role": "user", "content": "Hi"}]
     });
 
-    // Each request should fail with 502 (upstream error — connection refused).
-    // After THRESHOLD failures the circuit opens.
     for i in 0..THRESHOLD {
         let resp = client
             .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
@@ -86,8 +79,6 @@ async fn test_circuit_breaker_trips() {
         );
     }
 
-    // Circuit is now open. The next request should get 503 without touching
-    // the (dead) endpoint at all.
     let resp = client
         .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
@@ -109,24 +100,84 @@ async fn test_circuit_breaker_trips() {
 }
 
 #[tokio::test]
-async fn test_circuit_breaker_recovers() {
-    // The circuit goes Open after threshold failures, then HalfOpen after
-    // recovery_timeout. A successful request in HalfOpen closes the circuit.
+async fn test_circuit_breaker_trips_on_5xx() {
     use crate::common::MockRunner;
 
-    let model = "recovering-model/v1";
     const THRESHOLD: u32 = 3;
+    let model = "5xx-circuit-test/model-v1";
+
+    // Mock runner that fails the first THRESHOLD requests with 500.
+    let runner = MockRunner::spawn_failing(model, THRESHOLD as usize).await;
 
     let proxy = TestProxy::spawn_with_config(TestProxyConfig {
         control_plane_url: "http://127.0.0.1:1".to_string(),
         cb_failure_threshold: THRESHOLD,
         cb_failure_window: Duration::from_secs(30),
-        cb_recovery_timeout: Duration::from_millis(100), // very short for testing
+        cb_recovery_timeout: Duration::from_secs(60),
         ..Default::default()
     })
     .await;
 
-    // Start with a dead endpoint.
+    crate::common::insert_active_model(&proxy.routing_cache, model, runner.addr).await;
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "Hi"}]
+    });
+
+    // Each 500 response from the runner should be recorded as a failure.
+    for _ in 0..THRESHOLD {
+        let resp = client
+            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .json(&payload)
+            .send()
+            .await
+            .expect("request to proxy failed");
+
+        // The proxy forwards the 500 from the runner.
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // Circuit should now be open — next request gets 503 without hitting runner.
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .json(&payload)
+        .send()
+        .await
+        .expect("request to proxy failed");
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "circuit should be open after THRESHOLD 5xx responses"
+    );
+
+    let body: serde_json::Value = resp.json().await.expect("response not JSON");
+    assert_eq!(body["error"]["type"], "all_endpoints_unhealthy");
+}
+
+#[tokio::test]
+async fn test_circuit_breaker_recovers() {
+    use crate::common::MockRunner;
+
+    let model = "recovering-model/v1";
+    const THRESHOLD: u32 = 3;
+
+    // Spawn the live runner BEFORE tripping the circuit so it's ready
+    // when the circuit transitions to HalfOpen.
+    let runner = MockRunner::spawn(model).await;
+
+    let proxy = TestProxy::spawn_with_config(TestProxyConfig {
+        control_plane_url: "http://127.0.0.1:1".to_string(),
+        cb_failure_threshold: THRESHOLD,
+        cb_failure_window: Duration::from_secs(30),
+        cb_recovery_timeout: Duration::from_millis(100),
+        ..Default::default()
+    })
+    .await;
+
+    // Start with a dead endpoint to trip the circuit.
     let (dead_host, dead_port) = unreachable_endpoint();
     {
         use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
@@ -143,7 +194,10 @@ async fn test_circuit_breaker_recovers() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy.routing_cache.update_entry(model.to_string(), entry).await;
+        proxy
+            .routing_cache
+            .update_entry(model.to_string(), entry)
+            .await;
     }
 
     let client = reqwest::Client::new();
@@ -161,11 +215,7 @@ async fn test_circuit_breaker_recovers() {
             .await;
     }
 
-    // Wait for recovery_timeout → circuit goes HalfOpen.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // Swap to a working runner before the next request.
-    let runner = MockRunner::spawn(model).await;
+    // Swap to the working runner BEFORE waiting for recovery.
     {
         use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
         let entry = RoutingEntry {
@@ -181,11 +231,16 @@ async fn test_circuit_breaker_recovers() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy.routing_cache.update_entry(model.to_string(), entry).await;
+        proxy
+            .routing_cache
+            .update_entry(model.to_string(), entry)
+            .await;
     }
 
-    // In HalfOpen state, the circuit allows one request through. If it
-    // succeeds, the circuit closes.
+    // Wait for recovery_timeout → circuit goes HalfOpen.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // In HalfOpen state, the circuit allows one probe request through.
     let resp = client
         .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)

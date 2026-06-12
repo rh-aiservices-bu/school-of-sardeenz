@@ -42,8 +42,7 @@ async fn test_unknown_model_404() {
 }
 
 #[tokio::test]
-async fn test_unknown_model_missing_field_500() {
-    // A request body without a "model" field should return 500 (Internal).
+async fn test_missing_model_field_400() {
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
@@ -58,7 +57,39 @@ async fn test_unknown_model_missing_field_500() {
 
     assert_eq!(
         resp.status(),
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "missing model field should return 500"
+        StatusCode::BAD_REQUEST,
+        "missing model field should return 400"
+    );
+
+    let body: serde_json::Value = resp.json().await.expect("response not JSON");
+    assert_eq!(
+        body["error"]["type"], "invalid_request_error",
+        "error type should be invalid_request_error"
+    );
+}
+
+#[tokio::test]
+async fn test_invalid_json_body_400() {
+    let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .header("content-type", "application/json")
+        .body("not valid json{{{")
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "invalid JSON should return 400"
+    );
+
+    let body: serde_json::Value = resp.json().await.expect("response not JSON");
+    assert_eq!(
+        body["error"]["type"], "invalid_request_error",
+        "error type should be invalid_request_error"
     );
 }

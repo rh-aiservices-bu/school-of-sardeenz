@@ -17,6 +17,8 @@ struct EndpointCircuit {
     state: CircuitState,
     failures: Vec<Instant>,
     last_state_change: Instant,
+    /// When true, a probe request is already in flight during HalfOpen.
+    half_open_probe_in_flight: bool,
 }
 
 /// Per-endpoint circuit breaker.
@@ -34,34 +36,32 @@ impl CircuitBreaker {
         }
     }
 
-    /// Returns the current state of the circuit for the given endpoint key.
-    pub async fn state(&self, key: &str) -> CircuitState {
-        let mut circuits = self.circuits.lock().await;
-        let circuit = circuits
-            .entry(key.to_string())
-            .or_insert_with(|| EndpointCircuit {
-                state: CircuitState::Closed,
-                failures: Vec::new(),
-                last_state_change: Instant::now(),
-            });
-
-        // Check if an open circuit should transition to half-open
-        if circuit.state == CircuitState::Open
-            && circuit.last_state_change.elapsed() >= self.config.recovery_timeout
-        {
-            circuit.state = CircuitState::HalfOpen;
-            circuit.last_state_change = Instant::now();
+    /// Returns the current state without triggering transitions.
+    pub async fn current_state(&self, key: &str) -> CircuitState {
+        let circuits = self.circuits.lock().await;
+        match circuits.get(key) {
+            Some(circuit) => {
+                if circuit.state == CircuitState::Open
+                    && circuit.last_state_change.elapsed() >= self.config.recovery_timeout
+                {
+                    CircuitState::HalfOpen
+                } else {
+                    circuit.state
+                }
+            }
+            None => CircuitState::Closed,
         }
-
-        circuit.state
     }
 
     pub async fn record_success(&self, key: &str) {
         let mut circuits = self.circuits.lock().await;
         if let Some(circuit) = circuits.get_mut(key) {
-            circuit.state = CircuitState::Closed;
-            circuit.failures.clear();
-            circuit.last_state_change = Instant::now();
+            if circuit.state == CircuitState::HalfOpen {
+                circuit.state = CircuitState::Closed;
+                circuit.failures.clear();
+                circuit.last_state_change = Instant::now();
+                circuit.half_open_probe_in_flight = false;
+            }
         }
     }
 
@@ -73,12 +73,20 @@ impl CircuitBreaker {
                 state: CircuitState::Closed,
                 failures: Vec::new(),
                 last_state_change: Instant::now(),
+                half_open_probe_in_flight: false,
             });
+
+        if circuit.state == CircuitState::HalfOpen {
+            circuit.state = CircuitState::Open;
+            circuit.last_state_change = Instant::now();
+            circuit.failures.clear();
+            circuit.half_open_probe_in_flight = false;
+            return;
+        }
 
         let now = Instant::now();
         circuit.failures.push(now);
 
-        // Remove failures outside the window
         let window_start = now - self.config.failure_window;
         circuit.failures.retain(|&t| t >= window_start);
 
@@ -89,16 +97,43 @@ impl CircuitBreaker {
     }
 
     pub async fn is_allowed(&self, key: &str) -> bool {
-        matches!(
-            self.state(key).await,
-            CircuitState::Closed | CircuitState::HalfOpen
-        )
+        let mut circuits = self.circuits.lock().await;
+        let circuit = circuits
+            .entry(key.to_string())
+            .or_insert_with(|| EndpointCircuit {
+                state: CircuitState::Closed,
+                failures: Vec::new(),
+                last_state_change: Instant::now(),
+                half_open_probe_in_flight: false,
+            });
+
+        match circuit.state {
+            CircuitState::Closed => true,
+            CircuitState::Open => {
+                if circuit.last_state_change.elapsed() >= self.config.recovery_timeout {
+                    circuit.state = CircuitState::HalfOpen;
+                    circuit.last_state_change = Instant::now();
+                    circuit.half_open_probe_in_flight = true;
+                    true
+                } else {
+                    false
+                }
+            }
+            CircuitState::HalfOpen => {
+                if circuit.half_open_probe_in_flight {
+                    false
+                } else {
+                    circuit.half_open_probe_in_flight = true;
+                    true
+                }
+            }
+        }
     }
 
     /// Get circuit breaker state as a numeric gauge value for Prometheus.
     #[allow(dead_code)]
     pub async fn state_gauge(&self, key: &str) -> f64 {
-        match self.state(key).await {
+        match self.current_state(key).await {
             CircuitState::Closed => 0.0,
             CircuitState::Open => 1.0,
             CircuitState::HalfOpen => 2.0,
@@ -123,7 +158,7 @@ mod tests {
     #[tokio::test]
     async fn starts_closed() {
         let cb = CircuitBreaker::new(test_config());
-        assert_eq!(cb.state("ep1").await, CircuitState::Closed);
+        assert_eq!(cb.current_state("ep1").await, CircuitState::Closed);
     }
 
     #[tokio::test]
@@ -132,7 +167,7 @@ mod tests {
         for _ in 0..3 {
             cb.record_failure("ep1").await;
         }
-        assert_eq!(cb.state("ep1").await, CircuitState::Open);
+        assert_eq!(cb.current_state("ep1").await, CircuitState::Open);
     }
 
     #[tokio::test]
@@ -141,10 +176,10 @@ mod tests {
         for _ in 0..3 {
             cb.record_failure("ep1").await;
         }
-        assert_eq!(cb.state("ep1").await, CircuitState::Open);
+        assert_eq!(cb.current_state("ep1").await, CircuitState::Open);
 
         tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(cb.state("ep1").await, CircuitState::HalfOpen);
+        assert_eq!(cb.current_state("ep1").await, CircuitState::HalfOpen);
     }
 
     #[tokio::test]
@@ -154,7 +189,36 @@ mod tests {
             cb.record_failure("ep1").await;
         }
         tokio::time::sleep(Duration::from_millis(150)).await;
+        // Transition to HalfOpen by allowing a probe
+        assert!(cb.is_allowed("ep1").await);
         cb.record_success("ep1").await;
-        assert_eq!(cb.state("ep1").await, CircuitState::Closed);
+        assert_eq!(cb.current_state("ep1").await, CircuitState::Closed);
+    }
+
+    #[tokio::test]
+    async fn half_open_allows_single_probe() {
+        let cb = CircuitBreaker::new(test_config());
+        for _ in 0..3 {
+            cb.record_failure("ep1").await;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // First caller gets through (probe)
+        assert!(cb.is_allowed("ep1").await);
+        // Second caller blocked while probe is in flight
+        assert!(!cb.is_allowed("ep1").await);
+    }
+
+    #[tokio::test]
+    async fn half_open_failure_reopens() {
+        let cb = CircuitBreaker::new(test_config());
+        for _ in 0..3 {
+            cb.record_failure("ep1").await;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert!(cb.is_allowed("ep1").await);
+        cb.record_failure("ep1").await;
+        assert_eq!(cb.current_state("ep1").await, CircuitState::Open);
     }
 }

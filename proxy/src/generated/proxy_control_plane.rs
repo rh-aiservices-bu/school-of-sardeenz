@@ -1,6 +1,8 @@
 // @generated — do not edit by hand.
 // Source: packages/contracts/specs/proxy-control-plane.yaml
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Routing-level state of a model as seen by the proxy.
@@ -61,6 +63,8 @@ pub struct RoutingEntryMetadata {
     pub max_model_len: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine_type: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 /// A single runner endpoint that can serve inference requests.

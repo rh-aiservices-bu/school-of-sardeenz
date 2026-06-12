@@ -1,7 +1,19 @@
 use axum::body::Body;
-use axum::http::{Request, Response};
+use axum::http::{HeaderMap, Method, Response};
+use bytes::Bytes;
 
 use crate::generated::proxy_control_plane::RunnerEndpoint;
+
+const HOP_BY_HOP_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 /// HTTP client for forwarding requests to runner endpoints.
 #[derive(Clone)]
@@ -28,24 +40,28 @@ impl ForwardingClient {
     }
 
     /// Forward an inference request to the given runner endpoint.
+    ///
+    /// Accepts pre-buffered body bytes to avoid redundant re-buffering.
     pub async fn forward(
         &self,
         endpoint: &RunnerEndpoint,
         path: &str,
-        request: Request<Body>,
+        method: Method,
+        headers: &HeaderMap,
+        body: Bytes,
     ) -> Result<Response<Body>, anyhow::Error> {
         let url = format!("http://{}:{}{}", endpoint.host, endpoint.port, path);
 
-        let (parts, body) = request.into_parts();
-        let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024).await?;
+        let mut req_builder = self.client.request(method, &url).body(body);
 
-        let mut req_builder = self
-            .client
-            .request(parts.method, &url)
-            .body(body_bytes.clone());
-
-        for (key, value) in &parts.headers {
+        for (key, value) in headers {
             if key == "host" {
+                continue;
+            }
+            if HOP_BY_HOP_HEADERS
+                .iter()
+                .any(|h| key.as_str().eq_ignore_ascii_case(h))
+            {
                 continue;
             }
             req_builder = req_builder.header(key, value);
@@ -54,11 +70,11 @@ impl ForwardingClient {
         let response = req_builder.send().await?;
 
         let status = response.status();
-        let headers = response.headers().clone();
+        let resp_headers = response.headers().clone();
         let stream = response.bytes_stream();
 
         let mut builder = Response::builder().status(status);
-        for (key, value) in &headers {
+        for (key, value) in &resp_headers {
             builder = builder.header(key, value);
         }
 

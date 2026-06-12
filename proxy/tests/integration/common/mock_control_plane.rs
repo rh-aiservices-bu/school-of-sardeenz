@@ -206,7 +206,7 @@ async fn handle_wake(
         current_state: Some(ModelState::Starting),
         message: None,
     };
-    (StatusCode::OK, axum::Json(resp)).into_response()
+    (StatusCode::ACCEPTED, axum::Json(resp)).into_response()
 }
 
 /// Build an Active RoutingEntry pointing at a runner.

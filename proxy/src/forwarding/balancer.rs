@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::generated::proxy_control_plane::RunnerEndpoint;
 
+const MAX_WEIGHT: u32 = 100;
+
 /// Weighted round-robin load balancer across runner endpoints.
 pub struct WeightedRoundRobin {
     counter: AtomicUsize,
@@ -22,6 +24,7 @@ impl WeightedRoundRobin {
 
     /// Select the next endpoint from a list using weighted round-robin.
     /// Endpoints with weight 0 or unhealthy are skipped.
+    /// Uses cumulative weight selection: O(n) in endpoints, zero heap allocation.
     pub fn pick<'a>(&self, endpoints: &'a [RunnerEndpoint]) -> Option<&'a RunnerEndpoint> {
         let healthy: Vec<&RunnerEndpoint> = endpoints
             .iter()
@@ -32,18 +35,25 @@ impl WeightedRoundRobin {
             return None;
         }
 
-        // Build expanded list based on weights
-        let expanded: Vec<&RunnerEndpoint> = healthy
+        let total_weight: u32 = healthy
             .iter()
-            .flat_map(|ep| std::iter::repeat_n(*ep, ep.weight as usize))
-            .collect();
+            .map(|ep| ep.weight.min(MAX_WEIGHT))
+            .sum();
 
-        if expanded.is_empty() {
+        if total_weight == 0 {
             return None;
         }
 
-        let idx = self.counter.fetch_add(1, Ordering::Relaxed) % expanded.len();
-        Some(expanded[idx])
+        let idx = (self.counter.fetch_add(1, Ordering::Relaxed) as u32) % total_weight;
+        let mut cumulative = 0u32;
+        for ep in &healthy {
+            cumulative += ep.weight.min(MAX_WEIGHT);
+            if idx < cumulative {
+                return Some(ep);
+            }
+        }
+
+        Some(healthy.last().unwrap())
     }
 }
 
@@ -70,17 +80,16 @@ mod tests {
             endpoint("c", 1, true),
         ];
 
-        let picked: Vec<_> = (0..4).map(|_| balancer.pick(&endpoints).unwrap().host.clone()).collect();
+        let picked: Vec<_> = (0..4)
+            .map(|_| balancer.pick(&endpoints).unwrap().host.clone())
+            .collect();
         assert!(picked.iter().all(|h| h == "a" || h == "c"));
     }
 
     #[test]
     fn respects_weights() {
         let balancer = WeightedRoundRobin::new();
-        let endpoints = vec![
-            endpoint("heavy", 3, true),
-            endpoint("light", 1, true),
-        ];
+        let endpoints = vec![endpoint("heavy", 3, true), endpoint("light", 1, true)];
 
         let mut counts = std::collections::HashMap::new();
         for _ in 0..100 {
@@ -88,12 +97,29 @@ mod tests {
             *counts.entry(ep.host.clone()).or_insert(0) += 1;
         }
 
-        assert!(counts["heavy"] > counts["light"]);
+        assert_eq!(counts["heavy"], 75);
+        assert_eq!(counts["light"], 25);
     }
 
     #[test]
     fn returns_none_for_empty() {
         let balancer = WeightedRoundRobin::new();
         assert!(balancer.pick(&[]).is_none());
+    }
+
+    #[test]
+    fn caps_weight_at_max() {
+        let balancer = WeightedRoundRobin::new();
+        let endpoints = vec![endpoint("a", 200, true), endpoint("b", 100, true)];
+
+        let mut counts = std::collections::HashMap::new();
+        for _ in 0..200 {
+            let ep = balancer.pick(&endpoints).unwrap();
+            *counts.entry(ep.host.clone()).or_insert(0) += 1;
+        }
+
+        // Both capped at 100, so 50/50
+        assert_eq!(counts["a"], 100);
+        assert_eq!(counts["b"], 100);
     }
 }
