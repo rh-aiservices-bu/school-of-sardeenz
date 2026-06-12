@@ -12,3 +12,4 @@
 - [ADR-010](adr-010-engine-runners.md) — Engine Runners
 - [ADR-011](adr-011-worker-capabilities-and-placement.md) — Worker Capabilities and Workload Placement
 - [ADR-012](adr-012-typescript-stack.md) — TypeScript Stack for Control Plane and Dashboard
+- [ADR-013](adr-013-secrets-management.md) — Secrets Management Policy
