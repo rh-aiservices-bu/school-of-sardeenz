@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Control plane core services (`control-plane/src/services/`):
+  - `ModelRepository`: PostgreSQL CRUD for model configuration
+  - `ModelLifecycleService`: Redis-backed state machine with atomic CAS transitions via Lua scripts
+  - `MemoryBudgetService`: in-memory VRAM budget tracker with per-device reservations and staleness detection
+  - `WorkerPoolService`: Redis SCAN-based worker discovery with three-tier heartbeat status (ONLINE/DEGRADED/OFFLINE)
+  - `RoutingMapService`: Redis hash-backed routing map with atomic MULTI/EXEC writes and pub/sub notifications
+  - `PlacementPipeline`: four-stage workload placement (runner type → hardware → capacity → strategy)
+  - `EvictionEngine`: LRU eviction with circuit breaker, max-per-cycle limit, pinned model exclusion, minimum active time
+  - `SleepWakeService`: sleep/wake coordination driving ACTIVE→DRAINING→SLEEPING and SLEEPING→STARTING→ACTIVE transitions
+  - `LeaderElectionService`: K8s Lease API leader election with local dev mode fallback
+- Control plane database migrations (`control-plane/migrations/001-initial-schema.sql`):
+  models, memory_profiles, benchmarks, and settings tables with migration runner
+- Control plane HTTP clients (`control-plane/src/clients/`):
+  runner HTTP client wrapping engine runner contract endpoints, SQL migration runner
 - Control plane admin API OpenAPI spec (`packages/contracts/specs/control-plane.yaml`):
   model lifecycle CRUD (deploy/sleep/wake/delete), worker management, cluster state/memory,
   SSE events stream, `ModelLifecycleState` enum (8 states), `WorkerStatus` and `ClusterEventType` enums
