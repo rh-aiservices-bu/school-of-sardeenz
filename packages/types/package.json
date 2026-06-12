@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "codegen": "openapi-typescript ../contracts/specs/engine-runner.yaml -o src/generated/engine-runner.ts --export-type --enum",
+    "codegen": "openapi-typescript ../contracts/specs/engine-runner.yaml -o src/generated/engine-runner.ts --export-type --enum && openapi-typescript ../contracts/specs/proxy-control-plane.yaml -o src/generated/proxy-control-plane.ts --export-type --enum",
     "typecheck": "tsc --noEmit"
   }
 }

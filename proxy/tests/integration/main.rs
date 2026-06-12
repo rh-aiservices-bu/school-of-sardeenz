@@ -1,0 +1,19 @@
+// Integration tests for the Sardeenz routing proxy.
+//
+// These tests spin up real HTTP servers (mock runner + mock control plane)
+// and a full proxy instance, then exercise end-to-end flows without any
+// Redis dependency — the routing map is injected directly into
+// `RoutingMapCache`.
+
+mod common;
+
+mod test_active_model;
+mod test_circuit_breaker;
+mod test_health;
+mod test_models_endpoint;
+mod test_parking_timeout;
+mod test_sleeping_model;
+mod test_streaming;
+mod test_thundering_herd;
+mod test_unknown_model;
+mod test_weighted_round_robin;

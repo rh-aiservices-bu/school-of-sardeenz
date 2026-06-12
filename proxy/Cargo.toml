@@ -14,9 +14,43 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-axum = "0.8"
+# Web framework and async runtime
+axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "http1", "http2"] }
+tower = { version = "0.5", features = ["timeout", "util"] }
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Redis/Valkey
+redis = { version = "0.29", features = ["tokio-comp", "connection-manager"] }
+
+# HTTP client (for wake triggers and request forwarding)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+
+# Observability
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+futures-util = "0.3"
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+
+[dev-dependencies]
+tokio-test = "0.4"

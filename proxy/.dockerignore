@@ -1,0 +1,44 @@
+# Build artefacts — largest directory, must always be excluded
+target/
+
+# Rust incremental compilation cache
+**/.cargo/
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Git internals
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD configs (not needed at runtime)
+.github/
+.gitlab-ci.yml
+
+# Documentation — not needed inside the image
+*.md
+docs/
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
+
+# Docker files themselves (already in build context, no need to COPY)
+Dockerfile
+.dockerignore
+
+# Test fixtures and coverage reports
+tests/fixtures/
+coverage/
+*.profraw
+lcov.info

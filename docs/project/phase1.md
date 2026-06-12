@@ -44,20 +44,20 @@ The proxy covers six functional areas for a **stateless** request routing proces
 
 ## Tasks
 
-| #    | Task                                     | Status      | Output                                              |
-| ---- | ---------------------------------------- | ----------- | --------------------------------------------------- |
-| 1.1  | Study v1 proxy patterns                  | Not started | Reference notes (internal)                          |
-| 1.2  | Write proxy ↔ control plane OpenAPI spec | Not started | `packages/contracts/specs/proxy-control-plane.yaml` |
-| 1.3  | Set up Rust codegen from OpenAPI specs   | Not started | Generated Rust types in `proxy/src/generated/`      |
-| 1.4  | Scaffold proxy crate                     | Not started | Compilable binary with config + logging             |
-| 1.5  | Implement routing core                   | Not started | Request routing with Redis integration              |
-| 1.6  | Implement connection parking             | Not started | Parking subsystem with wake triggers                |
-| 1.7  | Implement cluster forwarding             | Not started | Load balancing + circuit breaking                   |
-| 1.8  | Implement health and metrics             | Not started | `/metrics`, `/healthz`, `/readyz`                   |
-| 1.9  | Structured output compatibility          | Not started | Documented approach + prototype                     |
-| 1.10 | Write proxy design document              | Not started | `docs/architecture/components/proxy.md`             |
-| 1.11 | Build container image                    | Not started | `proxy/Dockerfile`                                  |
-| 1.12 | Integration test suite                   | Not started | `proxy/tests/integration/`                          |
+| #    | Task                                     | Status      | Output                                                     |
+| ---- | ---------------------------------------- | ----------- | ---------------------------------------------------------- |
+| 1.1  | Study v1 proxy patterns                  | Done        | Reference notes (internal)                                 |
+| 1.2  | Write proxy ↔ control plane OpenAPI spec | Done        | `packages/contracts/specs/proxy-control-plane.yaml`        |
+| 1.3  | Set up Rust codegen from OpenAPI specs   | Done        | Hand-written Rust types in `proxy/src/generated/`          |
+| 1.4  | Scaffold proxy crate                     | Done        | Compilable binary with config + logging                    |
+| 1.5  | Implement routing core                   | Done        | Request routing with Redis integration                     |
+| 1.6  | Implement connection parking             | Done        | Parking subsystem with wake triggers                       |
+| 1.7  | Implement cluster forwarding             | Done        | Load balancing + circuit breaking                          |
+| 1.8  | Implement health and metrics             | Done        | `/metrics`, `/healthz`, `/readyz`                          |
+| 1.9  | Structured output compatibility          | Done        | `docs/architecture/components/structured-output-*.md`      |
+| 1.10 | Write proxy design document              | Done        | `docs/architecture/components/proxy.md`                    |
+| 1.11 | Build container image                    | Done        | `proxy/Dockerfile`                                         |
+| 1.12 | Integration test suite                   | Done        | `proxy/tests/integration/`                                 |
 
 ## Task Details
 

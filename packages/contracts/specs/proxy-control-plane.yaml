@@ -1,0 +1,433 @@
+openapi: 3.1.0
+info:
+  title: Sardeenz Proxy ↔ Control Plane Contract
+  version: 0.1.0
+  description: |
+    Contract between the routing proxy (Rust) and the control plane (TypeScript).
+    Defines two interface areas:
+
+    1. **Wake trigger API** — HTTP endpoints the proxy calls on the control plane
+       when it receives a request for a sleeping model
+    2. **Routing map schema** — data structures stored in Redis/Valkey, written by
+       the control plane, read by the proxy
+
+    The proxy is a stateless request router. It reads the routing map from
+    Redis/Valkey to resolve which runner should handle each inference request.
+    When the target model is sleeping, the proxy parks the client connection
+    and fires a wake trigger to the control plane. The control plane
+    orchestrates the wake-up and updates the routing map; the proxy detects
+    the state change via Redis pub/sub and forwards the parked request.
+
+    ## Non-HTTP schemas
+
+    Some schemas in this spec are not referenced by HTTP endpoints but are
+    part of the contract:
+
+    - `RoutingMapUpdate` — published to the `sardeenz:routing-updates`
+      Redis pub/sub channel by the control plane
+
+    ## Conventions
+
+    - Endpoint paths: `kebab-case`
+    - Schema names: `PascalCase`
+    - Field names: `camelCase`
+    - Enum values: `SCREAMING_SNAKE_CASE`
+
+tags:
+  - name: Wake
+    description: |
+      Wake trigger endpoints. The proxy calls these on the control plane
+      when it needs a sleeping model to become active.
+  - name: Routing
+    description: |
+      Routing map query endpoints. These are secondary to the Redis-based
+      routing map — the proxy uses them for initial bootstrap or when Redis
+      is unavailable.
+
+paths:
+  /api/v1/wake:
+    post:
+      operationId: triggerWake
+      summary: Trigger a model wake-up
+      description: |
+        Fired by the proxy when an inference request arrives for a model in
+        `SLEEPING` state. The control plane evaluates the VRAM budget, evicts
+        other models if necessary, and commands the runner to wake.
+
+        This endpoint is **idempotent** — duplicate triggers for the same model
+        are safe and produce no additional side effects. The control plane
+        deduplicates internally, but the proxy also deduplicates on its side
+        to avoid unnecessary network calls (thundering herd prevention).
+
+        The response acknowledges the trigger but does NOT wait for the model
+        to finish waking. The proxy detects readiness via Redis pub/sub
+        notifications on the routing map.
+
+        **Expected latency:** The control plane should respond within a few
+        hundred milliseconds. The actual wake-up may take seconds to minutes
+        depending on model size and sleep level.
+      tags:
+        - Wake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WakeTriggerRequest"
+      responses:
+        "202":
+          description: |
+            Wake trigger accepted. The control plane will orchestrate the
+            wake-up asynchronously. The proxy should watch for routing map
+            updates via Redis pub/sub.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WakeTriggerResponse"
+        "404":
+          description: |
+            Model not found. The model identifier does not match any known
+            model in the control plane's inventory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Model is not in a wakeable state. It may already be active,
+            starting, or in an error state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/routing-map:
+    get:
+      operationId: getRoutingMap
+      summary: Get the full routing map
+      description: |
+        Returns the complete routing map as a JSON object. This is a fallback
+        for initial proxy bootstrap or recovery when the Redis-based routing
+        map is unavailable.
+
+        In normal operation, the proxy reads the routing map from Redis/Valkey
+        and receives updates via pub/sub. This endpoint exists for:
+
+        1. **Bootstrap** — the proxy can seed its in-memory cache before
+           Redis pub/sub is fully connected
+        2. **Recovery** — if the proxy loses its Redis connection and the
+           in-memory cache is stale, it can re-fetch the full map
+
+        The response is the same data structure stored in Redis, serialized
+        as a JSON object keyed by model name.
+      tags:
+        - Routing
+      responses:
+        "200":
+          description: Full routing map retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutingMap"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    # -------------------------------------------------------------------------
+    # Enums
+    # -------------------------------------------------------------------------
+
+    ModelState:
+      type: string
+      description: |
+        Routing-level state of a model as seen by the proxy. This is a
+        higher-level abstraction over the runner's `RunnerState` — it
+        represents the model's availability for inference routing, not
+        the runner process's internal state.
+
+        - `ACTIVE` — model is loaded and ready for inference. The proxy
+          forwards requests to its runner endpoints.
+        - `SLEEPING` — model is sleeping (weights offloaded). The proxy
+          parks incoming connections and fires a wake trigger.
+        - `STARTING` — model is loading (runner is starting up or waking).
+          The proxy parks connections without firing a new wake trigger
+          (one is already in progress).
+        - `DRAINING` — model is being drained before sleep or shutdown.
+          The proxy stops routing new requests but allows in-flight
+          requests to complete.
+        - `ERROR` — model is in an error state. The proxy returns 503
+          for any requests targeting this model.
+      enum:
+        - ACTIVE
+        - SLEEPING
+        - STARTING
+        - DRAINING
+        - ERROR
+
+    # -------------------------------------------------------------------------
+    # Wake Trigger
+    # -------------------------------------------------------------------------
+
+    WakeTriggerRequest:
+      type: object
+      description: |
+        Request to wake a sleeping model. Sent by the proxy to the control
+        plane when an inference request arrives for a model in `SLEEPING`
+        state.
+      required:
+        - modelName
+      properties:
+        modelName:
+          type: string
+          description: |
+            The model name as it appears in the routing map and in inference
+            requests (the `model` field from the OpenAI API request body).
+            This is the routing key, not an internal ID.
+          examples:
+            - "meta-llama/Llama-3.1-8B-Instruct"
+            - "llama-3"
+        requestId:
+          type: string
+          description: |
+            Optional request ID from the inference request that triggered the
+            wake. Used for tracing and debugging — allows correlating the wake
+            trigger with the original client request.
+
+    WakeTriggerResponse:
+      type: object
+      description: |
+        Acknowledgement that the wake trigger has been received and the
+        control plane will orchestrate the wake-up. The proxy should watch
+        for routing map state changes via Redis pub/sub.
+      required:
+        - accepted
+        - modelName
+      properties:
+        accepted:
+          type: boolean
+          description: |
+            Whether the wake trigger was accepted. Always `true` in a 202
+            response — included for explicitness.
+        modelName:
+          type: string
+          description: The model name that was requested to wake.
+        currentState:
+          $ref: "#/components/schemas/ModelState"
+        message:
+          type: string
+          description: |
+            Optional human-readable message about the wake-up status
+            (e.g., "Wake-up in progress", "Already waking").
+
+    # -------------------------------------------------------------------------
+    # Routing Map
+    # -------------------------------------------------------------------------
+
+    RoutingMap:
+      type: object
+      description: |
+        The complete routing map, keyed by model name. This is the data
+        structure stored in Redis/Valkey and read by the proxy for request
+        routing.
+
+        **Redis storage:** The entire map is stored as a Redis hash at key
+        `sardeenz:routing-map`. Each hash field is a model name and each
+        value is a JSON-serialized `RoutingEntry`.
+
+        **Redis pub/sub:** The control plane publishes to channel
+        `sardeenz:routing-updates` whenever the routing map changes. The
+        message payload is a `RoutingMapUpdate` object indicating what
+        changed.
+      additionalProperties:
+        $ref: "#/components/schemas/RoutingEntry"
+
+    RoutingEntry:
+      type: object
+      description: |
+        Routing information for a single model. Contains the model's current
+        state and a list of runner endpoints that can serve it.
+      required:
+        - modelName
+        - state
+        - endpoints
+        - updatedAt
+      properties:
+        modelName:
+          type: string
+          description: |
+            The model name used as the routing key. Matches the `model`
+            field in OpenAI API requests.
+          examples:
+            - "meta-llama/Llama-3.1-8B-Instruct"
+        state:
+          $ref: "#/components/schemas/ModelState"
+        endpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunnerEndpoint"
+          description: |
+            Runner endpoints serving this model. Empty when the model is
+            in `SLEEPING` or `ERROR` state. Multiple entries indicate
+            replicas for load balancing.
+        updatedAt:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp of the last routing map update for this model.
+            Used by the proxy to detect stale entries.
+        metadata:
+          type: object
+          description: |
+            Optional metadata about the model, passed through from the
+            control plane. The proxy does not interpret this — it is
+            available for the `/v1/models` aggregation endpoint.
+          properties:
+            ownedBy:
+              type: string
+              description: |
+                Owner identifier for the model, surfaced in the OpenAI
+                `/v1/models` response.
+            maxModelLen:
+              type: integer
+              minimum: 1
+              description: |
+                Maximum context length supported by this model deployment.
+            engineType:
+              type: string
+              description: |
+                The inference engine type serving this model (e.g., "vllm",
+                "triton").
+          additionalProperties: true
+
+    RunnerEndpoint:
+      type: object
+      description: |
+        A single runner endpoint that can serve inference requests for a
+        model. Includes the network address, health status, and load
+        balancing weight.
+      required:
+        - host
+        - port
+        - weight
+        - healthy
+      properties:
+        host:
+          type: string
+          description: |
+            Hostname or IP address of the runner. Within a Kubernetes cluster,
+            this is typically a pod IP or service DNS name.
+          examples:
+            - "10.244.1.5"
+            - "worker-1.sardeenz.svc.cluster.local"
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Port number the runner is listening on for inference traffic.
+          examples:
+            - 8000
+        weight:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 1
+          description: |
+            Relative weight for weighted round-robin load balancing. Higher
+            weight means more traffic. A weight of 0 effectively removes the
+            endpoint from rotation without deleting it.
+
+            Typical usage:
+            - Equal weights (all 1) for uniform distribution
+            - Higher weight for endpoints with more capacity
+            - Weight 0 for endpoints being drained
+        healthy:
+          type: boolean
+          description: |
+            Whether the control plane considers this endpoint healthy based
+            on its last health check. The proxy may also maintain its own
+            circuit breaker state per endpoint.
+        runnerId:
+          type: string
+          description: |
+            Unique identifier for the runner instance. Used for logging,
+            metrics, and correlating with control plane state.
+
+    # -------------------------------------------------------------------------
+    # Routing Map Updates (pub/sub)
+    # -------------------------------------------------------------------------
+
+    RoutingMapUpdate:
+      type: object
+      description: |
+        Published to the `sardeenz:routing-updates` Redis pub/sub channel
+        whenever the routing map changes. The proxy subscribes to this
+        channel to keep its in-memory cache current.
+
+        The proxy can handle updates incrementally (apply the delta) or
+        conservatively (re-read the full routing map from the Redis hash
+        after receiving any notification).
+      required:
+        - type
+        - modelName
+        - timestamp
+      properties:
+        type:
+          type: string
+          description: The type of routing map change.
+          enum:
+            - MODEL_STATE_CHANGED
+            - ENDPOINT_ADDED
+            - ENDPOINT_REMOVED
+            - ENDPOINT_UPDATED
+            - MODEL_ADDED
+            - MODEL_REMOVED
+        modelName:
+          type: string
+          description: The model name affected by this update.
+        state:
+          $ref: "#/components/schemas/ModelState"
+        endpoint:
+          $ref: "#/components/schemas/RunnerEndpoint"
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when this update was applied.
+
+    # -------------------------------------------------------------------------
+    # Common
+    # -------------------------------------------------------------------------
+
+    ErrorResponse:
+      type: object
+      description: Error response returned by any endpoint on failure.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+        code:
+          type: string
+          description: |
+            Machine-readable error code for programmatic handling.
+        details:
+          type: object
+          description: Additional structured error details.
+          additionalProperties: true
