@@ -59,6 +59,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - State transition metric (`stateTransitionsTotal`) now labels `from` correctly — Lua script returns `currentState|encoded` instead of only the new state
 - `ModelLifecycleService.getAllStates()` and `MemoryBudgetService.refreshAll()` now use SCAN instead of `KEYS *` to avoid blocking Redis in production
 - `WorkerPoolService.infoScanPattern()` now uses configurable `keyPrefix` instead of hardcoded namespace
+- `updateLastInference` now uses atomic Lua script instead of non-atomic GET-then-SET, preventing state clobber on concurrent transitions
+- `createModel` now uses `SET NX` for atomic existence check, preventing TOCTOU race on duplicate model creation
+- `RoutingMapService.addEndpoint/removeEndpoint/updateEndpointHealth` now use Lua scripts for atomic read-modify-write, preventing concurrent endpoint list corruption
+- K8s service account token now re-reads from disk every 60s instead of caching forever, preventing auth failures after projected token rotation
+- Internal `/api/v1/wake` response now includes required `accepted` field and uses `currentState` field per proxy-control-plane spec contract
+- `delay()` helper in sleep-wake service now cleans up abort listener when timer fires normally, preventing listener accumulation during long polling loops
 - OpenAPI validation script now fails on lint errors instead of silently swallowing them (#1)
 - Readiness probe now requires both Redis connection AND successful routing map load (#4)
 - Response hop-by-hop headers now filtered symmetrically with request-side filtering (#9)

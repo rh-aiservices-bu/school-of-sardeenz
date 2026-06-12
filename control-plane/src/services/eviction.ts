@@ -69,7 +69,9 @@ export class EvictionEngine {
     }
 
     const candidates = allModels
-      .filter((m) => m.state === ModelLifecycleState.ACTIVE || m.state === ModelLifecycleState.SLEEPING)
+      .filter(
+        (m) => m.state === ModelLifecycleState.ACTIVE || m.state === ModelLifecycleState.SLEEPING,
+      )
       .filter((m) => !pinnedModels.has(m.modelName))
       .filter((m) => !targetWorkerId || m.workerId === targetWorkerId)
       .filter((m) => {
@@ -77,14 +79,16 @@ export class EvictionEngine {
         const activeAge = (Date.now() - new Date(m.stateChangedAt).getTime()) / 1000;
         return activeAge >= this.config.minActiveTimeSecs;
       })
-      .map((m): EvictionCandidate => ({
-        modelName: m.modelName,
-        state: m.state,
-        workerId: m.workerId ?? '',
-        memoryBytes: 0,
-        lastInferenceAt: m.lastInferenceAt,
-        pinned: false,
-      }));
+      .map(
+        (m): EvictionCandidate => ({
+          modelName: m.modelName,
+          state: m.state,
+          workerId: m.workerId ?? '',
+          memoryBytes: 0,
+          lastInferenceAt: m.lastInferenceAt,
+          pinned: false,
+        }),
+      );
 
     if (candidates.length === 0) return [];
 

@@ -18,16 +18,18 @@ export function registerInternalRoutes(app: FastifyInstance, deps: RouteDeps): v
 
     if (state.state === ModelLifecycleState.ACTIVE) {
       return reply.code(200).send({
+        accepted: true,
         modelName,
-        state: state.state,
+        currentState: state.state,
         message: 'Model is already active',
       });
     }
 
     if (state.state === ModelLifecycleState.STARTING) {
       return reply.code(202).send({
+        accepted: true,
         modelName,
-        state: state.state,
+        currentState: state.state,
         message: 'Model is already waking up',
       });
     }
@@ -51,8 +53,9 @@ export function registerInternalRoutes(app: FastifyInstance, deps: RouteDeps): v
     });
 
     return reply.code(202).send({
+      accepted: true,
       modelName,
-      state: ModelLifecycleState.STARTING,
+      currentState: ModelLifecycleState.STARTING,
       message: 'Wake initiated',
     });
   });

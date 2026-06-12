@@ -94,22 +94,31 @@ export class RoutingMapService {
   }
 
   async addEndpoint(modelName: string, endpoint: RunnerEndpoint): Promise<void> {
-    const entry = await this.getEntry(modelName);
     const now = new Date().toISOString();
 
-    const baseEntry: RoutingEntry = entry ?? {
-      modelName,
-      state: ModelState.STARTING,
-      endpoints: [],
-      updatedAt: now,
-    };
+    const luaScript = `
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      local entry
+      if raw then
+        entry = cjson.decode(raw)
+      else
+        entry = { modelName = ARGV[1], state = 'STARTING', endpoints = {}, updatedAt = ARGV[3] }
+      end
+      local ep = cjson.decode(ARGV[2])
+      local filtered = {}
+      for _, e in ipairs(entry.endpoints) do
+        if not (e.host == ep.host and e.port == ep.port) then
+          filtered[#filtered + 1] = e
+        end
+      end
+      filtered[#filtered + 1] = ep
+      entry.endpoints = filtered
+      entry.updatedAt = ARGV[3]
+      redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(entry))
+      redis.call('PUBLISH', KEYS[2], ARGV[4])
+      return 1
+    `;
 
-    const endpoints = baseEntry.endpoints.filter(
-      (e) => !(e.host === endpoint.host && e.port === endpoint.port),
-    );
-    endpoints.push(endpoint);
-
-    const updated: RoutingEntry = { ...baseEntry, endpoints, updatedAt: now };
     const update: RoutingMapUpdate = {
       type: RoutingMapUpdateType.ENDPOINT_ADDED,
       modelName,
@@ -117,65 +126,105 @@ export class RoutingMapService {
       timestamp: now,
     };
 
-    await this.redis
-      .multi()
-      .hset(this.hashKey, modelName, JSON.stringify(updated))
-      .publish(this.pubsubChannel, JSON.stringify(update))
-      .exec();
+    await this.redis.eval(
+      luaScript,
+      2,
+      this.hashKey,
+      this.pubsubChannel,
+      modelName,
+      JSON.stringify(endpoint),
+      now,
+      JSON.stringify(update),
+    );
   }
 
   async removeEndpoint(modelName: string, host: string, port: number): Promise<void> {
-    const entry = await this.getEntry(modelName);
-    if (!entry) return;
-
     const now = new Date().toISOString();
-    const removed = entry.endpoints.find((e) => e.host === host && e.port === port);
-    const endpoints = entry.endpoints.filter((e) => !(e.host === host && e.port === port));
-    const updated: RoutingEntry = { ...entry, endpoints, updatedAt: now };
+
+    const luaScript = `
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      if not raw then return nil end
+      local entry = cjson.decode(raw)
+      local filtered = {}
+      local removed = nil
+      for _, e in ipairs(entry.endpoints) do
+        if e.host == ARGV[2] and e.port == tonumber(ARGV[3]) then
+          removed = e
+        else
+          filtered[#filtered + 1] = e
+        end
+      end
+      entry.endpoints = filtered
+      entry.updatedAt = ARGV[4]
+      redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(entry))
+      redis.call('PUBLISH', KEYS[2], ARGV[5])
+      return 1
+    `;
 
     const update: RoutingMapUpdate = {
       type: RoutingMapUpdateType.ENDPOINT_REMOVED,
       modelName,
-      ...(removed ? { endpoint: removed } : {}),
       timestamp: now,
     };
 
-    await this.redis
-      .multi()
-      .hset(this.hashKey, modelName, JSON.stringify(updated))
-      .publish(this.pubsubChannel, JSON.stringify(update))
-      .exec();
+    await this.redis.eval(
+      luaScript,
+      2,
+      this.hashKey,
+      this.pubsubChannel,
+      modelName,
+      host,
+      port.toString(),
+      now,
+      JSON.stringify(update),
+    );
   }
 
-  async updateEndpointHealth(modelName: string, host: string, port: number, healthy: boolean): Promise<void> {
-    const entry = await this.getEntry(modelName);
-    if (!entry) return;
-
+  async updateEndpointHealth(
+    modelName: string,
+    host: string,
+    port: number,
+    healthy: boolean,
+  ): Promise<void> {
     const now = new Date().toISOString();
-    let changed: RunnerEndpoint | undefined;
 
-    const endpoints = entry.endpoints.map((e) => {
-      if (e.host === host && e.port === port) {
-        changed = { ...e, healthy };
-        return changed;
-      }
-      return e;
-    });
+    const luaScript = `
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      if not raw then return nil end
+      local entry = cjson.decode(raw)
+      local changed = nil
+      for i, e in ipairs(entry.endpoints) do
+        if e.host == ARGV[2] and e.port == tonumber(ARGV[3]) then
+          e.healthy = ARGV[4] == 'true'
+          entry.endpoints[i] = e
+          changed = e
+          break
+        end
+      end
+      if not changed then return nil end
+      entry.updatedAt = ARGV[5]
+      redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(entry))
+      redis.call('PUBLISH', KEYS[2], ARGV[6])
+      return 1
+    `;
 
-    if (!changed) return;
-
-    const updated: RoutingEntry = { ...entry, endpoints, updatedAt: now };
     const update: RoutingMapUpdate = {
       type: RoutingMapUpdateType.ENDPOINT_UPDATED,
       modelName,
-      endpoint: changed,
       timestamp: now,
     };
 
-    await this.redis
-      .multi()
-      .hset(this.hashKey, modelName, JSON.stringify(updated))
-      .publish(this.pubsubChannel, JSON.stringify(update))
-      .exec();
+    await this.redis.eval(
+      luaScript,
+      2,
+      this.hashKey,
+      this.pubsubChannel,
+      modelName,
+      host,
+      port.toString(),
+      healthy.toString(),
+      now,
+      JSON.stringify(update),
+    );
   }
 }

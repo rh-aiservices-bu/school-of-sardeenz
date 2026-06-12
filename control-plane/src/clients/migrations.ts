@@ -32,7 +32,9 @@ export async function runMigrations(db: DatabasePool, migrationsDir: string): Pr
     try {
       await client.query('BEGIN');
       await client.query(sql);
-      await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [migration.version]);
+      await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [
+        migration.version,
+      ]);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');

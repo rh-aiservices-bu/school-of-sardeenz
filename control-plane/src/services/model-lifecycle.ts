@@ -96,10 +96,6 @@ export class ModelLifecycleService {
 
   async createModel(modelName: string, workerId?: string | null): Promise<ModelState> {
     const key = modelStateKey(this.keyPrefix, modelName);
-    const existing = await this.redis.get(key);
-    if (existing) {
-      throw ControlPlaneError.modelAlreadyExists(modelName);
-    }
 
     const state: ModelState = {
       modelName,
@@ -113,7 +109,10 @@ export class ModelLifecycleService {
       errorMessage: null,
     };
 
-    await this.redis.set(key, JSON.stringify(state));
+    const result = await this.redis.set(key, JSON.stringify(state), 'NX');
+    if (!result) {
+      throw ControlPlaneError.modelAlreadyExists(modelName);
+    }
     return state;
   }
 
@@ -220,10 +219,14 @@ export class ModelLifecycleService {
 
   async updateLastInference(modelName: string): Promise<void> {
     const key = modelStateKey(this.keyPrefix, modelName);
-    const raw = await this.redis.get(key);
-    if (!raw) return;
-    const state = JSON.parse(raw) as ModelState;
-    state.lastInferenceAt = new Date().toISOString();
-    await this.redis.set(key, JSON.stringify(state));
+    const luaScript = `
+      local raw = redis.call('GET', KEYS[1])
+      if not raw then return nil end
+      local state = cjson.decode(raw)
+      state['lastInferenceAt'] = ARGV[1]
+      redis.call('SET', KEYS[1], cjson.encode(state))
+      return 1
+    `;
+    await this.redis.eval(luaScript, 1, key, new Date().toISOString());
   }
 }

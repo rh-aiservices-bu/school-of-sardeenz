@@ -176,9 +176,12 @@ export class LeaderElectionService {
   }
 
   private cachedToken: string | null = null;
+  private tokenReadAt = 0;
+  private static readonly TOKEN_CACHE_MS = 60_000;
 
   private kubeHeaders(): Record<string, string> {
-    if (this.cachedToken) {
+    const now = Date.now();
+    if (this.cachedToken && now - this.tokenReadAt < LeaderElectionService.TOKEN_CACHE_MS) {
       return { Authorization: `Bearer ${this.cachedToken}` };
     }
     try {
@@ -188,6 +191,7 @@ export class LeaderElectionService {
         '/var/run/secrets/kubernetes.io/serviceaccount/token',
         'utf-8',
       );
+      this.tokenReadAt = now;
       return { Authorization: `Bearer ${this.cachedToken}` };
     } catch {
       return {};

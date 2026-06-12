@@ -39,11 +39,15 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
       reject(abortError());
       return;
     }
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => {
+    const onAbort = (): void => {
       clearTimeout(timer);
       reject(abortError());
-    });
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -92,7 +96,11 @@ export class SleepWakeService {
 
       // Clear the endpoint so the proxy stops routing to this model.
       if (modelState.runnerHost && modelState.runnerPort) {
-        await this.routingMap.removeEndpoint(modelName, modelState.runnerHost, modelState.runnerPort);
+        await this.routingMap.removeEndpoint(
+          modelName,
+          modelState.runnerHost,
+          modelState.runnerPort,
+        );
       }
 
       // DRAINING → SLEEPING
@@ -101,10 +109,7 @@ export class SleepWakeService {
 
       sleepDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
-      await this.transitionToError(
-        modelName,
-        err instanceof Error ? err.message : String(err),
-      );
+      await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
       throw err;
     }
   }
@@ -155,10 +160,7 @@ export class SleepWakeService {
 
       wakeDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
-      await this.transitionToError(
-        modelName,
-        err instanceof Error ? err.message : String(err),
-      );
+      await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
       throw err;
     }
   }
@@ -192,7 +194,11 @@ export class SleepWakeService {
 
       // Remove the endpoint so routing stops immediately.
       if (modelState.runnerHost && modelState.runnerPort) {
-        await this.routingMap.removeEndpoint(modelName, modelState.runnerHost, modelState.runnerPort);
+        await this.routingMap.removeEndpoint(
+          modelName,
+          modelState.runnerHost,
+          modelState.runnerPort,
+        );
       }
 
       // Transition to STOPPING then STOPPED.
@@ -208,10 +214,7 @@ export class SleepWakeService {
       // Remove from routing map entirely.
       await this.routingMap.removeModel(modelName);
     } catch (err) {
-      await this.transitionToError(
-        modelName,
-        err instanceof Error ? err.message : String(err),
-      );
+      await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
       throw err;
     }
   }

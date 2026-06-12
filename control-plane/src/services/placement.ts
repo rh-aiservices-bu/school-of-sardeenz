@@ -116,9 +116,7 @@ export class PlacementPipeline {
       const budget = budgets.get(worker.workerId);
       if (!budget || budget.stale) continue;
 
-      let eligibleDevices = budget.devices.filter(
-        (d) => d.availableBytes >= perDeviceRequired,
-      );
+      let eligibleDevices = budget.devices.filter((d) => d.availableBytes >= perDeviceRequired);
 
       if (request.deviceType) {
         eligibleDevices = eligibleDevices.filter((d) => d.deviceType === request.deviceType);
