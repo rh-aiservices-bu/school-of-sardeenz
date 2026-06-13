@@ -1,4 +1,4 @@
-import { ModelLifecycleState } from '@sardeenz/types';
+import { ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
 
 import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { WorkerPoolService } from './worker-pool.js';
@@ -10,6 +10,9 @@ import {
   reconciliationDeadWorkersTotal,
   reconciliationTickDuration,
   reconciliationErrors,
+  modelsTotal,
+  workersTotal,
+  deviceMemoryBytes,
 } from '../health/metrics.js';
 
 export interface ReconciliationLogger {
@@ -89,6 +92,7 @@ export class ReconciliationService {
       await this.safeStep('handleDeadWorkers', () => this.handleDeadWorkers());
       await this.safeStep('refreshMemoryBudgets', () => this.memoryBudget.refreshAll());
       await this.safeStep('recoverStuckModels', () => this.recoverStuckModels());
+      await this.safeStep('refreshMetrics', () => this.refreshMetrics());
 
       reconciliationTickDuration.observe((Date.now() - startedAt) / 1000);
     } finally {
@@ -191,6 +195,45 @@ export class ReconciliationService {
             err: err instanceof Error ? err.message : String(err),
           },
           'Failed to recover stuck model',
+        );
+      }
+    }
+  }
+
+  private async refreshMetrics(): Promise<void> {
+    const allStates = await this.lifecycle.getAllStates();
+    const stateCounts = new Map<string, number>();
+    for (const state of Object.values(ModelLifecycleState)) {
+      stateCounts.set(state, 0);
+    }
+    for (const model of allStates) {
+      stateCounts.set(model.state, (stateCounts.get(model.state) ?? 0) + 1);
+    }
+    for (const [state, count] of stateCounts) {
+      modelsTotal.set({ state }, count);
+    }
+
+    const allWorkers = this.workerPool.getAllWorkers();
+    const statusCounts = new Map<string, number>();
+    for (const status of Object.values(WorkerStatus)) {
+      statusCounts.set(status, 0);
+    }
+    for (const worker of allWorkers) {
+      statusCounts.set(worker.status, (statusCounts.get(worker.status) ?? 0) + 1);
+    }
+    for (const [status, count] of statusCounts) {
+      workersTotal.set({ status }, count);
+    }
+
+    const allBudgets = this.memoryBudget.getAllBudgets();
+    for (const budget of allBudgets) {
+      if (budget.stale) continue;
+      for (const device of budget.devices) {
+        deviceMemoryBytes.set({ worker_id: budget.workerId, state: 'total' }, device.totalBytes);
+        deviceMemoryBytes.set({ worker_id: budget.workerId, state: 'used' }, device.usedBytes);
+        deviceMemoryBytes.set(
+          { worker_id: budget.workerId, state: 'available' },
+          device.availableBytes,
         );
       }
     }

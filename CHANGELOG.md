@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Readiness probe (`/readyz`) now reports leader-election status in the response
+- Prometheus gauge metrics (`modelsTotal`, `workersTotal`, `deviceMemoryBytes`) are now
+  populated with real values on every reconciliation tick instead of remaining at zero
 - Leader-election lease operations now use Kubernetes `resourceVersion` for optimistic
   concurrency, preventing split-brain from concurrent lease updates; 409 conflicts are
   detected explicitly

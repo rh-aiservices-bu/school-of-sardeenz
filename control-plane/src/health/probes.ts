@@ -6,6 +6,7 @@ import type { DatabasePool } from '../clients/database.js';
 export interface ProbesDeps {
   redis: Redis;
   db: DatabasePool;
+  leaderElection?: { readonly isLeader: boolean };
 }
 
 export function registerProbes(app: FastifyInstance, deps: ProbesDeps): void {
@@ -33,6 +34,10 @@ export function registerProbes(app: FastifyInstance, deps: ProbesDeps): void {
     } catch {
       checks['postgres'] = 'error';
       ready = false;
+    }
+
+    if (deps.leaderElection) {
+      checks['leader'] = deps.leaderElection.isLeader ? 'leader' : 'follower';
     }
 
     return reply.code(ready ? 200 : 503).send({ status: ready ? 'ready' : 'not_ready', checks });

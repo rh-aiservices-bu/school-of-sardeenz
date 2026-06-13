@@ -46,7 +46,11 @@ export async function buildServer(deps: ServerDeps) {
     });
   });
 
-  registerProbes(app, { redis: deps.redis, db: deps.db });
+  registerProbes(app, {
+    redis: deps.redis,
+    db: deps.db,
+    leaderElection: deps.routes.leaderElection,
+  });
   registerMetricsRoute(app);
 
   registerModelRoutes(app, deps.routes);
