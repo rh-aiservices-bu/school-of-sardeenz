@@ -32,6 +32,7 @@ interface WorkerMemoryReport {
     memoryUsedBytes: number;
     memoryTotalBytes: number;
   }>;
+  reportedAt?: string;
 }
 
 const WORKER_MEMORY_SUBKEY = 'memory';
@@ -91,7 +92,7 @@ export class MemoryBudgetService {
 
     if (!Array.isArray(report.devices)) return null;
 
-    const lastReportAt = new Date().toISOString();
+    const lastReportAt = report.reportedAt ?? new Date().toISOString();
 
     const devices: DeviceBudget[] = report.devices.map((d) => {
       const reservedBytes = this.getReservation(workerId, d.deviceIndex);
@@ -120,15 +121,20 @@ export class MemoryBudgetService {
 
   /**
    * Read the memory report for a single worker from Redis and update the local
-   * budget.  Returns the refreshed WorkerBudget, or null if no report exists.
+   * budget.  Clears in-flight reservations for that worker since the fresh
+   * report reflects actual usage.  Returns the refreshed WorkerBudget, or null
+   * if no report exists.
    */
   async refreshWorkerBudget(workerId: string): Promise<WorkerBudget | null> {
     const key = workerMemoryKey(this.keyPrefix, workerId);
     const raw = await this.redis.get(key);
     if (!raw) {
       this.budgets.delete(workerId);
+      this.clearWorkerReservations(workerId);
       return null;
     }
+
+    this.clearWorkerReservations(workerId);
 
     const budget = this.parseReport(raw, workerId);
     if (!budget) {
@@ -142,15 +148,19 @@ export class MemoryBudgetService {
 
   /**
    * Scan Redis for all worker memory keys and refresh every worker in one
-   * pipeline round-trip.
+   * pipeline round-trip.  Clears all in-flight reservations since fresh
+   * reports reflect actual usage.
    */
   async refreshAll(): Promise<void> {
     const pattern = redisKey(this.keyPrefix, 'workers', '*', WORKER_MEMORY_SUBKEY);
     const keys = await this.scanKeys(pattern);
     if (keys.length === 0) {
       this.budgets.clear();
+      this.reservations.clear();
       return;
     }
+
+    this.reservations.clear();
 
     const pipeline = this.redis.pipeline();
     for (const key of keys) {
@@ -278,6 +288,15 @@ export class MemoryBudgetService {
       keys.push(...batch);
     } while (cursor !== '0');
     return keys;
+  }
+
+  private clearWorkerReservations(workerId: string): void {
+    const prefix = `${workerId}:`;
+    for (const key of this.reservations.keys()) {
+      if (key.startsWith(prefix)) {
+        this.reservations.delete(key);
+      }
+    }
   }
 
   private recomputeDeviceBudget(workerId: string, deviceIndex: number): void {

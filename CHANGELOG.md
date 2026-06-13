@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Memory-budget staleness now uses worker-reported `reportedAt` timestamp instead of
+  control-plane read-time, making staleness detection accurate for batched/delayed reports
+- In-flight memory reservations are cleared on budget refresh (`refreshAll` and
+  `refreshWorkerBudget`), preventing phantom reservations from accumulating after model
+  stop/delete/failure
+
 ### Added
 
 - Control plane reconciliation loop (`control-plane/src/services/reconciliation.ts`):
