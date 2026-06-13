@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Leader-election lease operations now use Kubernetes `resourceVersion` for optimistic
+  concurrency, preventing split-brain from concurrent lease updates; 409 conflicts are
+  detected explicitly
+- Kubernetes service account token loading uses ESM-compatible `readFileSync` import
+  instead of `require('node:fs')`
 - `stopModel()` now handles all lifecycle states correctly — PENDING and STARTING
   route through ERROR before reaching STOPPED instead of attempting invalid transitions
 - Wake and sleep routes atomically claim their transitional state (STARTING / DRAINING)

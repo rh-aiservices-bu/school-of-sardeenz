@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { leaderIsLeader } from '../health/metrics.js';
 
 export interface LeaderElectionOptions {
@@ -58,7 +60,7 @@ export class LeaderElectionService {
     try {
       const lease = await this.getLease();
       if (!lease || this.isLeaseExpired(lease)) {
-        await this.acquireLease();
+        await this.acquireLease(lease);
         this._isLeader = true;
         leaderIsLeader.set(1);
       }
@@ -95,7 +97,7 @@ export class LeaderElectionService {
     return (await response.json()) as KubeLease;
   }
 
-  private async acquireLease(): Promise<void> {
+  private async acquireLease(existing: KubeLease | null): Promise<void> {
     const now = new Date().toISOString();
     const hostname = process.env['HOSTNAME'] ?? 'unknown';
     const body: KubeLeaseSpec = {
@@ -104,6 +106,9 @@ export class LeaderElectionService {
       metadata: {
         name: this.options.leaseName,
         namespace: this.options.leaseNamespace,
+        ...(existing?.metadata?.resourceVersion
+          ? { resourceVersion: existing.metadata.resourceVersion }
+          : {}),
       },
       spec: {
         holderIdentity: hostname,
@@ -113,7 +118,6 @@ export class LeaderElectionService {
       },
     };
 
-    const existing = await this.getLease();
     const method = existing ? 'PUT' : 'POST';
     const url = existing
       ? `https://kubernetes.default.svc/apis/coordination.k8s.io/v1/namespaces/${this.options.leaseNamespace}/leases/${this.options.leaseName}`
@@ -138,7 +142,9 @@ export class LeaderElectionService {
       throw new Error('Lease held by another instance');
     }
 
-    lease.spec.renewTime = new Date().toISOString();
+    if (lease.spec) {
+      lease.spec.renewTime = new Date().toISOString();
+    }
 
     const response = await fetch(
       `https://kubernetes.default.svc/apis/coordination.k8s.io/v1/namespaces/${this.options.leaseNamespace}/leases/${this.options.leaseName}`,
@@ -150,6 +156,7 @@ export class LeaderElectionService {
       },
     );
 
+    if (response.status === 409) throw new Error('Lease conflict — another instance took over');
     if (!response.ok) throw new Error(`Lease renew failed: ${response.status}`);
   }
 
@@ -185,9 +192,7 @@ export class LeaderElectionService {
       return { Authorization: `Bearer ${this.cachedToken}` };
     }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const fs = require('node:fs') as { readFileSync: (path: string, encoding: string) => string };
-      this.cachedToken = fs.readFileSync(
+      this.cachedToken = readFileSync(
         '/var/run/secrets/kubernetes.io/serviceaccount/token',
         'utf-8',
       );
@@ -202,7 +207,7 @@ export class LeaderElectionService {
 interface KubeLeaseSpec {
   apiVersion: string;
   kind: string;
-  metadata: { name: string; namespace: string };
+  metadata: { name: string; namespace: string; resourceVersion?: string };
   spec: {
     holderIdentity: string;
     leaseDurationSeconds: number;
@@ -212,6 +217,9 @@ interface KubeLeaseSpec {
 }
 
 interface KubeLease {
+  metadata?: {
+    resourceVersion?: string;
+  };
   spec?: {
     holderIdentity?: string;
     leaseDurationSeconds?: number;
