@@ -13,6 +13,7 @@ export interface Config {
   readonly sleepTimeoutSecs: number;
   readonly wakeTimeoutSecs: number;
   readonly healthCheckIntervalSecs: number;
+  readonly deployTimeoutSecs: number;
 }
 
 export function requiredEnv(name: string): string {
@@ -61,6 +62,7 @@ export function loadConfig(): Config {
     sleepTimeoutSecs: intEnv('SARDEENZ_SLEEP_TIMEOUT_SECS', 300),
     wakeTimeoutSecs: intEnv('SARDEENZ_WAKE_TIMEOUT_SECS', 300),
     healthCheckIntervalSecs: intEnv('SARDEENZ_HEALTH_CHECK_INTERVAL_SECS', 10),
+    deployTimeoutSecs: intEnv('SARDEENZ_DEPLOY_TIMEOUT_SECS', 600),
   };
 }
 

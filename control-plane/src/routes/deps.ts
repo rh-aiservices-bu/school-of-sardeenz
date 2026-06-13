@@ -7,6 +7,7 @@ import type { RoutingMapService } from '../services/routing-map.js';
 import type { PlacementPipeline } from '../services/placement.js';
 import type { EvictionEngine } from '../services/eviction.js';
 import type { SleepWakeService } from '../services/sleep-wake.js';
+import type { DeployOrchestrationService } from '../services/deploy-orchestration.js';
 import type { LeaderElectionService } from '../services/leader-election.js';
 import type { RunnerClient } from '../clients/runner.js';
 
@@ -20,6 +21,7 @@ export interface RouteDeps {
   placement: PlacementPipeline;
   eviction: EvictionEngine;
   sleepWake: SleepWakeService;
+  deployOrchestration: DeployOrchestrationService;
   leaderElection: LeaderElectionService;
   createRunnerClient: (host: string, port: number) => RunnerClient;
 }

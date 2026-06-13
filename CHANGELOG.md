@@ -20,8 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `LeaderElectionService`: K8s Lease API leader election with local dev mode fallback
 - Control plane database migrations (`control-plane/migrations/001-initial-schema.sql`):
   models, memory_profiles, benchmarks, and settings tables with migration runner
+- Control plane deploy orchestration (`control-plane/src/services/deploy-orchestration.ts`):
+  `DeployOrchestrationService` drives models from STARTING → ACTIVE by calling the worker
+  management API to start a runner, polling runner health until READY, registering the
+  endpoint in the routing map, and transitioning to ACTIVE (with ERROR fallback and
+  capacity reservation release on failure)
 - Control plane HTTP clients (`control-plane/src/clients/`):
-  runner HTTP client wrapping engine runner contract endpoints, SQL migration runner
+  runner HTTP client wrapping engine runner contract endpoints, worker management HTTP
+  client for starting/stopping runners on workers, SQL migration runner
 - Control plane HTTP route handlers (`control-plane/src/routes/`):
   model CRUD (deploy/list/get/delete/sleep/wake), worker list/get, cluster status/memory,
   SSE event stream, internal proxy wake trigger and routing map read endpoints

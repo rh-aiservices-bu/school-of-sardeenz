@@ -27,6 +27,7 @@ export interface WorkerRecord {
   devices: WorkerDevice[];
   lastHeartbeatAt: string | null;
   joinedAt: string;
+  managementUrl: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ export interface WorkerRecord {
 interface WorkerInfoPayload {
   capabilities: WorkerCapability[];
   devices: WorkerDevice[];
+  managementUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +180,7 @@ export class WorkerPoolService {
         devices: payload.devices,
         lastHeartbeatAt: existing?.lastHeartbeatAt ?? null,
         joinedAt: existing?.joinedAt ?? now,
+        managementUrl: payload.managementUrl ?? null,
       };
       this.workers.set(workerId, record);
       discoveredWorkerIds.push(workerId);

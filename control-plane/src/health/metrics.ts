@@ -61,6 +61,19 @@ export const wakeDuration = new Histogram({
   registers: [registry],
 });
 
+export const deployDuration = new Histogram({
+  name: 'sardeenz_control_plane_deploy_duration_seconds',
+  help: 'Time for full deploy orchestration (start runner to ACTIVE)',
+  buckets: [1, 5, 10, 30, 60, 120, 300, 600],
+  registers: [registry],
+});
+
+export const deployTriggersTotal = new Counter({
+  name: 'sardeenz_control_plane_deploy_triggers_total',
+  help: 'Deploy orchestrations initiated',
+  registers: [registry],
+});
+
 export const wakeTriggersTotal = new Counter({
   name: 'sardeenz_control_plane_wake_triggers_total',
   help: 'Wake triggers received from proxy',

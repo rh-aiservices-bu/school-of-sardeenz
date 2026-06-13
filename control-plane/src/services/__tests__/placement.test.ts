@@ -23,6 +23,7 @@ function makeWorker(
     devices,
     lastHeartbeatAt: new Date().toISOString(),
     joinedAt: new Date().toISOString(),
+    managementUrl: null,
   };
 }
 

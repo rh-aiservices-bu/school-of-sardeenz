@@ -15,7 +15,9 @@ import { RoutingMapService } from './services/routing-map.js';
 import { PlacementPipeline } from './services/placement.js';
 import { EvictionEngine } from './services/eviction.js';
 import { SleepWakeService } from './services/sleep-wake.js';
+import { DeployOrchestrationService } from './services/deploy-orchestration.js';
 import { LeaderElectionService } from './services/leader-election.js';
+import { WorkerClient } from './clients/worker.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -60,6 +62,16 @@ async function main(): Promise<void> {
     config.wakeTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
   );
+  const deployOrchestration = new DeployOrchestrationService(
+    lifecycle,
+    routingMap,
+    workerPool,
+    memoryBudget,
+    (baseUrl) => new WorkerClient({ baseUrl }),
+    (host, port) => new RunnerClient({ host, port }),
+    config.deployTimeoutSecs * 1000,
+    config.healthCheckIntervalSecs * 1000,
+  );
   const leaderElection = new LeaderElectionService({
     leaseName: config.leaseName,
     leaseNamespace: config.leaseNamespace,
@@ -82,6 +94,7 @@ async function main(): Promise<void> {
       placement,
       eviction,
       sleepWake,
+      deployOrchestration,
       leaderElection,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
     },

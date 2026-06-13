@@ -104,6 +104,22 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         workerId: result.workerId,
       });
 
+      deps.deployOrchestration
+        .deployModel({
+          modelName: body.modelName,
+          workerId: result.workerId,
+          runnerType: body.runnerType,
+          modelPath: body.modelPath,
+          requiredMemory: body.requiredMemory,
+          deviceType: body.deviceType,
+          tensorParallel: body.tensorParallel ?? 1,
+          engineConfig: body.engineConfig,
+          devices: result.devices,
+        })
+        .catch((err: unknown) => {
+          app.log.error({ err, modelName: body.modelName }, 'Background deploy orchestration failed');
+        });
+
       return reply.code(202).send({
         modelName: body.modelName,
         state: ModelLifecycleState.STARTING,

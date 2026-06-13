@@ -7,11 +7,12 @@ import {
   wakeTriggersTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
+import { delay } from '../utils.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 
 /** Maps a ModelLifecycleState to the ModelState exposed in the routing map. */
-function toRoutingState(state: ModelLifecycleState): ModelState | null {
+export function toRoutingState(state: ModelLifecycleState): ModelState | null {
   switch (state) {
     case ModelLifecycleState.STARTING:
       return ModelState.STARTING;
@@ -27,28 +28,6 @@ function toRoutingState(state: ModelLifecycleState): ModelState | null {
     default:
       return null;
   }
-}
-
-/** Delay helper that respects an AbortSignal. */
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const abortError = (): Error =>
-      signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError');
-
-    if (signal.aborted) {
-      reject(abortError());
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(abortError());
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 /** Result returned by pollRunnerHealth. */
