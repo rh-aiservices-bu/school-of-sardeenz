@@ -63,6 +63,7 @@ export class EvictionEngine {
     pinnedModels: Set<string>,
     requiredBytes: number,
     targetWorkerId?: string,
+    memoryByModel?: Map<string, number>,
   ): EvictionCandidate[] {
     if (this.isCircuitBreakerOpen()) {
       return [];
@@ -84,7 +85,7 @@ export class EvictionEngine {
           modelName: m.modelName,
           state: m.state,
           workerId: m.workerId ?? '',
-          memoryBytes: 0,
+          memoryBytes: memoryByModel?.get(m.modelName) ?? 0,
           lastInferenceAt: m.lastInferenceAt,
           pinned: false,
         }),

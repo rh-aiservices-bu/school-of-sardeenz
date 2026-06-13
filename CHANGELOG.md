@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Eviction engine now wired into deploy and wake flows: insufficient capacity triggers
+  LRU eviction of idle models before failing with placement error
+- Eviction candidates now use actual `requiredMemory` from model metadata instead of
+  hardcoded zero bytes, fixing freed-capacity accounting
 - Memory-budget staleness now uses worker-reported `reportedAt` timestamp instead of
   control-plane read-time, making staleness detection accurate for batched/delayed reports
 - In-flight memory reservations are cleared on budget refresh (`refreshAll` and

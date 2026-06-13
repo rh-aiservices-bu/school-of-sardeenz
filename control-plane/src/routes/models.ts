@@ -73,17 +73,57 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const workers = deps.workerPool.getAllWorkers();
       const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
 
-      const result = deps.placement.place(
-        {
-          modelName: body.modelName,
-          runnerType: body.runnerType,
-          requiredMemory: body.requiredMemory,
-          deviceType: body.deviceType,
-          tensorParallel: body.tensorParallel ?? 1,
-        },
-        workers,
-        budgets,
-      );
+      const placementRequest = {
+        modelName: body.modelName,
+        runnerType: body.runnerType,
+        requiredMemory: body.requiredMemory,
+        deviceType: body.deviceType,
+        tensorParallel: body.tensorParallel ?? 1,
+      };
+
+      let result = deps.placement.place(placementRequest, workers, budgets);
+
+      if (!result) {
+        const allStates = await deps.lifecycle.getAllStates();
+        const allRecords = await deps.modelRepository.findAll();
+        const pinnedModels = new Set(
+          allRecords.filter((r) => r.pinned).map((r) => r.name),
+        );
+        const memoryByModel = new Map(
+          allRecords
+            .filter((r) => r.requiredMemory !== null)
+            .map((r) => [r.name, r.requiredMemory!]),
+        );
+
+        const victims = deps.eviction.selectVictims(
+          allStates,
+          pinnedModels,
+          body.requiredMemory,
+          undefined,
+          memoryByModel,
+        );
+
+        if (victims.length > 0) {
+          const stopTimer = deps.eviction.startTimer();
+          for (const victim of victims) {
+            const victimState = await deps.lifecycle.getState(victim.modelName);
+            const victimRunner =
+              victimState?.runnerHost && victimState.runnerPort
+                ? deps.createRunnerClient(victimState.runnerHost, victimState.runnerPort)
+                : null;
+            await deps.sleepWake.stopModel(victim.modelName, victimRunner);
+            await deps.lifecycle.removeModel(victim.modelName);
+            deps.eviction.recordEviction('capacity');
+          }
+          stopTimer();
+
+          await deps.memoryBudget.refreshAll();
+          const refreshedBudgets = new Map(
+            deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]),
+          );
+          result = deps.placement.place(placementRequest, workers, refreshedBudgets);
+        }
+      }
 
       if (!result) {
         throw ControlPlaneError.placementFailed(
@@ -340,6 +380,49 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           'INTERNAL_ERROR',
           `Model ${modelName} has no runner endpoint`,
         );
+      }
+
+      const record = await deps.modelRepository.findByName(modelName);
+      const requiredMemory = record?.requiredMemory ?? 0;
+
+      if (requiredMemory > 0 && state.workerId) {
+        const workerBudget = deps.memoryBudget.getWorkerBudget(state.workerId);
+        const totalAvailable = workerBudget
+          ? workerBudget.devices.reduce((sum, d) => sum + d.availableBytes, 0)
+          : 0;
+
+        if (totalAvailable < requiredMemory) {
+          const allStates = await deps.lifecycle.getAllStates();
+          const allRecords = await deps.modelRepository.findAll();
+          const pinnedModels = new Set(
+            allRecords.filter((r) => r.pinned).map((r) => r.name),
+          );
+          pinnedModels.add(modelName);
+          const memoryByModel = new Map(
+            allRecords
+              .filter((r) => r.requiredMemory !== null)
+              .map((r) => [r.name, r.requiredMemory!]),
+          );
+
+          const victims = deps.eviction.selectVictims(
+            allStates,
+            pinnedModels,
+            requiredMemory,
+            state.workerId,
+            memoryByModel,
+          );
+
+          for (const victim of victims) {
+            const vs = await deps.lifecycle.getState(victim.modelName);
+            const vr =
+              vs?.runnerHost && vs.runnerPort
+                ? deps.createRunnerClient(vs.runnerHost, vs.runnerPort)
+                : null;
+            await deps.sleepWake.stopModel(victim.modelName, vr);
+            await deps.lifecycle.removeModel(victim.modelName);
+            deps.eviction.recordEviction('wake');
+          }
+        }
       }
 
       const runnerClient = deps.createRunnerClient(state.runnerHost, state.runnerPort);
