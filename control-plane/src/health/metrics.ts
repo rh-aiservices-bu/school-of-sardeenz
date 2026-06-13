@@ -99,6 +99,38 @@ export const runnerHealthCheckErrorsTotal = new Counter({
   registers: [registry],
 });
 
+export const reconciliationTicksTotal = new Counter({
+  name: 'sardeenz_control_plane_reconciliation_ticks_total',
+  help: 'Total reconciliation ticks executed',
+  registers: [registry],
+});
+
+export const reconciliationDeadWorkersTotal = new Counter({
+  name: 'sardeenz_control_plane_reconciliation_dead_workers_total',
+  help: 'Dead workers cleaned up by reconciliation',
+  registers: [registry],
+});
+
+export const reconciliationStuckModelsTotal = new Counter({
+  name: 'sardeenz_control_plane_reconciliation_stuck_models_total',
+  help: 'Stuck models recovered by reconciliation',
+  registers: [registry],
+});
+
+export const reconciliationErrors = new Counter({
+  name: 'sardeenz_control_plane_reconciliation_errors_total',
+  help: 'Reconciliation step errors',
+  labelNames: ['step'] as const,
+  registers: [registry],
+});
+
+export const reconciliationTickDuration = new Histogram({
+  name: 'sardeenz_control_plane_reconciliation_tick_duration_seconds',
+  help: 'Time for a single reconciliation tick',
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  registers: [registry],
+});
+
 export function registerMetricsRoute(app: FastifyInstance): void {
   app.get('/metrics', async (_req, reply) => {
     const metrics = await registry.metrics();

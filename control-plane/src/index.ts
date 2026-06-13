@@ -17,6 +17,7 @@ import { EvictionEngine } from './services/eviction.js';
 import { SleepWakeService } from './services/sleep-wake.js';
 import { DeployOrchestrationService } from './services/deploy-orchestration.js';
 import { LeaderElectionService } from './services/leader-election.js';
+import { ReconciliationService } from './services/reconciliation.js';
 import { WorkerClient } from './clients/worker.js';
 
 async function main(): Promise<void> {
@@ -100,12 +101,28 @@ async function main(): Promise<void> {
     },
   });
 
+  const reconciliation = new ReconciliationService(
+    lifecycle,
+    workerPool,
+    memoryBudget,
+    routingMap,
+    leaderElection,
+    {
+      reconciliationIntervalSecs: config.reconciliationIntervalSecs,
+      deployTimeoutSecs: config.deployTimeoutSecs,
+      sleepTimeoutSecs: config.sleepTimeoutSecs,
+    },
+    app.log,
+  );
+
   await leaderElection.start();
   await workerPool.discoverWorkers();
   await memoryBudget.refreshAll();
+  reconciliation.start();
 
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'Shutting down');
+    reconciliation.stop();
     await leaderElection.stop();
     await app.close();
     redis.disconnect();

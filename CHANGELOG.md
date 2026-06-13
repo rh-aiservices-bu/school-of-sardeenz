@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Control plane reconciliation loop (`control-plane/src/services/reconciliation.ts`):
+  `ReconciliationService` runs a leader-only background loop (default 30s interval) that
+  re-discovers workers, checks heartbeats, cleans up dead workers (transitions their models
+  to ERROR and removes routing), refreshes memory budgets, and recovers models stuck in
+  transitional states past their timeout. Detects leader promotion for full state rebuild.
+  Includes Prometheus metrics for tick count, duration, dead workers, stuck models, and
+  per-step errors.
 - Control plane core services (`control-plane/src/services/`):
   - `ModelRepository`: PostgreSQL CRUD for model configuration
   - `ModelLifecycleService`: Redis-backed state machine with atomic CAS transitions via Lua scripts
