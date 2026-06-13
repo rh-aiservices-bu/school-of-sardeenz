@@ -62,8 +62,11 @@ export class SleepWakeService {
     }
 
     try {
-      // ACTIVE → DRAINING
-      await this.lifecycle.transition(modelName, ModelLifecycleState.DRAINING);
+      // ACTIVE → DRAINING is claimed atomically by the route handler.
+      // If called directly (not from route), claim it here.
+      if (modelState.state === ModelLifecycleState.ACTIVE) {
+        await this.lifecycle.transition(modelName, ModelLifecycleState.DRAINING);
+      }
       await this.routingMap.setModelState(modelName, ModelState.DRAINING);
 
       // Wait for in-flight requests to drain.
@@ -110,8 +113,11 @@ export class SleepWakeService {
     }
 
     try {
-      // SLEEPING → STARTING
-      await this.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
+      // SLEEPING → STARTING is claimed atomically by the route handler.
+      // If called directly (not from route), claim it here.
+      if (modelState.state === ModelLifecycleState.SLEEPING) {
+        await this.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
+      }
       await this.routingMap.setModelState(modelName, ModelState.STARTING);
 
       // Send wake command. Unlike sleep, /wake on the runner completes quickly —
@@ -180,15 +186,30 @@ export class SleepWakeService {
         );
       }
 
-      // Transition to STOPPING then STOPPED.
+      // Transition to STOPPING then STOPPED. States like PENDING and STARTING
+      // cannot reach STOPPING directly, so route them through ERROR first.
       const stateBeforeStopping = (await this.lifecycle.getState(modelName))?.state;
+
       if (
+        stateBeforeStopping === ModelLifecycleState.PENDING ||
+        stateBeforeStopping === ModelLifecycleState.STARTING
+      ) {
+        await this.lifecycle.transition(modelName, ModelLifecycleState.ERROR, {
+          errorMessage: 'Model stopped during startup',
+        });
+        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+      } else if (
         stateBeforeStopping === ModelLifecycleState.DRAINING ||
         stateBeforeStopping === ModelLifecycleState.SLEEPING
       ) {
         await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPING);
+        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+      } else if (stateBeforeStopping === ModelLifecycleState.STOPPING) {
+        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+      } else if (stateBeforeStopping === ModelLifecycleState.ERROR) {
+        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
       }
-      await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+      // STOPPED is already terminal — no transition needed.
 
       // Remove from routing map entirely.
       await this.routingMap.removeModel(modelName);

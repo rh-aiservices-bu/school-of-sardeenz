@@ -332,6 +332,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         );
       }
 
+      // Atomically claim ACTIVE → DRAINING before launching background work.
+      await deps.lifecycle.transition(modelName, ModelLifecycleState.DRAINING);
+
       const runnerClient = deps.createRunnerClient(state.runnerHost, state.runnerPort);
 
       deps.sleepWake.sleepModel(modelName, runnerClient).catch((err: unknown) => {
@@ -381,6 +384,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           `Model ${modelName} has no runner endpoint`,
         );
       }
+
+      // Atomically claim SLEEPING → STARTING before launching background work.
+      // Concurrent wake requests will fail this transition and get "already waking".
+      await deps.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
 
       const record = await deps.modelRepository.findByName(modelName);
       const requiredMemory = record?.requiredMemory ?? 0;

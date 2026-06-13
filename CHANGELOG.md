@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `stopModel()` now handles all lifecycle states correctly — PENDING and STARTING
+  route through ERROR before reaching STOPPED instead of attempting invalid transitions
+- Wake and sleep routes atomically claim their transitional state (STARTING / DRAINING)
+  before launching background work, preventing concurrent request races
 - Eviction engine now wired into deploy and wake flows: insufficient capacity triggers
   LRU eviction of idle models before failing with placement error
 - Eviction candidates now use actual `requiredMemory` from model metadata instead of
