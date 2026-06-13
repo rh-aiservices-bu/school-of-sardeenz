@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Deployment security documentation (`docs/usage/deployment-security.md`) documenting the
+  network isolation requirement for Phase 2 (no auth until a later phase)
 - Readiness probe (`/readyz`) now reports leader-election status in the response
 - Prometheus gauge metrics (`modelsTotal`, `workersTotal`, `deviceMemoryBytes`) are now
   populated with real values on every reconciliation tick instead of remaining at zero
