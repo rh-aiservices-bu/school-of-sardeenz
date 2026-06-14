@@ -1,3 +1,4 @@
+import { WorkerStatus } from '@sardeenz/types';
 import type { WorkerRecord, WorkerCapability } from './worker-pool.js';
 import type { WorkerBudget, DeviceBudget } from './memory-budget.js';
 import { placementDuration } from '../health/metrics.js';
@@ -49,7 +50,10 @@ export class PlacementPipeline {
   ): PlacementResult | null {
     const end = placementDuration.startTimer();
     try {
-      const afterRunnerType = this.filterByRunnerType(request, workers);
+      const healthyWorkers = this.filterByHealth(workers);
+      if (healthyWorkers.length === 0) return null;
+
+      const afterRunnerType = this.filterByRunnerType(request, healthyWorkers);
       if (afterRunnerType.length === 0) return null;
 
       const afterHardware = this.filterByHardware(request, afterRunnerType);
@@ -73,6 +77,10 @@ export class PlacementPipeline {
     } finally {
       end();
     }
+  }
+
+  private filterByHealth(workers: WorkerRecord[]): WorkerRecord[] {
+    return workers.filter((w) => w.status === WorkerStatus.ONLINE);
   }
 
   private filterByRunnerType(
