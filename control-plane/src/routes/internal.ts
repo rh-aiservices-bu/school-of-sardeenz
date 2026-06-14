@@ -6,6 +6,11 @@ import { ControlPlaneError } from '../errors.js';
 
 export function registerInternalRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post<{ Body: { modelName: string } }>('/api/v1/wake', async (request, reply) => {
+    // Leader gate: only the leader instance should orchestrate wake operations.
+    if (!deps.leaderElection.isLeader) {
+      throw ControlPlaneError.notLeader();
+    }
+
     const { modelName } = request.body ?? {};
     if (!modelName || typeof modelName !== 'string') {
       throw ControlPlaneError.invalidRequest('modelName is required');
@@ -45,6 +50,11 @@ export function registerInternalRoutes(app: FastifyInstance, deps: RouteDeps): v
         `Model ${modelName} has no runner endpoint`,
       );
     }
+
+    // Atomically claim SLEEPING → STARTING before launching background work.
+    // The CAS transition (Lua script) ensures only one concurrent request wins;
+    // subsequent requests will find the model in STARTING and return 202 above.
+    await deps.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
 
     const runnerClient = deps.createRunnerClient(state.runnerHost, state.runnerPort);
 

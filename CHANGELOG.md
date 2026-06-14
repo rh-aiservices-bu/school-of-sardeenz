@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Internal wake route (`POST /api/v1/wake`) now enforces leader gate and atomically
+  claims `SLEEPING → STARTING` via CAS before launching background work, preventing
+  thundering herd from concurrent proxy wake triggers and follower-instance wake
+  processing (#32)
 - Deployment security documentation (`docs/usage/deployment-security.md`) documenting the
   network isolation requirement for Phase 2 (no auth until a later phase)
 - Readiness probe (`/readyz`) now reports leader-election status in the response
