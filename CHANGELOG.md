@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Control plane Dockerfile COPY instructions no longer use invalid shell redirection
+  (`2>/dev/null || true`); optional workspace-local `node_modules` dirs are guaranteed to
+  exist via `mkdir -p` in the deps stage so plain COPY always succeeds (#33)
 - Deployment security documentation (`docs/usage/deployment-security.md`) documenting the
   network isolation requirement for Phase 2 (no auth until a later phase)
 - Readiness probe (`/readyz`) now reports leader-election status in the response
