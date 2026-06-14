@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exist via `mkdir -p` in the deps stage so plain COPY always succeeds (#33)
 - Placement pipeline now excludes DEGRADED and OFFLINE workers as the first filter stage,
   preventing unhealthy workers from being selected for model placement (#35)
+- Readiness probe (`/readyz`) now returns 503 for follower instances when leader election
+  is enabled, ensuring Kubernetes endpoints exclude followers from orchestration traffic
+  (closes #36)
 - Deployment security documentation (`docs/usage/deployment-security.md`) documenting the
   network isolation requirement for Phase 2 (no auth until a later phase)
 - Readiness probe (`/readyz`) now reports leader-election status in the response

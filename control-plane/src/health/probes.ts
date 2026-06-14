@@ -37,7 +37,9 @@ export function registerProbes(app: FastifyInstance, deps: ProbesDeps): void {
     }
 
     if (deps.leaderElection) {
-      checks['leader'] = deps.leaderElection.isLeader ? 'leader' : 'follower';
+      const leading = deps.leaderElection.isLeader;
+      checks['leader'] = leading ? 'leader' : 'follower';
+      if (!leading) ready = false;
     }
 
     return reply.code(ready ? 200 : 503).send({ status: ready ? 'ready' : 'not_ready', checks });
