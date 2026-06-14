@@ -16,6 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Readiness probe (`/readyz`) now returns 503 for follower instances when leader election
   is enabled, ensuring Kubernetes endpoints exclude followers from orchestration traffic
   (closes #36)
+- `MemoryBudgetService.refreshAll()` and `refreshWorkerBudget()` no longer clear all
+  in-flight reservations on every reconciliation tick. Reservations are now cleared
+  per-device only when the worker's fresh memory report shows `usedBytes >= reservedBytes`,
+  meaning the allocation has been accounted for. Reservations for in-flight deploys (runner
+  starting, worker not yet reporting) are preserved, closing the overcommit window that
+  allowed double-placement onto the same capacity (closes #34).
 - Deployment security documentation (`docs/usage/deployment-security.md`) documenting the
   network isolation requirement for Phase 2 (no auth until a later phase)
 - Readiness probe (`/readyz`) now reports leader-election status in the response
