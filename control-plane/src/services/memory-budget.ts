@@ -121,9 +121,10 @@ export class MemoryBudgetService {
 
   /**
    * Read the memory report for a single worker from Redis and update the local
-   * budget.  Clears in-flight reservations for that worker since the fresh
-   * report reflects actual usage.  Returns the refreshed WorkerBudget, or null
-   * if no report exists.
+   * budget.  Clears only the reservations whose bytes are already reflected in
+   * the fresh report (usedBytes >= reservedBytes), preserving any reservation
+   * that belongs to an in-flight deploy not yet reported by the worker.
+   * Returns the refreshed WorkerBudget, or null if no report exists.
    */
   async refreshWorkerBudget(workerId: string): Promise<WorkerBudget | null> {
     const key = workerMemoryKey(this.keyPrefix, workerId);
@@ -134,8 +135,6 @@ export class MemoryBudgetService {
       return null;
     }
 
-    this.clearWorkerReservations(workerId);
-
     const budget = this.parseReport(raw, workerId);
     if (!budget) {
       this.budgets.delete(workerId);
@@ -143,13 +142,16 @@ export class MemoryBudgetService {
     }
 
     this.budgets.set(workerId, budget);
+    this.clearSatisfiedReservations(workerId, budget);
     return budget;
   }
 
   /**
    * Scan Redis for all worker memory keys and refresh every worker in one
-   * pipeline round-trip.  Clears all in-flight reservations since fresh
-   * reports reflect actual usage.
+   * pipeline round-trip.  Clears only reservations whose bytes are already
+   * reflected in the worker's fresh report, so that in-flight deploy
+   * reservations (runner starting, report not yet updated) are preserved and
+   * continue to protect capacity against double-placement.
    */
   async refreshAll(): Promise<void> {
     const pattern = redisKey(this.keyPrefix, 'workers', '*', WORKER_MEMORY_SUBKEY);
@@ -159,8 +161,6 @@ export class MemoryBudgetService {
       this.reservations.clear();
       return;
     }
-
-    this.reservations.clear();
 
     const pipeline = this.redis.pipeline();
     for (const key of keys) {
@@ -190,6 +190,7 @@ export class MemoryBudgetService {
       const budget = this.parseReport(raw, workerId);
       if (budget) {
         this.budgets.set(workerId, budget);
+        this.clearSatisfiedReservations(workerId, budget);
         seenWorkers.add(workerId);
       }
     }
@@ -295,6 +296,26 @@ export class MemoryBudgetService {
     for (const key of this.reservations.keys()) {
       if (key.startsWith(prefix)) {
         this.reservations.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Clear only the reservations for a worker whose fresh report already
+   * accounts for the reserved bytes (usedBytes >= reservedBytes on that
+   * device).  Reservations for devices whose usedBytes is still below the
+   * reserved amount — indicating the runner has not yet updated its report —
+   * are left intact so that the capacity remains protected.
+   */
+  private clearSatisfiedReservations(workerId: string, budget: WorkerBudget): void {
+    for (const device of budget.devices) {
+      const rk = this.reservationKey(workerId, device.deviceIndex);
+      const reserved = this.reservations.get(rk);
+      if (reserved === undefined) continue;
+      if (device.usedBytes >= reserved) {
+        this.reservations.delete(rk);
+        // Recompute so availableBytes reflects the now-zero reservation.
+        this.recomputeDeviceBudget(workerId, device.deviceIndex);
       }
     }
   }
