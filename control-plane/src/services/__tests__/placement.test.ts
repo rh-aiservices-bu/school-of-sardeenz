@@ -232,6 +232,109 @@ describe('PlacementPipeline', () => {
     expect(result!.devices).toHaveLength(2);
   });
 
+  it('excludes DEGRADED workers from placement', () => {
+    const workers = [
+      {
+        ...makeWorker(
+          'w1',
+          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        ),
+        status: WorkerStatus.DEGRADED,
+      },
+    ];
+    const budgets = new Map([
+      [
+        'w1',
+        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+      ],
+    ]);
+
+    const result = pipeline.place(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      workers,
+      budgets,
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('excludes OFFLINE workers from placement', () => {
+    const workers = [
+      {
+        ...makeWorker(
+          'w1',
+          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        ),
+        status: WorkerStatus.OFFLINE,
+      },
+    ];
+    const budgets = new Map([
+      [
+        'w1',
+        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+      ],
+    ]);
+
+    const result = pipeline.place(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      workers,
+      budgets,
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('selects the only ONLINE worker when others are unhealthy', () => {
+    const workers = [
+      {
+        ...makeWorker(
+          'w1',
+          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        ),
+        status: WorkerStatus.DEGRADED,
+      },
+      {
+        ...makeWorker(
+          'w2',
+          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        ),
+        status: WorkerStatus.OFFLINE,
+      },
+      makeWorker(
+        'w3',
+        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+      ),
+    ];
+    const budgets = new Map([
+      [
+        'w1',
+        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+      ],
+      [
+        'w2',
+        makeBudget('w2', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+      ],
+      [
+        'w3',
+        makeBudget('w3', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+      ],
+    ]);
+
+    const result = pipeline.place(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      workers,
+      budgets,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.workerId).toBe('w3');
+  });
+
   it('rejects stale worker budgets', () => {
     const workers = [
       makeWorker(
