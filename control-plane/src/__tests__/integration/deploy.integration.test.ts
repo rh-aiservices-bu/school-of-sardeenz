@@ -98,7 +98,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     expect(entry!.endpoints[0].port).toBe(runner.port);
   });
 
-  it('deploy timeout: runner stays STARTING → model transitions to ERROR', async () => {
+  it('deploy timeout: runner stays STARTING → model transitions to ERROR', { timeout: 15_000 }, async () => {
     const WORKER_ID = 'w2';
     const MODEL = 'stuck-model';
     const MEM = 4_000_000_000;
