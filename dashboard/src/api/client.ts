@@ -11,7 +11,7 @@ type ErrorResponse = ControlPlaneComponents['schemas']['ErrorResponse'];
 
 export { type ModelInfo, type ModelDetail, type ModelDeploymentRequest, type ClusterStatus, type ClusterMemory, type WorkerInfo, type WorkerDetail };
 
-const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+export const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -34,13 +34,11 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${BASE_URL}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+  const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
+  if (options?.body) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(url, { ...options, headers });
 
   if (!res.ok) {
     let errorMessage = `HTTP ${res.status}`;

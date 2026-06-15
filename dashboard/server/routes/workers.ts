@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
 export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): void {
@@ -7,7 +8,8 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
     try {
       const { status, data } = await deps.controlPlane.listWorkers();
       return reply.code(status).send(data);
-    } catch {
+    } catch (err) {
+      if (!(err instanceof BffError)) throw err;
       app.log.warn('Control plane unavailable for listWorkers, falling back to Redis');
       const workers = await deps.redis.listWorkers();
       return reply.code(200).send({ workers, source: 'redis-fallback' });

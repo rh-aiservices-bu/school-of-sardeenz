@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
 export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): void {
@@ -7,7 +8,8 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
     try {
       const { status, data } = await deps.controlPlane.getClusterStatus();
       return reply.code(status).send(data);
-    } catch {
+    } catch (err) {
+      if (!(err instanceof BffError)) throw err;
       app.log.warn('Control plane unavailable for getClusterStatus, falling back to Redis');
       const partial = await deps.redis.getClusterStatus();
       return reply.code(200).send({ ...partial, source: 'redis-fallback' });

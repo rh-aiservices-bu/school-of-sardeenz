@@ -62,8 +62,11 @@ export async function buildServer(deps: ServerDeps) {
       wildcard: false,
     });
 
-    // SPA fallback: serve index.html for all non-API, non-static routes
-    app.setNotFoundHandler((_request, reply) => {
+    // SPA fallback: serve index.html for non-API routes (client-side routing)
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api/')) {
+        return reply.code(404).send({ error: 'Not found', code: 'NOT_FOUND' });
+      }
       return reply.sendFile('index.html');
     });
   }

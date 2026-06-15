@@ -36,7 +36,8 @@ type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 function WorkersCard({ status }: { status: ClusterStatus }) {
   const online = status.workersOnline ?? 0;
   const total = status.workerCount;
-  const color: 'green' | 'red' = online === total && total > 0 ? 'green' : 'red';
+  const color: 'green' | 'red' | 'grey' =
+    total === 0 ? 'grey' : online === total ? 'green' : 'red';
 
   return (
     <Card isCompact>
@@ -60,7 +61,7 @@ function WorkersCard({ status }: { status: ClusterStatus }) {
         <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> / {total}</span>
         <div style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}>
           <Label color={color} isCompact>
-            {online === total && total > 0 ? 'All online' : `${total - online} offline`}
+            {total === 0 ? 'No workers' : online === total ? 'All online' : `${total - online} offline`}
           </Label>
         </div>
       </CardBody>

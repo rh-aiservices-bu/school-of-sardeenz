@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Cross-model review fixes for Phase 3 dashboard:
+  - SSE event stream now handles `EVICTION_TRIGGERED` and `PLACEMENT_COMPLETED` events
+    (previously caused stale UI until next poll cycle)
+  - Metrics time range no longer goes stale — `buildFreshParams` computes timestamps at
+    fetch time instead of memoizing them once
+  - SSE route writes 200 headers only after Redis subscribe succeeds, returns 502 on failure;
+    cleanup guard prevents double invocation; `reply.hijack()` called before raw writes
+  - `formatBytes` guards against negative values and clamps unit index to prevent overflow
+  - `JSON.parse` result in deploy form validated as object (rejects primitives/arrays)
+  - Added 404 catch-all route and React `ErrorBoundary` to prevent blank/white screens
+  - SPA fallback no longer serves `index.html` for mistyped `/api/*` paths (returns JSON 404)
+  - Zero-worker cluster shows grey "No workers" instead of red "0 offline"
+  - `Content-Type: application/json` only set on requests with a body (not GET/DELETE)
+  - `res.json()` in BFF control plane client wrapped in try/catch for non-JSON responses
+  - Redis fallback catch blocks only catch `BffError` (upstream errors), not programming errors
+  - Health probe checks run in parallel via `Promise.all` instead of sequentially
+  - Deduplicated `BASE_URL` — `useEventStream` imports from `api/client` instead of
+    re-deriving from `import.meta.env`
+
 ### Added
 
 - Accessibility audit (Task 3.12) — WCAG 2.1 AA compliance fixes: event feed uses semantic

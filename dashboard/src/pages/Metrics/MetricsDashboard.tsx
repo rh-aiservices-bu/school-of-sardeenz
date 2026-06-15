@@ -23,8 +23,7 @@ import {
   ChartVoronoiContainer,
 } from '@patternfly/react-charts/victory';
 import { ChartLineIcon } from '@patternfly/react-icons';
-import { useLatencyMetrics, useThroughputMetrics, useMemoryMetrics } from '../../hooks/useMetrics';
-import type { MetricsParams } from '../../api/client';
+import { useLatencyMetrics, useThroughputMetrics, useMemoryMetrics, type TimeRange } from '../../hooks/useMetrics';
 import { formatBytes } from '../../utils/format';
 
 // ---------------------------------------------------------------------------
@@ -62,38 +61,8 @@ interface PrometheusInstantResult {
 }
 
 // ---------------------------------------------------------------------------
-// Time range configuration
-// ---------------------------------------------------------------------------
-
-type TimeRange = '15m' | '1h' | '6h' | '24h';
-
-interface TimeRangeConfig {
-  label: string;
-  durationMs: number;
-  step: string;
-}
-
-const TIME_RANGE_CONFIGS: Record<TimeRange, TimeRangeConfig> = {
-  '15m': { label: '15m', durationMs: 15 * 60 * 1000, step: '15s' },
-  '1h': { label: '1h', durationMs: 60 * 60 * 1000, step: '60s' },
-  '6h': { label: '6h', durationMs: 6 * 60 * 60 * 1000, step: '300s' },
-  '24h': { label: '24h', durationMs: 24 * 60 * 60 * 1000, step: '900s' },
-};
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function buildMetricsParams(range: TimeRange): MetricsParams {
-  const { durationMs, step } = TIME_RANGE_CONFIGS[range];
-  const end = new Date();
-  const start = new Date(end.getTime() - durationMs);
-  return {
-    start: start.toISOString(),
-    end: end.toISOString(),
-    step,
-  };
-}
 
 function formatHHMM(date: Date): string {
   return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -356,11 +325,9 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
 export function MetricsDashboard() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1h');
 
-  const params = useMemo(() => buildMetricsParams(selectedRange), [selectedRange]);
-
-  const latency = useLatencyMetrics(params);
-  const throughput = useThroughputMetrics(params);
-  const memory = useMemoryMetrics(params);
+  const latency = useLatencyMetrics(selectedRange);
+  const throughput = useThroughputMetrics(selectedRange);
+  const memory = useMemoryMetrics(selectedRange);
 
   const latencySeries = useMemo(() => parseRangeSeries(latency.data), [latency.data]);
   const throughputSeries = useMemo(() => parseRangeSeries(throughput.data), [throughput.data]);
@@ -380,7 +347,7 @@ export function MetricsDashboard() {
           {timeRanges.map((range) => (
             <ToggleGroupItem
               key={range}
-              text={TIME_RANGE_CONFIGS[range].label}
+              text={range}
               isSelected={selectedRange === range}
               onChange={(_event, selected) => {
                 if (selected) setSelectedRange(range);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ClusterEventType, type ControlPlaneComponents } from '@sardeenz/types';
+import { BASE_URL } from '../api/client';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
@@ -19,8 +20,7 @@ export function useEventStream() {
     }
 
     setStatus('connecting');
-    const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
-    const es = new EventSource(`${baseUrl}/events`);
+    const es = new EventSource(`${BASE_URL}/events`);
     eventSourceRef.current = es;
 
     es.onopen = () => {
@@ -46,6 +46,12 @@ export function useEventStream() {
             break;
           case ClusterEventType.WORKER_MEMORY_UPDATED:
             void queryClient.invalidateQueries({ queryKey: ['cluster', 'memory'] });
+            void queryClient.invalidateQueries({ queryKey: ['workers'] });
+            break;
+          case ClusterEventType.EVICTION_TRIGGERED:
+          case ClusterEventType.PLACEMENT_COMPLETED:
+            void queryClient.invalidateQueries({ queryKey: ['models'] });
+            void queryClient.invalidateQueries({ queryKey: ['cluster'] });
             void queryClient.invalidateQueries({ queryKey: ['workers'] });
             break;
         }

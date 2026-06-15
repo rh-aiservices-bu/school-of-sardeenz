@@ -16,7 +16,8 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     try {
       const { status, data } = await deps.controlPlane.listModels(state);
       return reply.code(status).send(data);
-    } catch {
+    } catch (err) {
+      if (!(err instanceof BffError)) throw err;
       app.log.warn('Control plane unavailable for listModels, falling back to Redis');
       const models = await deps.redis.listModels();
       return reply.code(200).send({ models, source: 'redis-fallback' });
@@ -29,7 +30,8 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     try {
       const { status, data } = await deps.controlPlane.getModel(name);
       return reply.code(status).send(data);
-    } catch {
+    } catch (err) {
+      if (!(err instanceof BffError)) throw err;
       app.log.warn({ modelName: name }, 'Control plane unavailable for getModel, falling back to Redis');
       const model = await deps.redis.getModel(name);
       if (model === null) {

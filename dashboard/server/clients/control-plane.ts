@@ -35,7 +35,15 @@ export class ControlPlaneClient {
         cause: cause instanceof Error ? cause.message : String(cause),
       });
     }
-    const data: unknown = await res.json();
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      throw BffError.upstreamError('Control plane returned non-JSON response', {
+        path,
+        status: res.status,
+      });
+    }
     return { status: res.status, data };
   }
 

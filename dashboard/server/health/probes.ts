@@ -7,19 +7,19 @@ export function registerProbes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   app.get('/readyz', async (_req, reply) => {
-    const checks: Record<string, string> = {};
-    let ready = true;
+    const [cpHealthy, redisHealthy, promHealthy] = await Promise.all([
+      deps.controlPlane.isHealthy(),
+      deps.redis.isHealthy(),
+      deps.prometheus.isHealthy(),
+    ]);
 
-    const cpHealthy = await deps.controlPlane.isHealthy();
-    checks['controlPlane'] = cpHealthy ? 'ok' : 'error';
-    if (!cpHealthy) ready = false;
+    const checks: Record<string, string> = {
+      controlPlane: cpHealthy ? 'ok' : 'error',
+      redis: redisHealthy ? 'ok' : 'error',
+      prometheus: promHealthy ? 'ok' : 'warning',
+    };
 
-    const redisHealthy = await deps.redis.isHealthy();
-    checks['redis'] = redisHealthy ? 'ok' : 'error';
-    if (!redisHealthy) ready = false;
-
-    const promHealthy = await deps.prometheus.isHealthy();
-    checks['prometheus'] = promHealthy ? 'ok' : 'warning';
+    const ready = cpHealthy && redisHealthy;
 
     return reply.code(ready ? 200 : 503).send({
       status: ready ? 'ready' : 'not_ready',

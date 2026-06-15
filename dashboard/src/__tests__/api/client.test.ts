@@ -47,9 +47,7 @@ describe('api.cluster.getStatus', () => {
 
     const result = await api.cluster.getStatus();
 
-    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(mockFetch).toHaveBeenCalledWith('/api/cluster/status', expect.anything());
-    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
     expect(result).toEqual(payload);
   });
 

@@ -86,7 +86,10 @@ function validate(form: FormState): FormErrors {
 
   if (form.engineConfig.trim()) {
     try {
-      JSON.parse(form.engineConfig);
+      const parsed: unknown = JSON.parse(form.engineConfig);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        errors.engineConfig = 'Engine config must be a JSON object.';
+      }
     } catch {
       errors.engineConfig = 'Engine config must be valid JSON.';
     }
