@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- BFF resilience extended to cover all read routes with Redis fallback (closes #45):
+  - `GET /api/cluster/memory` now falls back to Redis when the control plane is
+    unreachable; returns 502 only when no cached snapshot is available
+  - `GET /api/workers/:id` now falls back to Redis; returns 404 when no cached
+    worker detail is available (matching the control plane's own 404 behaviour)
+  - Control plane `MemoryBudgetService.refreshAll()` writes a per-device memory
+    snapshot to `{prefix}:cluster:memory` (TTL 300s) after each budget refresh
+  - Control plane `WorkerPoolService.checkHeartbeats()` writes each worker's full
+    record to `{prefix}:worker:{workerId}:detail` (TTL 120s) after each heartbeat
+    check, so dead workers expire quickly
+  - BFF `RedisReader` gains `getClusterMemory()` and `getWorkerDetail(id)` methods
+    to read the new control-plane-written snapshots
+  - New `DegradedBanner` component (PatternFly 6 `Alert`, `variant="warning"`,
+    `isInline`) shows "Control plane unreachable — showing cached data" when any
+    active query returns `source: "redis-fallback"`; auto-dismisses on resume
+  - New `DegradedContext` / `DegradedProvider` tracks which query keys are serving
+    stale data; mounted in `App.tsx` wrapping the authenticated route subtree
+  - All data hooks (`useModels`, `useModel`, `useWorkers`, `useWorker`,
+    `useClusterStatus`, `useClusterMemory`) report fallback status to
+    `DegradedContext` via `useEffect`
+  - Dashboard architecture doc updated with full fallback coverage table
+
 ### Added
 
 - Dashboard BFF auth system with three modes: `none`, `simple`, and `oauth`

@@ -16,9 +16,17 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
     }
   });
 
-  // GET /api/cluster/memory — no Redis fallback (per-device breakdown not in Redis)
+  // GET /api/cluster/memory — with Redis fallback
   app.get('/api/cluster/memory', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (_request, reply) => {
-    const { status, data } = await deps.controlPlane.getClusterMemory();
-    return reply.code(status).send(data);
+    try {
+      const { status, data } = await deps.controlPlane.getClusterMemory();
+      return reply.code(status).send(data);
+    } catch (err) {
+      if (!(err instanceof BffError)) throw err;
+      app.log.warn('Control plane unavailable for getClusterMemory, falling back to Redis');
+      const memory = await deps.redis.getClusterMemory();
+      if (memory === null) throw BffError.upstreamError('Control plane unreachable and no cached memory data');
+      return reply.code(200).send({ ...memory, source: 'redis-fallback' });
+    }
   });
 }

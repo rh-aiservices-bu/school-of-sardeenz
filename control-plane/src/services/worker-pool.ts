@@ -227,6 +227,10 @@ export class WorkerPoolService {
   /**
    * Read heartbeat timestamps from Redis for all known workers and update
    * their status to ONLINE / DEGRADED / OFFLINE based on age.
+   *
+   * After updating statuses, writes each worker's full record to Redis under
+   * `{prefix}:worker:{workerId}:detail` so the dashboard BFF can serve stale
+   * worker detail when the control plane is unreachable.
    */
   async checkHeartbeats(): Promise<void> {
     const workerIds = Array.from(this.workers.keys());
@@ -250,6 +254,27 @@ export class WorkerPoolService {
       record.lastHeartbeatAt = lastHeartbeatAt;
       record.status = resolveHeartbeatStatus(lastHeartbeatAt, this.heartbeatTimeoutSecs);
     }
+
+    // Persist individual worker records for BFF fallback reads.
+    await this.writeWorkerDetailSnapshots(workerIds);
+  }
+
+  /**
+   * Write each worker's full record to Redis for dashboard BFF fallback.
+   * Key: `{prefix}:worker:{workerId}:detail`
+   * TTL: 120 seconds — dead workers expire quickly so stale data doesn't linger.
+   */
+  private async writeWorkerDetailSnapshots(workerIds: string[]): Promise<void> {
+    if (workerIds.length === 0) return;
+
+    const writePipeline = this.redis.pipeline();
+    for (const workerId of workerIds) {
+      const record = this.workers.get(workerId);
+      if (!record) continue;
+      const key = redisKey(this.keyPrefix, 'worker', workerId, 'detail');
+      writePipeline.set(key, JSON.stringify(record), 'EX', 120);
+    }
+    await writePipeline.exec();
   }
 
   /**

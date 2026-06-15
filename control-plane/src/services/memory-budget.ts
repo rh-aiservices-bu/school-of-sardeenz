@@ -152,6 +152,10 @@ export class MemoryBudgetService {
    * reflected in the worker's fresh report, so that in-flight deploy
    * reservations (runner starting, report not yet updated) are preserved and
    * continue to protect capacity against double-placement.
+   *
+   * After refreshing, writes a per-device memory snapshot to
+   * `{prefix}:cluster:memory` so the dashboard BFF can serve stale data
+   * when the control plane is unreachable.
    */
   async refreshAll(): Promise<void> {
     const pattern = redisKey(this.keyPrefix, 'workers', '*', WORKER_MEMORY_SUBKEY);
@@ -201,6 +205,35 @@ export class MemoryBudgetService {
         this.budgets.delete(workerId);
       }
     }
+
+    // Persist a per-device memory snapshot for BFF fallback reads.
+    await this.writeClusterMemorySnapshot();
+  }
+
+  /**
+   * Write a per-device memory breakdown to Redis for dashboard BFF fallback.
+   * Key: `{prefix}:cluster:memory`
+   * TTL: 300 seconds (gives BFF up to 5 minutes of stale data).
+   */
+  private async writeClusterMemorySnapshot(): Promise<void> {
+    const budgets = this.getAllBudgets();
+    const workers = budgets.map((b) => ({
+      workerId: b.workerId,
+      devices: b.devices.map((d) => ({
+        deviceIndex: d.deviceIndex,
+        deviceType: d.deviceType,
+        memoryTotalBytes: d.totalBytes,
+        memoryUsedBytes: d.usedBytes,
+        memoryAvailableBytes: d.availableBytes,
+        memoryReservedBytes: d.reservedBytes,
+      })),
+    }));
+
+    const summary = this.getClusterSummary();
+    const snapshot = { workers, summary };
+
+    const key = redisKey(this.keyPrefix, 'cluster', 'memory');
+    await this.redis.set(key, JSON.stringify(snapshot), 'EX', 300);
   }
 
   /** Return the current in-memory budget for a worker, with staleness flag applied. */
