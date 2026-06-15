@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Dashboard frontend scaffold — Vite + React 18 + PatternFly 6 + React Router + TanStack Query
+  with app shell (masthead, sidebar nav, page routing), placeholder pages for all 7 views
+  (cluster overview, models, workers, metrics), Vitest config, and TypeScript strict mode
+- Dashboard backend-for-frontend (BFF) scaffold — Fastify service with control plane API proxy
+  routes, Redis/Prometheus client stubs, health probes (`/healthz`, `/readyz`), structured
+  logging, error handling, and graceful shutdown; follows control plane patterns
+- v1 component inventory and mapping document (`docs/project/v1-component-mapping.md`) — catalogs
+  all reusable components from the v1 dashboard with port verdicts, data model mapping
+  (v1 types → v2 `@sardeenz/types`), and state color mapping
+- Phase 3 project plan (`docs/project/phase3.md`) — 15-task breakdown for the admin
+  dashboard with v1 component reuse-first approach: inventory and port v1 UI components,
+  frontend (React + PatternFly 6 + Vite), backend-for-frontend (Fastify BFF), device memory
+  visualization, metrics dashboard, Playwright E2E tests, and container images
 - Proxy writes per-model inference timestamps to Redis (`SET {prefix}:inference:last:{model}`)
   on each routed request, with a 5-second local debounce to minimize overhead. Gives the
   control plane's LRU eviction engine a real recency signal (ADR-014, #39)

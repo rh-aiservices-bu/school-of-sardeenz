@@ -28,7 +28,12 @@ export default tseslint.config(
       'packages/types/src/generated/',
       'vitest.config.ts',
       'vitest.workspace.ts',
+      '**/vitest.config.ts',
       '**/vitest.integration.config.ts',
+      'dashboard/dist/',
+      'dashboard/vite.config.ts',
+      '**/*.v1.tsx',
+      '**/*.v1.ts',
     ],
   },
 );
