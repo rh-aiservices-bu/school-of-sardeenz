@@ -133,7 +133,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
         tensorParallel: 1,
         devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
       }),
-    ).rejects.toThrow(/timed out/i);
+    ).rejects.toThrow(/timeout/i);
 
     const state = await harness.lifecycle.getState(MODEL);
     expect(state?.state).toBe(ModelLifecycleState.ERROR);

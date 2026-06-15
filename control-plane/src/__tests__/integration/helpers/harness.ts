@@ -104,7 +104,7 @@ export function createHarness(): TestHarness {
   async function registerWorker(opts: RegisterWorkerOpts): Promise<void> {
     const infoKey = redisKey(keyPrefix, 'workers', opts.workerId, 'info');
     const heartbeatKey = redisKey(keyPrefix, 'workers', opts.workerId, 'heartbeat');
-    const budgetKey = redisKey(keyPrefix, 'budgets', opts.workerId);
+    const memoryKey = redisKey(keyPrefix, 'workers', opts.workerId, 'memory');
 
     const info = {
       capabilities: [
@@ -124,15 +124,12 @@ export function createHarness(): TestHarness {
       managementUrl: opts.managementUrl,
     };
 
-    const budget = {
-      workerId: opts.workerId,
+    const memoryReport = {
       devices: opts.devices.map((d) => ({
         deviceIndex: d.deviceIndex,
         deviceType: d.deviceType,
-        totalBytes: d.memoryTotalBytes,
-        usedBytes: 0,
-        reservedBytes: 0,
-        availableBytes: d.memoryTotalBytes,
+        memoryUsedBytes: 0,
+        memoryTotalBytes: d.memoryTotalBytes,
       })),
       reportedAt: new Date().toISOString(),
     };
@@ -140,7 +137,7 @@ export function createHarness(): TestHarness {
     await redis.pipeline()
       .set(infoKey, JSON.stringify(info))
       .set(heartbeatKey, new Date().toISOString())
-      .set(budgetKey, JSON.stringify(budget))
+      .set(memoryKey, JSON.stringify(memoryReport))
       .exec();
 
     await workerPool.discoverWorkers();
