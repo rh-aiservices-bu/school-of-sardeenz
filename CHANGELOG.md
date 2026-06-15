@@ -6,8 +6,114 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Phase 2 (control plane sleep/wake orchestration) marked complete — 18/18 tasks done,
+  128 unit tests + 7 integration tests passing
+
+### Fixed
+
+- LRU eviction now reads per-model inference timestamps from Redis (`{prefix}:inference:last:{model}`)
+  written by the proxy, giving the eviction engine a real recency signal instead of random
+  ordering. See ADR-014 for the design decision (#37)
+- Control plane Dockerfile COPY instructions no longer use invalid shell redirection
+  (`2>/dev/null || true`); optional workspace-local `node_modules` dirs are guaranteed to
+  exist via `mkdir -p` in the deps stage so plain COPY always succeeds (#33)
+- Placement pipeline now excludes DEGRADED and OFFLINE workers as the first filter stage,
+  preventing unhealthy workers from being selected for model placement (#35)
+- Readiness probe (`/readyz`) now returns 503 for follower instances when leader election
+  is enabled, ensuring Kubernetes endpoints exclude followers from orchestration traffic
+  (closes #36)
+- `MemoryBudgetService.refreshAll()` and `refreshWorkerBudget()` no longer clear all
+  in-flight reservations on every reconciliation tick. Reservations are now cleared
+  per-device only when the worker's fresh memory report shows `usedBytes >= reservedBytes`,
+  meaning the allocation has been accounted for. Reservations for in-flight deploys (runner
+  starting, worker not yet reporting) are preserved, closing the overcommit window that
+  allowed double-placement onto the same capacity (closes #34).
+- Internal wake route (`POST /api/v1/wake`) now enforces leader gate and atomically
+  claims `SLEEPING → STARTING` via CAS before launching background work, preventing
+  thundering herd from concurrent proxy wake triggers and follower-instance wake
+  processing (#32)
+- Deployment security documentation (`docs/usage/deployment-security.md`) documenting the
+  network isolation requirement for Phase 2 (no auth until a later phase)
+- Readiness probe (`/readyz`) now reports leader-election status in the response
+- Prometheus gauge metrics (`modelsTotal`, `workersTotal`, `deviceMemoryBytes`) are now
+  populated with real values on every reconciliation tick instead of remaining at zero
+- Leader-election lease operations now use Kubernetes `resourceVersion` for optimistic
+  concurrency, preventing split-brain from concurrent lease updates; 409 conflicts are
+  detected explicitly
+- Kubernetes service account token loading uses ESM-compatible `readFileSync` import
+  instead of `require('node:fs')`
+- `stopModel()` now handles all lifecycle states correctly — PENDING and STARTING
+  route through ERROR before reaching STOPPED instead of attempting invalid transitions
+- Wake and sleep routes atomically claim their transitional state (STARTING / DRAINING)
+  before launching background work, preventing concurrent request races
+- Eviction engine now wired into deploy and wake flows: insufficient capacity triggers
+  LRU eviction of idle models before failing with placement error
+- Eviction candidates now use actual `requiredMemory` from model metadata instead of
+  hardcoded zero bytes, fixing freed-capacity accounting
+- Memory-budget staleness now uses worker-reported `reportedAt` timestamp instead of
+  control-plane read-time, making staleness detection accurate for batched/delayed reports
+- In-flight memory reservations are cleared on budget refresh (`refreshAll` and
+  `refreshWorkerBudget`), preventing phantom reservations from accumulating after model
+  stop/delete/failure
+
 ### Added
 
+- Integration test infrastructure for control plane (`control-plane/src/__tests__/integration/`):
+  test harness wiring real Redis (DB 1) and PostgreSQL with per-test key prefixes, in-process
+  mock runner and worker Fastify servers, `canConnect()` skip guard, and dedicated vitest config
+  (`vitest.integration.config.ts`). Three test suites: deploy orchestration (happy path +
+  timeout), sleep/wake round-trip with CAS thundering-herd prevention, and worker discovery
+  with routing map consistency across deploy/sleep/wake lifecycle (#38)
+- PostgreSQL service added to `compose.yaml` for integration test and local dev use
+- Control plane reconciliation loop (`control-plane/src/services/reconciliation.ts`):
+  `ReconciliationService` runs a leader-only background loop (default 30s interval) that
+  re-discovers workers, checks heartbeats, cleans up dead workers (transitions their models
+  to ERROR and removes routing), refreshes memory budgets, and recovers models stuck in
+  transitional states past their timeout. Detects leader promotion for full state rebuild.
+  Includes Prometheus metrics for tick count, duration, dead workers, stuck models, and
+  per-step errors.
+- Control plane core services (`control-plane/src/services/`):
+  - `ModelRepository`: PostgreSQL CRUD for model configuration
+  - `ModelLifecycleService`: Redis-backed state machine with atomic CAS transitions via Lua scripts
+  - `MemoryBudgetService`: in-memory VRAM budget tracker with per-device reservations and staleness detection
+  - `WorkerPoolService`: Redis SCAN-based worker discovery with three-tier heartbeat status (ONLINE/DEGRADED/OFFLINE)
+  - `RoutingMapService`: Redis hash-backed routing map with atomic MULTI/EXEC writes and pub/sub notifications
+  - `PlacementPipeline`: four-stage workload placement (runner type → hardware → capacity → strategy)
+  - `EvictionEngine`: LRU eviction with circuit breaker, max-per-cycle limit, pinned model exclusion, minimum active time
+  - `SleepWakeService`: sleep/wake coordination driving ACTIVE→DRAINING→SLEEPING and SLEEPING→STARTING→ACTIVE transitions
+  - `LeaderElectionService`: K8s Lease API leader election with local dev mode fallback
+- Control plane database migrations (`control-plane/migrations/001-initial-schema.sql`):
+  models, memory_profiles, benchmarks, and settings tables with migration runner
+- Control plane deploy orchestration (`control-plane/src/services/deploy-orchestration.ts`):
+  `DeployOrchestrationService` drives models from STARTING → ACTIVE by calling the worker
+  management API to start a runner, polling runner health until READY, registering the
+  endpoint in the routing map, and transitioning to ACTIVE (with ERROR fallback and
+  capacity reservation release on failure)
+- Control plane HTTP clients (`control-plane/src/clients/`):
+  runner HTTP client wrapping engine runner contract endpoints, worker management HTTP
+  client for starting/stopping runners on workers, SQL migration runner
+- Control plane HTTP route handlers (`control-plane/src/routes/`):
+  model CRUD (deploy/list/get/delete/sleep/wake), worker list/get, cluster status/memory,
+  SSE event stream, internal proxy wake trigger and routing map read endpoints
+- Full service wiring in control plane entry point: all services instantiated,
+  leader election started, worker discovery and memory budget refresh on startup
+- Control plane container image (`containers/control-plane/Dockerfile`):
+  multi-stage build (deps → build → runtime), non-root user, Node.js 22 slim base
+- Control plane test suite (54 tests): config loading and URL redaction, error hierarchy
+  serialization, state machine transition validation (16 valid + 8 invalid transitions),
+  placement pipeline (runner type/hardware/capacity/TP filtering, spread strategy, stale budget
+  rejection), LRU eviction engine (ordering, pinned exclusion, min-active-time, max-per-cycle,
+  circuit breaker)
+- Control plane admin API OpenAPI spec (`packages/contracts/specs/control-plane.yaml`):
+  model lifecycle CRUD (deploy/sleep/wake/delete), worker management, cluster state/memory,
+  SSE events stream, `ModelLifecycleState` enum (8 states), `WorkerStatus` and `ClusterEventType` enums
+- Generated TypeScript types from control plane spec (`packages/types/src/generated/control-plane.ts`)
+- Control plane Fastify scaffold (`control-plane/src/`): config from env vars, typed error hierarchy
+  (`ControlPlaneError` with error codes), Redis/PostgreSQL/runner HTTP clients, Prometheus metrics
+  (13 metrics: models, workers, memory, placement, eviction, sleep/wake, state transitions, leader),
+  health probes (`/healthz`, `/readyz`), structured JSON logging, graceful shutdown
 - Phase 2 project plan (`docs/project/phase2.md`): detailed task breakdown for control plane sleep/wake orchestration — 18 tasks covering OpenAPI specs, Fastify scaffold, PostgreSQL schema, model lifecycle state machine, placement pipeline, LRU eviction, sleep/wake coordination, routing map management, worker pool, leader election, health/metrics, container image, and integration tests
 - Backward-compatibility policy in ADR-005: semver rules for pre-1.0 specs, breaking vs. non-breaking change definitions, simultaneous rollout guarantee, version mismatch detection via startup logging (#13)
 - Runner BUSY state routing mapping in runner contract docs: BUSY sets endpoint weight to 0 (model stays ACTIVE, endpoint stays healthy), full RunnerState-to-ModelState mapping table (#14)
@@ -19,6 +125,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- SSE event stream now creates per-connection Redis subscriber via `subscriber.duplicate()` and calls `reply.hijack()` before writing to raw socket — prevents cross-client message leaks and Fastify warnings
+- Model deploy endpoint now rolls back DB record and Redis state on placement failure, validates request body types at runtime, and catches PostgreSQL unique constraint violations for race-safe duplicate detection
+- Database migrations now execute at startup (were imported but never called)
+- State transition metric (`stateTransitionsTotal`) now labels `from` correctly — Lua script returns `currentState|encoded` instead of only the new state
+- `ModelLifecycleService.getAllStates()` and `MemoryBudgetService.refreshAll()` now use SCAN instead of `KEYS *` to avoid blocking Redis in production
+- `WorkerPoolService.infoScanPattern()` now uses configurable `keyPrefix` instead of hardcoded namespace
+- `updateLastInference` now uses atomic Lua script instead of non-atomic GET-then-SET, preventing state clobber on concurrent transitions
+- `createModel` now uses `SET NX` for atomic existence check, preventing TOCTOU race on duplicate model creation
+- `RoutingMapService.addEndpoint/removeEndpoint/updateEndpointHealth` now use Lua scripts for atomic read-modify-write, preventing concurrent endpoint list corruption
+- K8s service account token now re-reads from disk every 60s instead of caching forever, preventing auth failures after projected token rotation
+- Internal `/api/v1/wake` response now includes required `accepted` field and uses `currentState` field per proxy-control-plane spec contract
+- `delay()` helper in sleep-wake service now cleans up abort listener when timer fires normally, preventing listener accumulation during long polling loops
 - OpenAPI validation script now fails on lint errors instead of silently swallowing them (#1)
 - Readiness probe now requires both Redis connection AND successful routing map load (#4)
 - Response hop-by-hop headers now filtered symmetrically with request-side filtering (#9)

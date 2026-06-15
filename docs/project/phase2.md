@@ -51,26 +51,26 @@ The control plane covers eight functional areas:
 
 ## Tasks
 
-| #    | Task                                          | Status  | Output                                                          |
-| ---- | --------------------------------------------- | ------- | --------------------------------------------------------------- |
-| 2.1  | Write control plane OpenAPI specs             | Pending | `packages/contracts/specs/control-plane.yaml`                   |
-| 2.2  | Write dashboard ↔ control plane OpenAPI spec  | Pending | `packages/contracts/specs/dashboard-control-plane.yaml`         |
-| 2.3  | Set up TypeScript codegen for new specs       | Pending | `packages/types/src/generated/`                                 |
-| 2.4  | Scaffold control plane service                | Pending | Compilable Fastify app with config + logging                    |
-| 2.5  | Design PostgreSQL schema and migrations       | Pending | `control-plane/migrations/`                                     |
-| 2.6  | Implement model lifecycle state machine       | Pending | State machine with transition validation + timeout recovery     |
-| 2.7  | Implement device memory budget tracking       | Pending | Redis-based memory budget reader + in-memory aggregation        |
-| 2.8  | Implement workload placement pipeline         | Pending | Four-stage placement with pluggable strategy                    |
-| 2.9  | Implement LRU eviction engine                 | Pending | Eviction engine with pluggable strategy interface               |
-| 2.10 | Implement sleep/wake coordination             | Pending | Runner contract client for sleep/wake/health/capabilities       |
-| 2.11 | Implement routing map management              | Pending | Redis routing map writer + pub/sub publisher                    |
-| 2.12 | Implement worker pool management              | Pending | Worker discovery, heartbeat detection, capability registry      |
-| 2.13 | Implement wake trigger + routing map APIs     | Pending | `POST /api/v1/wake`, `GET /api/v1/routing-map`                 |
-| 2.14 | Implement admin APIs                          | Pending | Model CRUD, worker management, cluster state endpoints          |
-| 2.15 | Implement leader election                     | Pending | K8s Lease-based leader/standby                                  |
-| 2.16 | Implement health and metrics                  | Pending | `/healthz`, `/readyz`, `/metrics`                               |
-| 2.17 | Build container image                         | Pending | `control-plane/Dockerfile`                                      |
-| 2.18 | Integration test suite                        | Pending | `control-plane/tests/`                                          |
+| #    | Task                                          | Status  | Output                                                                         |
+| ---- | --------------------------------------------- | ------- | ------------------------------------------------------------------------------ |
+| 2.1  | Write control plane OpenAPI specs             | Done    | `packages/contracts/specs/control-plane.yaml`                                  |
+| 2.2  | Write dashboard ↔ control plane OpenAPI spec  | Done    | Merged into 2.1 (single admin API spec + SSE events endpoint)                  |
+| 2.3  | Set up TypeScript codegen for new specs       | Done    | `packages/types/src/generated/control-plane.ts`                                |
+| 2.4  | Scaffold control plane service                | Done    | Compilable Fastify app with config, logging, errors, graceful shutdown         |
+| 2.5  | Design PostgreSQL schema and migrations       | Done    | `control-plane/migrations/001-initial-schema.sql`                              |
+| 2.6  | Implement model lifecycle state machine       | Done    | Atomic CAS transitions via Lua, SET NX for creation, SCAN for enumeration     |
+| 2.7  | Implement device memory budget tracking       | Done    | Redis-based reader + in-memory reservations + staleness detection              |
+| 2.8  | Implement workload placement pipeline         | Done    | Four-stage placement with MostAvailableCapacity spread strategy                |
+| 2.9  | Implement LRU eviction engine                 | Done    | LRU with circuit breaker, max-per-cycle, pinned exclusion, min-active-time    |
+| 2.10 | Implement sleep/wake coordination             | Done    | Runner HTTP client + drain polling + wake polling with timeout                 |
+| 2.11 | Implement routing map management              | Done    | Atomic Lua scripts for endpoint add/remove/update + MULTI/EXEC for state      |
+| 2.12 | Implement worker pool management              | Done    | SCAN-based discovery, heartbeat detection (ONLINE/DEGRADED/OFFLINE)            |
+| 2.13 | Implement wake trigger + routing map APIs     | Done    | `POST /api/v1/wake` (matches spec contract), `GET /api/v1/routing-map`        |
+| 2.14 | Implement admin APIs                          | Done    | Model CRUD, worker list/get, cluster status/memory, SSE events                 |
+| 2.15 | Implement leader election                     | Done    | K8s Lease API with local dev mode fallback, token refresh every 60s            |
+| 2.16 | Implement health and metrics                  | Done    | `/healthz`, `/readyz`, `/metrics` with 13 Prometheus metrics                   |
+| 2.17 | Build container image                         | Done    | `containers/control-plane/Dockerfile` (multi-stage, non-root)                  |
+| 2.18 | Integration test suite                        | Done    | 128 unit tests + 7 integration tests (real Redis + PostgreSQL)                 |
 
 ## Task Details
 

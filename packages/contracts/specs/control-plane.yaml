@@ -1,0 +1,1172 @@
+openapi: 3.1.0
+info:
+  title: Sardeenz Control Plane API
+  version: 0.1.0
+  description: |
+    Admin and orchestration API for the Sardeenz control plane. This is the
+    single API surface consumed by both the admin dashboard backend and
+    operators managing the cluster.
+
+    ## Interface Areas
+
+    1. **Model lifecycle management** — deploy, sleep, wake, stop models
+    2. **Worker management** — list workers and their capabilities
+    3. **Cluster state** — aggregate cluster health and capacity
+    4. **Events** — SSE stream of real-time cluster events
+
+    ## Conventions
+
+    - Endpoint paths: `kebab-case`
+    - Schema names: `PascalCase`
+    - Field names: `camelCase`
+    - Enum values: `SCREAMING_SNAKE_CASE`
+
+tags:
+  - name: Models
+    description: |
+      Model lifecycle management. Deploy, query, sleep, wake, and stop
+      models across the worker pool.
+  - name: Workers
+    description: |
+      Worker pool monitoring. List workers, query capabilities, and
+      inspect per-device memory usage.
+  - name: Cluster
+    description: |
+      Aggregate cluster state. Health, capacity, and summary statistics.
+  - name: Events
+    description: |
+      Real-time event stream for live cluster monitoring.
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Models
+  # ---------------------------------------------------------------------------
+
+  /api/v1/models:
+    post:
+      operationId: deployModel
+      summary: Deploy a new model
+      description: |
+        Submit a model deployment request. The control plane runs the
+        placement pipeline to find a suitable worker, starts the runner,
+        and tracks the model through its lifecycle.
+
+        If no worker has sufficient capacity, the control plane triggers
+        eviction of least-recently-used models before retrying placement.
+
+        The response returns immediately with the deployment status. The
+        model transitions through `PENDING` → `STARTING` → `ACTIVE`
+        asynchronously. Monitor progress via the events stream or by
+        polling `GET /api/v1/models/{modelName}`.
+
+        Returns `409` if a model with the same name already exists.
+      tags:
+        - Models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelDeploymentRequest"
+      responses:
+        "202":
+          description: |
+            Deployment accepted. The model is now in `PENDING` state and
+            the placement pipeline is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelDeploymentResponse"
+        "400":
+          description: Invalid deployment request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A model with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            Control plane cannot accept deployments (not leader, or
+            required services unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      operationId: listModels
+      summary: List all models
+      description: |
+        Returns all models with their current lifecycle state and summary
+        information. Combines runtime state from Redis with configuration
+        from PostgreSQL.
+      tags:
+        - Models
+      parameters:
+        - name: state
+          in: query
+          required: false
+          description: Filter by lifecycle state
+          schema:
+            $ref: "#/components/schemas/ModelLifecycleState"
+      responses:
+        "200":
+          description: Model list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - models
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModelInfo"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}:
+    get:
+      operationId: getModel
+      summary: Get model details
+      description: |
+        Returns detailed information about a specific model including its
+        current lifecycle state, worker assignment, device memory usage,
+        runner capabilities, and deployment configuration.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Model details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelDetail"
+        "404":
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: deleteModel
+      summary: Stop and remove a model
+      description: |
+        Initiates model removal. The control plane transitions the model
+        through `DRAINING` → `STOPPING` → `STOPPED`, then removes it from
+        the routing map and PostgreSQL.
+
+        If the model is `SLEEPING`, it transitions directly to `STOPPING`.
+        If it is `ACTIVE`, it drains first to allow in-flight requests to
+        complete.
+
+        Returns `202` immediately — the removal happens asynchronously.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Model removal accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelActionResponse"
+        "404":
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model is already stopping or stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/sleep:
+    post:
+      operationId: sleepModel
+      summary: Put a model to sleep
+      description: |
+        Admin-initiated sleep. Transitions the model through `DRAINING` →
+        `SLEEPING`. This is separate from eviction-triggered sleep — it's
+        an explicit operator action.
+
+        Only models in `ACTIVE` state can be put to sleep. Returns `409`
+        for models in other states.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Sleep request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelActionResponse"
+        "404":
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model is not in a state that can be put to sleep
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/wake:
+    post:
+      operationId: wakeModel
+      summary: Wake a sleeping model
+      description: |
+        Admin-initiated wake. Transitions the model from `SLEEPING` →
+        `STARTING` → `ACTIVE`. This is separate from proxy-triggered wake
+        — it's an explicit operator action.
+
+        Only models in `SLEEPING` state can be woken. Models already in
+        `STARTING` state return `202` idempotently.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Wake request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelActionResponse"
+        "404":
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model is not in a wakeable state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Workers
+  # ---------------------------------------------------------------------------
+
+  /api/v1/workers:
+    get:
+      operationId: listWorkers
+      summary: List all workers
+      description: |
+        Returns all registered workers with their capabilities, running
+        models, and aggregate memory usage.
+      tags:
+        - Workers
+      responses:
+        "200":
+          description: Worker list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - workers
+                properties:
+                  workers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkerInfo"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/workers/{workerId}:
+    get:
+      operationId: getWorker
+      summary: Get worker details
+      description: |
+        Returns detailed information about a specific worker including
+        per-device memory breakdown, running runners, and capabilities.
+      tags:
+        - Workers
+      parameters:
+        - name: workerId
+          in: path
+          required: true
+          description: The worker identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Worker details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDetail"
+        "404":
+          description: Worker not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Cluster
+  # ---------------------------------------------------------------------------
+
+  /api/v1/cluster/status:
+    get:
+      operationId: getClusterStatus
+      summary: Get cluster status
+      description: |
+        Returns aggregate cluster state including total/used/free device
+        memory, model counts by state, worker counts, and leader status.
+      tags:
+        - Cluster
+      responses:
+        "200":
+          description: Cluster status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterStatus"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/cluster/memory:
+    get:
+      operationId: getClusterMemory
+      summary: Get cluster memory breakdown
+      description: |
+        Returns per-worker, per-device memory breakdown across the entire
+        cluster. Used by the dashboard for VRAM budget visualization.
+      tags:
+        - Cluster
+      responses:
+        "200":
+          description: Cluster memory breakdown retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterMemory"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Events
+  # ---------------------------------------------------------------------------
+
+  /api/v1/events:
+    get:
+      operationId: streamEvents
+      summary: Stream cluster events
+      description: |
+        Server-Sent Events (SSE) endpoint for real-time cluster monitoring.
+        The dashboard subscribes to this stream for live updates.
+
+        Event types:
+        - `model.state_changed` — model lifecycle state transition
+        - `model.deployed` — new model deployed
+        - `model.removed` — model removed
+        - `worker.joined` — new worker registered
+        - `worker.left` — worker deregistered
+        - `worker.memory_updated` — worker memory report received
+        - `eviction.triggered` — eviction cycle started
+        - `placement.completed` — placement pipeline finished
+
+        The stream sends a `ping` event every 30 seconds to keep the
+        connection alive.
+      tags:
+        - Events
+      responses:
+        "200":
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ClusterEvent"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    # -------------------------------------------------------------------------
+    # Enums
+    # -------------------------------------------------------------------------
+
+    ModelLifecycleState:
+      type: string
+      description: |
+        Lifecycle state of a model as managed by the control plane. This is
+        a superset of the proxy-facing `ModelState` — it includes states
+        that are only relevant to the control plane's orchestration logic.
+
+        - `PENDING` — deployment accepted, placement pipeline not yet started
+        - `STARTING` — runner is starting up, loading model weights
+        - `ACTIVE` — model is loaded and serving inference
+        - `DRAINING` — model is being drained before sleep or shutdown
+        - `SLEEPING` — model weights offloaded, runner idle
+        - `STOPPING` — runner is being stopped
+        - `STOPPED` — runner stopped, model removed from routing
+        - `ERROR` — unrecoverable error, requires operator intervention
+      enum:
+        - PENDING
+        - STARTING
+        - ACTIVE
+        - DRAINING
+        - SLEEPING
+        - STOPPING
+        - STOPPED
+        - ERROR
+
+    WorkerStatus:
+      type: string
+      description: |
+        Health status of a worker as determined by heartbeat monitoring.
+
+        - `ONLINE` — worker heartbeat is current
+        - `DEGRADED` — worker heartbeat is late but within grace period
+        - `OFFLINE` — worker heartbeat has expired
+      enum:
+        - ONLINE
+        - DEGRADED
+        - OFFLINE
+
+    ClusterEventType:
+      type: string
+      description: |
+        Type of cluster event emitted on the SSE stream.
+      enum:
+        - MODEL_STATE_CHANGED
+        - MODEL_DEPLOYED
+        - MODEL_REMOVED
+        - WORKER_JOINED
+        - WORKER_LEFT
+        - WORKER_MEMORY_UPDATED
+        - EVICTION_TRIGGERED
+        - PLACEMENT_COMPLETED
+
+    # -------------------------------------------------------------------------
+    # Models — Requests / Responses
+    # -------------------------------------------------------------------------
+
+    ModelDeploymentRequest:
+      type: object
+      description: |
+        Request to deploy a new model. The control plane uses this to run
+        the placement pipeline and start a runner.
+      required:
+        - modelName
+        - runnerType
+        - modelPath
+        - requiredMemory
+      properties:
+        modelName:
+          type: string
+          description: |
+            Model name used as the routing key. Must be unique across the
+            cluster. This is what clients specify in the `model` field of
+            OpenAI API requests.
+          examples:
+            - "meta-llama/Llama-3.1-8B-Instruct"
+        runnerType:
+          type: string
+          description: |
+            Required runner type. Must match a registered runner type in the
+            worker pool (e.g., `vllm`, `triton`, `mlserver`).
+          examples:
+            - "vllm"
+        modelPath:
+          type: string
+          description: |
+            Path to model weights on shared storage (CephFS/NFS). Runners
+            load weights from this path.
+          examples:
+            - "/models/meta-llama/Llama-3.1-8B-Instruct"
+        requiredMemory:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Estimated device memory requirement in bytes. Used by the
+            placement pipeline for capacity filtering.
+          examples:
+            - 17179869184
+        deviceType:
+          type: string
+          description: |
+            Required device type. If not specified, any compatible device
+            type is accepted.
+          examples:
+            - "CUDA"
+        tensorParallel:
+          type: integer
+          minimum: 1
+          default: 1
+          description: |
+            Tensor parallelism degree. The model will be split across this
+            many devices on a single worker.
+        engineConfig:
+          type: object
+          description: |
+            Engine-specific configuration passed through to the runner.
+            The control plane does not interpret this — it is stored in
+            PostgreSQL and forwarded when starting the runner.
+          additionalProperties: true
+        pinned:
+          type: boolean
+          default: false
+          description: |
+            If true, the model cannot be evicted by the LRU eviction
+            engine. It must be explicitly stopped by an operator.
+
+    ModelDeploymentResponse:
+      type: object
+      description: |
+        Response after a deployment request is accepted. The model is now
+        in `PENDING` state.
+      required:
+        - modelName
+        - state
+      properties:
+        modelName:
+          type: string
+          description: The deployed model name.
+        state:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        message:
+          type: string
+          description: Human-readable status message.
+
+    ModelActionResponse:
+      type: object
+      description: |
+        Response for model lifecycle actions (sleep, wake, delete).
+      required:
+        - modelName
+        - state
+      properties:
+        modelName:
+          type: string
+          description: The affected model name.
+        state:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        previousState:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        message:
+          type: string
+          description: Human-readable status message.
+
+    # -------------------------------------------------------------------------
+    # Models — Info / Detail
+    # -------------------------------------------------------------------------
+
+    ModelInfo:
+      type: object
+      description: |
+        Summary information for a model in the list view.
+      required:
+        - modelName
+        - state
+        - runnerType
+        - createdAt
+      properties:
+        modelName:
+          type: string
+          description: Model name (routing key).
+        state:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        runnerType:
+          type: string
+          description: Runner type serving this model.
+        workerId:
+          type: string
+          description: |
+            Worker where the model is deployed. Null if not yet placed
+            or if the model is stopped.
+        requiredMemory:
+          type: integer
+          format: int64
+          description: Configured device memory requirement in bytes.
+        currentMemory:
+          type: integer
+          format: int64
+          description: |
+            Actual device memory consumption in bytes, from the runner's
+            last memory report. Null if the model is not running.
+        lastInferenceAt:
+          type: string
+          format: date-time
+          description: |
+            Timestamp of the last inference request. Used for LRU eviction
+            ordering. Null if the model has never served inference.
+        pinned:
+          type: boolean
+          description: Whether the model is pinned (non-evictable).
+        createdAt:
+          type: string
+          format: date-time
+          description: When the model was deployed.
+
+    ModelDetail:
+      type: object
+      description: |
+        Detailed information about a single model including deployment
+        configuration, runtime state, and placement details.
+      required:
+        - modelName
+        - state
+        - runnerType
+        - modelPath
+        - requiredMemory
+        - createdAt
+        - updatedAt
+      properties:
+        modelName:
+          type: string
+          description: Model name (routing key).
+        state:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        runnerType:
+          type: string
+          description: Runner type serving this model.
+        modelPath:
+          type: string
+          description: Path to model weights on shared storage.
+        requiredMemory:
+          type: integer
+          format: int64
+          description: Configured device memory requirement in bytes.
+        currentMemory:
+          type: integer
+          format: int64
+          description: |
+            Actual device memory consumption in bytes, from the runner's
+            last memory report.
+        deviceType:
+          type: string
+          description: Required device type.
+        tensorParallel:
+          type: integer
+          description: Tensor parallelism degree.
+        engineConfig:
+          type: object
+          description: Engine-specific configuration.
+          additionalProperties: true
+        pinned:
+          type: boolean
+          description: Whether the model is pinned (non-evictable).
+        workerId:
+          type: string
+          description: Assigned worker identifier.
+        runnerEndpoint:
+          type: object
+          description: Runner endpoint details (host, port).
+          properties:
+            host:
+              type: string
+              description: Runner hostname or IP.
+            port:
+              type: integer
+              description: Runner port.
+        progress:
+          type: object
+          description: |
+            Loading progress when the model is in `STARTING` state.
+          properties:
+            phase:
+              type: string
+              description: Current loading phase.
+            percentComplete:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Overall loading completion percentage.
+            message:
+              type: string
+              description: Human-readable progress message.
+            estimatedRemainingSeconds:
+              type: integer
+              minimum: 0
+              description: Estimated seconds until loading completes.
+        lastInferenceAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last inference request.
+        stateChangedAt:
+          type: string
+          format: date-time
+          description: When the model last changed state.
+        errorMessage:
+          type: string
+          description: Error details when the model is in `ERROR` state.
+        createdAt:
+          type: string
+          format: date-time
+          description: When the model was deployed.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the model configuration was last updated.
+
+    # -------------------------------------------------------------------------
+    # Workers
+    # -------------------------------------------------------------------------
+
+    WorkerInfo:
+      type: object
+      description: |
+        Summary information for a worker in the list view.
+      required:
+        - workerId
+        - status
+        - devices
+      properties:
+        workerId:
+          type: string
+          description: Unique worker identifier.
+        status:
+          $ref: "#/components/schemas/WorkerStatus"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceInfo"
+          description: Compute devices available on this worker.
+        modelCount:
+          type: integer
+          minimum: 0
+          description: Number of models currently deployed on this worker.
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last heartbeat from this worker.
+
+    WorkerDetail:
+      type: object
+      description: |
+        Detailed information about a specific worker including per-device
+        memory breakdown and running models.
+      required:
+        - workerId
+        - status
+        - devices
+        - models
+      properties:
+        workerId:
+          type: string
+          description: Unique worker identifier.
+        status:
+          $ref: "#/components/schemas/WorkerStatus"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceInfo"
+          description: Compute devices with detailed memory breakdown.
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerModelInfo"
+          description: Models currently deployed on this worker.
+        runnerCapabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerRunnerCapability"
+          description: Runner types available on this worker.
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last heartbeat from this worker.
+        joinedAt:
+          type: string
+          format: date-time
+          description: When this worker joined the pool.
+
+    DeviceInfo:
+      type: object
+      description: |
+        Information about a single compute device on a worker.
+      required:
+        - deviceIndex
+        - deviceType
+        - memoryTotalBytes
+        - memoryUsedBytes
+        - memoryAvailableBytes
+      properties:
+        deviceIndex:
+          type: integer
+          minimum: 0
+          description: Zero-based device index.
+        deviceType:
+          type: string
+          description: Device type (CUDA, ROCM, CPU, OTHER).
+        memoryTotalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total device memory capacity in bytes.
+        memoryUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Currently used device memory in bytes.
+        memoryAvailableBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Available device memory in bytes.
+        memoryReservedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Memory reserved for models being started (not yet reflected
+            in the used count).
+
+    WorkerModelInfo:
+      type: object
+      description: |
+        Summary of a model running on a specific worker.
+      required:
+        - modelName
+        - state
+      properties:
+        modelName:
+          type: string
+          description: Model name.
+        state:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        memoryUsedBytes:
+          type: integer
+          format: int64
+          description: Device memory consumed by this model.
+
+    WorkerRunnerCapability:
+      type: object
+      description: |
+        Runner type available on a worker.
+      required:
+        - runnerType
+        - engineName
+        - supportedModelTypes
+        - supportedDeviceTypes
+      properties:
+        runnerType:
+          type: string
+          description: Runner type identifier.
+        engineName:
+          type: string
+          description: Human-readable engine name.
+        supportedModelTypes:
+          type: array
+          items:
+            type: string
+          description: Workload types this runner can serve.
+        supportedDeviceTypes:
+          type: array
+          items:
+            type: string
+          description: Device types this runner can use.
+        supportedSleepLevels:
+          type: array
+          items:
+            type: string
+          description: Sleep levels supported by this runner.
+
+    # -------------------------------------------------------------------------
+    # Cluster
+    # -------------------------------------------------------------------------
+
+    ClusterStatus:
+      type: object
+      description: |
+        Aggregate cluster health and capacity.
+      required:
+        - isLeader
+        - workerCount
+        - modelCounts
+        - memory
+      properties:
+        isLeader:
+          type: boolean
+          description: Whether this instance is the active leader.
+        workerCount:
+          type: integer
+          minimum: 0
+          description: Total number of registered workers.
+        workersOnline:
+          type: integer
+          minimum: 0
+          description: Number of workers with current heartbeat.
+        modelCounts:
+          type: object
+          description: Model counts by lifecycle state.
+          required:
+            - total
+          properties:
+            total:
+              type: integer
+              minimum: 0
+              description: Total number of models.
+            active:
+              type: integer
+              minimum: 0
+              description: Models in ACTIVE state.
+            sleeping:
+              type: integer
+              minimum: 0
+              description: Models in SLEEPING state.
+            starting:
+              type: integer
+              minimum: 0
+              description: Models in STARTING state.
+            error:
+              type: integer
+              minimum: 0
+              description: Models in ERROR state.
+            other:
+              type: integer
+              minimum: 0
+              description: Models in other states (PENDING, DRAINING, STOPPING).
+        memory:
+          $ref: "#/components/schemas/ClusterMemorySummary"
+
+    ClusterMemorySummary:
+      type: object
+      description: |
+        Aggregate device memory across the cluster.
+      required:
+        - totalBytes
+        - usedBytes
+        - availableBytes
+      properties:
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total device memory across all workers and devices.
+        usedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Used device memory across all workers and devices.
+        availableBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Available device memory across all workers and devices.
+        reservedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Reserved device memory for models being started.
+
+    ClusterMemory:
+      type: object
+      description: |
+        Per-worker, per-device memory breakdown for VRAM budget
+        visualization.
+      required:
+        - workers
+        - summary
+      properties:
+        workers:
+          type: array
+          items:
+            type: object
+            required:
+              - workerId
+              - devices
+            properties:
+              workerId:
+                type: string
+                description: Worker identifier.
+              devices:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceInfo"
+                description: Per-device memory breakdown.
+              models:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkerModelInfo"
+                description: Models consuming memory on this worker.
+        summary:
+          $ref: "#/components/schemas/ClusterMemorySummary"
+
+    # -------------------------------------------------------------------------
+    # Events
+    # -------------------------------------------------------------------------
+
+    ClusterEvent:
+      type: object
+      description: |
+        An event emitted on the SSE stream. The `type` field determines
+        which data fields are populated.
+      required:
+        - type
+        - timestamp
+      properties:
+        type:
+          $ref: "#/components/schemas/ClusterEventType"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the event occurred.
+        modelName:
+          type: string
+          description: Affected model name (for model events).
+        workerId:
+          type: string
+          description: Affected worker ID (for worker events).
+        state:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        previousState:
+          $ref: "#/components/schemas/ModelLifecycleState"
+        message:
+          type: string
+          description: Human-readable event description.
+        data:
+          type: object
+          description: Event-specific data.
+          additionalProperties: true
+
+    # -------------------------------------------------------------------------
+    # Common
+    # -------------------------------------------------------------------------
+
+    ErrorResponse:
+      type: object
+      description: Error response returned by any endpoint on failure.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+        code:
+          type: string
+          description: Machine-readable error code for programmatic handling.
+        details:
+          type: object
+          description: Additional structured error details.
+          additionalProperties: true

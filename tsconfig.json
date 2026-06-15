@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "packages/types" }, { "path": "packages/utils" }]
+  "references": [
+    { "path": "packages/types" },
+    { "path": "packages/utils" },
+    { "path": "control-plane" }
+  ]
 }

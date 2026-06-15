@@ -48,12 +48,16 @@ export type paths = {
         };
         /**
          * Get the full routing map
-         * @description Returns the complete routing map as a JSON object. This is a fallback
-         *     for initial proxy bootstrap or recovery when the Redis-based routing
-         *     map is unavailable.
+         * @description Returns the complete routing map as a JSON object. This is a planned
+         *     fallback for initial proxy bootstrap or recovery when the Redis-based
+         *     routing map is unavailable.
+         *
+         *     **Status:** This endpoint will be implemented by the control plane in
+         *     Phase 2. The proxy does not currently use this fallback — it relies
+         *     exclusively on Redis for routing map data.
          *
          *     In normal operation, the proxy reads the routing map from Redis/Valkey
-         *     and receives updates via pub/sub. This endpoint exists for:
+         *     and receives updates via pub/sub. This endpoint will exist for:
          *
          *     1. **Bootstrap** — the proxy can seed its in-memory cache before
          *        Redis pub/sub is fully connected

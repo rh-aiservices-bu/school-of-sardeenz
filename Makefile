@@ -1,8 +1,8 @@
 CARGO := $(shell command -v cargo 2>/dev/null)
 COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podman-compose"; elif command -v podman >/dev/null 2>&1; then echo "podman compose"; else echo "docker compose"; fi)
 
-.PHONY: all lint lint-specs format format-check typecheck test test-coverage \
-        codegen clean dev-cp dev-dashboard dev-proxy services services-stop
+.PHONY: all lint lint-specs format format-check typecheck test test-integration \
+        test-coverage codegen clean dev-cp dev-dashboard dev-proxy services services-stop
 
 all: typecheck lint
 
@@ -46,6 +46,9 @@ test:
 ifdef CARGO
 	cd proxy && cargo test
 endif
+
+test-integration: ## Run integration tests (requires compose services)
+	npm run test:integration -w @sardeenz/control-plane
 
 test-coverage:
 	npm run test:coverage
