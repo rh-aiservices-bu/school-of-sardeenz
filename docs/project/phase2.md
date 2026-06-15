@@ -70,7 +70,7 @@ The control plane covers eight functional areas:
 | 2.15 | Implement leader election                     | Done    | K8s Lease API with local dev mode fallback, token refresh every 60s            |
 | 2.16 | Implement health and metrics                  | Done    | `/healthz`, `/readyz`, `/metrics` with 13 Prometheus metrics                   |
 | 2.17 | Build container image                         | Done    | `containers/control-plane/Dockerfile` (multi-stage, non-root)                  |
-| 2.18 | Integration test suite                        | Partial | 54 unit tests passing; integration tests against real Redis/PG deferred        |
+| 2.18 | Integration test suite                        | Done    | 128 unit tests + 7 integration tests (real Redis + PostgreSQL)                 |
 
 ## Task Details
 

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Phase 2 (control plane sleep/wake orchestration) marked complete — 18/18 tasks done,
+  128 unit tests + 7 integration tests passing
+
 ### Fixed
 
 - LRU eviction now reads per-model inference timestamps from Redis (`{prefix}:inference:last:{model}`)
