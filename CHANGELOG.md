@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- SSE integration aligned with control plane event channel and payload shape (#44):
+  - BFF now subscribes to `routing-updates` Redis channel (matching the control plane)
+    instead of the non-existent `events` channel
+  - BFF transforms `RoutingMapUpdate` payloads into `ClusterEvent` shape before relaying
+    to the frontend, mapping `RoutingMapUpdateType` values to `ClusterEventType`
+  - `useEventStream()` moved from `ClusterOverview` to app scope via React context so all
+    pages benefit from real-time SSE updates and query invalidation
 - Cross-model review fixes for Phase 3 dashboard:
   - SSE event stream now handles `EVICTION_TRIGGERED` and `PLACEMENT_COMPLETED` events
     (previously caused stale UI until next poll cycle)

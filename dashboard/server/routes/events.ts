@@ -1,19 +1,73 @@
 import type { FastifyInstance } from 'fastify';
+import { ClusterEventType, RoutingMapUpdateType, type ModelLifecycleState } from '@sardeenz/types';
+import type { ControlPlaneComponents, ProxyControlPlaneComponents } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
+
+type RoutingMapUpdate = ProxyControlPlaneComponents['schemas']['RoutingMapUpdate'];
+type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
 const PING_INTERVAL_MS = 30_000;
 
+/**
+ * The control plane publishes `RoutingMapUpdate` payloads on the
+ * `routing-updates` Redis channel.  The dashboard frontend expects
+ * `ClusterEvent` objects.  This function bridges the two schemas.
+ */
+export function toClusterEvent(update: RoutingMapUpdate): ClusterEvent {
+  const base: Pick<ClusterEvent, 'timestamp' | 'modelName'> = {
+    timestamp: update.timestamp,
+    modelName: update.modelName,
+  };
+
+  // ModelState is a strict subset of ModelLifecycleState (same string values)
+  // so this cast is safe at runtime.
+  const state = update.state as ModelLifecycleState | undefined;
+
+  switch (update.type) {
+    case RoutingMapUpdateType.MODEL_STATE_CHANGED:
+      return { ...base, type: ClusterEventType.MODEL_STATE_CHANGED, state };
+    case RoutingMapUpdateType.MODEL_ADDED:
+      return { ...base, type: ClusterEventType.MODEL_DEPLOYED, state };
+    case RoutingMapUpdateType.MODEL_REMOVED:
+      return { ...base, type: ClusterEventType.MODEL_REMOVED };
+    case RoutingMapUpdateType.ENDPOINT_ADDED:
+      return {
+        ...base,
+        type: ClusterEventType.MODEL_STATE_CHANGED,
+        message: `Endpoint added: ${update.endpoint?.host}:${update.endpoint?.port}`,
+        data: update.endpoint ? { endpoint: update.endpoint } : undefined,
+      };
+    case RoutingMapUpdateType.ENDPOINT_REMOVED:
+      return {
+        ...base,
+        type: ClusterEventType.MODEL_STATE_CHANGED,
+        message: `Endpoint removed: ${update.endpoint?.host}:${update.endpoint?.port}`,
+        data: update.endpoint ? { endpoint: update.endpoint } : undefined,
+      };
+    case RoutingMapUpdateType.ENDPOINT_UPDATED:
+      return {
+        ...base,
+        type: ClusterEventType.MODEL_STATE_CHANGED,
+        message: `Endpoint updated: ${update.endpoint?.host}:${update.endpoint?.port}`,
+        data: update.endpoint ? { endpoint: update.endpoint } : undefined,
+      };
+    default:
+      return { ...base, type: ClusterEventType.MODEL_STATE_CHANGED };
+  }
+}
+
 export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get('/api/events', async (request, reply) => {
-    const channel = `${deps.redis.keyPrefix}:events`;
+    const channel = `${deps.redis.keyPrefix}:routing-updates`;
     const subscriber = deps.redis.createSubscriber();
 
     // Subscribe to Redis BEFORE writing SSE headers so failures return a proper error
     try {
       subscriber.on('message', (_chan: string, message: string): void => {
         try {
-          JSON.parse(message);
-          reply.raw.write(`data: ${message}\n\n`);
+          const update = JSON.parse(message) as RoutingMapUpdate;
+          const event = toClusterEvent(update);
+          reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
         } catch {
           app.log.warn({ message }, 'Received non-JSON event from Redis pub/sub — skipping');
         }
