@@ -401,6 +401,45 @@ async fn test_inference_timestamp_debounce() {
 }
 
 #[tokio::test]
+async fn test_inference_timestamp_written_on_5xx() {
+    let mut harness = RedisTestHarness::new().await;
+    let model = "test/5xx-timestamp-model";
+    // Runner that always returns 500
+    let runner = MockRunner::spawn_failing(model, 1000).await;
+
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    // Send a request that will get a 500 from the runner
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(runner.request_count(), 1);
+
+    // Wait for the fire-and-forget write
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Timestamp should still be written — model is actively receiving traffic
+    let ts_key = format!("{}:inference:last:{}", harness.prefix, model);
+    let value: Option<String> = harness.conn.get(&ts_key).await.unwrap();
+    assert!(
+        value.is_some(),
+        "expected inference timestamp even on 5xx response"
+    );
+
+    let _: () = harness.conn.del(&ts_key).await.unwrap_or(());
+    harness.cleanup().await;
+}
+
+#[tokio::test]
 async fn test_redis_readiness_lifecycle() {
     let mut harness = RedisTestHarness::new().await;
     let client = reqwest::Client::new();

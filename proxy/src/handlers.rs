@@ -98,6 +98,10 @@ async fn handle_inference_inner(
 
     let ep_key = format!("{}:{}", endpoint.host, endpoint.port);
 
+    // Record inference recency regardless of upstream outcome — a model
+    // receiving traffic (even 5xx) is still actively in use for LRU purposes.
+    state.inference_tracker.record(&model_name).await;
+
     match state
         .forwarding_client
         .forward(&endpoint, path, parts.method, &parts.headers, body_bytes)
@@ -108,7 +112,6 @@ async fn handle_inference_inner(
                 state.circuit_breaker.record_failure(&ep_key).await;
             } else {
                 state.circuit_breaker.record_success(&ep_key).await;
-                state.inference_tracker.record(&model_name).await;
             }
             Ok(response)
         }
