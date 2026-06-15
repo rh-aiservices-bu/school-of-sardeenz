@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Model Management pages (Task 3.7) — model list at `/models` with PF6 Table, sortable columns,
+  multi-select state filter, kebab dropdown actions (sleep/wake/delete with confirmation modals),
+  empty state with deploy button; deploy form at `/models/deploy` with all fields (model name,
+  runner type, model path, required memory in GiB, device type, tensor parallelism, pinned switch,
+  engine config JSON), inline validation, GiB→bytes conversion, and navigation on success/cancel
+- Cluster Overview page (Task 3.6) — full implementation of `/` landing page with four summary
+  cards (Workers online/total with green/red status label, Models with active/sleeping counts,
+  GPU Memory with PF6 `Progress` bar and available bytes, Alerts with error model + offline worker
+  counts); `ChartDonut` from `@patternfly/react-charts/victory` for VRAM used/available donut
+  with inline legend; model state breakdown card listing all `ModelLifecycleState` values with
+  colored `StateLabel` and counts; live recent-events feed (last 20) from `useEventStream()` with
+  formatted relative timestamps, colored event-type `Label`, and SSE connection status indicator;
+  loading spinner and error `Alert` states; PF6 semantic design tokens throughout
+- Metrics Dashboard page (Task 3.11) — full implementation of `/metrics` with PF6 `ToggleGroup`
+  time range selector (15m/1h/6h/24h, default 1h), `@patternfly/react-charts` line charts for
+  request latency (p95) and throughput, device memory summary table, and proper loading/empty
+  states; Prometheus range/instant response parsing with TypeScript type guards; step size
+  auto-selected per time range; `ChartVoronoiContainer` hover tooltips; `formatBytes` for memory
+- Dashboard container image (Task 3.14) — multi-stage Dockerfile at `containers/dashboard/`
+  building frontend (Vite) and BFF (TypeScript) into a single image; `@fastify/static` serves
+  the SPA from `dist/client/` in production with SPA fallback routing; HEALTHCHECK on `/healthz`
+- Dashboard design document (Task 3.13) — architecture narrative at
+  `docs/architecture/components/dashboard.md` covering BFF pattern, data flow, Redis fallback,
+  SSE relay, state management, configuration, and testing strategy
 - Dashboard BFF data aggregation layer (Task 3.4) — fleshed out `ControlPlaneClient` with typed
   methods (`listModels`, `getModel`, `deployModel`, `deleteModel`, `sleepModel`, `wakeModel`,
   `listWorkers`, `getWorker`, `getClusterStatus`, `getClusterMemory`) that wrap `proxyRequest`

@@ -1,12 +1,658 @@
-import { Content, PageSection } from '@patternfly/react-core';
+import {
+  Alert,
+  Card,
+  CardBody,
+  CardTitle,
+  Content,
+  Flex,
+  FlexItem,
+  Gallery,
+  Label,
+  PageSection,
+  Progress,
+  Spinner,
+  Title,
+} from '@patternfly/react-core';
+import { ChartDonut } from '@patternfly/react-charts/victory';
+import {
+  CubesIcon,
+  ExclamationTriangleIcon,
+  MemoryIcon,
+  ServerIcon,
+} from '@patternfly/react-icons';
+import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
+import { useClusterStatus } from '../../hooks/useCluster';
+import { useEventStream } from '../../hooks/useEventStream';
+import { StateLabel } from '../../components/StateLabel';
+import { formatBytes, formatRelativeTime } from '../../utils/format';
 
+type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
+type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
+
+// ---------------------------------------------------------------------------
+// Summary card: Workers
+// ---------------------------------------------------------------------------
+function WorkersCard({ status }: { status: ClusterStatus }) {
+  const online = status.workersOnline ?? 0;
+  const total = status.workerCount;
+  const color: 'green' | 'red' = online === total && total > 0 ? 'green' : 'red';
+
+  return (
+    <Card isCompact>
+      <CardTitle>
+        <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+          <FlexItem>
+            <ServerIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
+          </FlexItem>
+          <FlexItem>Workers</FlexItem>
+        </Flex>
+      </CardTitle>
+      <CardBody>
+        <span
+          style={{
+            fontSize: 'var(--pf-t--global--font--size--2xl)',
+            fontWeight: 'var(--pf-t--global--font--weight--bold)',
+          }}
+        >
+          {online}
+        </span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> / {total}</span>
+        <div style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}>
+          <Label color={color} isCompact>
+            {online === total && total > 0 ? 'All online' : `${total - online} offline`}
+          </Label>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Summary card: Models
+// ---------------------------------------------------------------------------
+function ModelsCard({ status }: { status: ClusterStatus }) {
+  const { active = 0, sleeping = 0, total } = status.modelCounts;
+
+  return (
+    <Card isCompact>
+      <CardTitle>
+        <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+          <FlexItem>
+            <CubesIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
+          </FlexItem>
+          <FlexItem>Models</FlexItem>
+        </Flex>
+      </CardTitle>
+      <CardBody>
+        <span
+          style={{
+            fontSize: 'var(--pf-t--global--font--size--2xl)',
+            fontWeight: 'var(--pf-t--global--font--weight--bold)',
+          }}
+        >
+          {total}
+        </span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> total</span>
+        <div
+          style={{
+            marginTop: 'var(--pf-t--global--spacer--xs)',
+            display: 'flex',
+            gap: 'var(--pf-t--global--spacer--xs)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Label color="green" isCompact>
+            {active} active
+          </Label>
+          <Label color="blue" isCompact>
+            {sleeping} sleeping
+          </Label>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Summary card: GPU Memory
+// ---------------------------------------------------------------------------
+function GpuMemoryCard({ status }: { status: ClusterStatus }) {
+  const { totalBytes, usedBytes, availableBytes } = status.memory;
+  const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+
+  return (
+    <Card isCompact>
+      <CardTitle>
+        <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+          <FlexItem>
+            <MemoryIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
+          </FlexItem>
+          <FlexItem>GPU Memory</FlexItem>
+        </Flex>
+      </CardTitle>
+      <CardBody>
+        <span
+          style={{
+            fontSize: 'var(--pf-t--global--font--size--2xl)',
+            fontWeight: 'var(--pf-t--global--font--weight--bold)',
+          }}
+        >
+          {percent}%
+        </span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> used</span>
+        <Progress
+          value={percent}
+          aria-label="GPU memory usage"
+          style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
+        />
+        <div
+          style={{
+            marginTop: 'var(--pf-t--global--spacer--xs)',
+            fontSize: 'var(--pf-t--global--font--size--sm)',
+            color: 'var(--pf-t--global--text--color--subtle)',
+          }}
+        >
+          {formatBytes(availableBytes)} available of {formatBytes(totalBytes)}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Summary card: Alerts
+// ---------------------------------------------------------------------------
+function AlertsCard({ status }: { status: ClusterStatus }) {
+  const errorModels = status.modelCounts.error ?? 0;
+  const offlineWorkers =
+    status.workerCount - (status.workersOnline ?? status.workerCount);
+  const total = errorModels + offlineWorkers;
+  const color: 'red' | 'green' = total > 0 ? 'red' : 'green';
+
+  return (
+    <Card isCompact>
+      <CardTitle>
+        <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+          <FlexItem>
+            <ExclamationTriangleIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
+          </FlexItem>
+          <FlexItem>Alerts</FlexItem>
+        </Flex>
+      </CardTitle>
+      <CardBody>
+        <span
+          style={{
+            fontSize: 'var(--pf-t--global--font--size--2xl)',
+            fontWeight: 'var(--pf-t--global--font--weight--bold)',
+          }}
+        >
+          {total}
+        </span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+          {total === 1 ? ' issue' : ' issues'}
+        </span>
+        <div
+          style={{
+            marginTop: 'var(--pf-t--global--spacer--xs)',
+            display: 'flex',
+            gap: 'var(--pf-t--global--spacer--xs)',
+            flexWrap: 'wrap',
+          }}
+        >
+          {errorModels > 0 && (
+            <Label color="red" isCompact>
+              {errorModels} model error{errorModels !== 1 ? 's' : ''}
+            </Label>
+          )}
+          {offlineWorkers > 0 && (
+            <Label color="red" isCompact>
+              {offlineWorkers} worker{offlineWorkers !== 1 ? 's' : ''} offline
+            </Label>
+          )}
+          {total === 0 && (
+            <Label color={color} isCompact>
+              All clear
+            </Label>
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row 1: Summary cards gallery
+// ---------------------------------------------------------------------------
+function SummaryCards({ status }: { status: ClusterStatus }) {
+  return (
+    <Gallery hasGutter minWidths={{ default: '200px' }}>
+      <WorkersCard status={status} />
+      <ModelsCard status={status} />
+      <GpuMemoryCard status={status} />
+      <AlertsCard status={status} />
+    </Gallery>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row 2: Memory donut chart
+// ---------------------------------------------------------------------------
+function MemoryDonutChart({ status }: { status: ClusterStatus }) {
+  const { totalBytes, usedBytes, availableBytes } = status.memory;
+  const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+
+  const data = [
+    { x: 'Used', y: usedBytes },
+    { x: 'Available', y: availableBytes },
+  ];
+
+  return (
+    <Card>
+      <CardTitle>
+        <Title headingLevel="h2" size="lg">
+          VRAM Usage
+        </Title>
+      </CardTitle>
+      <CardBody>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--pf-t--global--spacer--xl)' }}>
+          <div style={{ height: '200px', width: '200px', flexShrink: 0 }}>
+            <ChartDonut
+              ariaDesc="GPU memory usage donut chart"
+              ariaTitle="VRAM Usage"
+              constrainToVisibleArea
+              data={data}
+              height={200}
+              width={200}
+              title={`${percent}%`}
+              subTitle="used"
+              colorScale={[
+                'var(--pf-t-chart-color-blue-300)',
+                'var(--pf-t-chart-color-blue-100)',
+              ]}
+              legendData={[
+                { name: `Used: ${formatBytes(usedBytes)}` },
+                { name: `Available: ${formatBytes(availableBytes)}` },
+              ]}
+              legendOrientation="vertical"
+              legendPosition="right"
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--pf-t--global--spacer--sm)',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--sm)',
+                  color: 'var(--pf-t--global--text--color--subtle)',
+                }}
+              >
+                Used
+              </div>
+              <div
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--xl)',
+                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                }}
+              >
+                {formatBytes(usedBytes)}
+              </div>
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--sm)',
+                  color: 'var(--pf-t--global--text--color--subtle)',
+                }}
+              >
+                Available
+              </div>
+              <div
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--xl)',
+                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                }}
+              >
+                {formatBytes(availableBytes)}
+              </div>
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--sm)',
+                  color: 'var(--pf-t--global--text--color--subtle)',
+                }}
+              >
+                Total
+              </div>
+              <div style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+                {formatBytes(totalBytes)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row 3: Model state breakdown
+// ---------------------------------------------------------------------------
+const MODEL_STATE_DISPLAY_ORDER: ModelLifecycleState[] = [
+  ModelLifecycleState.ACTIVE,
+  ModelLifecycleState.SLEEPING,
+  ModelLifecycleState.STARTING,
+  ModelLifecycleState.PENDING,
+  ModelLifecycleState.DRAINING,
+  ModelLifecycleState.STOPPING,
+  ModelLifecycleState.STOPPED,
+  ModelLifecycleState.ERROR,
+];
+
+function stateCountFromStatus(
+  status: ClusterStatus,
+  state: ModelLifecycleState,
+): number {
+  const mc = status.modelCounts;
+  switch (state) {
+    case ModelLifecycleState.ACTIVE:
+      return mc.active ?? 0;
+    case ModelLifecycleState.SLEEPING:
+      return mc.sleeping ?? 0;
+    case ModelLifecycleState.STARTING:
+      return mc.starting ?? 0;
+    case ModelLifecycleState.ERROR:
+      return mc.error ?? 0;
+    // PENDING, DRAINING, STOPPING, STOPPED all roll into "other"
+    default:
+      return 0;
+  }
+}
+
+function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
+  const other = status.modelCounts.other ?? 0;
+
+  return (
+    <Card>
+      <CardTitle>
+        <Title headingLevel="h2" size="lg">
+          Model State Breakdown
+        </Title>
+      </CardTitle>
+      <CardBody>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--pf-t--global--spacer--sm)',
+          }}
+        >
+          {MODEL_STATE_DISPLAY_ORDER.map((state) => {
+            const count = stateCountFromStatus(status, state);
+            // Skip zero-count states (except ACTIVE always shown)
+            if (count === 0 && state !== ModelLifecycleState.ACTIVE) return null;
+            return (
+              <div
+                key={state}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 'var(--pf-t--global--spacer--md)',
+                }}
+              >
+                <StateLabel state={state} isCompact />
+                <span
+                  style={{
+                    fontSize: 'var(--pf-t--global--font--size--lg)',
+                    fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                    minWidth: '2ch',
+                    textAlign: 'right',
+                  }}
+                >
+                  {count}
+                </span>
+              </div>
+            );
+          })}
+          {other > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--pf-t--global--spacer--md)',
+              }}
+            >
+              <Label color="grey" isCompact>
+                Other
+              </Label>
+              <span
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--lg)',
+                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                  minWidth: '2ch',
+                  textAlign: 'right',
+                }}
+              >
+                {other}
+              </span>
+            </div>
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Event type label color mapping
+// ---------------------------------------------------------------------------
+function getEventTypeColor(
+  type: string,
+): 'blue' | 'teal' | 'green' | 'orange' | 'red' | 'purple' | 'grey' | 'yellow' {
+  switch (type) {
+    case 'MODEL_DEPLOYED':
+      return 'green';
+    case 'MODEL_REMOVED':
+      return 'orange';
+    case 'MODEL_STATE_CHANGED':
+      return 'blue';
+    case 'WORKER_JOINED':
+      return 'teal';
+    case 'WORKER_LEFT':
+      return 'orange';
+    case 'WORKER_MEMORY_UPDATED':
+      return 'grey';
+    case 'EVICTION_TRIGGERED':
+      return 'red';
+    case 'PLACEMENT_COMPLETED':
+      return 'purple';
+    default:
+      return 'grey';
+  }
+}
+
+function formatEventType(type: string): string {
+  return type
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ---------------------------------------------------------------------------
+// Row 4: Recent events
+// ---------------------------------------------------------------------------
+function EventEntry({ event }: { event: ClusterEvent }) {
+  const color = getEventTypeColor(event.type);
+  const description =
+    event.message ??
+    (event.modelName ? `Model: ${event.modelName}` : null) ??
+    (event.workerId ? `Worker: ${event.workerId}` : null) ??
+    '—';
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 'var(--pf-t--global--spacer--sm)',
+        padding: 'var(--pf-t--global--spacer--xs) 0',
+        borderBottom: '1px solid var(--pf-t--global--border--color--default)',
+      }}
+    >
+      <span
+        style={{
+          fontSize: 'var(--pf-t--global--font--size--sm)',
+          color: 'var(--pf-t--global--text--color--subtle)',
+          flexShrink: 0,
+          minWidth: '5ch',
+        }}
+      >
+        {formatRelativeTime(event.timestamp)}
+      </span>
+      <Label color={color} isCompact style={{ flexShrink: 0 }}>
+        {formatEventType(event.type)}
+      </Label>
+      <span
+        style={{
+          fontSize: 'var(--pf-t--global--font--size--sm)',
+          color: 'var(--pf-t--global--text--color--default)',
+          wordBreak: 'break-word',
+        }}
+      >
+        {description}
+      </span>
+    </div>
+  );
+}
+
+function RecentEvents() {
+  const { status: connectionStatus, events } = useEventStream();
+  const recent = events.slice(0, 20);
+
+  const connectionColor: 'green' | 'orange' | 'red' =
+    connectionStatus === 'connected'
+      ? 'green'
+      : connectionStatus === 'connecting'
+        ? 'orange'
+        : 'red';
+
+  return (
+    <Card>
+      <CardTitle>
+        <Flex
+          spaceItems={{ default: 'spaceItemsSm' }}
+          alignItems={{ default: 'alignItemsCenter' }}
+          justifyContent={{ default: 'justifyContentSpaceBetween' }}
+        >
+          <FlexItem>
+            <Title headingLevel="h2" size="lg">
+              Recent Events
+            </Title>
+          </FlexItem>
+          <FlexItem>
+            <Label color={connectionColor} isCompact>
+              {connectionStatus === 'connected'
+                ? 'Live'
+                : connectionStatus === 'connecting'
+                  ? 'Connecting…'
+                  : 'Disconnected'}
+            </Label>
+          </FlexItem>
+        </Flex>
+      </CardTitle>
+      <CardBody>
+        {recent.length === 0 ? (
+          <div
+            style={{
+              color: 'var(--pf-t--global--text--color--subtle)',
+              fontSize: 'var(--pf-t--global--font--size--sm)',
+              textAlign: 'center',
+              padding: 'var(--pf-t--global--spacer--lg) 0',
+            }}
+          >
+            No events yet. Waiting for cluster activity…
+          </div>
+        ) : (
+          <div>
+            {recent.map((event, idx) => (
+              <EventEntry key={`${event.timestamp}-${event.type}-${idx}`} event={event} />
+            ))}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page component
+// ---------------------------------------------------------------------------
 export function ClusterOverview() {
+  const { data: status, isLoading, error } = useClusterStatus();
+
+  if (isLoading) {
+    return (
+      <PageSection>
+        <Flex justifyContent={{ default: 'justifyContentCenter' }}>
+          <FlexItem>
+            <Spinner size="xl" aria-label="Loading cluster status" />
+          </FlexItem>
+        </Flex>
+      </PageSection>
+    );
+  }
+
+  if (error || !status) {
+    return (
+      <PageSection>
+        <Alert
+          variant="danger"
+          title="Failed to load cluster status"
+          isInline
+        >
+          <Content>
+            {error instanceof Error ? error.message : 'An unexpected error occurred.'}
+          </Content>
+        </Alert>
+      </PageSection>
+    );
+  }
+
   return (
     <PageSection>
-      <Content>
-        <h1>Cluster Overview</h1>
-        <p>Coming soon.</p>
-      </Content>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--pf-t--global--spacer--lg)',
+        }}
+      >
+        {/* Row 1: Summary cards */}
+        <SummaryCards status={status} />
+
+        {/* Rows 2 & 3: Donut chart + Model state breakdown side-by-side */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
+            gap: 'var(--pf-t--global--spacer--lg)',
+            alignItems: 'start',
+          }}
+        >
+          <MemoryDonutChart status={status} />
+          <ModelStateBreakdown status={status} />
+        </div>
+
+        {/* Row 4: Recent events */}
+        <RecentEvents />
+      </div>
     </PageSection>
   );
 }

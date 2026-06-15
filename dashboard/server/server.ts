@@ -1,4 +1,8 @@
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 
 import type { Config } from './config.js';
 import type { RouteDeps } from './routes/deps.js';
@@ -46,6 +50,23 @@ export async function buildServer(deps: ServerDeps) {
   registerClusterRoutes(app, deps.routes);
   registerMetricsRoutes(app, deps.routes);
   registerEventRoutes(app, deps.routes);
+
+  // In production, serve the frontend SPA from dist/client/
+  const serverDir = dirname(fileURLToPath(import.meta.url));
+  const clientDir = join(serverDir, '..', 'client');
+
+  if (process.env['NODE_ENV'] === 'production' && existsSync(clientDir)) {
+    await app.register(fastifyStatic, {
+      root: clientDir,
+      prefix: '/',
+      wildcard: false,
+    });
+
+    // SPA fallback: serve index.html for all non-API, non-static routes
+    app.setNotFoundHandler((_request, reply) => {
+      return reply.sendFile('index.html');
+    });
+  }
 
   return app;
 }
