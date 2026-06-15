@@ -39,7 +39,7 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
 
   // GET /api/metrics/memory — current device memory usage (instant query)
   app.get('/api/metrics/memory', async (_request, reply) => {
-    const result = await deps.prometheus.queryInstant('sardeenz_device_memory_bytes');
+    const result = await deps.prometheus.queryInstant('sardeenz_control_plane_device_memory_bytes');
     return reply.send(result);
   });
 }

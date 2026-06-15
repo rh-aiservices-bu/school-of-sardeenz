@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- BFF memory metrics endpoint now queries `sardeenz_control_plane_device_memory_bytes`
+  (was `sardeenz_device_memory_bytes`, which the control plane does not export)
 - Cross-model review fixes for Phase 3 dashboard:
   - SSE event stream now handles `EVICTION_TRIGGERED` and `PLACEMENT_COMPLETED` events
     (previously caused stale UI until next poll cycle)
