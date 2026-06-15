@@ -6,6 +6,7 @@ import {
   PageSection,
 } from '@patternfly/react-core';
 import { AppLayout } from './components/AppLayout';
+import { EventStreamContext, useEventStreamConnection } from './hooks/useEventStream';
 import { ClusterOverview } from './pages/ClusterOverview/ClusterOverview';
 import { ModelList } from './pages/Models/ModelList';
 import { ModelDeploy } from './pages/Models/ModelDeploy';
@@ -54,21 +55,32 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   }
 }
 
+function EventStreamProvider({ children }: { children: ReactNode }) {
+  const state = useEventStreamConnection();
+  return (
+    <EventStreamContext.Provider value={state}>
+      {children}
+    </EventStreamContext.Provider>
+  );
+}
+
 export function App() {
   return (
-    <AppLayout>
-      <ErrorBoundary>
-        <Routes>
-          <Route path="/" element={<ClusterOverview />} />
-          <Route path="/models" element={<ModelList />} />
-          <Route path="/models/deploy" element={<ModelDeploy />} />
-          <Route path="/models/:modelName" element={<ModelDetail />} />
-          <Route path="/workers" element={<WorkerList />} />
-          <Route path="/workers/:workerId" element={<WorkerDetail />} />
-          <Route path="/metrics" element={<MetricsDashboard />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </ErrorBoundary>
-    </AppLayout>
+    <EventStreamProvider>
+      <AppLayout>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<ClusterOverview />} />
+            <Route path="/models" element={<ModelList />} />
+            <Route path="/models/deploy" element={<ModelDeploy />} />
+            <Route path="/models/:modelName" element={<ModelDetail />} />
+            <Route path="/workers" element={<WorkerList />} />
+            <Route path="/workers/:workerId" element={<WorkerDetail />} />
+            <Route path="/metrics" element={<MetricsDashboard />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </ErrorBoundary>
+      </AppLayout>
+    </EventStreamProvider>
   );
 }

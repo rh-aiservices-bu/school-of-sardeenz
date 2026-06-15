@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ClusterEventType, type ControlPlaneComponents } from '@sardeenz/types';
 import { BASE_URL } from '../api/client';
@@ -7,7 +7,21 @@ type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
-export function useEventStream() {
+export interface EventStreamState {
+  status: ConnectionStatus;
+  events: ClusterEvent[];
+}
+
+export const EventStreamContext = createContext<EventStreamState>({
+  status: 'disconnected',
+  events: [],
+});
+
+/**
+ * Internal hook that manages the SSE connection and query invalidation.
+ * Mount exactly once at app scope via `EventStreamProvider`.
+ */
+export function useEventStreamConnection(): EventStreamState {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [events, setEvents] = useState<ClusterEvent[]>([]);
@@ -82,4 +96,12 @@ export function useEventStream() {
   }, [connect]);
 
   return { status, events };
+}
+
+/**
+ * Consumer hook — reads event-stream state from the nearest
+ * `EventStreamContext.Provider`.
+ */
+export function useEventStream(): EventStreamState {
+  return useContext(EventStreamContext);
 }
