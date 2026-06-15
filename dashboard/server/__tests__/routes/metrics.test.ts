@@ -238,3 +238,386 @@ describe('GET /api/metrics/throughput', () => {
     expect(res.statusCode).toBe(502);
   });
 });
+
+describe('GET /api/metrics/latency (multi-quantile)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries p50, p95, and p99 quantiles in parallel and returns combined object', async () => {
+    const promResponse = { status: 'success', data: { resultType: 'matrix', result: [] } };
+    queryRangeFn.mockResolvedValue(promResponse);
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/latency' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    // Three parallel queries should have been made
+    expect(queryRangeFn).toHaveBeenCalledTimes(3);
+    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
+    expect(queries.some((q) => q.includes('0.50'))).toBe(true);
+    expect(queries.some((q) => q.includes('0.95'))).toBe(true);
+    expect(queries.some((q) => q.includes('0.99'))).toBe(true);
+    // Response must be an object with p50/p95/p99 keys
+    expect(res.json()).toHaveProperty('p50');
+    expect(res.json()).toHaveProperty('p95');
+    expect(res.json()).toHaveProperty('p99');
+  });
+
+  it('passes start, end, step to each quantile query', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/latency?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    for (const call of queryRangeFn.mock.calls as [string, string, string, string][]) {
+      const [, start, end, step] = call;
+      expect(start).toBe('2026-01-01T00:00:00Z');
+      expect(end).toBe('2026-01-01T01:00:00Z');
+      expect(step).toBe('30s');
+    }
+  });
+
+  it('returns 502 when any Prometheus query fails', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/latency' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/connections', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries sardeenz_proxy_active_connections and sardeenz_proxy_parked_connections', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/connections' });
+    await app.close();
+
+    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
+    expect(queries.some((q) => q.includes('sardeenz_proxy_active_connections'))).toBe(true);
+    expect(queries.some((q) => q.includes('sardeenz_proxy_parked_connections'))).toBe(true);
+  });
+
+  it('passes start, end, step query params to Prometheus', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/connections?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    for (const call of queryRangeFn.mock.calls as [string, string, string, string][]) {
+      const [, start, end, step] = call;
+      expect(start).toBe('2026-01-01T00:00:00Z');
+      expect(end).toBe('2026-01-01T01:00:00Z');
+      expect(step).toBe('30s');
+    }
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/connections' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/parking-duration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries sardeenz_proxy_parking_duration_seconds_bucket with histogram_quantile', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/parking-duration' });
+    await app.close();
+
+    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
+    expect(queries.every((q) => q.includes('sardeenz_proxy_parking_duration_seconds_bucket'))).toBe(true);
+    expect(queries.every((q) => q.includes('histogram_quantile'))).toBe(true);
+    expect(queries.some((q) => q.includes('0.50'))).toBe(true);
+    expect(queries.some((q) => q.includes('0.95'))).toBe(true);
+  });
+
+  it('passes start, end, step query params to Prometheus', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/parking-duration?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    for (const call of queryRangeFn.mock.calls as [string, string, string, string][]) {
+      const [, start, end, step] = call;
+      expect(start).toBe('2026-01-01T00:00:00Z');
+      expect(end).toBe('2026-01-01T01:00:00Z');
+      expect(step).toBe('30s');
+    }
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/parking-duration' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/wake-triggers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries sardeenz_control_plane_wake_triggers_total with rate()', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/wake-triggers' });
+    await app.close();
+
+    const [query] = queryRangeFn.mock.calls[0] as [string];
+    expect(query).toContain('sardeenz_control_plane_wake_triggers_total');
+    expect(query).toContain('rate(');
+  });
+
+  it('passes start, end, step query params to Prometheus', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/wake-triggers?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    const [, start, end, step] = queryRangeFn.mock.calls[0] as [string, string, string, string];
+    expect(start).toBe('2026-01-01T00:00:00Z');
+    expect(end).toBe('2026-01-01T01:00:00Z');
+    expect(step).toBe('30s');
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/wake-triggers' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/state-transitions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries sardeenz_control_plane_state_transitions_total with rate()', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/state-transitions' });
+    await app.close();
+
+    const [query] = queryRangeFn.mock.calls[0] as [string];
+    expect(query).toContain('sardeenz_control_plane_state_transitions_total');
+    expect(query).toContain('rate(');
+  });
+
+  it('passes start, end, step query params to Prometheus', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/state-transitions?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    const [, start, end, step] = queryRangeFn.mock.calls[0] as [string, string, string, string];
+    expect(start).toBe('2026-01-01T00:00:00Z');
+    expect(end).toBe('2026-01-01T01:00:00Z');
+    expect(step).toBe('30s');
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/state-transitions' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/evictions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries sardeenz_control_plane_evictions_total with rate()', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/evictions' });
+    await app.close();
+
+    const [query] = queryRangeFn.mock.calls[0] as [string];
+    expect(query).toContain('sardeenz_control_plane_evictions_total');
+    expect(query).toContain('rate(');
+  });
+
+  it('passes start, end, step query params to Prometheus', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/evictions?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    const [, start, end, step] = queryRangeFn.mock.calls[0] as [string, string, string, string];
+    expect(start).toBe('2026-01-01T00:00:00Z');
+    expect(end).toBe('2026-01-01T01:00:00Z');
+    expect(step).toBe('30s');
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/evictions' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/memory-history', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries sardeenz_control_plane_device_memory_bytes as a range query', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/memory-history' });
+    await app.close();
+
+    const [query] = queryRangeFn.mock.calls[0] as [string];
+    expect(query).toContain('sardeenz_control_plane_device_memory_bytes');
+  });
+
+  it('passes start, end, step query params to Prometheus', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/memory-history?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    const [, start, end, step] = queryRangeFn.mock.calls[0] as [string, string, string, string];
+    expect(start).toBe('2026-01-01T00:00:00Z');
+    expect(end).toBe('2026-01-01T01:00:00Z');
+    expect(step).toBe('30s');
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/memory-history' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});
+
+describe('GET /api/metrics/operations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries p95 of deploy, sleep, wake, eviction, and placement duration histograms', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    // 5 parallel queries
+    expect(queryRangeFn).toHaveBeenCalledTimes(5);
+    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
+    expect(queries.some((q) => q.includes('sardeenz_control_plane_deploy_duration_seconds_bucket'))).toBe(true);
+    expect(queries.some((q) => q.includes('sardeenz_control_plane_sleep_duration_seconds_bucket'))).toBe(true);
+    expect(queries.some((q) => q.includes('sardeenz_control_plane_wake_duration_seconds_bucket'))).toBe(true);
+    expect(queries.some((q) => q.includes('sardeenz_control_plane_eviction_duration_seconds_bucket'))).toBe(true);
+    expect(queries.some((q) => q.includes('sardeenz_control_plane_placement_duration_seconds_bucket'))).toBe(true);
+    expect(queries.every((q) => q.includes('0.95'))).toBe(true);
+    // Response must have all operation keys
+    expect(res.json()).toHaveProperty('deploy');
+    expect(res.json()).toHaveProperty('sleep');
+    expect(res.json()).toHaveProperty('wake');
+    expect(res.json()).toHaveProperty('eviction');
+    expect(res.json()).toHaveProperty('placement');
+  });
+
+  it('passes start, end, step query params to each Prometheus query', async () => {
+    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/operations?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+    });
+    await app.close();
+
+    for (const call of queryRangeFn.mock.calls as [string, string, string, string][]) {
+      const [, start, end, step] = call;
+      expect(start).toBe('2026-01-01T00:00:00Z');
+      expect(end).toBe('2026-01-01T01:00:00Z');
+      expect(step).toBe('30s');
+    }
+  });
+
+  it('returns 502 when Prometheus is unreachable', async () => {
+    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });
+    await app.close();
+
+    expect(res.statusCode).toBe(502);
+  });
+});

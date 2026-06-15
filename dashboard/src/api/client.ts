@@ -138,5 +138,19 @@ export const api = {
       request<unknown>(`/metrics/throughput?${formatMetricsParams(params)}`, { signal }),
     getMemory: (params: MetricsParams, signal?: AbortSignal) =>
       request<unknown>(`/metrics/memory?${formatMetricsParams(params)}`, { signal }),
+    getConnections: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/connections?${formatMetricsParams(params)}`, { signal }),
+    getParkingDuration: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/parking-duration?${formatMetricsParams(params)}`, { signal }),
+    getWakeTriggers: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/wake-triggers?${formatMetricsParams(params)}`, { signal }),
+    getStateTransitions: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/state-transitions?${formatMetricsParams(params)}`, { signal }),
+    getEvictions: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/evictions?${formatMetricsParams(params)}`, { signal }),
+    getMemoryHistory: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/memory-history?${formatMetricsParams(params)}`, { signal }),
+    getOperations: (params: MetricsParams, signal?: AbortSignal) =>
+      request<unknown>(`/metrics/operations?${formatMetricsParams(params)}`, { signal }),
   },
 };
