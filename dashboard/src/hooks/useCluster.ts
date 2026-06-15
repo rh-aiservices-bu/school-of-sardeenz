@@ -2,13 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { api } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
+import { useEventStream } from './useEventStream';
 
 export function useClusterStatus() {
   const { reportFallback } = useDegraded();
+  const { status: sseStatus } = useEventStream();
   const query = useQuery({
     queryKey: ['cluster', 'status'],
     queryFn: ({ signal }) => api.cluster.getStatus(signal),
-    refetchInterval: 10_000,
+    refetchInterval: sseStatus === 'degraded' ? 2_000 : 10_000,
   });
 
   useEffect(() => {
@@ -22,10 +24,11 @@ export function useClusterStatus() {
 
 export function useClusterMemory() {
   const { reportFallback } = useDegraded();
+  const { status: sseStatus } = useEventStream();
   const query = useQuery({
     queryKey: ['cluster', 'memory'],
     queryFn: ({ signal }) => api.cluster.getMemory(signal),
-    refetchInterval: 10_000,
+    refetchInterval: sseStatus === 'degraded' ? 2_000 : 10_000,
   });
 
   useEffect(() => {

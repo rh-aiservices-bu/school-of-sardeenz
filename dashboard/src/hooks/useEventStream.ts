@@ -5,7 +5,22 @@ import { BASE_URL, getAuthToken } from '../api/client';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
-export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+/**
+ * Connection state machine:
+ *
+ *   CONNECTED → (SSE error) → RECONNECTING → (5 failures) → DEGRADED
+ *       ↑                          ↑                              |
+ *       |                          |                              |
+ *       +--- (SSE reconnects) -----+--- (SSE reconnects) --------+
+ *
+ * In DEGRADED state the reconnect backoff increases from 5s to 30s
+ * and query hooks switch to faster polling intervals to compensate.
+ */
+export type ConnectionStatus = 'connected' | 'reconnecting' | 'degraded';
+
+const FAILURE_THRESHOLD = 5;
+const RECONNECT_INTERVAL_NORMAL = 5_000;
+const RECONNECT_INTERVAL_DEGRADED = 30_000;
 
 export interface EventStreamState {
   status: ConnectionStatus;
@@ -13,7 +28,7 @@ export interface EventStreamState {
 }
 
 export const EventStreamContext = createContext<EventStreamState>({
-  status: 'disconnected',
+  status: 'reconnecting',
   events: [],
 });
 
@@ -23,17 +38,17 @@ export const EventStreamContext = createContext<EventStreamState>({
  */
 export function useEventStreamConnection(): EventStreamState {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected');
+  const [status, setStatus] = useState<ConnectionStatus>('reconnecting');
   const [events, setEvents] = useState<ClusterEvent[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const failureCountRef = useRef<number>(0);
 
   const connect = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
 
-    setStatus('connecting');
     // EventSource cannot send custom headers; pass token via query param
     const token = getAuthToken();
     const sseUrl = token ? `${BASE_URL}/events?token=${encodeURIComponent(token)}` : `${BASE_URL}/events`;
@@ -41,6 +56,8 @@ export function useEventStreamConnection(): EventStreamState {
     eventSourceRef.current = es;
 
     es.onopen = () => {
+      // Successful connection — reset failure count and go to connected
+      failureCountRef.current = 0;
       setStatus('connected');
     };
 
@@ -56,6 +73,16 @@ export function useEventStreamConnection(): EventStreamState {
             void queryClient.invalidateQueries({ queryKey: ['models'] });
             void queryClient.invalidateQueries({ queryKey: ['cluster'] });
             break;
+          case ClusterEventType.EVICTION_TRIGGERED:
+            void queryClient.invalidateQueries({ queryKey: ['models'] });
+            void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+            void queryClient.invalidateQueries({ queryKey: ['metrics'] });
+            break;
+          case ClusterEventType.PLACEMENT_COMPLETED:
+            void queryClient.invalidateQueries({ queryKey: ['models'] });
+            void queryClient.invalidateQueries({ queryKey: ['workers'] });
+            void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+            break;
           case ClusterEventType.WORKER_JOINED:
           case ClusterEventType.WORKER_LEFT:
             void queryClient.invalidateQueries({ queryKey: ['workers'] });
@@ -65,12 +92,6 @@ export function useEventStreamConnection(): EventStreamState {
             void queryClient.invalidateQueries({ queryKey: ['cluster', 'memory'] });
             void queryClient.invalidateQueries({ queryKey: ['workers'] });
             break;
-          case ClusterEventType.EVICTION_TRIGGERED:
-          case ClusterEventType.PLACEMENT_COMPLETED:
-            void queryClient.invalidateQueries({ queryKey: ['models'] });
-            void queryClient.invalidateQueries({ queryKey: ['cluster'] });
-            void queryClient.invalidateQueries({ queryKey: ['workers'] });
-            break;
         }
       } catch {
         // Ignore parse errors (e.g., ping comments)
@@ -78,11 +99,18 @@ export function useEventStreamConnection(): EventStreamState {
     };
 
     es.onerror = () => {
-      setStatus('disconnected');
       es.close();
       eventSourceRef.current = null;
 
-      reconnectTimeoutRef.current = setTimeout(connect, 5000);
+      failureCountRef.current += 1;
+
+      if (failureCountRef.current >= FAILURE_THRESHOLD) {
+        setStatus('degraded');
+        reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL_DEGRADED);
+      } else {
+        setStatus('reconnecting');
+        reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL_NORMAL);
+      }
     };
   }, [queryClient]);
 

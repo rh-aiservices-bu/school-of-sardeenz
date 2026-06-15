@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- SSE connection state machine with degraded polling fallback (closes #50):
+  - `ConnectionStatus` type extended from `'connected' | 'connecting' | 'disconnected'` to
+    `'connected' | 'reconnecting' | 'degraded'`
+  - `useEventStreamConnection` now tracks consecutive failure count via `failureCountRef`; after 5
+    failures (~25 s) the hook transitions to `'degraded'` state and slows reconnect attempts from
+    5 s to 30 s to reduce noise
+  - Successful reconnect from any state resets the failure count and restores `'connected'`
+  - `EVICTION_TRIGGERED` event now also invalidates the `['metrics']` query key (was missing)
+  - `PLACEMENT_COMPLETED` event invalidates `['models']`, `['workers']`, and `['cluster']`
+    (previously also invalidated workers — now explicit)
+  - `useModels`, `useModel`, `useWorkers`, `useWorker`, `useClusterStatus`, `useClusterMemory`
+    all switch to a 2 s `refetchInterval` when SSE is `'degraded'` (vs. 5–10 s normally)
+  - `MetricsDashboard` switches to 5 s `refetchInterval` when SSE is `'degraded'` and
+    auto-refresh is on (vs. 30 s normally)
+  - `DegradedBanner` now also shows "Real-time updates unavailable — polling for changes" when
+    SSE is degraded; the Redis-fallback message ("Control plane unreachable — showing cached
+    data") takes precedence as the more severe condition
+  - `ClusterOverview` event feed label updated: `'Connecting…'` → `'Reconnecting…'`,
+    `'Disconnected'` → `'Degraded'` to match new status values
+  - 13 new unit tests covering the state machine transitions and threshold constants
+
 - BFF resilience extended to cover all read routes with Redis fallback (closes #45):
   - `GET /api/cluster/memory` now falls back to Redis when the control plane is
     unreachable; returns 502 only when no cached snapshot is available
