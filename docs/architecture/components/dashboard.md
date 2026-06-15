@@ -246,6 +246,6 @@ The metrics dashboard queries three metric families:
 | --- | --- | --- | --- |
 | `sardeenz_proxy_request_duration_seconds` | Histogram | Proxy | p95 latency line chart |
 | `sardeenz_proxy_requests_total` | Counter | Proxy | Throughput (req/s) line chart |
-| `sardeenz_device_memory_bytes` | Gauge | Control plane | Device memory instant query |
+| `sardeenz_control_plane_device_memory_bytes` | Gauge | Control plane | Device memory instant query |
 
 Time ranges map to PromQL step sizes: 15m → 15s, 1h → 60s, 6h → 300s, 24h → 900s. The BFF constructs the PromQL and handles time range parameters; the frontend receives chart-ready arrays.
