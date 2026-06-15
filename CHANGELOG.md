@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Model Detail view (Task 3.8) — full detail page at `/models/:modelName` with breadcrumb
+  navigation, DescriptionList of all model fields, conditional action buttons (sleep/wake/delete),
+  PF6 Progress bar for STARTING state with phase/message display, danger Alert for ERROR state
+  with retry action, expandable engine config CodeBlock, and confirmation modals
+- Worker pages (Task 3.9) — worker list at `/workers` with PF6 Table (ID, status, devices,
+  memory, models, heartbeat); worker detail at `/workers/:workerId` with breadcrumb, status
+  header, device memory cards (Gallery with Progress bars per GPU), running models table,
+  and expandable runner capabilities section
 - Model Management pages (Task 3.7) — model list at `/models` with PF6 Table, sortable columns,
   multi-select state filter, kebab dropdown actions (sleep/wake/delete with confirmation modals),
   empty state with deploy button; deploy form at `/models/deploy` with all fields (model name,
