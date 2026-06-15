@@ -14,7 +14,7 @@ function defaultEnd(): string {
 
 export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // GET /api/metrics/latency — p95 proxy request latency over the selected range
-  app.get('/api/metrics/latency', async (request, reply) => {
+  app.get('/api/metrics/latency', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const q = request.query as Record<string, string>;
     const result = await deps.prometheus.queryRange(
       'histogram_quantile(0.95, rate(sardeenz_proxy_request_duration_seconds_bucket[5m]))',
@@ -26,7 +26,7 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
   });
 
   // GET /api/metrics/throughput — request rate over the selected range
-  app.get('/api/metrics/throughput', async (request, reply) => {
+  app.get('/api/metrics/throughput', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const q = request.query as Record<string, string>;
     const result = await deps.prometheus.queryRange(
       'rate(sardeenz_proxy_requests_total[5m])',
@@ -38,7 +38,7 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
   });
 
   // GET /api/metrics/memory — current device memory usage (instant query)
-  app.get('/api/metrics/memory', async (_request, reply) => {
+  app.get('/api/metrics/memory', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (_request, reply) => {
     const result = await deps.prometheus.queryInstant('sardeenz_control_plane_device_memory_bytes');
     return reply.send(result);
   });

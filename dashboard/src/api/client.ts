@@ -32,13 +32,36 @@ export class ApiError extends Error {
   }
 }
 
+const SESSION_KEY = 'sardeenz_auth_token';
+
+function getToken(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${BASE_URL}${path}`;
   const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
   if (options?.body) {
     headers['Content-Type'] = 'application/json';
   }
+
+  // Attach auth token when available
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    // Clear token and notify AuthContext
+    try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    window.dispatchEvent(new Event('auth:unauthorized'));
+  }
 
   if (!res.ok) {
     let errorMessage = `HTTP ${res.status}`;
@@ -56,6 +79,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return res.json() as T;
+}
+
+/** Get the auth token for SSE query parameter (EventSource can't send headers). */
+export function getAuthToken(): string | null {
+  return getToken();
 }
 
 interface MetricsParams {

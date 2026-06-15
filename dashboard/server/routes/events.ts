@@ -57,7 +57,7 @@ export function toClusterEvent(update: RoutingMapUpdate): ClusterEvent {
 }
 
 export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  app.get('/api/events', async (request, reply) => {
+  app.get('/api/events', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const channel = `${deps.redis.keyPrefix}:routing-updates`;
     const subscriber = deps.redis.createSubscriber();
 
