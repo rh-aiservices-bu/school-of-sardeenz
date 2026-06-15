@@ -42,6 +42,7 @@ import {
   useOperationDurations,
   type TimeRange,
 } from '../../hooks/useMetrics';
+import { useEventStream } from '../../hooks/useEventStream';
 import { formatBytes } from '../../utils/format';
 
 // ---------------------------------------------------------------------------
@@ -427,8 +428,13 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
 export function MetricsDashboard() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1h');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const { status: sseStatus } = useEventStream();
 
-  const refetchInterval: number | false = autoRefresh ? 30_000 : false;
+  // When SSE is degraded and auto-refresh is on, poll more aggressively to
+  // compensate for the loss of real-time push updates.
+  const refetchInterval: number | false = autoRefresh
+    ? sseStatus === 'degraded' ? 5_000 : 30_000
+    : false;
 
   const latency = useLatencyMetrics(selectedRange, refetchInterval);
   const throughput = useThroughputMetrics(selectedRange, refetchInterval);

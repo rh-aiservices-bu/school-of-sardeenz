@@ -543,7 +543,7 @@ function RecentEvents() {
   const connectionColor: 'green' | 'orange' | 'red' =
     connectionStatus === 'connected'
       ? 'green'
-      : connectionStatus === 'connecting'
+      : connectionStatus === 'reconnecting'
         ? 'orange'
         : 'red';
 
@@ -565,9 +565,9 @@ function RecentEvents() {
               <Label color={connectionColor} isCompact>
                 {connectionStatus === 'connected'
                   ? 'Live'
-                  : connectionStatus === 'connecting'
-                    ? 'Connecting…'
-                    : 'Disconnected'}
+                  : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting…'
+                    : 'Degraded'}
               </Label>
             </span>
           </FlexItem>

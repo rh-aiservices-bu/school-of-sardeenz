@@ -2,13 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { api } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
+import { useEventStream } from './useEventStream';
 
 export function useWorkers() {
   const { reportFallback } = useDegraded();
+  const { status: sseStatus } = useEventStream();
   const raw = useQuery({
     queryKey: ['workers'],
     queryFn: ({ signal }) => api.workers.list(signal),
-    refetchInterval: 10_000,
+    refetchInterval: sseStatus === 'degraded' ? 2_000 : 10_000,
   });
 
   useEffect(() => {
@@ -22,11 +24,12 @@ export function useWorkers() {
 
 export function useWorker(id: string) {
   const { reportFallback } = useDegraded();
+  const { status: sseStatus } = useEventStream();
   const query = useQuery({
     queryKey: ['workers', id],
     queryFn: ({ signal }) => api.workers.get(id, signal),
     enabled: !!id,
-    refetchInterval: 5_000,
+    refetchInterval: sseStatus === 'degraded' ? 2_000 : 5_000,
   });
 
   useEffect(() => {
