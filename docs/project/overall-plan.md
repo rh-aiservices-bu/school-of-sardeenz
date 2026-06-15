@@ -199,7 +199,7 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 **Objective:** Build a web-based administration interface where operators can deploy and manage models, monitor GPU memory utilization, and observe cluster health — all in real time.
 
-**Approach:** New build using React 18 + PatternFly 6, not a port of the v1 dashboard. Proven v1 UI components (GPU memory cards, model status panels, benchmark views) will be cherry-picked and adapted to the new platform's data model.
+**Approach:** React 18 + PatternFly 6 frontend with a reuse-first strategy. The v1 dashboard is a functional React + PatternFly application covering the same domain — v1 components (GPU memory cards, model status panels, deploy forms, worker layouts) should be **ported directly** to the v2 data model and upgraded from PatternFly 5 to 6. Build new only when v1 has no equivalent or when the v2 data model diverges too far for porting to be practical.
 
 #### Deliverables
 
@@ -217,7 +217,7 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 - **Cluster overview** — worker status, aggregate GPU memory utilization, active/sleeping model counts
 - **Model management** — deploy, stop, sleep, wake models; view state history and logs
 - **Worker detail** — per-worker GPU memory breakdown, running runners, hardware capabilities
-- **Device memory visualization** — graphical representation of memory allocation across devices (cherry-pick from v1)
+- **Device memory visualization** — graphical representation of memory allocation across devices (port from v1)
 - **Metrics dashboards** — inference latency, throughput, device utilization (data from Prometheus)
 
 **Infrastructure:**
@@ -256,7 +256,7 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 | --- | --- | --- |
 | PatternFly 6 is newer and community examples are fewer | Slower UI development, unexpected component gaps | Use official PatternFly.org docs as sole reference; avoid Context7 for PF components (may return outdated versions) |
 | Real-time updates create excessive Redis load | Dashboard polling degrades proxy performance | Use pub/sub for state changes, not polling; rate-limit dashboard subscriptions |
-| v1 component cherry-pick takes longer than expected | UI delivery slows | Time-box cherry-pick to 2 days per component; rebuild from scratch if adaptation is too invasive |
+| v1 component porting takes longer than expected | UI delivery slows | Time-box porting to 2 days per component; rebuild only if porting costs more than building new |
 
 ---
 
