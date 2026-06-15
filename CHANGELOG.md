@@ -32,6 +32,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Expanded metrics dashboard to a four-row layout with full metric coverage (closes #49):
+  - **Row 1 — Request Traffic:** latency chart now shows p50/p95/p99 quantile lines (was p95
+    only); throughput chart unchanged
+  - **Row 2 — Connections & Parking:** active connections line chart, parked connections line
+    chart (broken down by model label when available), and parking duration p50/p95 chart
+  - **Row 3 — Model Lifecycle:** wake triggers rate chart, state transitions rate chart (broken
+    down by `from→to` label pairs), and evictions rate chart (broken down by reason)
+  - **Row 4 — Memory & Operations:** memory over time area chart, operation duration p95 chart
+    (deploy/sleep/wake/eviction/placement), and existing device memory table (current instant values)
+  - Time range selector extended with `7d` option (step: `3600s`)
+  - Auto-refresh toggle (PatternFly `Switch`) — when off disables all `refetchInterval` timers;
+    when on uses 30 s default
+  - Seven new BFF routes in `dashboard/server/routes/metrics.ts`:
+    `GET /api/metrics/connections`, `GET /api/metrics/parking-duration`,
+    `GET /api/metrics/wake-triggers`, `GET /api/metrics/state-transitions`,
+    `GET /api/metrics/evictions`, `GET /api/metrics/memory-history`,
+    `GET /api/metrics/operations` — all accept `start`/`end`/`step` query params with
+    same auth preHandlers as existing routes
+  - Updated `GET /api/metrics/latency` to query p50/p95/p99 in parallel and return
+    `{ p50, p95, p99 }` combined object (backward-incompatible response shape change)
+  - Seven new API client methods in `api.metrics`, seven new hooks in `useMetrics.ts`,
+    all accepting `refetchInterval` param for auto-refresh control
+  - 24 new BFF route tests covering correct metric names, param forwarding, and 502 handling
+    for each new endpoint
+
 - Dashboard BFF auth system with three modes: `none`, `simple`, and `oauth`
   (`AUTH_MODE` env var, defaults to `none` for backward compatibility) (#43):
   - **Simple mode**: username/password login with timing-safe credential
