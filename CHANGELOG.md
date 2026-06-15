@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Document worker agent / runner / engine three-layer process architecture in
+  `docs/architecture/overview.md` — process tree, communication channels, and
+  Lmod environment isolation rationale (#31)
+
 ### Changed
 
 - Phase 2 (control plane sleep/wake orchestration) marked complete — 18/18 tasks done,
