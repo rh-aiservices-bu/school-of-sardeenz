@@ -8,6 +8,8 @@ import {
   Spinner,
 } from '@patternfly/react-core';
 import { useAuth } from './contexts/AuthContext';
+import { DegradedProvider } from './contexts/DegradedContext';
+import { DegradedBanner } from './components/DegradedBanner';
 import { AppLayout } from './components/AppLayout';
 import { EventStreamContext, useEventStreamConnection } from './hooks/useEventStream';
 import { ClusterOverview } from './pages/ClusterOverview/ClusterOverview';
@@ -101,22 +103,25 @@ export function App() {
         path="*"
         element={
           <ProtectedRoute>
-            <EventStreamProvider>
-              <AppLayout>
-                <ErrorBoundary>
-                  <Routes>
-                    <Route path="/" element={<ClusterOverview />} />
-                    <Route path="/models" element={<ModelList />} />
-                    <Route path="/models/deploy" element={<ModelDeploy />} />
-                    <Route path="/models/:modelName" element={<ModelDetail />} />
-                    <Route path="/workers" element={<WorkerList />} />
-                    <Route path="/workers/:workerId" element={<WorkerDetail />} />
-                    <Route path="/metrics" element={<MetricsDashboard />} />
-                    <Route path="*" element={<NotFoundPage />} />
-                  </Routes>
-                </ErrorBoundary>
-              </AppLayout>
-            </EventStreamProvider>
+            <DegradedProvider>
+              <DegradedBanner />
+              <EventStreamProvider>
+                <AppLayout>
+                  <ErrorBoundary>
+                    <Routes>
+                      <Route path="/" element={<ClusterOverview />} />
+                      <Route path="/models" element={<ModelList />} />
+                      <Route path="/models/deploy" element={<ModelDeploy />} />
+                      <Route path="/models/:modelName" element={<ModelDetail />} />
+                      <Route path="/workers" element={<WorkerList />} />
+                      <Route path="/workers/:workerId" element={<WorkerDetail />} />
+                      <Route path="/metrics" element={<MetricsDashboard />} />
+                      <Route path="*" element={<NotFoundPage />} />
+                    </Routes>
+                  </ErrorBoundary>
+                </AppLayout>
+              </EventStreamProvider>
+            </DegradedProvider>
           </ProtectedRoute>
         }
       />

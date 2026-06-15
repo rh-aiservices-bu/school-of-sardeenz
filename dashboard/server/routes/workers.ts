@@ -16,9 +16,17 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
     }
   });
 
-  // GET /api/workers/:id — no Redis fallback (worker detail is too rich to reconstruct)
+  // GET /api/workers/:id — with Redis fallback
   app.get<{ Params: { id: string } }>('/api/workers/:id', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
-    const { status, data } = await deps.controlPlane.getWorker(request.params.id);
-    return reply.code(status).send(data);
+    try {
+      const { status, data } = await deps.controlPlane.getWorker(request.params.id);
+      return reply.code(status).send(data);
+    } catch (err) {
+      if (!(err instanceof BffError)) throw err;
+      app.log.warn({ workerId: request.params.id }, 'Control plane unavailable for getWorker, falling back to Redis');
+      const worker = await deps.redis.getWorkerDetail(request.params.id);
+      if (worker === null) throw BffError.notFound(request.params.id);
+      return reply.code(200).send({ ...worker, source: 'redis-fallback' });
+    }
   });
 }

@@ -11,6 +11,7 @@ function makeMockRedis(workerReports: Record<string, string> = {}): {
   redis: Redis;
   get: ReturnType<typeof vi.fn>;
   scan: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
   pipeline: ReturnType<typeof vi.fn>;
 } {
   // Build a scan result that lists all known worker memory keys
@@ -22,6 +23,9 @@ function makeMockRedis(workerReports: Record<string, string> = {}): {
     return Promise.resolve(workerReports[key] ?? null);
   });
 
+  // set() is called by writeClusterMemorySnapshot after refreshAll
+  const set = vi.fn().mockResolvedValue('OK');
+
   // Pipeline mock: collects get() calls, returns their results on exec()
   const pipelineGet = vi.fn().mockReturnThis();
   const exec = vi.fn().mockImplementation(() => {
@@ -31,9 +35,9 @@ function makeMockRedis(workerReports: Record<string, string> = {}): {
 
   const pipeline = vi.fn().mockReturnValue({ get: pipelineGet, exec });
 
-  const redis = { get, scan, pipeline } as unknown as Redis;
+  const redis = { get, scan, set, pipeline } as unknown as Redis;
 
-  return { redis, get, scan, pipeline };
+  return { redis, get, scan, set, pipeline };
 }
 
 function workerMemoryReport(

@@ -5,7 +5,9 @@ import type { ControlPlaneComponents } from '@sardeenz/types';
 
 type ModelInfo = ControlPlaneComponents['schemas']['ModelInfo'];
 type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
+type WorkerDetail = ControlPlaneComponents['schemas']['WorkerDetail'];
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
+type ClusterMemory = ControlPlaneComponents['schemas']['ClusterMemory'];
 
 export class RedisReader {
   private readonly client: Redis;
@@ -190,6 +192,49 @@ export class RedisReader {
       modelCounts: counts,
       memory: { totalBytes, usedBytes, availableBytes },
     };
+  }
+
+  /**
+   * Read the per-device cluster memory snapshot written by the control plane's
+   * MemoryBudgetService.refreshAll().  Returns the parsed ClusterMemory object
+   * or null when no snapshot exists.
+   */
+  async getClusterMemory(): Promise<ClusterMemory | null> {
+    const raw = await this.client.get(`${this.prefix}:cluster:memory`);
+    if (raw === null) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed !== null && typeof parsed === 'object') {
+        return parsed as ClusterMemory;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Read a single worker's detail record written by the control plane's
+   * WorkerPoolService.checkHeartbeats().  Returns the parsed WorkerDetail
+   * object or null when no record exists.
+   */
+  async getWorkerDetail(id: string): Promise<WorkerDetail | null> {
+    const raw = await this.client.get(`${this.prefix}:worker:${id}:detail`);
+    if (raw === null) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        'workerId' in parsed &&
+        typeof (parsed as Record<string, unknown>)['workerId'] === 'string'
+      ) {
+        return parsed as WorkerDetail;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /** Create a dedicated Redis connection for pub/sub. */

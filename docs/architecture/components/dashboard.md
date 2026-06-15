@@ -166,7 +166,7 @@ Consistent across all views:
 
 **ControlPlaneClient** — Typed HTTP proxy to the control plane's admin API. Each method wraps a `fetch` call, checks the response status, and either returns the body or throws a `BffError`. Used for all write operations and as the primary read path.
 
-**RedisReader** — Direct Redis reader for resilience. Uses SCAN to enumerate model names from `{prefix}:models:state:*` keys, then reads per-model keys (`state`, `worker`, `memory`, `required-memory`, `runner-type`, `pinned`, `created-at`, `inference:last`). For workers, reads JSON hashes from `{prefix}:workers:*`. Also provides `getClusterStatus()` which aggregates model counts and memory totals from the raw keys. Only used when the control plane is unreachable.
+**RedisReader** — Direct Redis reader for resilience. Uses SCAN to enumerate model names from `{prefix}:models:state:*` keys, then reads per-model keys (`state`, `worker`, `memory`, `required-memory`, `runner-type`, `pinned`, `created-at`, `inference:last`). For workers, reads JSON hashes from `{prefix}:workers:*`. Also provides `getClusterStatus()` which aggregates model counts and memory totals from the raw keys. `getClusterMemory()` reads the per-device snapshot at `{prefix}:cluster:memory` (written by the control plane's `MemoryBudgetService` on each budget refresh, TTL 300s). `getWorkerDetail(id)` reads the full worker record from `{prefix}:worker:{id}:detail` (written by `WorkerPoolService` on each heartbeat check, TTL 120s). Only used when the control plane is unreachable.
 
 **PrometheusClient** — Thin wrapper around the Prometheus HTTP API. Supports `query_range` (for time-series charts) and `query` (for instant gauges).
 
@@ -185,9 +185,23 @@ try {
 }
 ```
 
-The `source: "redis-fallback"` field signals to the frontend that the response is from the fallback path. The frontend can display a degraded-state indicator when this field is present.
+The `source: "redis-fallback"` field signals to the frontend that the response is from the fallback path. The `DegradedBanner` component detects this field across all active queries and shows a persistent warning: "Control plane unreachable — showing cached data". The banner auto-dismisses as soon as fresh data resumes.
 
 Write routes (POST, DELETE) never fall back. They return the upstream error to the client, since Redis is a read-only mirror.
+
+### Fallback coverage
+
+| Route | Fallback | Degraded behavior |
+| --- | --- | --- |
+| `GET /api/models` | Redis | Full model list, may be stale |
+| `GET /api/models/:name` | Redis | Full model detail, may be stale |
+| `GET /api/workers` | Redis | Worker list, may be stale |
+| `GET /api/workers/:id` | Redis | Worker detail, may be stale |
+| `GET /api/cluster/status` | Redis | Aggregate status, may be stale |
+| `GET /api/cluster/memory` | Redis | Per-device memory, may be stale |
+| `GET /api/metrics/*` | None | Metrics unavailable (Prometheus dependency) |
+| `GET /api/events` | None | SSE stream disconnected |
+| `POST/DELETE /api/models/*` | None | Mutating operations fail with 502 |
 
 ### Health probes
 
