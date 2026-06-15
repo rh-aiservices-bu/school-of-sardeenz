@@ -136,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function init() {
       try {
-        const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+        const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
         const res = await fetch(`${baseUrl}/auth/config`);
         if (res.ok) {
           const data = (await res.json()) as { authMode: AuthMode };
@@ -173,7 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (username: string, password: string) => {
       setLoginError(null);
-      const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+      const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
 
       const res = await fetch(`${baseUrl}/auth/login`, {
         method: 'POST',

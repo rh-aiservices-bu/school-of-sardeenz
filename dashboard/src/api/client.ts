@@ -11,7 +11,7 @@ type ErrorResponse = ControlPlaneComponents['schemas']['ErrorResponse'];
 
 export { type ModelInfo, type ModelDetail, type ModelDeploymentRequest, type ClusterStatus, type ClusterMemory, type WorkerInfo, type WorkerDetail };
 
-export const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+export const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
 
 export class ApiError extends Error {
   readonly status: number;

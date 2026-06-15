@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- E2E test framework with mock service harness for the dashboard (closes #47):
+  - `MockControlPlane` (`dashboard/e2e/mocks/control-plane.ts`): lightweight Fastify server
+    on a random port serving all BFF-facing CP endpoints (`/api/v1/models`, `/api/v1/workers`,
+    `/api/v1/cluster/status`, `/api/v1/cluster/memory`, `/healthz`) with configurable canned
+    responses and an SSE endpoint that can push events on demand via `pushEvent()`; also
+    supports stateful scenarios (model deploy, delete, sleep, wake)
+  - `MockPrometheus` (`dashboard/e2e/mocks/prometheus.ts`): lightweight Fastify server
+    serving `/api/v1/query_range` and `/api/v1/query` with pluggable response factories;
+    includes helpers `latencyRangeFactory()` and `memoryInstantFactory()` for common scenarios
+  - `Playwright fixtures` (`dashboard/e2e/fixtures.ts`): per-test fixture that starts
+    MockControlPlane + MockPrometheus on random ports, spawns the BFF (via `tsx`) pointed at
+    those mocks with `AUTH_MODE=none`, waits for readiness, and tears down cleanly; exports
+    typed helpers `bffUrl()`, `MockControlPlane`, `MockPrometheus`
+  - Updated `playwright.config.ts`: removed dev-server dependency, configured
+    trace-on-retry and screenshot-on-failure, set sequential test execution to prevent
+    port exhaustion
+  - Fixed `navigation.spec.ts`: corrected h1→h2 element mismatch (the component renders
+    `h2` not `h1`); added sidebar visibility, active nav-item highlighting for all pages,
+    and 404 catch-all coverage
+  - New `cluster-overview.spec.ts`: summary card presence and count verification from
+    mock data, VRAM Usage / Model State Breakdown / Recent Events sections, All online /
+    All clear label logic
+  - New `models.spec.ts`: model table renders, empty state, deploy form field presence and
+    validation, full deploy flow (form fill → submit → redirect), delete confirmation modal,
+    cancel keeps model, model detail page
+  - New `workers.spec.ts`: worker table, status labels (Online/Offline), empty state, worker
+    detail page with device memory cards and running models, not-found handling
+  - New `metrics.spec.ts`: page structure (heading, all 5 time-range buttons), default
+    selection (1h), range switching, auto-refresh toggle, empty state with no data, chart
+    section rendering with mock Prometheus data, error state when Prometheus is unreachable
+  - New `sse.spec.ts`: Recent Events connection status label, waiting message, degraded
+    mode resilience
+  - New `auth.spec.ts`: none-mode (no login redirect), auth config endpoint, API
+    accessibility without token, public health endpoints
+  - Fixed pre-existing TypeScript compilation error: `import.meta.env` not recognised
+    in worktrees without their own `node_modules` — `vite-env.d.ts` now includes an
+    explicit `ImportMeta` / `ImportMetaEnv` augmentation as a fallback; also removed four
+    now-redundant `as string | undefined` type assertions flagged by the linter
+
 ### Fixed
 
 - SSE connection state machine with degraded polling fallback (closes #50):

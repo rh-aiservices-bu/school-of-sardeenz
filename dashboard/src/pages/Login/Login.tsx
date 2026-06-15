@@ -23,7 +23,7 @@ export function Login() {
   // OAuth mode — show SSO button
   if (authMode === 'oauth') {
     const handleSsoLogin = () => {
-      const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+      const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
       window.location.href = `${baseUrl}/auth/login`;
     };
 
