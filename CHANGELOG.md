@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Proxy writes per-model inference timestamps to Redis (`SET {prefix}:inference:last:{model}`)
+  on each routed request, with a 5-second local debounce to minimize overhead. Gives the
+  control plane's LRU eviction engine a real recency signal (ADR-014, #39)
 - Document worker agent / runner / engine three-layer process architecture in
   `docs/architecture/overview.md` — process tree, communication channels, and
   Lmod environment isolation rationale (#31)

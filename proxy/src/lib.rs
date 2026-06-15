@@ -4,6 +4,7 @@ pub mod forwarding;
 pub mod generated;
 pub mod handlers;
 pub mod health;
+pub mod inference_tracker;
 pub mod parking;
 pub mod protocol;
 pub mod routing;
