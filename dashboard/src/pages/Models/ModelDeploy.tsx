@@ -102,16 +102,16 @@ interface FieldHelperProps {
   fieldId: string;
 }
 
-function FieldHelper({ hint, error, showError }: FieldHelperProps) {
+function FieldHelper({ hint, error, showError, fieldId }: FieldHelperProps) {
   const hasError = showError && !!error;
   if (!hint && !hasError) return null;
   return (
     <FormHelperText>
       <HelperText>
         {hasError ? (
-          <HelperTextItem variant="error">{error}</HelperTextItem>
+          <HelperTextItem id={`${fieldId}-helper`} variant="error">{error}</HelperTextItem>
         ) : hint ? (
-          <HelperTextItem>{hint}</HelperTextItem>
+          <HelperTextItem id={`${fieldId}-helper`}>{hint}</HelperTextItem>
         ) : null}
       </HelperText>
     </FormHelperText>
@@ -204,6 +204,7 @@ export function ModelDeploy() {
                 onChange={(_ev, val) => set('modelName', val)}
                 isRequired
                 aria-invalid={submitted && !!errors.modelName}
+                aria-describedby="model-name-helper"
                 placeholder="meta-llama/Llama-3.1-8B-Instruct"
               />
               <FieldHelper
@@ -238,6 +239,7 @@ export function ModelDeploy() {
                 onChange={(_ev, val) => set('modelPath', val)}
                 isRequired
                 aria-invalid={submitted && !!errors.modelPath}
+                aria-describedby="model-path-helper"
                 placeholder="/models/meta-llama/Llama-3.1-8B-Instruct"
               />
               <FieldHelper
@@ -256,6 +258,7 @@ export function ModelDeploy() {
                 onChange={(_ev, val) => set('requiredMemoryGib', val)}
                 isRequired
                 aria-invalid={submitted && !!errors.requiredMemoryGib}
+                aria-describedby="required-memory-helper"
                 placeholder="16"
                 min={0}
                 step={0.5}
@@ -293,6 +296,7 @@ export function ModelDeploy() {
                 value={form.tensorParallel}
                 onChange={(_ev, val) => set('tensorParallel', val)}
                 aria-invalid={submitted && !!errors.tensorParallel}
+                aria-describedby="tensor-parallel-helper"
                 min={1}
                 step={1}
               />
@@ -310,7 +314,6 @@ export function ModelDeploy() {
                 label="Pinned"
                 isChecked={form.pinned}
                 onChange={(_ev, checked) => set('pinned', checked)}
-                aria-label="Pinned"
               />
               <FieldHelper
                 hint="Pinned models cannot be evicted by the LRU eviction engine."
@@ -325,6 +328,7 @@ export function ModelDeploy() {
                 value={form.engineConfig}
                 onChange={(_ev, val) => set('engineConfig', val)}
                 aria-invalid={submitted && !!errors.engineConfig}
+                aria-describedby="engine-config-helper"
                 placeholder={'{\n  "max_model_len": 4096\n}'}
                 rows={5}
                 style={{ fontFamily: 'monospace' }}

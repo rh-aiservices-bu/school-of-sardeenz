@@ -24,6 +24,7 @@ import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/type
 import { useClusterStatus } from '../../hooks/useCluster';
 import { useEventStream } from '../../hooks/useEventStream';
 import { StateLabel } from '../../components/StateLabel';
+import { MemoryVisualization } from '../../components/MemoryVisualization';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
@@ -497,13 +498,14 @@ function EventEntry({ event }: { event: ClusterEvent }) {
     '—';
 
   return (
-    <div
+    <li
       style={{
         display: 'flex',
         alignItems: 'flex-start',
         gap: 'var(--pf-t--global--spacer--sm)',
         padding: 'var(--pf-t--global--spacer--xs) 0',
         borderBottom: '1px solid var(--pf-t--global--border--color--default)',
+        listStyle: 'none',
       }}
     >
       <span
@@ -513,6 +515,7 @@ function EventEntry({ event }: { event: ClusterEvent }) {
           flexShrink: 0,
           minWidth: '5ch',
         }}
+        title={event.timestamp}
       >
         {formatRelativeTime(event.timestamp)}
       </span>
@@ -528,7 +531,7 @@ function EventEntry({ event }: { event: ClusterEvent }) {
       >
         {description}
       </span>
-    </div>
+    </li>
   );
 }
 
@@ -557,13 +560,15 @@ function RecentEvents() {
             </Title>
           </FlexItem>
           <FlexItem>
-            <Label color={connectionColor} isCompact>
-              {connectionStatus === 'connected'
-                ? 'Live'
-                : connectionStatus === 'connecting'
-                  ? 'Connecting…'
-                  : 'Disconnected'}
-            </Label>
+            <span aria-live="polite">
+              <Label color={connectionColor} isCompact>
+                {connectionStatus === 'connected'
+                  ? 'Live'
+                  : connectionStatus === 'connecting'
+                    ? 'Connecting…'
+                    : 'Disconnected'}
+              </Label>
+            </span>
           </FlexItem>
         </Flex>
       </CardTitle>
@@ -580,11 +585,11 @@ function RecentEvents() {
             No events yet. Waiting for cluster activity…
           </div>
         ) : (
-          <div>
+          <ul aria-live="polite" aria-label="Recent cluster events" style={{ margin: 0, padding: 0 }}>
             {recent.map((event, idx) => (
               <EventEntry key={`${event.timestamp}-${event.type}-${idx}`} event={event} />
             ))}
-          </div>
+          </ul>
         )}
       </CardBody>
     </Card>
@@ -649,6 +654,9 @@ export function ClusterOverview() {
           <MemoryDonutChart status={status} />
           <ModelStateBreakdown status={status} />
         </div>
+
+        {/* Row 2.5: Per-worker VRAM breakdown */}
+        <MemoryVisualization />
 
         {/* Row 4: Recent events */}
         <RecentEvents />

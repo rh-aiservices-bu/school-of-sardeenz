@@ -32,6 +32,8 @@ export default tseslint.config(
       '**/vitest.integration.config.ts',
       'dashboard/dist/',
       'dashboard/vite.config.ts',
+      'dashboard/playwright.config.ts',
+      'dashboard/e2e/',
       '**/*.v1.tsx',
       '**/*.v1.ts',
     ],

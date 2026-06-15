@@ -295,6 +295,7 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
             <thead>
               <tr>
                 <th
+                  scope="col"
                   style={{
                     textAlign: 'left',
                     padding: '8px 12px',
@@ -305,6 +306,7 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
                   Device / Model
                 </th>
                 <th
+                  scope="col"
                   style={{
                     textAlign: 'right',
                     padding: '8px 12px',

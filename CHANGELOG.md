@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Accessibility audit (Task 3.12) — WCAG 2.1 AA compliance fixes: event feed uses semantic
+  `<ul>/<li>` list with `aria-live="polite"` for screen reader announcements; SSE connection
+  status wrapped in `aria-live="polite"` region; form error messages linked to inputs via
+  `aria-describedby` with unique IDs on HelperTextItem components; table headers in metrics
+  dashboard use `scope="col"` for assistive technology; event timestamps include full ISO
+  date-time in `title` attribute; redundant `aria-label` removed from Switch component;
+  Vitest config excludes `e2e/` directory to avoid Playwright/Vitest test runner conflicts
+- Playwright E2E test infrastructure for the admin dashboard — `playwright.config.ts` with Vite
+  dev server integration (reuse existing server, 30s test timeout, HTML reporter, trace/screenshot
+  on failure); 5 spec files under `dashboard/e2e/` covering navigation, cluster overview, model
+  management, workers, and metrics; `tsconfig.e2e.json` for the e2e include path;
+  `test:e2e` script in `dashboard/package.json`; `dashboard/e2e/` and
+  `dashboard/playwright.config.ts` added to ESLint ignores so they run cleanly from the host
+- `MemoryVisualization` component — reusable card at `dashboard/src/components/MemoryVisualization.tsx`
+  showing per-worker, per-device GPU memory as proportionally accurate stacked horizontal bars
+  (Used in blue, Reserved in orange, Available in light gray), with inline Used/Total byte labels,
+  native `title` hover tooltips per segment, color-coded legend, loading spinner, and empty state;
+  integrated into Cluster Overview below the aggregate VRAM donut chart as a per-worker breakdown
 - Model Detail view (Task 3.8) — full detail page at `/models/:modelName` with breadcrumb
   navigation, DescriptionList of all model fields, conditional action buttons (sleep/wake/delete),
   PF6 Progress bar for STARTING state with phase/message display, danger Alert for ERROR state
