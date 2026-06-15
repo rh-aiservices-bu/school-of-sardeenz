@@ -217,16 +217,23 @@ export class ModelLifecycleService {
     await this.redis.del(key);
   }
 
-  async updateLastInference(modelName: string): Promise<void> {
-    const key = modelStateKey(this.keyPrefix, modelName);
-    const luaScript = `
-      local raw = redis.call('GET', KEYS[1])
-      if not raw then return nil end
-      local state = cjson.decode(raw)
-      state['lastInferenceAt'] = ARGV[1]
-      redis.call('SET', KEYS[1], cjson.encode(state))
-      return 1
-    `;
-    await this.redis.eval(luaScript, 1, key, new Date().toISOString());
+  async getLastInferenceTimestamps(modelNames: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (modelNames.length === 0) return result;
+
+    const pipeline = this.redis.pipeline();
+    for (const name of modelNames) {
+      pipeline.get(redisKey(this.keyPrefix, 'inference', 'last', name));
+    }
+    const replies = await pipeline.exec();
+    if (!replies) return result;
+
+    for (let i = 0; i < modelNames.length; i++) {
+      const [err, raw] = replies[i];
+      if (!err && typeof raw === 'string') {
+        result.set(modelNames[i], raw);
+      }
+    }
+    return result;
   }
 }

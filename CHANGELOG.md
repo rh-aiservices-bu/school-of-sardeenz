@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- LRU eviction now reads per-model inference timestamps from Redis (`{prefix}:inference:last:{model}`)
+  written by the proxy, giving the eviction engine a real recency signal instead of random
+  ordering. See ADR-014 for the design decision (#37)
 - Control plane Dockerfile COPY instructions no longer use invalid shell redirection
   (`2>/dev/null || true`); optional workspace-local `node_modules` dirs are guaranteed to
   exist via `mkdir -p` in the deps stage so plain COPY always succeeds (#33)

@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
 
-import { isValidTransition, isTerminalState } from '../model-lifecycle.js';
+import { isValidTransition, isTerminalState, ModelLifecycleService } from '../model-lifecycle.js';
+import type { Redis } from '../../clients/redis.js';
 
 describe('isValidTransition', () => {
   const validTransitions: [ModelLifecycleState, ModelLifecycleState][] = [
@@ -58,5 +59,69 @@ describe('isTerminalState', () => {
 
   it('ERROR is not terminal', () => {
     expect(isTerminalState(ModelLifecycleState.ERROR)).toBe(false);
+  });
+});
+
+describe('ModelLifecycleService.getLastInferenceTimestamps', () => {
+  function makeMockRedis(data: Record<string, string>): Redis {
+    return {
+      pipeline: () => ({
+        get: vi.fn().mockReturnThis(),
+        exec: vi.fn().mockResolvedValue(
+          Object.keys(data).length > 0
+            ? Object.values(data).map((v) => [null, v])
+            : [],
+        ),
+      }),
+    } as unknown as Redis;
+  }
+
+  it('returns empty map for empty model list', async () => {
+    const redis = makeMockRedis({});
+    const service = new ModelLifecycleService(redis, 'test');
+    const result = await service.getLastInferenceTimestamps([]);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns timestamps for models that have inference data', async () => {
+    const ts1 = '2026-06-15T10:00:00.000Z';
+    const ts2 = '2026-06-15T11:00:00.000Z';
+    const redis = {
+      pipeline: () => {
+        const calls: string[] = [];
+        return {
+          get: vi.fn((key: string) => {
+            calls.push(key);
+            return { get: vi.fn().mockReturnThis(), exec: vi.fn() };
+          }),
+          exec: vi.fn().mockResolvedValue([
+            [null, ts1],
+            [null, null],
+            [null, ts2],
+          ]),
+        };
+      },
+    } as unknown as Redis;
+    const service = new ModelLifecycleService(redis, 'test');
+    const result = await service.getLastInferenceTimestamps(['model-a', 'model-b', 'model-c']);
+    expect(result.size).toBe(2);
+    expect(result.get('model-a')).toBe(ts1);
+    expect(result.has('model-b')).toBe(false);
+    expect(result.get('model-c')).toBe(ts2);
+  });
+
+  it('returns empty map when no models have inference data', async () => {
+    const redis = {
+      pipeline: () => ({
+        get: vi.fn().mockReturnThis(),
+        exec: vi.fn().mockResolvedValue([
+          [null, null],
+          [null, null],
+        ]),
+      }),
+    } as unknown as Redis;
+    const service = new ModelLifecycleService(redis, 'test');
+    const result = await service.getLastInferenceTimestamps(['model-a', 'model-b']);
+    expect(result.size).toBe(0);
   });
 });

@@ -85,6 +85,12 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       if (!result) {
         const allStates = await deps.lifecycle.getAllStates();
+        const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
+          allStates.map((s) => s.modelName),
+        );
+        for (const s of allStates) {
+          s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+        }
         const allRecords = await deps.modelRepository.findAll();
         const pinnedModels = new Set(
           allRecords.filter((r) => r.pinned).map((r) => r.name),
@@ -400,6 +406,12 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
         if (totalAvailable < requiredMemory) {
           const allStates = await deps.lifecycle.getAllStates();
+          const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
+            allStates.map((s) => s.modelName),
+          );
+          for (const s of allStates) {
+            s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+          }
           const allRecords = await deps.modelRepository.findAll();
           const pinnedModels = new Set(
             allRecords.filter((r) => r.pinned).map((r) => r.name),
