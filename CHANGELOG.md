@@ -15,6 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     to the frontend, mapping `RoutingMapUpdateType` values to `ClusterEventType`
   - `useEventStream()` moved from `ClusterOverview` to app scope via React context so all
     pages benefit from real-time SSE updates and query invalidation
+- BFF memory metrics endpoint now queries `sardeenz_control_plane_device_memory_bytes`
+  (was `sardeenz_device_memory_bytes`, which the control plane does not export); verified
+  proxy metric names `sardeenz_proxy_request_duration_seconds_bucket` and
+  `sardeenz_proxy_requests_total` match Rust proxy exports; added BFF metrics route
+  tests to prevent metric name regressions (closes #46)
 - Cross-model review fixes for Phase 3 dashboard:
   - SSE event stream now handles `EVICTION_TRIGGERED` and `PLACEMENT_COMPLETED` events
     (previously caused stale UI until next poll cycle)
