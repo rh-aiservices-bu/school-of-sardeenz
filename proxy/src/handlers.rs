@@ -108,6 +108,7 @@ async fn handle_inference_inner(
                 state.circuit_breaker.record_failure(&ep_key).await;
             } else {
                 state.circuit_breaker.record_success(&ep_key).await;
+                state.inference_tracker.record(&model_name).await;
             }
             Ok(response)
         }

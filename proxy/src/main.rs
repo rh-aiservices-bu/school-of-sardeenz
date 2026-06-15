@@ -4,6 +4,7 @@ mod forwarding;
 mod generated;
 mod handlers;
 mod health;
+mod inference_tracker;
 mod parking;
 mod protocol;
 mod routing;

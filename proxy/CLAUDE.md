@@ -15,6 +15,7 @@ Stateless Rust (axum/tokio) routing proxy for OpenAI-compatible inference reques
 | `generated` | `src/generated/` | Hand-maintained Rust types mirroring OpenAPI specs |
 | `handlers` | `src/handlers.rs` | Inference handlers + `/metrics` endpoint |
 | `health` | `src/health/` | `/healthz`, `/readyz`, Prometheus metric descriptions |
+| `inference_tracker` | `src/inference_tracker.rs` | Per-model inference timestamps to Redis (debounced, fire-and-forget) |
 | `parking` | `src/parking/` | `ParkingManager`, `WakeTriggerClient`, thundering herd prevention |
 | `protocol` | `src/protocol/` | Request parsing (model extraction), OpenAI response building |
 | `routing` | `src/routing/` | `RoutingMapCache` (watch-based), `ModelResolver` |
@@ -33,6 +34,7 @@ Stateless Rust (axum/tokio) routing proxy for OpenAI-compatible inference reques
 | `CircuitBreaker` | `forwarding` | Per-endpoint Closed/Open/HalfOpen state machine |
 | `ForwardingClient` | `forwarding` | reqwest-based HTTP forwarder with hop-by-hop header filtering |
 | `WeightedRoundRobin` | `forwarding` | Endpoint selection by cumulative weight |
+| `InferenceTracker` | `inference_tracker` | Debounced per-model timestamp writes to Redis for LRU eviction |
 
 ## Hand-Maintained Types
 
@@ -50,6 +52,7 @@ Rationale: [ADR-005](../docs/architecture/adrs/adr-005-openapi-contracts.md)
 3. If sleeping/starting: park connection, fire wake trigger if first request (`parking`)
 4. Pick endpoint via circuit breaker + weighted round-robin (`forwarding`)
 5. Forward request, stream response back to client (`forwarding`)
+6. On success: fire-and-forget debounced inference timestamp to Redis (`inference_tracker`)
 
 ## Test Infrastructure
 
