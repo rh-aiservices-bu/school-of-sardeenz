@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Dashboard BFF data aggregation layer (Task 3.4) — fleshed out `ControlPlaneClient` with typed
+  methods (`listModels`, `getModel`, `deployModel`, `deleteModel`, `sleepModel`, `wakeModel`,
+  `listWorkers`, `getWorker`, `getClusterStatus`, `getClusterMemory`) that wrap `proxyRequest`
+  and throw `BffError.upstreamError()` on network failures; `RedisReader` with SCAN-based model
+  enumeration, worker reconstruction from JSON hash, and `getClusterStatus()` aggregation for
+  resilience fallback; `PrometheusClient` with `queryRange` and `queryInstant` methods; route
+  handlers for `GET /api/models`, `GET /api/models/:name`, `GET /api/workers`, and
+  `GET /api/cluster/status` now fall back to Redis direct reads when the control plane is
+  unreachable; `GET /api/events` SSE relay subscribes to `{prefix}:events` Redis pub/sub channel
+  and forwards events to frontend clients with 30-second keepalive pings; `GET /api/metrics/*`
+  routes issue range and instant Prometheus queries; 17 new unit tests (10 client, 7 route)
+- Dashboard frontend data fetching layer (Task 3.5) — typed API client (`src/api/client.ts`)
+  with `ApiError`, TanStack Query hooks for cluster, models, workers, and metrics, SSE event
+  stream hook with automatic reconnect and query invalidation (`useEventStream`), formatting
+  utilities (`formatBytes`, `formatRelativeTime`, `formatDateTime`, `formatPercentage`),
+  state-color mapping for PF6 Label, `StateLabel` shared component, and `vite-env.d.ts` for
+  `import.meta.env` typing; 59 unit tests across 4 test files all passing
 - Dashboard frontend scaffold — Vite + React 18 + PatternFly 6 + React Router + TanStack Query
   with app shell (masthead, sidebar nav, page routing), placeholder pages for all 7 views
   (cluster overview, models, workers, metrics), Vitest config, and TypeScript strict mode

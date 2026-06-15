@@ -2,18 +2,21 @@ import type { FastifyInstance } from 'fastify';
 import type { RouteDeps } from './deps.js';
 
 export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  // GET /api/workers — list workers with Redis fallback
   app.get('/api/workers', async (_request, reply) => {
-    const res = await deps.controlPlane.proxyRequest('GET', '/api/v1/workers');
-    const body: unknown = await res.json();
-    return reply.code(res.status).send(body);
+    try {
+      const { status, data } = await deps.controlPlane.listWorkers();
+      return reply.code(status).send(data);
+    } catch {
+      app.log.warn('Control plane unavailable for listWorkers, falling back to Redis');
+      const workers = await deps.redis.listWorkers();
+      return reply.code(200).send({ workers, source: 'redis-fallback' });
+    }
   });
 
+  // GET /api/workers/:id — no Redis fallback (worker detail is too rich to reconstruct)
   app.get<{ Params: { id: string } }>('/api/workers/:id', async (request, reply) => {
-    const res = await deps.controlPlane.proxyRequest(
-      'GET',
-      `/api/v1/workers/${encodeURIComponent(request.params.id)}`,
-    );
-    const body: unknown = await res.json();
-    return reply.code(res.status).send(body);
+    const { status, data } = await deps.controlPlane.getWorker(request.params.id);
+    return reply.code(status).send(data);
   });
 }
