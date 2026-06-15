@@ -180,7 +180,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: expect.stringContaining('Worker not found') }),
+        expect.objectContaining({ errorMessage: expect.stringContaining('Worker not found') as string }),
       );
     });
 
@@ -192,7 +192,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: expect.stringContaining('no management URL') }),
+        expect.objectContaining({ errorMessage: expect.stringContaining('no management URL') as string }),
       );
     });
 
@@ -268,7 +268,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: expect.stringContaining('OOM killed') }),
+        expect.objectContaining({ errorMessage: expect.stringContaining('OOM killed') as string }),
       );
       expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalled();
     });
@@ -295,7 +295,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: expect.any(String) }),
+        expect.objectContaining({ errorMessage: expect.any(String) as string }),
       );
       expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalled();
     });

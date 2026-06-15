@@ -39,10 +39,10 @@ describe('WorkerClient', () => {
 
       expect(result).toEqual(response);
       expect(mockFetch).toHaveBeenCalledOnce();
-      const [url, opts] = mockFetch.mock.calls[0];
+      const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(url).toBe('http://worker-1:8080/runners');
-      expect(opts.method).toBe('POST');
-      expect(JSON.parse(opts.body)).toMatchObject({ modelName: 'llama-3', runnerType: 'vllm' });
+      expect((opts as Record<string, unknown>).method).toBe('POST');
+      expect(JSON.parse((opts as Record<string, unknown>).body as string)).toMatchObject({ modelName: 'llama-3', runnerType: 'vllm' });
     });
 
     it('strips trailing slashes from baseUrl', async () => {
@@ -58,7 +58,7 @@ describe('WorkerClient', () => {
         devices: [],
       });
 
-      const [url] = mockFetch.mock.calls[0];
+      const [url] = mockFetch.mock.calls[0] as [string];
       expect(url).toBe('http://worker-1:8080/runners');
     });
 
@@ -86,9 +86,9 @@ describe('WorkerClient', () => {
       const client = new WorkerClient({ baseUrl: 'http://worker-1:8080' });
       await client.stopRunner('runner-abc');
 
-      const [url, opts] = mockFetch.mock.calls[0];
+      const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(url).toBe('http://worker-1:8080/runners/runner-abc');
-      expect(opts.method).toBe('DELETE');
+      expect((opts as Record<string, unknown>).method).toBe('DELETE');
     });
 
     it('throws on non-OK response', async () => {
