@@ -143,9 +143,20 @@ This independence means the dashboard can display cluster state and metrics even
 | **Role**                 | Engine-specific workload execution |
 | **First implementation** | vLLM runner (reference)            |
 
-A **runner** is a process within a worker that runs a single workload using a specific engine. Each **runner type** implements a common contract that the control plane uses to manage its lifecycle.
+Each worker runs a three-layer process architecture:
 
-The runner contract defines the HTTP endpoints each runner exposes:
+1. **Worker agent** — a long-lived management process inside the worker Pod. It self-registers to Redis/Valkey (capabilities, devices, heartbeat), receives commands from the control plane to start and stop runners, and exposes an HTTP management API (`POST /runners`, `DELETE /runners/{runnerId}`).
+
+2. **Runner** — a separate process spawned by the worker agent, one per model. Each runner is a thin engine-specific shim that:
+   - Runs `module load <engine>/<version>` to set up its isolated Lmod environment
+   - Spawns the actual engine process as a child
+   - Exposes the runner contract HTTP API (`/health`, `/sleep`, `/wake`, `/memory-report`) on its own port
+
+3. **Engine** (vLLM, Triton, etc.) — the unmodified inference engine, started and managed by its parent runner. The engine has no knowledge of Sardeenz.
+
+The runner is the isolation boundary — each runner has its own Lmod environment, allowing different engine types and versions to coexist on the same worker. See [Why runners are separate processes](#why-runners-are-separate-processes) for the rationale.
+
+**The runner contract** defines the HTTP endpoints each runner exposes:
 
 - **Health checking** — readiness detection, state reporting
 - **Memory reporting** — per-device memory consumption
@@ -153,7 +164,7 @@ The runner contract defines the HTTP endpoints each runner exposes:
 - **Progress reporting** — structured loading progress
 - **Capability declaration** — supported platform features (tensor parallelism, sleep levels, model types)
 
-Process lifecycle (start, stop, drain) is a worker-level concern — the worker manages runner processes, and the control plane manages the routing map.
+Process lifecycle (start, stop, drain) is a worker-level concern — the worker agent manages runner processes, and the control plane manages the routing map.
 
 > See [ADR-010](adrs/adr-010-engine-runners.md) for the runner abstraction design. See [`components/runner-contract.md`](components/runner-contract.md) for the full contract specification.
 
@@ -247,9 +258,35 @@ graph TB
     CP -->|"reads capabilities"| RD
 ```
 
-**Workers** are long-lived Pods with one or more accelerators (or CPU capacity). They host one or many **runners**.
+**Workers** are long-lived Pods with one or more accelerators (or CPU capacity). Each worker runs a **worker agent** process that manages the runners on that node.
 
 **Runners** are short-lived relative to workers — started, stopped, slept, and woken by the control plane. Each runner is typed to a specific engine and runs a single workload.
+
+### Process Tree
+
+Each worker Pod runs a worker agent that spawns and supervises runners. Each runner loads its own Lmod environment and spawns its engine as a child process:
+
+```text
+Worker agent (long-lived, manages everything)
+├── Runner A: module load vllm/0.19.1 → spawn vLLM → serve model X on :5001
+├── Runner B: module load vllm/0.20.0 → spawn vLLM → serve model Y on :5002
+└── Runner C: module load triton/2.40 → spawn Triton → serve model Z on :5003
+```
+
+### Communication Channels
+
+| Channel                          | Direction                | Purpose                                                                      |
+| -------------------------------- | ------------------------ | ---------------------------------------------------------------------------- |
+| Control plane → Worker agent     | Process management       | `POST /runners` to start a runner, `DELETE /runners/{id}` to stop one        |
+| Control plane → Runner           | Lifecycle management     | `/health`, `/sleep`, `/wake` — the runner contract                           |
+| Proxy → Runner                   | Inference traffic        | Direct request forwarding, no control plane involvement on the hot path      |
+| Worker agent → Redis / Valkey    | Self-registration        | Capabilities, devices, heartbeat, management URL                             |
+
+### Why Runners Are Separate Processes
+
+The key constraint is **Lmod environment isolation**. Lmod works by modifying `PATH`, `LD_LIBRARY_PATH`, `PYTHONPATH`, and other environment variables in the shell environment. Running multiple engines or engine versions on the same worker requires each to have its own isolated environment. A separate process per runner provides this naturally — each runner does its own `module load` and inherits the resulting environment. Trying to manage per-model environments within a single worker agent process would be fragile and fight against how Lmod is designed.
+
+> See [ADR-004](adrs/adr-004-highlander-runtime.md) for the Highlander integration rationale and [ADR-010](adrs/adr-010-engine-runners.md) for the runner abstraction design.
 
 ### Workload Placement
 
