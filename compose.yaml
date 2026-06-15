@@ -18,5 +18,22 @@ services:
       timeout: 3s
       retries: 5
 
+  postgres:
+    image: docker.io/postgres:16
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: sardeenz
+      POSTGRES_PASSWORD: sardeenz
+      POSTGRES_DB: sardeenz
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sardeenz']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   redis-data:
+  postgres-data:

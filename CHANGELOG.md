@@ -55,6 +55,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Integration test infrastructure for control plane (`control-plane/src/__tests__/integration/`):
+  test harness wiring real Redis (DB 1) and PostgreSQL with per-test key prefixes, in-process
+  mock runner and worker Fastify servers, `canConnect()` skip guard, and dedicated vitest config
+  (`vitest.integration.config.ts`). Three test suites: deploy orchestration (happy path +
+  timeout), sleep/wake round-trip with CAS thundering-herd prevention, and worker discovery
+  with routing map consistency across deploy/sleep/wake lifecycle (#38)
+- PostgreSQL service added to `compose.yaml` for integration test and local dev use
 - Control plane reconciliation loop (`control-plane/src/services/reconciliation.ts`):
   `ReconciliationService` runs a leader-only background loop (default 30s interval) that
   re-discovers workers, checks heartbeats, cleans up dead workers (transitions their models
