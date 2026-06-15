@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerMetricsRoutes } from '../../routes/metrics.js';
+import { authPlugin } from '../../plugins/auth.js';
 import { BffError } from '../../errors.js';
 import type { RouteDeps } from '../../routes/deps.js';
 import type { Config } from '../../config.js';
@@ -16,6 +17,16 @@ const mockConfig: Config = {
   redisKeyPrefix: 'sardeenz',
   prometheusUrl: 'http://prom.test',
   corsOrigin: 'http://localhost:5173',
+  authMode: 'none',
+  adminUsername: 'admin',
+  adminPassword: '',
+  jwtSecret: '',
+  jwtExpirationHours: 8,
+  oauthClientId: 'sardeenz',
+  oauthClientSecret: '',
+  oauthIssuerUrl: '',
+  k8sApiUrl: '',
+  namespace: 'sardeenz',
 };
 
 const queryRangeFn = vi.fn();
@@ -65,6 +76,7 @@ async function buildApp(deps: RouteDeps): Promise<FastifyInstance> {
     }
     return reply.code(500).send({ error: 'Internal error', code: 'INTERNAL_ERROR' });
   });
+  await app.register(authPlugin, { config: mockConfig });
   registerMetricsRoutes(app, deps);
   await app.ready();
   return app;

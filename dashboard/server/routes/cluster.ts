@@ -4,7 +4,7 @@ import type { RouteDeps } from './deps.js';
 
 export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // GET /api/cluster/status — with Redis fallback
-  app.get('/api/cluster/status', async (_request, reply) => {
+  app.get('/api/cluster/status', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (_request, reply) => {
     try {
       const { status, data } = await deps.controlPlane.getClusterStatus();
       return reply.code(status).send(data);
@@ -17,7 +17,7 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
   });
 
   // GET /api/cluster/memory — no Redis fallback (per-device breakdown not in Redis)
-  app.get('/api/cluster/memory', async (_request, reply) => {
+  app.get('/api/cluster/memory', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (_request, reply) => {
     const { status, data } = await deps.controlPlane.getClusterMemory();
     return reply.code(status).send(data);
   });

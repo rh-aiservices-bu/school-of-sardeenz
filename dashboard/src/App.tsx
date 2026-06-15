@@ -1,10 +1,13 @@
 import { Component, type ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import {
+  Bullseye,
   EmptyState,
   EmptyStateBody,
   PageSection,
+  Spinner,
 } from '@patternfly/react-core';
+import { useAuth } from './contexts/AuthContext';
 import { AppLayout } from './components/AppLayout';
 import { EventStreamContext, useEventStreamConnection } from './hooks/useEventStream';
 import { ClusterOverview } from './pages/ClusterOverview/ClusterOverview';
@@ -14,6 +17,8 @@ import { ModelDetail } from './pages/Models/ModelDetail';
 import { WorkerList } from './pages/Workers/WorkerList';
 import { WorkerDetail } from './pages/Workers/WorkerDetail';
 import { MetricsDashboard } from './pages/Metrics/MetricsDashboard';
+import { Login } from './pages/Login/Login';
+import { OAuthCallback } from './pages/Login/OAuthCallback';
 
 function NotFoundPage() {
   return (
@@ -55,6 +60,29 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   }
 }
 
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading, authMode } = useAuth();
+  const location = useLocation();
+
+  // Auth disabled — always pass
+  if (authMode === 'none') return <>{children}</>;
+
+  // Still loading auth state
+  if (isLoading) {
+    return (
+      <Bullseye>
+        <Spinner size="xl" aria-label="Loading..." />
+      </Bullseye>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function EventStreamProvider({ children }: { children: ReactNode }) {
   const state = useEventStreamConnection();
   return (
@@ -66,21 +94,32 @@ function EventStreamProvider({ children }: { children: ReactNode }) {
 
 export function App() {
   return (
-    <EventStreamProvider>
-      <AppLayout>
-        <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<ClusterOverview />} />
-            <Route path="/models" element={<ModelList />} />
-            <Route path="/models/deploy" element={<ModelDeploy />} />
-            <Route path="/models/:modelName" element={<ModelDetail />} />
-            <Route path="/workers" element={<WorkerList />} />
-            <Route path="/workers/:workerId" element={<WorkerDetail />} />
-            <Route path="/metrics" element={<MetricsDashboard />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </ErrorBoundary>
-      </AppLayout>
-    </EventStreamProvider>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/oauth/callback" element={<OAuthCallback />} />
+      <Route
+        path="*"
+        element={
+          <ProtectedRoute>
+            <EventStreamProvider>
+              <AppLayout>
+                <ErrorBoundary>
+                  <Routes>
+                    <Route path="/" element={<ClusterOverview />} />
+                    <Route path="/models" element={<ModelList />} />
+                    <Route path="/models/deploy" element={<ModelDeploy />} />
+                    <Route path="/models/:modelName" element={<ModelDetail />} />
+                    <Route path="/workers" element={<WorkerList />} />
+                    <Route path="/workers/:workerId" element={<WorkerDetail />} />
+                    <Route path="/metrics" element={<MetricsDashboard />} />
+                    <Route path="*" element={<NotFoundPage />} />
+                  </Routes>
+                </ErrorBoundary>
+              </AppLayout>
+            </EventStreamProvider>
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   );
 }

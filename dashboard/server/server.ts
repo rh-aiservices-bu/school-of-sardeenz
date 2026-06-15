@@ -7,7 +7,9 @@ import fastifyStatic from '@fastify/static';
 import type { Config } from './config.js';
 import type { RouteDeps } from './routes/deps.js';
 import { BffError } from './errors.js';
+import { authPlugin } from './plugins/auth.js';
 import { registerProbes } from './health/probes.js';
+import { registerAuthRoutes } from './routes/auth.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerWorkerRoutes } from './routes/workers.js';
 import { registerClusterRoutes } from './routes/cluster.js';
@@ -44,7 +46,11 @@ export async function buildServer(deps: ServerDeps) {
     });
   });
 
+  // Auth plugin MUST be registered before routes
+  await app.register(authPlugin, { config: deps.config });
+
   registerProbes(app, deps.routes);
+  registerAuthRoutes(app, deps.config);
   registerModelRoutes(app, deps.routes);
   registerWorkerRoutes(app, deps.routes);
   registerClusterRoutes(app, deps.routes);

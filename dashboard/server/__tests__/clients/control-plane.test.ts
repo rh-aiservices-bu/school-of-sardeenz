@@ -13,6 +13,16 @@ const mockConfig: Config = {
   redisKeyPrefix: 'sardeenz',
   prometheusUrl: 'http://prom.test',
   corsOrigin: 'http://localhost:5173',
+  authMode: 'none',
+  adminUsername: 'admin',
+  adminPassword: '',
+  jwtSecret: '',
+  jwtExpirationHours: 8,
+  oauthClientId: 'sardeenz',
+  oauthClientSecret: '',
+  oauthIssuerUrl: '',
+  k8sApiUrl: '',
+  namespace: 'sardeenz',
 };
 
 function makeFetchResponse(status: number, body: unknown): Response {

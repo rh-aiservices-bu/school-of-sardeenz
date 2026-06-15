@@ -4,7 +4,7 @@ import type { RouteDeps } from './deps.js';
 
 export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // GET /api/workers — list workers with Redis fallback
-  app.get('/api/workers', async (_request, reply) => {
+  app.get('/api/workers', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (_request, reply) => {
     try {
       const { status, data } = await deps.controlPlane.listWorkers();
       return reply.code(status).send(data);
@@ -17,7 +17,7 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
   });
 
   // GET /api/workers/:id — no Redis fallback (worker detail is too rich to reconstruct)
-  app.get<{ Params: { id: string } }>('/api/workers/:id', async (request, reply) => {
+  app.get<{ Params: { id: string } }>('/api/workers/:id', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const { status, data } = await deps.controlPlane.getWorker(request.params.id);
     return reply.code(status).send(data);
   });

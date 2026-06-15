@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Dashboard BFF auth system with three modes: `none`, `simple`, and `oauth`
+  (`AUTH_MODE` env var, defaults to `none` for backward compatibility) (#43):
+  - **Simple mode**: username/password login with timing-safe credential
+    comparison, in-memory rate limiting, and JWT issuance
+  - **OAuth mode**: OpenShift OAuth2 flow with CSRF state tokens, code exchange,
+    user info fetching, and Kubernetes RBAC role resolution
+  - JWT-based route protection with `authenticate` and `requireRole` decorators;
+    admin role implies admin-readonly access
+  - SSE query-parameter token fallback (`?token=...`) for EventSource clients
+    that cannot send custom headers
+  - Frontend `AuthContext` with auto-logout timer, sessionStorage token
+    management, and `auth:unauthorized` event handling
+  - Login page with conditional rendering: username/password form (simple) or
+    SSO redirect button (oauth), built with PatternFly 6 `LoginPage` component
+  - OAuth callback page for extracting token from URL fragment
+  - Protected routing: unauthenticated users redirected to `/login`;
+    `authMode=none` bypasses all auth checks
+  - API client attaches `Authorization: Bearer` header automatically and
+    dispatches logout event on 401 responses
+  - Auth test suite covering login, credential rejection, JWT verification,
+    role-based access control, query-parameter token fallback, and `none` mode
+
 ### Fixed
 
 - SSE integration aligned with control plane event channel and payload shape (#44):

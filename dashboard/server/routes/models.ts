@@ -4,13 +4,13 @@ import type { RouteDeps } from './deps.js';
 
 export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // POST /api/models — deploy a new model (write op: no Redis fallback)
-  app.post('/api/models', async (request, reply) => {
+  app.post('/api/models', { preHandler: [app.authenticate, app.requireRole('admin')] }, async (request, reply) => {
     const { status, data } = await deps.controlPlane.deployModel(request.body);
     return reply.code(status).send(data);
   });
 
   // GET /api/models — list models with Redis fallback
-  app.get('/api/models', async (request, reply) => {
+  app.get('/api/models', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const query = request.query as Record<string, string>;
     const state = query['state'];
     try {
@@ -25,7 +25,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   });
 
   // GET /api/models/:name — get model detail with Redis fallback
-  app.get<{ Params: { name: string } }>('/api/models/:name', async (request, reply) => {
+  app.get<{ Params: { name: string } }>('/api/models/:name', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const { name } = request.params;
     try {
       const { status, data } = await deps.controlPlane.getModel(name);
@@ -42,19 +42,19 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   });
 
   // DELETE /api/models/:name — write op: no Redis fallback
-  app.delete<{ Params: { name: string } }>('/api/models/:name', async (request, reply) => {
+  app.delete<{ Params: { name: string } }>('/api/models/:name', { preHandler: [app.authenticate, app.requireRole('admin')] }, async (request, reply) => {
     const { status, data } = await deps.controlPlane.deleteModel(request.params.name);
     return reply.code(status).send(data);
   });
 
   // POST /api/models/:name/sleep — write op: no Redis fallback
-  app.post<{ Params: { name: string } }>('/api/models/:name/sleep', async (request, reply) => {
+  app.post<{ Params: { name: string } }>('/api/models/:name/sleep', { preHandler: [app.authenticate, app.requireRole('admin')] }, async (request, reply) => {
     const { status, data } = await deps.controlPlane.sleepModel(request.params.name);
     return reply.code(status).send(data);
   });
 
   // POST /api/models/:name/wake — write op: no Redis fallback
-  app.post<{ Params: { name: string } }>('/api/models/:name/wake', async (request, reply) => {
+  app.post<{ Params: { name: string } }>('/api/models/:name/wake', { preHandler: [app.authenticate, app.requireRole('admin')] }, async (request, reply) => {
     const { status, data } = await deps.controlPlane.wakeModel(request.params.name);
     return reply.code(status).send(data);
   });
