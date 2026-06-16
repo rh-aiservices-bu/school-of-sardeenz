@@ -1,0 +1,70 @@
+{
+  "overview": {
+    "title": "Cluster Overview",
+    "loading": "Loading cluster status",
+    "errors": {
+      "failedToLoad": "Failed to load cluster status"
+    },
+    "cards": {
+      "workers": {
+        "title": "Workers",
+        "allOnline": "All online",
+        "noWorkers": "No workers",
+        "offline": "{{count}} offline"
+      },
+      "models": {
+        "title": "Models",
+        "total": " total",
+        "active": "{{count}} active",
+        "sleeping": "{{count}} sleeping"
+      },
+      "gpuMemory": {
+        "title": "GPU Memory",
+        "used": " used",
+        "available": "{{value}} available of {{total}}"
+      },
+      "alerts": {
+        "title": "Alerts",
+        "issue": " issue",
+        "issues": " issues",
+        "allClear": "All clear",
+        "modelErrors": "{{count}} model error",
+        "modelErrors_plural": "{{count}} model errors",
+        "workersOffline": "{{count}} worker offline",
+        "workersOffline_plural": "{{count}} workers offline"
+      }
+    },
+    "vramUsage": {
+      "title": "VRAM Usage",
+      "ariaDesc": "GPU memory usage donut chart",
+      "used": "Used",
+      "available": "Available",
+      "total": "Total"
+    },
+    "modelStateBreakdown": {
+      "title": "Model State Breakdown",
+      "other": "Other"
+    },
+    "recentEvents": {
+      "title": "Recent Events",
+      "noEvents": "No events yet. Waiting for cluster activity…",
+      "ariaLabel": "Recent cluster events",
+      "connectionStatus": {
+        "live": "Live",
+        "reconnecting": "Reconnecting…",
+        "degraded": "Degraded"
+      }
+    },
+    "vramAllocation": {
+      "title": "VRAM Allocation",
+      "loading": "Loading VRAM allocation data",
+      "noData": "No memory data available.",
+      "noDevices": "No devices reported.",
+      "legend": {
+        "used": "Used",
+        "reserved": "Reserved",
+        "available": "Available"
+      }
+    }
+  }
+}

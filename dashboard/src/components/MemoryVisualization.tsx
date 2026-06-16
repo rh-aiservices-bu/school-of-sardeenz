@@ -7,6 +7,7 @@ import {
   Spinner,
   Title,
 } from '@patternfly/react-core';
+import { useTranslation } from 'react-i18next';
 import { type ControlPlaneComponents } from '@sardeenz/types';
 import { useClusterMemory } from '../hooks/useCluster';
 import { formatBytes } from '../utils/format';
@@ -18,6 +19,7 @@ type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
 // Legend
 // ---------------------------------------------------------------------------
 function Legend() {
+  const { t } = useTranslation('cluster');
   return (
     <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
       <FlexItem>
@@ -34,7 +36,7 @@ function Legend() {
             />
           </FlexItem>
           <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>Used</span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>{t('overview.vramAllocation.legend.used')}</span>
           </FlexItem>
         </Flex>
       </FlexItem>
@@ -52,7 +54,7 @@ function Legend() {
             />
           </FlexItem>
           <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>Reserved</span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>{t('overview.vramAllocation.legend.reserved')}</span>
           </FlexItem>
         </Flex>
       </FlexItem>
@@ -71,7 +73,7 @@ function Legend() {
             />
           </FlexItem>
           <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>Available</span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>{t('overview.vramAllocation.legend.available')}</span>
           </FlexItem>
         </Flex>
       </FlexItem>
@@ -87,6 +89,7 @@ interface DeviceBarProps {
 }
 
 function DeviceBar({ device }: DeviceBarProps) {
+  const { t } = useTranslation('cluster');
   const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes, memoryAvailableBytes, memoryReservedBytes } =
     device;
 
@@ -95,11 +98,13 @@ function DeviceBar({ device }: DeviceBarProps) {
   const reservedPercent = Math.min(100 - usedPercent, ((memoryReservedBytes ?? 0) / total) * 100);
   const availablePercent = Math.max(0, 100 - usedPercent - reservedPercent);
 
-  const usedLabel = `Used: ${formatBytes(memoryUsedBytes)}`;
+  const usedLabel = `${t('overview.vramAllocation.legend.used')}: ${formatBytes(memoryUsedBytes)}`;
   const reservedLabel =
-    (memoryReservedBytes ?? 0) > 0 ? ` | Reserved: ${formatBytes(memoryReservedBytes)}` : '';
-  const availableLabel = ` | Available: ${formatBytes(memoryAvailableBytes)}`;
-  const totalLabel = ` | Total: ${formatBytes(memoryTotalBytes)}`;
+    (memoryReservedBytes ?? 0) > 0
+      ? ` | ${t('overview.vramAllocation.legend.reserved')}: ${formatBytes(memoryReservedBytes)}`
+      : '';
+  const availableLabel = ` | ${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)}`;
+  const totalLabel = ` | ${t('overview.vramUsage.total')}: ${formatBytes(memoryTotalBytes)}`;
   const tooltipText = `${usedLabel}${reservedLabel}${availableLabel}${totalLabel}`;
 
   return (
@@ -167,7 +172,7 @@ function DeviceBar({ device }: DeviceBarProps) {
               background: 'var(--pf-t--global--color--status--warning--default)',
               transition: 'width 0.3s ease',
             }}
-            title={`Reserved: ${formatBytes(memoryReservedBytes)}`}
+            title={`${t('overview.vramAllocation.legend.reserved')}: ${formatBytes(memoryReservedBytes)}`}
           />
         )}
         {availablePercent > 0 && (
@@ -177,7 +182,7 @@ function DeviceBar({ device }: DeviceBarProps) {
               background: 'var(--pf-t--global--background--color--secondary--default)',
               transition: 'width 0.3s ease',
             }}
-            title={`Available: ${formatBytes(memoryAvailableBytes)}`}
+            title={`${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)}`}
           />
         )}
       </div>
@@ -212,6 +217,7 @@ interface WorkerSectionProps {
 }
 
 function WorkerSection({ workerId, devices }: WorkerSectionProps) {
+  const { t } = useTranslation('cluster');
 
   return (
     <div>
@@ -242,7 +248,7 @@ function WorkerSection({ workerId, devices }: WorkerSectionProps) {
               color: 'var(--pf-t--global--text--color--subtle)',
             }}
           >
-            No devices reported.
+            {t('overview.vramAllocation.noDevices')}
           </div>
         ) : (
           devices.map((device) => (
@@ -258,6 +264,7 @@ function WorkerSection({ workerId, devices }: WorkerSectionProps) {
 // Empty state
 // ---------------------------------------------------------------------------
 function EmptyMemoryState() {
+  const { t } = useTranslation('cluster');
   return (
     <div
       style={{
@@ -267,7 +274,7 @@ function EmptyMemoryState() {
         fontSize: 'var(--pf-t--global--font--size--sm)',
       }}
     >
-      No memory data available.
+      {t('overview.vramAllocation.noData')}
     </div>
   );
 }
@@ -281,6 +288,7 @@ export interface MemoryVisualizationProps {
 }
 
 export function MemoryVisualization({ data: externalData }: MemoryVisualizationProps) {
+  const { t } = useTranslation('cluster');
   const { data: fetchedData, isLoading } = useClusterMemory();
 
   // Prefer externally supplied data; fall back to fetched data.
@@ -297,7 +305,7 @@ export function MemoryVisualization({ data: externalData }: MemoryVisualizationP
         >
           <FlexItem>
             <Title headingLevel="h2" size="lg">
-              VRAM Allocation
+              {t('overview.vramAllocation.title')}
             </Title>
           </FlexItem>
           <FlexItem>
@@ -309,7 +317,7 @@ export function MemoryVisualization({ data: externalData }: MemoryVisualizationP
         {isLoading && !memory ? (
           <Flex justifyContent={{ default: 'justifyContentCenter' }}>
             <FlexItem>
-              <Spinner size="md" aria-label="Loading VRAM allocation data" />
+              <Spinner size="md" aria-label={t('overview.vramAllocation.loading')} />
             </FlexItem>
           </Flex>
         ) : !memory || memory.workers.length === 0 ? (

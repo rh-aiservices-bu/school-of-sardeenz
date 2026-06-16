@@ -4,6 +4,7 @@ import {
   Bullseye,
   Spinner,
 } from '@patternfly/react-core';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Handles the OAuth callback by extracting the token from the URL fragment.
@@ -12,6 +13,7 @@ import {
  */
 export function OAuthCallback() {
   const navigate = useNavigate();
+  const { t } = useTranslation('auth');
 
   useEffect(() => {
     // Token extraction happens in AuthContext on mount.
@@ -24,7 +26,7 @@ export function OAuthCallback() {
 
   return (
     <Bullseye>
-      <Spinner size="xl" aria-label="Completing login..." />
+      <Spinner size="xl" aria-label={t('callback.completingLogin')} />
     </Bullseye>
   );
 }

@@ -1,0 +1,63 @@
+{
+  "list": {
+    "title": "Workers",
+    "errors": {
+      "failedToLoad": "Failed to load workers"
+    },
+    "empty": {
+      "title": "No workers registered",
+      "body": "Workers appear here once they connect and register with the control plane."
+    },
+    "table": {
+      "workerId": "Worker ID",
+      "status": "Status",
+      "devices": "Devices",
+      "memoryUsed": "Memory Used",
+      "memoryTotal": "Memory Total",
+      "models": "Models",
+      "lastHeartbeat": "Last Heartbeat"
+    },
+    "deviceCount": "{{count}} GPU",
+    "deviceCount_plural": "{{count}} GPUs"
+  },
+  "detail": {
+    "errors": {
+      "failedToLoad": "Failed to load worker details",
+      "notFound": "Worker not found",
+      "notFoundBody": "Worker \"{{workerId}}\" was not found or has disconnected."
+    },
+    "fields": {
+      "lastHeartbeat": "Last heartbeat",
+      "joined": "Joined",
+      "devices": "Devices",
+      "modelsRunning": "Models running"
+    },
+    "deviceMemory": "Device Memory",
+    "runningModels": "Running Models",
+    "noModels": "No models running on this worker.",
+    "capabilities": {
+      "show": "Show runner capabilities ({{count}})",
+      "hide": "Hide runner capabilities"
+    },
+    "capabilityCard": {
+      "modelTypes": "Model types",
+      "deviceTypes": "Device types",
+      "sleepLevels": "Sleep levels"
+    },
+    "runningModelsTable": {
+      "modelName": "Model Name",
+      "state": "State",
+      "memoryUsed": "Memory Used"
+    },
+    "breadcrumb": {
+      "cluster": "Cluster",
+      "workers": "Workers"
+    },
+    "memory": {
+      "used": "{{value}} used",
+      "total": "{{value}} total",
+      "available": "Available: {{value}}",
+      "reserved": "Reserved: {{value}}"
+    }
+  }
+}

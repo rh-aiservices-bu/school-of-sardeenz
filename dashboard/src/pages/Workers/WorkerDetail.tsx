@@ -24,6 +24,7 @@ import {
   Title,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
+import { useTranslation } from 'react-i18next';
 import { type ControlPlaneComponents } from '@sardeenz/types';
 import { useWorker } from '../../hooks/useWorkers';
 import { StateLabel } from '../../components/StateLabel';
@@ -39,6 +40,7 @@ type WorkerRunnerCapability = ControlPlaneComponents['schemas']['WorkerRunnerCap
 // Device memory card
 // ---------------------------------------------------------------------------
 function DeviceCard({ device }: { device: DeviceInfo }) {
+  const { t } = useTranslation('workers');
   const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes, memoryAvailableBytes, memoryReservedBytes } = device;
   const usedPercent = memoryTotalBytes > 0 ? Math.round((memoryUsedBytes / memoryTotalBytes) * 100) : 0;
 
@@ -69,10 +71,10 @@ function DeviceCard({ device }: { device: DeviceInfo }) {
             }}
           >
             <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-              {formatBytes(memoryUsedBytes)} used
+              {t('detail.memory.used', { value: formatBytes(memoryUsedBytes) })}
             </span>
             <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-              {formatBytes(memoryTotalBytes)} total
+              {t('detail.memory.total', { value: formatBytes(memoryTotalBytes) })}
             </span>
           </div>
           <div
@@ -84,9 +86,9 @@ function DeviceCard({ device }: { device: DeviceInfo }) {
               color: 'var(--pf-t--global--text--color--subtle)',
             }}
           >
-            <div>Available: {formatBytes(memoryAvailableBytes)}</div>
+            <div>{t('detail.memory.available', { value: formatBytes(memoryAvailableBytes) })}</div>
             {memoryReservedBytes != null && memoryReservedBytes > 0 && (
-              <div>Reserved: {formatBytes(memoryReservedBytes)}</div>
+              <div>{t('detail.memory.reserved', { value: formatBytes(memoryReservedBytes) })}</div>
             )}
           </div>
         </div>
@@ -99,6 +101,8 @@ function DeviceCard({ device }: { device: DeviceInfo }) {
 // Running models table
 // ---------------------------------------------------------------------------
 function RunningModelsSection({ models }: { models: WorkerModelInfo[] }) {
+  const { t } = useTranslation('workers');
+
   if (models.length === 0) {
     return (
       <div
@@ -108,32 +112,32 @@ function RunningModelsSection({ models }: { models: WorkerModelInfo[] }) {
           padding: 'var(--pf-t--global--spacer--md) 0',
         }}
       >
-        No models running on this worker.
+        {t('detail.noModels')}
       </div>
     );
   }
 
   return (
-    <Table aria-label="Running models" variant="compact">
+    <Table aria-label={t('detail.runningModels')} variant="compact">
       <Thead>
         <Tr>
-          <Th>Model Name</Th>
-          <Th>State</Th>
-          <Th>Memory Used</Th>
+          <Th>{t('detail.runningModelsTable.modelName')}</Th>
+          <Th>{t('detail.runningModelsTable.state')}</Th>
+          <Th>{t('detail.runningModelsTable.memoryUsed')}</Th>
         </Tr>
       </Thead>
       <Tbody>
         {models.map((model) => (
           <Tr key={model.modelName}>
-            <Td dataLabel="Model Name">
+            <Td dataLabel={t('detail.runningModelsTable.modelName')}>
               <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
                 {model.modelName}
               </Link>
             </Td>
-            <Td dataLabel="State">
+            <Td dataLabel={t('detail.runningModelsTable.state')}>
               <StateLabel state={model.state} />
             </Td>
-            <Td dataLabel="Memory Used">
+            <Td dataLabel={t('detail.runningModelsTable.memoryUsed')}>
               {model.memoryUsedBytes != null ? formatBytes(model.memoryUsedBytes) : '—'}
             </Td>
           </Tr>
@@ -147,6 +151,8 @@ function RunningModelsSection({ models }: { models: WorkerModelInfo[] }) {
 // Runner capability row
 // ---------------------------------------------------------------------------
 function CapabilityCard({ capability }: { capability: WorkerRunnerCapability }) {
+  const { t } = useTranslation('workers');
+
   return (
     <Card isCompact>
       <CardHeader>
@@ -160,7 +166,7 @@ function CapabilityCard({ capability }: { capability: WorkerRunnerCapability }) 
       <CardBody>
         <DescriptionList isCompact isHorizontal>
           <DescriptionListGroup>
-            <DescriptionListTerm>Model types</DescriptionListTerm>
+            <DescriptionListTerm>{t('detail.capabilityCard.modelTypes')}</DescriptionListTerm>
             <DescriptionListDescription>
               {capability.supportedModelTypes.length > 0
                 ? capability.supportedModelTypes.join(', ')
@@ -168,7 +174,7 @@ function CapabilityCard({ capability }: { capability: WorkerRunnerCapability }) 
             </DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>
-            <DescriptionListTerm>Device types</DescriptionListTerm>
+            <DescriptionListTerm>{t('detail.capabilityCard.deviceTypes')}</DescriptionListTerm>
             <DescriptionListDescription>
               {capability.supportedDeviceTypes.length > 0
                 ? capability.supportedDeviceTypes.join(', ')
@@ -177,7 +183,7 @@ function CapabilityCard({ capability }: { capability: WorkerRunnerCapability }) 
           </DescriptionListGroup>
           {capability.supportedSleepLevels && capability.supportedSleepLevels.length > 0 && (
             <DescriptionListGroup>
-              <DescriptionListTerm>Sleep levels</DescriptionListTerm>
+              <DescriptionListTerm>{t('detail.capabilityCard.sleepLevels')}</DescriptionListTerm>
               <DescriptionListDescription>
                 {capability.supportedSleepLevels.join(', ')}
               </DescriptionListDescription>
@@ -193,6 +199,7 @@ function CapabilityCard({ capability }: { capability: WorkerRunnerCapability }) 
 // Main detail component
 // ---------------------------------------------------------------------------
 function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
+  const { t } = useTranslation('workers');
   const statusColor = getWorkerStatusColor(worker.status);
   const statusLabel = worker.status.charAt(0) + worker.status.slice(1).toLowerCase();
 
@@ -212,10 +219,10 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
       {/* Breadcrumb */}
       <Breadcrumb>
         <BreadcrumbItem>
-          <Link to="/">Cluster</Link>
+          <Link to="/">{t('detail.breadcrumb.cluster')}</Link>
         </BreadcrumbItem>
         <BreadcrumbItem>
-          <Link to="/workers">Workers</Link>
+          <Link to="/workers">{t('detail.breadcrumb.workers')}</Link>
         </BreadcrumbItem>
         <BreadcrumbItem isActive>{worker.workerId}</BreadcrumbItem>
       </Breadcrumb>
@@ -235,7 +242,7 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
       {/* Worker metadata */}
       <DescriptionList isCompact isHorizontal columnModifier={{ default: '2Col' }}>
         <DescriptionListGroup>
-          <DescriptionListTerm>Last heartbeat</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.lastHeartbeat')}</DescriptionListTerm>
           <DescriptionListDescription>
             {worker.lastHeartbeatAt ? (
               <>
@@ -251,14 +258,14 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
         </DescriptionListGroup>
         {worker.joinedAt && (
           <DescriptionListGroup>
-            <DescriptionListTerm>Joined</DescriptionListTerm>
+            <DescriptionListTerm>{t('detail.fields.joined')}</DescriptionListTerm>
             <DescriptionListDescription>
               {formatDateTime(worker.joinedAt)}
             </DescriptionListDescription>
           </DescriptionListGroup>
         )}
         <DescriptionListGroup>
-          <DescriptionListTerm>Devices</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.devices')}</DescriptionListTerm>
           <DescriptionListDescription>
             {worker.devices.length > 0
               ? `${worker.devices.length} GPU${worker.devices.length !== 1 ? 's' : ''}`
@@ -266,7 +273,7 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
           </DescriptionListDescription>
         </DescriptionListGroup>
         <DescriptionListGroup>
-          <DescriptionListTerm>Models running</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.modelsRunning')}</DescriptionListTerm>
           <DescriptionListDescription>{worker.models.length}</DescriptionListDescription>
         </DescriptionListGroup>
       </DescriptionList>
@@ -279,7 +286,7 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
             size="lg"
             style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           >
-            Device Memory
+            {t('detail.deviceMemory')}
           </Title>
           <Gallery hasGutter minWidths={{ default: '280px' }}>
             {worker.devices.map((device) => (
@@ -296,7 +303,7 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
           size="lg"
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          Running Models
+          {t('detail.runningModels')}
         </Title>
         <RunningModelsSection models={worker.models} />
       </div>
@@ -307,8 +314,8 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
           <ExpandableSection
             toggleText={
               capabilitiesExpanded
-                ? 'Hide runner capabilities'
-                : `Show runner capabilities (${worker.runnerCapabilities!.length})`
+                ? t('detail.capabilities.hide')
+                : t('detail.capabilities.show', { count: worker.runnerCapabilities!.length })
             }
             onToggle={(_ev, isExpanded) => setCapabilitiesExpanded(isExpanded)}
             isExpanded={capabilitiesExpanded}
@@ -333,6 +340,8 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
 }
 
 export function WorkerDetail() {
+  const { t } = useTranslation('workers');
+  const { t: tCommon } = useTranslation('common');
   const { workerId } = useParams<{ workerId: string }>();
   const id = workerId ?? '';
   const { data: worker, isLoading, error } = useWorker(id);
@@ -342,7 +351,7 @@ export function WorkerDetail() {
       <PageSection>
         <Flex justifyContent={{ default: 'justifyContentCenter' }}>
           <FlexItem>
-            <Spinner size="xl" aria-label="Loading worker details" />
+            <Spinner size="xl" aria-label={t('detail.errors.failedToLoad')} />
           </FlexItem>
         </Flex>
       </PageSection>
@@ -352,9 +361,9 @@ export function WorkerDetail() {
   if (error) {
     return (
       <PageSection>
-        <Alert variant="danger" title="Failed to load worker details" isInline>
+        <Alert variant="danger" title={t('detail.errors.failedToLoad')} isInline>
           <Content>
-            {error instanceof Error ? error.message : 'An unexpected error occurred.'}
+            {error instanceof Error ? error.message : tCommon('errors.unexpected')}
           </Content>
         </Alert>
       </PageSection>
@@ -364,8 +373,8 @@ export function WorkerDetail() {
   if (!worker) {
     return (
       <PageSection>
-        <Alert variant="warning" title="Worker not found" isInline>
-          <Content>Worker &quot;{id}&quot; was not found or has disconnected.</Content>
+        <Alert variant="warning" title={t('detail.errors.notFound')} isInline>
+          <Content>{t('detail.errors.notFoundBody', { workerId: id })}</Content>
         </Alert>
       </PageSection>
     );

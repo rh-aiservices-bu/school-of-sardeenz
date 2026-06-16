@@ -4,11 +4,13 @@ import {
   LoginPage,
   LoginForm,
 } from '@patternfly/react-core';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 
 export function Login() {
   const { authMode, isAuthenticated, isLoading, login, loginError } = useAuth();
   const location = useLocation();
+  const { t } = useTranslation('auth');
   const from = (location.state as { from?: string })?.from ?? '/';
 
   const [username, setUsername] = useState('');
@@ -29,12 +31,12 @@ export function Login() {
 
     return (
       <LoginPage
-        loginTitle="Log in to Sardeenz"
-        loginSubtitle="Use your organization SSO credentials"
-        textContent="Sardeenz GPU Workload Orchestration Platform"
+        loginTitle={t('login.title')}
+        loginSubtitle={t('login.subtitleSso')}
+        textContent={t('login.textContent')}
         socialMediaLoginContent={
           <LoginForm
-            loginButtonLabel="Log in with SSO"
+            loginButtonLabel={t('login.loginButtonSso')}
             onLoginButtonClick={handleSsoLogin}
           />
         }
@@ -57,22 +59,22 @@ export function Login() {
 
   return (
     <LoginPage
-      loginTitle="Log in to Sardeenz"
-      loginSubtitle="Enter your admin credentials"
-      textContent="Sardeenz GPU Workload Orchestration Platform"
+      loginTitle={t('login.title')}
+      loginSubtitle={t('login.subtitleSimple')}
+      textContent={t('login.textContent')}
     >
       <LoginForm
         showHelperText={!!loginError}
         helperText={loginError ?? undefined}
         helperTextIcon={undefined}
-        usernameLabel="Username"
+        usernameLabel={t('login.usernameLabel')}
         usernameValue={username}
         onChangeUsername={(_e, value) => setUsername(value)}
-        passwordLabel="Password"
+        passwordLabel={t('login.passwordLabel')}
         passwordValue={password}
         onChangePassword={(_e, value) => setPassword(value)}
         isLoginButtonDisabled={isSubmitting}
-        loginButtonLabel={isSubmitting ? 'Logging in...' : 'Log in'}
+        loginButtonLabel={isSubmitting ? t('login.loggingIn') : t('login.loginButton')}
         onLoginButtonClick={handleSubmit}
       />
     </LoginPage>

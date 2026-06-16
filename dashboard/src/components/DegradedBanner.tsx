@@ -1,6 +1,7 @@
 import { Alert } from '@patternfly/react-core';
 import { useDegraded } from '../contexts/DegradedContext';
 import { useEventStream } from '../hooks/useEventStream';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Renders a sticky warning banner when:
@@ -13,13 +14,14 @@ import { useEventStream } from '../hooks/useEventStream';
 export function DegradedBanner() {
   const { isDegraded: isRedisFallback } = useDegraded();
   const { status: sseStatus } = useEventStream();
+  const { t } = useTranslation('common');
   const isSseDegraded = sseStatus === 'degraded';
 
   if (!isRedisFallback && !isSseDegraded) return null;
 
   const title = isRedisFallback
-    ? 'Control plane unreachable — showing cached data'
-    : 'Real-time updates unavailable — polling for changes';
+    ? t('degraded.controlPlaneUnreachable', 'Control plane unreachable — showing cached data')
+    : t('degraded.sseUnavailable', 'Real-time updates unavailable — polling for changes');
 
   return (
     <Alert

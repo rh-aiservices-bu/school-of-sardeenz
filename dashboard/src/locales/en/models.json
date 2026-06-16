@@ -1,0 +1,133 @@
+{
+  "title": "Models",
+  "deploy": {
+    "title": "Deploy Model",
+    "fields": {
+      "modelName": "Model Name",
+      "runnerType": "Runner Type",
+      "modelPath": "Model Path",
+      "requiredMemory": "Required Memory (GiB)",
+      "deviceType": "Device Type",
+      "tensorParallel": "Tensor Parallelism",
+      "pinned": "Pinned",
+      "engineConfig": "Engine Config (JSON)"
+    },
+    "hints": {
+      "modelPath": "Absolute path to model weights on shared storage.",
+      "requiredMemory": "Estimated device memory in GiB. Used for placement.",
+      "deviceType": "Required device type. Leave blank to accept any compatible device.",
+      "tensorParallel": "Number of devices to split the model across on a single worker.",
+      "pinned": "Pinned models cannot be evicted by the LRU eviction engine.",
+      "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided."
+    },
+    "validation": {
+      "modelNameRequired": "Model name is required.",
+      "runnerTypeRequired": "Runner type is required.",
+      "modelPathRequired": "Model path is required.",
+      "modelPathStartsWithSlash": "Model path must start with /.",
+      "requiredMemoryPositive": "Required memory must be a positive number.",
+      "tensorParallelMin": "Tensor parallelism must be at least 1.",
+      "engineConfigObject": "Engine config must be a JSON object.",
+      "engineConfigValidJson": "Engine config must be valid JSON."
+    },
+    "errors": {
+      "deploymentFailed": "Deployment failed"
+    },
+    "button": "Deploy"
+  },
+  "list": {
+    "heading": "Models",
+    "filterByState": "Filter by state",
+    "filterStateCount": "State ({{count}})",
+    "empty": {
+      "title": "No models deployed",
+      "body": "Deploy a model to get started with inference."
+    },
+    "emptyFiltered": {
+      "title": "No models match the filter",
+      "body": "Try adjusting or clearing the state filter."
+    },
+    "errors": {
+      "failedToLoad": "Failed to load models",
+      "actionFailed": "Action failed"
+    },
+    "table": {
+      "modelName": "Model Name",
+      "state": "State",
+      "runnerType": "Runner Type",
+      "worker": "Worker",
+      "memory": "Memory",
+      "lastInference": "Last Inference",
+      "pinned": "Pinned",
+      "actions": "Actions"
+    },
+    "sleep": {
+      "menuItem": "Sleep",
+      "confirmTitle": "Put model to sleep?",
+      "confirmBody": "This will put {{modelName}} to sleep, freeing its device memory. It can be woken back up on demand."
+    },
+    "delete": {
+      "menuItem": "Delete",
+      "confirmTitle": "Delete model?",
+      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. This action cannot be undone."
+    },
+    "wake": {
+      "menuItem": "Wake"
+    }
+  },
+  "detail": {
+    "errors": {
+      "failedToLoad": "Failed to load model",
+      "actionFailed": "Action failed",
+      "notFound": "Model not found",
+      "notFoundBody": "No model named {{modelName}} exists.",
+      "backToModels": "Back to models",
+      "modelError": "Model error"
+    },
+    "fields": {
+      "state": "State",
+      "runnerType": "Runner Type",
+      "modelPath": "Model Path",
+      "worker": "Worker",
+      "runnerEndpoint": "Runner Endpoint",
+      "requiredMemory": "Required Memory",
+      "currentMemory": "Current Memory",
+      "deviceType": "Device Type",
+      "tensorParallel": "Tensor Parallelism",
+      "pinned": "Pinned",
+      "lastInference": "Last Inference",
+      "stateChanged": "State Changed",
+      "created": "Created"
+    },
+    "pinned": {
+      "yes": "Yes",
+      "no": "No"
+    },
+    "neverInferred": "Never",
+    "engineConfig": {
+      "show": "Show engine config",
+      "hide": "Hide engine config"
+    },
+    "progress": {
+      "phasePrefix": "Phase: ",
+      "remainingSeconds": " — ~{{seconds}}s remaining"
+    },
+    "sleep": {
+      "button": "Sleep",
+      "confirmTitle": "Put model to sleep?",
+      "confirmBody": "This will put {{modelName}} to sleep, freeing its device memory. It can be woken back up on demand."
+    },
+    "wake": {
+      "button": "Wake"
+    },
+    "delete": {
+      "button": "Delete",
+      "confirmTitle": "Delete model?",
+      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. This action cannot be undone."
+    },
+    "breadcrumb": {
+      "cluster": "Cluster",
+      "models": "Models"
+    }
+  }
+}

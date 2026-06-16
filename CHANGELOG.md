@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Accessibility audit and i18n infrastructure for the dashboard (closes #48):
+  - Installed `@axe-core/playwright` devDependency for automated WCAG 2.1 AA scanning
+  - Created `dashboard/e2e/accessibility.spec.ts`: axe-core scans on all key pages
+    (Cluster Overview, Model List, Model Deploy, Worker List, Metrics Dashboard)
+    using the existing E2E mock harness; pages are pre-populated with mock data
+  - Created `docs/development/accessibility-audit.md`: manual audit checklist covering
+    keyboard navigation, screen reader, colour/contrast, chart accessibility, and forms
+  - Installed `react-i18next`, `i18next`, and `i18next-browser-languagedetector`
+  - Created `dashboard/src/i18n.ts`: i18next configuration with browser language
+    detection, namespace-per-page pattern, English as default locale
+  - Created English locale files (`dashboard/src/locales/en/`):
+    `common.json`, `cluster.json`, `models.json`, `workers.json`, `metrics.json`, `auth.json`
+  - Wired `./i18n` side-effect import into `dashboard/src/main.tsx`
+  - Migrated all user-facing strings across 13 component/page files to `t()` calls:
+    `AppLayout`, `DegradedBanner`, `MemoryVisualization`, `Login`, `OAuthCallback`,
+    `ClusterOverview`, `ModelList`, `ModelDeploy`, `ModelDetail`,
+    `WorkerList`, `WorkerDetail`, `MetricsDashboard`
+  - Created `docs/development/i18n.md`: developer guide covering namespace conventions,
+    usage patterns, interpolation, adding new strings, and adding new languages
+
 - E2E test framework with mock service harness for the dashboard (closes #47):
   - `MockControlPlane` (`dashboard/e2e/mocks/control-plane.ts`): lightweight Fastify server
     on a random port serving all BFF-facing CP endpoints (`/api/v1/models`, `/api/v1/workers`,
