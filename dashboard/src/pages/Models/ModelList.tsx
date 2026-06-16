@@ -12,6 +12,7 @@ import {
   ToolbarContent,
   ToolbarItem,
   ToolbarFilter,
+  ToolbarGroup,
   Modal,
   ModalVariant,
   ModalHeader,
@@ -28,6 +29,10 @@ import {
   Dropdown,
   DropdownItem,
   DropdownList,
+  Pagination,
+  Progress,
+  ProgressSize,
+  Checkbox,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, type ThProps } from '@patternfly/react-table';
 import { EllipsisVIcon, LockIcon, CubesIcon } from '@patternfly/react-icons';
@@ -62,6 +67,15 @@ const STATE_LOCALE_KEYS: Record<ModelLifecycleState, string> = {
   [ModelLifecycleState.ERROR]: 'common:status.error',
 };
 
+const DEFAULT_PAGE_SIZE = 20;
+
+/** Return progress bar colour based on current/required ratio */
+function getMemoryVariant(ratio: number): 'success' | 'warning' | 'danger' {
+  if (ratio >= 0.95) return 'danger';
+  if (ratio >= 0.80) return 'warning';
+  return 'success';
+}
+
 export function ModelList() {
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
@@ -75,9 +89,24 @@ export function ModelList() {
   const [sortField, setSortField] = useState<SortField>('modelName');
   const [sortDir, setSortDir] = useState<SortDirection>('asc');
 
-  // Filtering
-  const [filterOpen, setFilterOpen] = useState(false);
+  // State filter
+  const [stateFilterOpen, setStateFilterOpen] = useState(false);
   const [selectedStates, setSelectedStates] = useState<string[]>([]);
+
+  // Runner-type filter
+  const [runnerFilterOpen, setRunnerFilterOpen] = useState(false);
+  const [selectedRunners, setSelectedRunners] = useState<string[]>([]);
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+
+  // Bulk selection
+  const [selectedModelNames, setSelectedModelNames] = useState<Set<string>>(new Set());
+
+  // Bulk action modals
+  const [bulkSleepOpen, setBulkSleepOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   // Kebab menu
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -99,10 +128,10 @@ export function ModelList() {
   };
 
   const getSortParams = (field: SortField): ThProps['sort'] => {
-    const columnIndex = field === 'modelName' ? 0 : 5;
+    const columnIndex = field === 'modelName' ? 1 : 6;
     return {
       sortBy: {
-        index: sortField === 'modelName' ? 0 : 5,
+        index: sortField === 'modelName' ? 1 : 6,
         direction: sortDir,
       },
       onSort: () => handleSort(field),
@@ -114,10 +143,22 @@ export function ModelList() {
     setSelectedStates((prev) =>
       prev.includes(value) ? prev.filter((s) => s !== value) : [...prev, value],
     );
+    setCurrentPage(1);
   };
+
+  const onRunnerFilterSelect = (value: string) => {
+    setSelectedRunners((prev) =>
+      prev.includes(value) ? prev.filter((r) => r !== value) : [...prev, value],
+    );
+    setCurrentPage(1);
+  };
+
+  // Unique runner types from all models
+  const allRunnerTypes = [...new Set((models ?? []).map((m) => m.runnerType))].sort();
 
   const filteredAndSorted = (models ?? [])
     .filter((m) => selectedStates.length === 0 || selectedStates.includes(m.state))
+    .filter((m) => selectedRunners.length === 0 || selectedRunners.includes(m.runnerType))
     .sort((a, b) => {
       let cmp = 0;
       if (sortField === 'modelName') {
@@ -129,6 +170,49 @@ export function ModelList() {
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
+
+  // Pagination slice
+  const totalItems = filteredAndSorted.length;
+  const paginatedModels = filteredAndSorted.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+
+  // Bulk selection helpers
+  const pageModelNames = paginatedModels.map((m) => m.modelName);
+  const allPageSelected =
+    pageModelNames.length > 0 && pageModelNames.every((n) => selectedModelNames.has(n));
+  const somePageSelected = pageModelNames.some((n) => selectedModelNames.has(n));
+
+  const toggleSelectAll = () => {
+    if (allPageSelected) {
+      setSelectedModelNames((prev) => {
+        const next = new Set(prev);
+        pageModelNames.forEach((n) => next.delete(n));
+        return next;
+      });
+    } else {
+      setSelectedModelNames((prev) => {
+        const next = new Set(prev);
+        pageModelNames.forEach((n) => next.add(n));
+        return next;
+      });
+    }
+  };
+
+  const toggleSelectModel = (modelName: string) => {
+    setSelectedModelNames((prev) => {
+      const next = new Set(prev);
+      if (next.has(modelName)) {
+        next.delete(modelName);
+      } else {
+        next.add(modelName);
+      }
+      return next;
+    });
+  };
+
+  const selectedCount = selectedModelNames.size;
 
   const handleSleepConfirm = () => {
     if (!sleepConfirmModel) return;
@@ -155,6 +239,38 @@ export function ModelList() {
     });
   };
 
+  // Bulk sleep: sleep all selected ACTIVE models
+  const handleBulkSleep = () => {
+    const activeSelected = (models ?? []).filter(
+      (m) => selectedModelNames.has(m.modelName) && m.state === ModelLifecycleState.ACTIVE,
+    );
+    setMutationError(null);
+    const promises = activeSelected.map((m) =>
+      sleepModel.mutateAsync(m.modelName).catch((err: unknown) => {
+        setMutationError(err instanceof Error ? err.message : 'Sleep failed');
+      }),
+    );
+    void Promise.all(promises).then(() => {
+      setBulkSleepOpen(false);
+      setSelectedModelNames(new Set());
+    });
+  };
+
+  // Bulk delete: delete all selected models
+  const handleBulkDelete = () => {
+    const selectedList = [...selectedModelNames];
+    setMutationError(null);
+    const promises = selectedList.map((name) =>
+      deleteModel.mutateAsync(name).catch((err: unknown) => {
+        setMutationError(err instanceof Error ? err.message : 'Delete failed');
+      }),
+    );
+    void Promise.all(promises).then(() => {
+      setBulkDeleteOpen(false);
+      setSelectedModelNames(new Set());
+    });
+  };
+
   if (isLoading) {
     return (
       <PageSection>
@@ -177,7 +293,35 @@ export function ModelList() {
     );
   }
 
-  const isEmpty = filteredAndSorted.length === 0 && selectedStates.length === 0 && (models ?? []).length === 0;
+  const isEmpty =
+    filteredAndSorted.length === 0 &&
+    selectedStates.length === 0 &&
+    selectedRunners.length === 0 &&
+    (models ?? []).length === 0;
+
+  const isFiltered = selectedStates.length > 0 || selectedRunners.length > 0;
+  const hasNoResults = filteredAndSorted.length === 0 && isFiltered;
+
+  const paginationComponent = (variant: 'top' | 'bottom') => (
+    <Pagination
+      itemCount={totalItems}
+      perPage={pageSize}
+      page={currentPage}
+      onSetPage={(_ev, page) => setCurrentPage(page)}
+      onPerPageSelect={(_ev, perPage) => {
+        setPageSize(perPage);
+        setCurrentPage(1);
+      }}
+      perPageOptions={[
+        { title: '10', value: 10 },
+        { title: '20', value: 20 },
+        { title: '50', value: 50 },
+      ]}
+      variant={variant}
+      isCompact={variant === 'top'}
+      aria-label={t('list.pagination.ariaLabel')}
+    />
+  );
 
   return (
     <PageSection>
@@ -199,6 +343,47 @@ export function ModelList() {
 
       <Toolbar>
         <ToolbarContent>
+          {/* Bulk select checkbox */}
+          <ToolbarGroup variant="action-group-plain">
+            <ToolbarItem>
+              <Checkbox
+                id="select-all-models"
+                aria-label={tCommon('actions.selectAll')}
+                isChecked={allPageSelected ? true : somePageSelected ? null : false}
+                onChange={toggleSelectAll}
+                isDisabled={paginatedModels.length === 0}
+              />
+            </ToolbarItem>
+            {selectedCount > 0 && (
+              <>
+                <ToolbarItem>
+                  <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+                    {t('list.bulkActions.selected', { count: selectedCount })}
+                  </span>
+                </ToolbarItem>
+                <ToolbarItem>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setBulkSleepOpen(true)}
+                    isDisabled={sleepModel.isPending || deleteModel.isPending}
+                  >
+                    {t('list.bulkActions.sleep')}
+                  </Button>
+                </ToolbarItem>
+                <ToolbarItem>
+                  <Button
+                    variant="danger"
+                    onClick={() => setBulkDeleteOpen(true)}
+                    isDisabled={sleepModel.isPending || deleteModel.isPending}
+                  >
+                    {t('list.bulkActions.delete')}
+                  </Button>
+                </ToolbarItem>
+              </>
+            )}
+          </ToolbarGroup>
+
+          {/* State filter */}
           <ToolbarItem>
             <ToolbarFilter
               labels={selectedStates.map((s) => tCommon(STATE_LOCALE_KEYS[s as ModelLifecycleState]))}
@@ -206,20 +391,20 @@ export function ModelList() {
                 const val = ALL_STATES.find((s) => tCommon(STATE_LOCALE_KEYS[s]) === label);
                 if (val) onStateFilterSelect(val);
               }}
-              deleteLabelGroup={() => setSelectedStates([])}
-              categoryName="State"
+              deleteLabelGroup={() => { setSelectedStates([]); setCurrentPage(1); }}
+              categoryName={t('list.filterByState')}
             >
               <Select
                 aria-label={t('list.filterByState')}
-                isOpen={filterOpen}
-                onOpenChange={(open) => setFilterOpen(open)}
+                isOpen={stateFilterOpen}
+                onOpenChange={(open) => setStateFilterOpen(open)}
                 selected={selectedStates}
                 onSelect={(_ev, value) => onStateFilterSelect(value as string)}
                 toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
                   <MenuToggle
                     ref={toggleRef}
-                    onClick={() => setFilterOpen(!filterOpen)}
-                    isExpanded={filterOpen}
+                    onClick={() => setStateFilterOpen(!stateFilterOpen)}
+                    isExpanded={stateFilterOpen}
                     style={{ minWidth: '160px' }}
                   >
                     {selectedStates.length > 0
@@ -241,11 +426,62 @@ export function ModelList() {
               </Select>
             </ToolbarFilter>
           </ToolbarItem>
+
+          {/* Runner-type filter */}
+          {allRunnerTypes.length > 0 && (
+            <ToolbarItem>
+              <ToolbarFilter
+                labels={selectedRunners}
+                deleteLabel={(_category, label) => onRunnerFilterSelect(label as string)}
+                deleteLabelGroup={() => { setSelectedRunners([]); setCurrentPage(1); }}
+                categoryName={t('list.filterByRunner')}
+              >
+                <Select
+                  aria-label={t('list.filterByRunner')}
+                  isOpen={runnerFilterOpen}
+                  onOpenChange={(open) => setRunnerFilterOpen(open)}
+                  selected={selectedRunners}
+                  onSelect={(_ev, value) => onRunnerFilterSelect(value as string)}
+                  toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                    <MenuToggle
+                      ref={toggleRef}
+                      onClick={() => setRunnerFilterOpen(!runnerFilterOpen)}
+                      isExpanded={runnerFilterOpen}
+                      style={{ minWidth: '160px' }}
+                    >
+                      {selectedRunners.length > 0
+                        ? t('list.filterRunnerCount', { count: selectedRunners.length })
+                        : t('list.filterByRunner')}
+                    </MenuToggle>
+                  )}
+                >
+                  {allRunnerTypes.map((rt) => (
+                    <SelectOption
+                      key={rt}
+                      value={rt}
+                      hasCheckbox
+                      isSelected={selectedRunners.includes(rt)}
+                    >
+                      {rt}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </ToolbarFilter>
+            </ToolbarItem>
+          )}
+
           <ToolbarItem align={{ default: 'alignEnd' }}>
             <Button variant="primary" onClick={() => void navigate('/models/deploy')}>
               {t('deploy.title')}
             </Button>
           </ToolbarItem>
+
+          {/* Pagination top */}
+          {!isEmpty && !hasNoResults && (
+            <ToolbarItem align={{ default: 'alignEnd' }}>
+              {paginationComponent('top')}
+            </ToolbarItem>
+          )}
         </ToolbarContent>
       </Toolbar>
 
@@ -266,125 +502,172 @@ export function ModelList() {
             </EmptyStateActions>
           </EmptyStateFooter>
         </EmptyState>
-      ) : filteredAndSorted.length === 0 ? (
+      ) : hasNoResults ? (
         <EmptyState headingLevel="h2" titleText={t('list.emptyFiltered.title')}>
           <EmptyStateBody>{t('list.emptyFiltered.body')}</EmptyStateBody>
           <EmptyStateFooter>
             <EmptyStateActions>
-              <Button variant="link" onClick={() => setSelectedStates([])}>
+              <Button variant="link" onClick={() => { setSelectedStates([]); setSelectedRunners([]); }}>
                 {tCommon('actions.clearFilters')}
               </Button>
             </EmptyStateActions>
           </EmptyStateFooter>
         </EmptyState>
       ) : (
-        <Table aria-label={t('list.heading')} variant="compact">
-          <Thead>
-            <Tr>
-              <Th sort={getSortParams('modelName')}>{t('list.table.modelName')}</Th>
-              <Th>{t('list.table.state')}</Th>
-              <Th>{t('list.table.runnerType')}</Th>
-              <Th>{t('list.table.worker')}</Th>
-              <Th>{t('list.table.memory')}</Th>
-              <Th sort={getSortParams('lastInferenceAt')}>{t('list.table.lastInference')}</Th>
-              <Th>{t('list.table.pinned')}</Th>
-              <Th aria-label={t('list.table.actions')} />
-            </Tr>
-          </Thead>
-          <Tbody>
-            {filteredAndSorted.map((model) => (
-              <Tr key={model.modelName}>
-                <Td dataLabel={t('list.table.modelName')}>
-                  <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
-                    {model.modelName}
-                  </Link>
-                </Td>
-                <Td dataLabel={t('list.table.state')}>
-                  <StateLabel state={model.state} />
-                </Td>
-                <Td dataLabel={t('list.table.runnerType')}>{model.runnerType}</Td>
-                <Td dataLabel={t('list.table.worker')}>
-                  {model.workerId ? (
-                    <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>
-                      {model.workerId}
-                    </Link>
-                  ) : (
-                    '—'
-                  )}
-                </Td>
-                <Td dataLabel={t('list.table.memory')}>
-                  {formatBytes(model.currentMemory)} / {formatBytes(model.requiredMemory)}
-                </Td>
-                <Td dataLabel={t('list.table.lastInference')}>
-                  {formatRelativeTime(model.lastInferenceAt)}
-                </Td>
-                <Td dataLabel={t('list.table.pinned')}>
-                  {model.pinned ? (
-                    <LockIcon aria-label={t('list.table.pinned')} />
-                  ) : null}
-                </Td>
-                <Td dataLabel={t('list.table.actions')} isActionCell>
-                  <Dropdown
-                    isOpen={openMenuId === model.modelName}
-                    onSelect={() => setOpenMenuId(null)}
-                    onOpenChange={(isOpen) => { if (!isOpen) setOpenMenuId(null); }}
-                    toggle={(toggleRef) => (
-                      <MenuToggle
-                        ref={toggleRef}
-                        variant="plain"
-                        onClick={() =>
-                          setOpenMenuId(
-                            openMenuId === model.modelName ? null : model.modelName,
-                          )
-                        }
-                        isExpanded={openMenuId === model.modelName}
-                        aria-label={`Actions for ${model.modelName}`}
-                      >
-                        <EllipsisVIcon />
-                      </MenuToggle>
-                    )}
-                    popperProps={{ position: 'right' }}
-                  >
-                    <DropdownList>
-                      {model.state === ModelLifecycleState.ACTIVE && (
-                        <DropdownItem
-                          key="sleep"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            setSleepConfirmModel(model);
-                          }}
-                        >
-                          {t('list.sleep.menuItem')}
-                        </DropdownItem>
-                      )}
-                      {model.state === ModelLifecycleState.SLEEPING && (
-                        <DropdownItem
-                          key="wake"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            handleWake(model);
-                          }}
-                        >
-                          {t('list.wake.menuItem')}
-                        </DropdownItem>
-                      )}
-                      <DropdownItem
-                        key="delete"
-                        isDanger
-                        onClick={() => {
-                          setOpenMenuId(null);
-                          setDeleteConfirmModel(model);
-                        }}
-                      >
-                        {t('list.delete.menuItem')}
-                      </DropdownItem>
-                    </DropdownList>
-                  </Dropdown>
-                </Td>
+        <>
+          <Table aria-label={t('list.heading')} variant="compact">
+            <Thead>
+              <Tr>
+                <Th
+                  select={{
+                    onSelect: toggleSelectAll,
+                    isSelected: allPageSelected,
+                    isHeaderSelectDisabled: paginatedModels.length === 0,
+                  }}
+                  aria-label={tCommon('actions.selectAll')}
+                />
+                <Th sort={getSortParams('modelName')}>{t('list.table.modelName')}</Th>
+                <Th>{t('list.table.state')}</Th>
+                <Th>{t('list.table.runnerType')}</Th>
+                <Th>{t('list.table.worker')}</Th>
+                <Th>{t('list.table.memory')}</Th>
+                <Th sort={getSortParams('lastInferenceAt')}>{t('list.table.lastInference')}</Th>
+                <Th>{t('list.table.pinned')}</Th>
+                <Th aria-label={t('list.table.actions')} />
               </Tr>
-            ))}
-          </Tbody>
-        </Table>
+            </Thead>
+            <Tbody>
+              {paginatedModels.map((model) => {
+                const required = model.requiredMemory ?? 0;
+                const current = model.currentMemory ?? 0;
+                const ratio = required > 0 ? current / required : 0;
+                const memVariant = getMemoryVariant(ratio);
+
+                return (
+                  <Tr key={model.modelName}>
+                    <Td
+                      select={{
+                        rowIndex: paginatedModels.indexOf(model),
+                        onSelect: () => toggleSelectModel(model.modelName),
+                        isSelected: selectedModelNames.has(model.modelName),
+                      }}
+                    />
+                    <Td dataLabel={t('list.table.modelName')}>
+                      <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
+                        {model.modelName}
+                      </Link>
+                    </Td>
+                    <Td dataLabel={t('list.table.state')}>
+                      <StateLabel state={model.state} />
+                    </Td>
+                    <Td dataLabel={t('list.table.runnerType')}>{model.runnerType}</Td>
+                    <Td dataLabel={t('list.table.worker')}>
+                      {model.workerId ? (
+                        <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>
+                          {model.workerId}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </Td>
+                    <Td dataLabel={t('list.table.memory')} style={{ minWidth: '160px' }}>
+                      {required > 0 ? (
+                        <div>
+                          <Progress
+                            value={Math.min(100, ratio * 100)}
+                            size={ProgressSize.sm}
+                            variant={memVariant}
+                            aria-label={t('list.table.memory')}
+                          />
+                          <div
+                            style={{
+                              fontSize: 'var(--pf-t--global--font--size--xs)',
+                              color: 'var(--pf-t--global--text--color--subtle)',
+                              marginTop: 'var(--pf-t--global--spacer--xs)',
+                            }}
+                          >
+                            {formatBytes(current)} / {formatBytes(required)}
+                          </div>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </Td>
+                    <Td dataLabel={t('list.table.lastInference')}>
+                      {formatRelativeTime(model.lastInferenceAt)}
+                    </Td>
+                    <Td dataLabel={t('list.table.pinned')}>
+                      {model.pinned ? (
+                        <LockIcon aria-label={t('list.table.pinned')} />
+                      ) : null}
+                    </Td>
+                    <Td dataLabel={t('list.table.actions')} isActionCell>
+                      <Dropdown
+                        isOpen={openMenuId === model.modelName}
+                        onSelect={() => setOpenMenuId(null)}
+                        onOpenChange={(isOpen) => { if (!isOpen) setOpenMenuId(null); }}
+                        toggle={(toggleRef) => (
+                          <MenuToggle
+                            ref={toggleRef}
+                            variant="plain"
+                            onClick={() =>
+                              setOpenMenuId(
+                                openMenuId === model.modelName ? null : model.modelName,
+                              )
+                            }
+                            isExpanded={openMenuId === model.modelName}
+                            aria-label={`Actions for ${model.modelName}`}
+                          >
+                            <EllipsisVIcon />
+                          </MenuToggle>
+                        )}
+                        popperProps={{ position: 'right' }}
+                      >
+                        <DropdownList>
+                          {model.state === ModelLifecycleState.ACTIVE && (
+                            <DropdownItem
+                              key="sleep"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                setSleepConfirmModel(model);
+                              }}
+                            >
+                              {t('list.sleep.menuItem')}
+                            </DropdownItem>
+                          )}
+                          {model.state === ModelLifecycleState.SLEEPING && (
+                            <DropdownItem
+                              key="wake"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                handleWake(model);
+                              }}
+                            >
+                              {t('list.wake.menuItem')}
+                            </DropdownItem>
+                          )}
+                          <DropdownItem
+                            key="delete"
+                            isDanger
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              setDeleteConfirmModel(model);
+                            }}
+                          >
+                            {t('list.delete.menuItem')}
+                          </DropdownItem>
+                        </DropdownList>
+                      </Dropdown>
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </Tbody>
+          </Table>
+
+          {/* Pagination bottom */}
+          {paginationComponent('bottom')}
+        </>
       )}
 
       {/* Sleep confirmation modal */}
@@ -431,6 +714,51 @@ export function ModelList() {
             {t('list.delete.menuItem')}
           </Button>
           <Button variant="link" onClick={() => setDeleteConfirmModel(null)}>
+            {tCommon('actions.cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Bulk sleep confirmation modal */}
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={bulkSleepOpen}
+        onClose={() => setBulkSleepOpen(false)}
+        aria-label={t('list.bulkActions.sleep')}
+      >
+        <ModalHeader title={t('list.bulkActions.sleepConfirmTitle')} />
+        <ModalBody>
+          {t('list.bulkActions.sleepConfirmBody', { count: selectedCount })}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleBulkSleep} isLoading={sleepModel.isPending}>
+            {t('list.bulkActions.sleep')}
+          </Button>
+          <Button variant="link" onClick={() => setBulkSleepOpen(false)}>
+            {tCommon('actions.cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Bulk delete confirmation modal */}
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={bulkDeleteOpen}
+        onClose={() => setBulkDeleteOpen(false)}
+        aria-label={t('list.bulkActions.delete')}
+      >
+        <ModalHeader
+          title={t('list.bulkActions.deleteConfirmTitle')}
+          titleIconVariant="danger"
+        />
+        <ModalBody>
+          {t('list.bulkActions.deleteConfirmBody', { count: selectedCount })}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={handleBulkDelete} isLoading={deleteModel.isPending}>
+            {t('list.bulkActions.delete')}
+          </Button>
+          <Button variant="link" onClick={() => setBulkDeleteOpen(false)}>
             {tCommon('actions.cancel')}
           </Button>
         </ModalFooter>

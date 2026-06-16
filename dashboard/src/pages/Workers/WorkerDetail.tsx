@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
   Alert,
   Breadcrumb,
@@ -39,7 +39,13 @@ type WorkerRunnerCapability = ControlPlaneComponents['schemas']['WorkerRunnerCap
 // ---------------------------------------------------------------------------
 // Device memory card
 // ---------------------------------------------------------------------------
-function DeviceCard({ device }: { device: DeviceInfo }) {
+interface DeviceCardProps {
+  device: DeviceInfo;
+  /** Models running on this worker (shown inside the card for per-device context). */
+  workerModels?: WorkerModelInfo[];
+}
+
+function DeviceCard({ device, workerModels }: DeviceCardProps) {
   const { t } = useTranslation('workers');
   const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes, memoryAvailableBytes, memoryReservedBytes } = device;
   const usedPercent = memoryTotalBytes > 0 ? Math.round((memoryUsedBytes / memoryTotalBytes) * 100) : 0;
@@ -91,6 +97,55 @@ function DeviceCard({ device }: { device: DeviceInfo }) {
               <div>{t('detail.memory.reserved', { value: formatBytes(memoryReservedBytes) })}</div>
             )}
           </div>
+
+          {/* Per-device model breakdown */}
+          {workerModels !== undefined && (
+            <div
+              style={{
+                borderTop: '1px solid var(--pf-t--global--border--color--default)',
+                paddingTop: 'var(--pf-t--global--spacer--sm)',
+                marginTop: 'var(--pf-t--global--spacer--xs)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--xs)',
+                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                  color: 'var(--pf-t--global--text--color--subtle)',
+                  marginBottom: 'var(--pf-t--global--spacer--xs)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {t('detail.deviceModels.title')}
+              </div>
+              {workerModels.length === 0 ? (
+                <div style={{ fontSize: 'var(--pf-t--global--font--size--sm)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+                  {t('detail.deviceModels.none')}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--xs)' }}>
+                  {workerModels.map((m) => (
+                    <div
+                      key={m.modelName}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: 'var(--pf-t--global--font--size--sm)',
+                      }}
+                    >
+                      <Link to={`/models/${encodeURIComponent(m.modelName)}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
+                        {m.modelName}
+                      </Link>
+                      <span style={{ color: 'var(--pf-t--global--text--color--subtle)', whiteSpace: 'nowrap', marginLeft: 'var(--pf-t--global--spacer--xs)' }}>
+                        {m.memoryUsedBytes != null ? formatBytes(m.memoryUsedBytes) : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </CardBody>
     </Card>
@@ -290,7 +345,13 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
           </Title>
           <Gallery hasGutter minWidths={{ default: '280px' }}>
             {worker.devices.map((device) => (
-              <DeviceCard key={device.deviceIndex} device={device} />
+              <DeviceCard
+                key={device.deviceIndex}
+                device={device}
+                // Per-device model breakdown: only available when there's one device
+                // (API does not expose deviceIndex on WorkerModelInfo for multi-GPU placement)
+                workerModels={worker.devices.length === 1 ? worker.models : undefined}
+              />
             ))}
           </Gallery>
         </div>

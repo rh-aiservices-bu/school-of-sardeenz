@@ -25,11 +25,18 @@ export function useModels(state?: string) {
 export function useModel(name: string) {
   const { reportFallback } = useDegraded();
   const { status: sseStatus } = useEventStream();
+
   const query = useQuery({
     queryKey: ['models', name],
     queryFn: ({ signal }) => api.models.get(name, signal),
     enabled: !!name,
-    refetchInterval: sseStatus === 'degraded' ? 2_000 : 5_000,
+    // Faster polling during STARTING / PENDING to reflect loading progress quickly
+    refetchInterval: (q) => {
+      const state = (q.state.data as { state?: string } | undefined)?.state;
+      const isTransient = state === 'STARTING' || state === 'PENDING';
+      if (sseStatus === 'degraded') return 2_000;
+      return isTransient ? 2_000 : 5_000;
+    },
   });
 
   useEffect(() => {

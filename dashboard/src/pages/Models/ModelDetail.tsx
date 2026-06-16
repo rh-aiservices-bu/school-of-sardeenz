@@ -386,6 +386,44 @@ export function ModelDetail() {
         </DescriptionListGroup>
       </DescriptionList>
 
+      {/* State timeline */}
+      <div style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
+        <Title headingLevel="h2" size="md" style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
+          {t('detail.timeline.title')}
+        </Title>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--pf-t--global--spacer--sm)',
+            borderLeft: '2px solid var(--pf-t--global--border--color--default)',
+            paddingLeft: 'var(--pf-t--global--spacer--md)',
+          }}
+        >
+          {/* Created event */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+              {t('detail.timeline.deployed')}
+            </span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+              {formatDateTime(model.createdAt)}
+            </span>
+          </div>
+
+          {/* State changed event (if different from created) */}
+          {model.stateChangedAt && model.stateChangedAt !== model.createdAt && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+                {t('detail.timeline.stateChanged')} <StateLabel state={model.state} />
+              </span>
+              <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+                {formatDateTime(model.stateChangedAt)}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Engine config expandable */}
       {engineConfigJson && (
         <ExpandableSection

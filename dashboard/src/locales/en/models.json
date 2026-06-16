@@ -39,6 +39,20 @@
     "heading": "Models",
     "filterByState": "Filter by state",
     "filterStateCount": "State ({{count}})",
+    "filterByRunner": "Filter by runner type",
+    "filterRunnerCount": "Runner ({{count}})",
+    "pagination": {
+      "ariaLabel": "Models pagination"
+    },
+    "bulkActions": {
+      "selected": "{{count}} selected",
+      "sleep": "Sleep selected",
+      "delete": "Delete selected",
+      "sleepConfirmTitle": "Sleep selected models?",
+      "sleepConfirmBody": "This will put {{count}} model(s) to sleep, freeing their device memory. They can be woken back up on demand.",
+      "deleteConfirmTitle": "Delete selected models?",
+      "deleteConfirmBody": "This will permanently delete {{count}} model(s) from the cluster. This action cannot be undone."
+    },
     "empty": {
       "title": "No models deployed",
       "body": "Deploy a model to get started with inference."
@@ -128,6 +142,11 @@
     "breadcrumb": {
       "cluster": "Cluster",
       "models": "Models"
+    },
+    "timeline": {
+      "title": "State History",
+      "deployed": "Deployed",
+      "stateChanged": "State changed to"
     }
   }
 }
