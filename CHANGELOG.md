@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as at least one of the control plane or Redis is healthy. Status is reported as
   `degraded` when one source is down, `ready` when both are up, and `not_ready` only
   when both are down.
+- Tone down WCAG 2.1 AA claim in `docs/development/accessibility-audit.md` to match actual
+  evidence: automated axe-core scanning covers primary views but a full manual audit is pending;
+  checked items in the manual checklist are now annotated with rationale (closes #63)
+- Expand accessibility E2E coverage in `dashboard/e2e/accessibility.spec.ts` to include model
+  detail, worker detail, empty states (no models / no workers), deploy form, and the delete
+  confirmation modal — previously only list pages and metrics were scanned
 
 ### Changed
 

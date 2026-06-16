@@ -1,7 +1,8 @@
 /**
  * Automated accessibility tests using axe-core.
  *
- * Scans each key page with the WCAG 2.1 AA ruleset.
+ * Scans each key page and view with the WCAG 2.1 AA ruleset.
+ * Covers primary list views, detail views, forms, empty states, and modal flows.
  * Uses the existing E2E mock harness from fixtures.ts.
  */
 
@@ -86,6 +87,27 @@ const MODELS = [
   },
 ];
 
+const ACTIVE_MODEL = MODELS[0];
+const WORKER_DETAIL = {
+  ...WORKERS[0],
+  models: [
+    {
+      modelName: ACTIVE_MODEL.modelName,
+      state: 'ACTIVE',
+      memoryUsedBytes: 15 * 1024 ** 3,
+    },
+  ],
+  runnerCapabilities: [
+    {
+      runnerType: 'vllm',
+      engineName: 'vLLM',
+      supportedModelTypes: ['llm'],
+      supportedDeviceTypes: ['CUDA'],
+    },
+  ],
+  joinedAt: new Date(Date.now() - 3600_000).toISOString(),
+};
+
 // WCAG 2.1 AA tags
 const A11Y_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'];
 
@@ -108,7 +130,9 @@ async function runA11yCheck(page: Page): Promise<void> {
 // Tests
 // ---------------------------------------------------------------------------
 
-test.describe('Accessibility — WCAG 2.1 AA', () => {
+test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
+  // ── Primary list views ────────────────────────────────────────────────────
+
   test('Cluster Overview (/) has no accessibility violations', async ({
     page,
     bffPort,
@@ -126,7 +150,7 @@ test.describe('Accessibility — WCAG 2.1 AA', () => {
     await runA11yCheck(page);
   });
 
-  test('Model List (/models) has no accessibility violations', async ({
+  test('Model List (/models) with data has no accessibility violations', async ({
     page,
     bffPort,
     mockControlPlane,
@@ -136,16 +160,96 @@ test.describe('Accessibility — WCAG 2.1 AA', () => {
 
     await page.goto(bffUrl(bffPort, '/models'));
 
-    // Wait for the table or empty state
-    await page.waitForSelector('table, [role="status"]', { timeout: 10_000 }).catch(() => {
-      // Empty state may render differently
-    });
-    await expect(page.getByText('Models').first()).toBeVisible();
+    // Wait for the table to render
+    await expect(page.locator('table[aria-label="Model list"]')).toBeVisible();
 
     await runA11yCheck(page);
   });
 
-  test('Model Deploy (/models/deploy) has no accessibility violations', async ({
+  test('Model List (/models) empty state has no accessibility violations', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    mockControlPlane.setClusterStatus(CLUSTER_STATUS);
+    mockControlPlane.setModels([]);
+
+    await page.goto(bffUrl(bffPort, '/models'));
+
+    await expect(page.getByText('No models deployed')).toBeVisible();
+
+    await runA11yCheck(page);
+  });
+
+  test('Worker List (/workers) with data has no accessibility violations', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    mockControlPlane.setClusterStatus(CLUSTER_STATUS);
+    mockControlPlane.setWorkers(WORKERS);
+
+    await page.goto(bffUrl(bffPort, '/workers'));
+
+    await expect(page.locator('table[aria-label="Worker list"]')).toBeVisible();
+
+    await runA11yCheck(page);
+  });
+
+  test('Worker List (/workers) empty state has no accessibility violations', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    mockControlPlane.setClusterStatus(CLUSTER_STATUS);
+    mockControlPlane.setWorkers([]);
+
+    await page.goto(bffUrl(bffPort, '/workers'));
+
+    await expect(page.getByText('No workers registered')).toBeVisible();
+
+    await runA11yCheck(page);
+  });
+
+  // ── Detail views ──────────────────────────────────────────────────────────
+
+  test('Model Detail (/models/:name) has no accessibility violations', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    mockControlPlane.setModels(MODELS);
+
+    const encodedName = encodeURIComponent(ACTIVE_MODEL.modelName);
+    await page.goto(bffUrl(bffPort, `/models/${encodedName}`));
+
+    // Wait for the model heading to appear
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await expect(page.getByText(ACTIVE_MODEL.modelName)).toBeVisible();
+
+    await runA11yCheck(page);
+  });
+
+  test('Worker Detail (/workers/:id) has no accessibility violations', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    const workerId = WORKERS[0].workerId;
+    mockControlPlane.setWorkers(WORKERS, { [workerId]: WORKER_DETAIL });
+
+    const encodedId = encodeURIComponent(workerId);
+    await page.goto(bffUrl(bffPort, `/workers/${encodedId}`));
+
+    // Wait for the worker heading to appear
+    await expect(page.getByRole('heading', { name: workerId })).toBeVisible();
+
+    await runA11yCheck(page);
+  });
+
+  // ── Form views ────────────────────────────────────────────────────────────
+
+  test('Model Deploy form (/models/deploy) has no accessibility violations', async ({
     page,
     bffPort,
     mockControlPlane,
@@ -160,21 +264,29 @@ test.describe('Accessibility — WCAG 2.1 AA', () => {
     await runA11yCheck(page);
   });
 
-  test('Worker List (/workers) has no accessibility violations', async ({
+  // ── Modal flows ───────────────────────────────────────────────────────────
+
+  test('Delete model confirmation modal has no accessibility violations', async ({
     page,
     bffPort,
     mockControlPlane,
   }) => {
-    mockControlPlane.setClusterStatus(CLUSTER_STATUS);
-    mockControlPlane.setWorkers(WORKERS);
+    mockControlPlane.setModels([ACTIVE_MODEL]);
 
-    await page.goto(bffUrl(bffPort, '/workers'));
+    await page.goto(bffUrl(bffPort, '/models'));
+    await expect(page.locator('table[aria-label="Model list"]')).toBeVisible();
 
-    // Wait for the workers page to load
-    await expect(page.getByText('Workers').first()).toBeVisible();
+    // Open the kebab menu and click Delete to open the modal
+    await page.locator(`button[aria-label="Actions for ${ACTIVE_MODEL.modelName}"]`).click();
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
+
+    // Wait for the modal to appear
+    await expect(page.getByText('Delete model?')).toBeVisible();
 
     await runA11yCheck(page);
   });
+
+  // ── Metrics ───────────────────────────────────────────────────────────────
 
   test('Metrics Dashboard (/metrics) has no accessibility violations', async ({
     page,
