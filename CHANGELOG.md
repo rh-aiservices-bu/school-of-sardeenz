@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Moved 14 `.v1.tsx` / `.v1.ts` reference files from `dashboard/src/` to `dashboard/reference/v1/`
+  (preserving subdirectory structure) to reduce search noise in the active source tree; removed
+  now-redundant exclude patterns from `dashboard/tsconfig.app.json` (closes #65)
+
+
+
 - Reconciled `docs/project/phase3.md` and `docs/architecture/components/dashboard.md` with the
   actual Phase 3 implementation (closes #52):
   - Checked all Definition of Done items and marked 11/12 complete; flagged redocly lint
