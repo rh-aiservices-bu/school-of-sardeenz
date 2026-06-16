@@ -19,6 +19,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Expand accessibility E2E coverage in `dashboard/e2e/accessibility.spec.ts` to include model
   detail, worker detail, empty states (no models / no workers), deploy form, and the delete
   confirmation modal — previously only list pages and metrics were scanned
+- Aligned dashboard Redis fallback schema with control-plane's actual Redis layout (closes #54):
+  - Model reader now reads single JSON blobs at `{prefix}:models:{name}` instead of the
+    incorrect multi-key schema (`models:state:*`, `models:worker:*`, `models:memory:*`, etc.)
+  - Worker lister now scans `{prefix}:worker:*:detail` snapshots (preferred) or falls back to
+    `{prefix}:workers:*:info` keys with heartbeat-based status derivation, instead of scanning
+    `{prefix}:workers:*` and requiring `workerId` in the JSON payload
+  - Cluster status memory summation now defaults missing `memoryUsedBytes`/`memoryAvailableBytes`
+    to 0 to avoid NaN sums from worker records that only carry `memoryTotalBytes`
+  - Added 22 integration-style tests seeding Redis with control-plane-compatible data to verify
+    the fallback behavior end to end
 
 ### Changed
 
