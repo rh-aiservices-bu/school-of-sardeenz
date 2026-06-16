@@ -7,15 +7,21 @@ import {
   FlexItem,
   Spinner,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
   Tooltip,
 } from '@patternfly/react-core';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { type ControlPlaneComponents } from '@sardeenz/types';
 import { useClusterMemory } from '../hooks/useCluster';
-import { formatBytes } from '../utils/format';
+import { formatBytes, formatPercentage } from '../utils/format';
 
 type ClusterMemory = ControlPlaneComponents['schemas']['ClusterMemory'];
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
+type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
+
+type DisplayMode = 'bytes' | 'percent';
 
 // ---------------------------------------------------------------------------
 // Legend
@@ -88,9 +94,11 @@ function Legend() {
 // ---------------------------------------------------------------------------
 interface DeviceBarProps {
   device: DeviceInfo;
+  displayMode: DisplayMode;
+  models?: WorkerModelInfo[];
 }
 
-function DeviceBar({ device }: DeviceBarProps) {
+function DeviceBar({ device, displayMode, models }: DeviceBarProps) {
   const { t } = useTranslation('cluster');
   const [expanded, setExpanded] = useState(false);
   const {
@@ -118,7 +126,14 @@ function DeviceBar({ device }: DeviceBarProps) {
       : '';
   const availableTooltip = `${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)} (${availablePct}%)`;
 
-  const fullTooltip = [usedTooltip, reservedTooltip, availableTooltip]
+  const modelTooltipLines = models?.map((m) => `${m.modelName} (${m.memoryUsedBytes != null ? formatBytes(m.memoryUsedBytes) : '—'})`);
+
+  const fullTooltip = [
+    usedTooltip,
+    reservedTooltip,
+    availableTooltip,
+    ...(modelTooltipLines?.length ? ['', ...modelTooltipLines] : []),
+  ]
     .filter(Boolean)
     .join(' | ');
 
@@ -225,12 +240,20 @@ function DeviceBar({ device }: DeviceBarProps) {
             minWidth: '13ch',
           }}
         >
-          <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-            {formatBytes(memoryUsedBytes)}
-          </span>
-          <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-            {' '}/ {formatBytes(memoryTotalBytes)}
-          </span>
+          {displayMode === 'bytes' ? (
+            <>
+              <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+                {formatBytes(memoryUsedBytes)}
+              </span>
+              <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+                {' '}/ {formatBytes(memoryTotalBytes)}
+              </span>
+            </>
+          ) : (
+            <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+              {t('overview.vramAllocation.usedPercent', { value: formatPercentage(memoryUsedBytes, memoryTotalBytes) })}
+            </span>
+          )}
         </div>
       </div>
 
@@ -293,23 +316,65 @@ function DeviceBar({ device }: DeviceBarProps) {
 interface WorkerSectionProps {
   workerId: string;
   devices: DeviceInfo[];
+  models?: WorkerModelInfo[];
+  displayMode: DisplayMode;
 }
 
-function WorkerSection({ workerId, devices }: WorkerSectionProps) {
+function WorkerSection({ workerId, devices, models, displayMode }: WorkerSectionProps) {
   const { t } = useTranslation('cluster');
+
+  const isSingleDevice = devices.length === 1;
 
   return (
     <div>
-      {/* Worker header */}
+      {/* Worker header — links to worker detail page */}
       <div
         style={{
-          fontWeight: 'var(--pf-t--global--font--weight--bold)',
-          fontSize: 'var(--pf-t--global--font--size--sm)',
           marginBottom: 'var(--pf-t--global--spacer--sm)',
-          color: 'var(--pf-t--global--text--color--default)',
         }}
       >
-        {workerId}
+        <Link
+          to={`/workers/${encodeURIComponent(workerId)}`}
+          style={{
+            fontWeight: 'var(--pf-t--global--font--weight--bold)',
+            fontSize: 'var(--pf-t--global--font--size--sm)',
+            color: 'var(--pf-t--global--link--color--default)',
+            textDecoration: 'none',
+          }}
+        >
+          {workerId}
+        </Link>
+
+        {/* Worker-level model names */}
+        {models && models.length > 0 && (
+          <div
+            style={{
+              marginTop: '2px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 'var(--pf-t--global--spacer--xs)',
+            }}
+          >
+            {models.map((model) => (
+              <span
+                key={model.modelName}
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--xs)',
+                  color: 'var(--pf-t--global--text--color--subtle)',
+                  background: 'var(--pf-t--global--background--color--secondary--default)',
+                  border: '1px solid var(--pf-t--global--border--color--default)',
+                  borderRadius: '4px',
+                  padding: '0 var(--pf-t--global--spacer--xs)',
+                  lineHeight: '1.6',
+                }}
+              >
+                {model.modelName}
+                <span style={{ margin: '0 2px' }}>&middot;</span>
+                {model.state}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Device bars */}
@@ -331,7 +396,12 @@ function WorkerSection({ workerId, devices }: WorkerSectionProps) {
           </div>
         ) : (
           devices.map((device) => (
-            <DeviceBar key={device.deviceIndex} device={device} />
+            <DeviceBar
+              key={device.deviceIndex}
+              device={device}
+              displayMode={displayMode}
+              models={isSingleDevice ? models : undefined}
+            />
           ))
         )}
       </div>
@@ -369,8 +439,8 @@ export interface MemoryVisualizationProps {
 export function MemoryVisualization({ data: externalData }: MemoryVisualizationProps) {
   const { t } = useTranslation('cluster');
   const { data: fetchedData, isLoading } = useClusterMemory();
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('bytes');
 
-  // Prefer externally supplied data; fall back to fetched data.
   const memory: ClusterMemory | undefined = externalData ?? fetchedData;
 
   return (
@@ -388,7 +458,27 @@ export function MemoryVisualization({ data: externalData }: MemoryVisualizationP
             </Title>
           </FlexItem>
           <FlexItem>
-            <Legend />
+            <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+              <FlexItem>
+                <ToggleGroup aria-label={t('overview.vramAllocation.displayModeLabel')}>
+                  <ToggleGroupItem
+                    text={t('overview.vramAllocation.displayGiB')}
+                    isSelected={displayMode === 'bytes'}
+                    onChange={(_event, selected) => { if (selected) setDisplayMode('bytes'); }}
+                    buttonId="display-mode-bytes"
+                  />
+                  <ToggleGroupItem
+                    text={t('overview.vramAllocation.displayPercent')}
+                    isSelected={displayMode === 'percent'}
+                    onChange={(_event, selected) => { if (selected) setDisplayMode('percent'); }}
+                    buttonId="display-mode-percent"
+                  />
+                </ToggleGroup>
+              </FlexItem>
+              <FlexItem>
+                <Legend />
+              </FlexItem>
+            </Flex>
           </FlexItem>
         </Flex>
       </CardTitle>
@@ -414,6 +504,8 @@ export function MemoryVisualization({ data: externalData }: MemoryVisualizationP
                 key={worker.workerId}
                 workerId={worker.workerId}
                 devices={worker.devices}
+                models={worker.models}
+                displayMode={displayMode}
               />
             ))}
           </div>

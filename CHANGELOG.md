@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- VRAM visualization enhancements (closes #59): added GiB/percent display
+  toggle to the MemoryVisualization card header, click-through navigation
+  from worker IDs to worker detail pages, and worker-level model name
+  labels showing running models and their states below each worker header.
+  For single-GPU workers, model names also appear in the device bar tooltip.
 - Real-time worker and memory SSE events (closes #56): the control plane's
   reconciliation loop now publishes `WORKER_JOINED`, `WORKER_LEFT`, and
   `WORKER_MEMORY_UPDATED` events on a new `{prefix}:cluster-events` Redis

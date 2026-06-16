@@ -61,6 +61,10 @@
       "noData": "No memory data available.",
       "noDevices": "No devices reported.",
       "clickToExpand": "Click to expand {{device}} memory details",
+      "displayModeLabel": "Display mode",
+      "displayGiB": "GiB",
+      "displayPercent": "%",
+      "usedPercent": "{{value}} used",
       "legend": {
         "used": "Used",
         "reserved": "Reserved",
