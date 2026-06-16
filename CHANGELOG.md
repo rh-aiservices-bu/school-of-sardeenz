@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Readiness probe (`/readyz`) no longer reports not-ready when only one data source is
+  unavailable (closes #55). The dashboard stays ready in degraded read-only mode as long
+  as at least one of the control plane or Redis is healthy. Status is reported as
+  `degraded` when one source is down, `ready` when both are up, and `not_ready` only
+  when both are down.
+
 ### Changed
 
 - Reconciled `docs/project/phase3.md` and `docs/architecture/components/dashboard.md` with the
