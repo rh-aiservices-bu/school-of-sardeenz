@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Converted stale planning language in phase 3 docs to explicit decisions (closes #64):
+  `docs/project/phase3.md` "Open Questions" section renamed to "Decisions" with all
+  "leaning toward" items replaced by their actual implemented choices (TanStack Query,
+  BFF in `dashboard/server/`, PF react-charts, light-theme-only as future work, PF6
+  porting moot since v1 already used PF6); masthead description updated to reflect
+  auth integration as implemented. `docs/project/v1-component-mapping.md` updated to
+  reflect that auth is implemented (JWT-based, three modes: `none`/`simple`/`oauth`)
+  rather than deferred.
+
 - Updated SSE architecture docs to reflect actual per-client subscriber design (closes #58):
   the Risks table in `docs/project/phase3.md` previously implied a shared fan-out model;
   corrected to describe the real per-client Redis subscriber approach with explicit trade-off
