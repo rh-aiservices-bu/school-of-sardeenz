@@ -85,6 +85,25 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Restricts a route to users with the `admin` role. Read-only users are redirected to `/models`. */
+function AdminRoute({ children }: { children: ReactNode }) {
+  const { isAdmin, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <Bullseye>
+        <Spinner size="xl" aria-label="Loading..." />
+      </Bullseye>
+    );
+  }
+
+  if (!isAdmin) {
+    return <Navigate to="/models" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function EventStreamProvider({ children }: { children: ReactNode }) {
   const state = useEventStreamConnection();
   return (
@@ -111,7 +130,14 @@ export function App() {
                     <Routes>
                       <Route path="/" element={<ClusterOverview />} />
                       <Route path="/models" element={<ModelList />} />
-                      <Route path="/models/deploy" element={<ModelDeploy />} />
+                      <Route
+                        path="/models/deploy"
+                        element={
+                          <AdminRoute>
+                            <ModelDeploy />
+                          </AdminRoute>
+                        }
+                      />
                       <Route path="/models/:modelName" element={<ModelDetail />} />
                       <Route path="/workers" element={<WorkerList />} />
                       <Route path="/workers/:workerId" element={<WorkerDetail />} />

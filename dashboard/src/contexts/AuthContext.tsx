@@ -19,6 +19,8 @@ export interface AuthUser {
 
 export interface AuthState {
   isAuthenticated: boolean;
+  /** True when the user holds the `admin` role (write access). False for `admin-readonly`. */
+  isAdmin: boolean;
   user: AuthUser | null;
   authMode: AuthMode;
   isLoading: boolean;
@@ -70,6 +72,7 @@ function clearToken(): void {
 
 const AuthContext = createContext<AuthState>({
   isAuthenticated: false,
+  isAdmin: false,
   user: null,
   authMode: 'none',
   isLoading: true,
@@ -196,10 +199,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const isAuthenticated = authMode === 'none' || user !== null;
+  // In 'none' mode the synthetic user has 'admin' role; otherwise require explicit membership.
+  const isAdmin = authMode === 'none' || (user?.roles.includes('admin') ?? false);
 
   return (
     <AuthContext.Provider
-      value={{ isAuthenticated, user, authMode, isLoading, login, logout, loginError }}
+      value={{ isAuthenticated, isAdmin, user, authMode, isLoading, login, logout, loginError }}
     >
       {children}
     </AuthContext.Provider>

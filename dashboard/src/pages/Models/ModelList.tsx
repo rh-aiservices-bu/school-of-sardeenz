@@ -41,6 +41,7 @@ import { useModels, useSleepModel, useWakeModel, useDeleteModel } from '../../ho
 import type { ModelInfo } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
+import { useAuth } from '../../contexts/AuthContext';
 
 type SortField = 'modelName' | 'lastInferenceAt';
 type SortDirection = 'asc' | 'desc';
@@ -80,6 +81,7 @@ export function ModelList() {
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { data: models, isLoading, error } = useModels();
   const sleepModel = useSleepModel();
   const wakeModel = useWakeModel();
@@ -343,45 +345,47 @@ export function ModelList() {
 
       <Toolbar>
         <ToolbarContent>
-          {/* Bulk select checkbox */}
-          <ToolbarGroup variant="action-group-plain">
-            <ToolbarItem>
-              <Checkbox
-                id="select-all-models"
-                aria-label={tCommon('actions.selectAll')}
-                isChecked={allPageSelected ? true : somePageSelected ? null : false}
-                onChange={toggleSelectAll}
-                isDisabled={paginatedModels.length === 0}
-              />
-            </ToolbarItem>
-            {selectedCount > 0 && (
-              <>
-                <ToolbarItem>
-                  <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
-                    {t('list.bulkActions.selected', { count: selectedCount })}
-                  </span>
-                </ToolbarItem>
-                <ToolbarItem>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setBulkSleepOpen(true)}
-                    isDisabled={sleepModel.isPending || deleteModel.isPending}
-                  >
-                    {t('list.bulkActions.sleep')}
-                  </Button>
-                </ToolbarItem>
-                <ToolbarItem>
-                  <Button
-                    variant="danger"
-                    onClick={() => setBulkDeleteOpen(true)}
-                    isDisabled={sleepModel.isPending || deleteModel.isPending}
-                  >
-                    {t('list.bulkActions.delete')}
-                  </Button>
-                </ToolbarItem>
-              </>
-            )}
-          </ToolbarGroup>
+          {/* Bulk select checkbox — only shown to admins */}
+          {isAdmin && (
+            <ToolbarGroup variant="action-group-plain">
+              <ToolbarItem>
+                <Checkbox
+                  id="select-all-models"
+                  aria-label={tCommon('actions.selectAll')}
+                  isChecked={allPageSelected ? true : somePageSelected ? null : false}
+                  onChange={toggleSelectAll}
+                  isDisabled={paginatedModels.length === 0}
+                />
+              </ToolbarItem>
+              {selectedCount > 0 && (
+                <>
+                  <ToolbarItem>
+                    <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+                      {t('list.bulkActions.selected', { count: selectedCount })}
+                    </span>
+                  </ToolbarItem>
+                  <ToolbarItem>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setBulkSleepOpen(true)}
+                      isDisabled={sleepModel.isPending || deleteModel.isPending}
+                    >
+                      {t('list.bulkActions.sleep')}
+                    </Button>
+                  </ToolbarItem>
+                  <ToolbarItem>
+                    <Button
+                      variant="danger"
+                      onClick={() => setBulkDeleteOpen(true)}
+                      isDisabled={sleepModel.isPending || deleteModel.isPending}
+                    >
+                      {t('list.bulkActions.delete')}
+                    </Button>
+                  </ToolbarItem>
+                </>
+              )}
+            </ToolbarGroup>
+          )}
 
           {/* State filter */}
           <ToolbarItem>
@@ -470,11 +474,13 @@ export function ModelList() {
             </ToolbarItem>
           )}
 
-          <ToolbarItem align={{ default: 'alignEnd' }}>
-            <Button variant="primary" onClick={() => void navigate('/models/deploy')}>
-              {t('deploy.title')}
-            </Button>
-          </ToolbarItem>
+          {isAdmin && (
+            <ToolbarItem align={{ default: 'alignEnd' }}>
+              <Button variant="primary" onClick={() => void navigate('/models/deploy')}>
+                {t('deploy.title')}
+              </Button>
+            </ToolbarItem>
+          )}
 
           {/* Pagination top */}
           {!isEmpty && !hasNoResults && (
@@ -494,13 +500,15 @@ export function ModelList() {
           <EmptyStateBody>
             {t('list.empty.body')}
           </EmptyStateBody>
-          <EmptyStateFooter>
-            <EmptyStateActions>
-              <Button variant="primary" onClick={() => void navigate('/models/deploy')}>
-                {t('deploy.title')}
-              </Button>
-            </EmptyStateActions>
-          </EmptyStateFooter>
+          {isAdmin && (
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={() => void navigate('/models/deploy')}>
+                  {t('deploy.title')}
+                </Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          )}
         </EmptyState>
       ) : hasNoResults ? (
         <EmptyState headingLevel="h2" titleText={t('list.emptyFiltered.title')}>
@@ -518,14 +526,16 @@ export function ModelList() {
           <Table aria-label={t('list.heading')} variant="compact">
             <Thead>
               <Tr>
-                <Th
-                  select={{
-                    onSelect: toggleSelectAll,
-                    isSelected: allPageSelected,
-                    isHeaderSelectDisabled: paginatedModels.length === 0,
-                  }}
-                  aria-label={tCommon('actions.selectAll')}
-                />
+                {isAdmin && (
+                  <Th
+                    select={{
+                      onSelect: toggleSelectAll,
+                      isSelected: allPageSelected,
+                      isHeaderSelectDisabled: paginatedModels.length === 0,
+                    }}
+                    aria-label={tCommon('actions.selectAll')}
+                  />
+                )}
                 <Th sort={getSortParams('modelName')}>{t('list.table.modelName')}</Th>
                 <Th>{t('list.table.state')}</Th>
                 <Th>{t('list.table.runnerType')}</Th>
@@ -533,7 +543,7 @@ export function ModelList() {
                 <Th>{t('list.table.memory')}</Th>
                 <Th sort={getSortParams('lastInferenceAt')}>{t('list.table.lastInference')}</Th>
                 <Th>{t('list.table.pinned')}</Th>
-                <Th aria-label={t('list.table.actions')} />
+                {isAdmin && <Th aria-label={t('list.table.actions')} />}
               </Tr>
             </Thead>
             <Tbody>
@@ -545,13 +555,15 @@ export function ModelList() {
 
                 return (
                   <Tr key={model.modelName}>
-                    <Td
-                      select={{
-                        rowIndex: paginatedModels.indexOf(model),
-                        onSelect: () => toggleSelectModel(model.modelName),
-                        isSelected: selectedModelNames.has(model.modelName),
-                      }}
-                    />
+                    {isAdmin && (
+                      <Td
+                        select={{
+                          rowIndex: paginatedModels.indexOf(model),
+                          onSelect: () => toggleSelectModel(model.modelName),
+                          isSelected: selectedModelNames.has(model.modelName),
+                        }}
+                      />
+                    )}
                     <Td dataLabel={t('list.table.modelName')}>
                       <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
                         {model.modelName}
@@ -601,64 +613,66 @@ export function ModelList() {
                         <LockIcon aria-label={t('list.table.pinned')} />
                       ) : null}
                     </Td>
-                    <Td dataLabel={t('list.table.actions')} isActionCell>
-                      <Dropdown
-                        isOpen={openMenuId === model.modelName}
-                        onSelect={() => setOpenMenuId(null)}
-                        onOpenChange={(isOpen) => { if (!isOpen) setOpenMenuId(null); }}
-                        toggle={(toggleRef) => (
-                          <MenuToggle
-                            ref={toggleRef}
-                            variant="plain"
-                            onClick={() =>
-                              setOpenMenuId(
-                                openMenuId === model.modelName ? null : model.modelName,
-                              )
-                            }
-                            isExpanded={openMenuId === model.modelName}
-                            aria-label={`Actions for ${model.modelName}`}
-                          >
-                            <EllipsisVIcon />
-                          </MenuToggle>
-                        )}
-                        popperProps={{ position: 'right' }}
-                      >
-                        <DropdownList>
-                          {model.state === ModelLifecycleState.ACTIVE && (
+                    {isAdmin && (
+                      <Td dataLabel={t('list.table.actions')} isActionCell>
+                        <Dropdown
+                          isOpen={openMenuId === model.modelName}
+                          onSelect={() => setOpenMenuId(null)}
+                          onOpenChange={(isOpen) => { if (!isOpen) setOpenMenuId(null); }}
+                          toggle={(toggleRef) => (
+                            <MenuToggle
+                              ref={toggleRef}
+                              variant="plain"
+                              onClick={() =>
+                                setOpenMenuId(
+                                  openMenuId === model.modelName ? null : model.modelName,
+                                )
+                              }
+                              isExpanded={openMenuId === model.modelName}
+                              aria-label={`Actions for ${model.modelName}`}
+                            >
+                              <EllipsisVIcon />
+                            </MenuToggle>
+                          )}
+                          popperProps={{ position: 'right' }}
+                        >
+                          <DropdownList>
+                            {model.state === ModelLifecycleState.ACTIVE && (
+                              <DropdownItem
+                                key="sleep"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  setSleepConfirmModel(model);
+                                }}
+                              >
+                                {t('list.sleep.menuItem')}
+                              </DropdownItem>
+                            )}
+                            {model.state === ModelLifecycleState.SLEEPING && (
+                              <DropdownItem
+                                key="wake"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  handleWake(model);
+                                }}
+                              >
+                                {t('list.wake.menuItem')}
+                              </DropdownItem>
+                            )}
                             <DropdownItem
-                              key="sleep"
+                              key="delete"
+                              isDanger
                               onClick={() => {
                                 setOpenMenuId(null);
-                                setSleepConfirmModel(model);
+                                setDeleteConfirmModel(model);
                               }}
                             >
-                              {t('list.sleep.menuItem')}
+                              {t('list.delete.menuItem')}
                             </DropdownItem>
-                          )}
-                          {model.state === ModelLifecycleState.SLEEPING && (
-                            <DropdownItem
-                              key="wake"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                handleWake(model);
-                              }}
-                            >
-                              {t('list.wake.menuItem')}
-                            </DropdownItem>
-                          )}
-                          <DropdownItem
-                            key="delete"
-                            isDanger
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              setDeleteConfirmModel(model);
-                            }}
-                          >
-                            {t('list.delete.menuItem')}
-                          </DropdownItem>
-                        </DropdownList>
-                      </Dropdown>
-                    </Td>
+                          </DropdownList>
+                        </Dropdown>
+                      </Td>
+                    )}
                   </Tr>
                 );
               })}

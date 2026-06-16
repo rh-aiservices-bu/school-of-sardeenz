@@ -38,6 +38,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Development mode logs a prominent warning when running with `AUTH_MODE=none`
   - Updated `docs/usage/deployment-security.md` with required environment variables
     per auth mode and example production configuration
+- UI-level authorization for read-only users (closes #61): `AuthContext` now exposes an
+  `isAdmin` boolean derived from the user's `admin` role. Mutating controls — Deploy button,
+  bulk-action toolbar, per-row action menu (sleep/wake/delete), and the `/models/deploy` route
+  — are hidden or redirect when `isAdmin` is false (i.e. for `admin-readonly` users). A new
+  `AdminRoute` wrapper in `App.tsx` redirects read-only users navigating directly to
+  `/models/deploy` back to `/models`. 28 new unit tests cover the `isAdmin` derivation,
+  `AdminRoute` guard logic, and every visibility guard condition.
 
 ### Changed
 
