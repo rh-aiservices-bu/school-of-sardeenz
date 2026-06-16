@@ -12,7 +12,7 @@ The dashboard owns the **operator experience** for day-to-day cluster management
 
 - **Make orchestration decisions.** The control plane handles placement, eviction, and lifecycle transitions. The dashboard triggers actions (deploy, sleep, wake, delete) and displays their results.
 - **Replace Prometheus/Grafana.** The metrics dashboard provides a convenience view of key metrics. Production alerting and deep observability remain in external tooling.
-- **Enforce authentication or authorization.** This is deferred to a future phase. The BFF is the planned integration point for auth middleware.
+- **Enforce RBAC beyond simple role-based auth.** A lightweight auth system (JWT, three modes: `none` / `simple` / `oauth`) is implemented. Per-model permissions and audit logging remain future work.
 - **Manage multiple clusters.** Single cluster only.
 
 ## Architecture
@@ -72,17 +72,18 @@ Write operations (deploy, sleep, wake, delete) are proxied to the control plane 
 ### Real-time updates (SSE)
 
 ```
-Browser → EventSource(/api/events)
-       → BFF subscribes to Redis pub/sub channel: {prefix}:events
-       → Forwards each JSON event as SSE data frames
-       → Sends keepalive pings every 30 seconds
+Browser → EventSource(/api/events?token=<jwt>)
+       → BFF creates a per-client Redis subscriber on channel: {prefix}:routing-updates
+       → Translates RoutingMapUpdate payloads → ClusterEvent objects
+       → Forwards each event as SSE data frames
+       → Sends keepalive ping comments every 30 seconds
        → Frontend useEventStream() hook:
          ├─ Parses ClusterEvent objects
          ├─ Dispatches to TanStack Query cache invalidation
          └─ Maintains 100-event ring buffer for event feed display
 ```
 
-The BFF's SSE relay subscribes to the Redis pub/sub channel rather than the control plane's `/api/v1/events` endpoint. This means events flow even during control plane restarts, since the control plane publishes events to Redis as part of its state transitions.
+The BFF's SSE relay subscribes to the Redis `{prefix}:routing-updates` pub/sub channel (not the control plane's `/api/v1/events` SSE endpoint directly). Each connected browser client gets its own Redis subscriber; the subscriber is cleaned up when the client disconnects. Events flow even during control plane restarts, since the control plane publishes to Redis as part of its state transitions.
 
 ### Metrics path
 
@@ -125,9 +126,21 @@ The frontend uses **TanStack Query for all server state** (data fetching, cachin
 
 Query invalidation is event-driven: the `useEventStream` hook listens for SSE events and invalidates the relevant query keys. For example, a `MODEL_STATE_CHANGED` event invalidates both `['models']` and `['cluster']` query keys, triggering a refetch only for components currently mounted and subscribed to those queries.
 
-### SSE reconnection
+### SSE reconnection and degraded mode
 
-The `useEventStream` hook connects to `/api/events` via `EventSource`. On disconnect, it reconnects after a 5-second backoff. The hook exposes a `ConnectionStatus` (`connected` | `connecting` | `disconnected`) for UI display.
+The `useEventStream` hook connects to `/api/events` via `EventSource` (JWT token passed as `?token=` since `EventSource` cannot send headers). The hook implements a two-tier failure model:
+
+```
+CONNECTED → (SSE error) → RECONNECTING → (5 failures) → DEGRADED
+    ↑                          ↑                              |
+    +---------- (SSE recovers) +----- (SSE recovers) ---------+
+```
+
+- **`connected`** — SSE stream is live; events drive cache invalidation in real time
+- **`reconnecting`** — temporary failure; retries every 5 seconds
+- **`degraded`** — 5+ consecutive failures; retries slow to every 30 seconds
+
+In degraded state, the `DegradedBanner` component shows a persistent warning: "Real-time updates unavailable — polling for changes". Query hooks automatically switch to faster polling intervals to compensate. The banner auto-dismisses as soon as the connection recovers.
 
 ### Shared components
 
@@ -135,7 +148,8 @@ The `useEventStream` hook connects to `/api/events` via `EventSource`. On discon
 | --- | --- |
 | `AppLayout` | PF6 Page shell with masthead, sidebar nav, active highlighting |
 | `StateLabel` | Model lifecycle state as a colored PF6 Label with state-appropriate icons |
-| `MemoryBar` | Stacked memory bar (used / reserved / available) |
+| `MemoryVisualization` | Stacked memory bar (used / reserved / available) with tooltips and expandable inline detail panel |
+| `DegradedBanner` | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state |
 
 ### State color mapping
 
@@ -227,6 +241,16 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 | `SARDEENZ_PROMETHEUS_URL` | `http://localhost:9090` | Prometheus query API base URL |
 | `SARDEENZ_CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin (dev only) |
 | `SARDEENZ_LOG_LEVEL` | `info` | Pino log level |
+| `AUTH_MODE` | `none` | Authentication mode: `none`, `simple`, or `oauth` |
+| `ADMIN_USERNAME` | `admin` | Admin username for `simple` auth mode |
+| `ADMIN_PASSWORD` | _(empty)_ | Admin password for `simple` auth mode |
+| `JWT_SECRET` | _(empty)_ | JWT signing secret (required when `AUTH_MODE` is not `none`) |
+| `JWT_EXPIRATION_HOURS` | `8` | JWT token expiration in hours |
+| `OAUTH_CLIENT_ID` | `sardeenz` | OAuth client ID (for `oauth` mode) |
+| `OAUTH_CLIENT_SECRET` | _(empty)_ | OAuth client secret (for `oauth` mode) |
+| `OAUTH_ISSUER_URL` | _(empty)_ | OAuth OIDC issuer URL (for `oauth` mode) |
+| `K8S_API_URL` | _(empty)_ | Kubernetes API URL for RBAC role resolution (for `oauth` mode) |
+| `NAMESPACE` | `sardeenz` | Kubernetes namespace for RBAC scope (for `oauth` mode) |
 
 ### Frontend environment variables
 
@@ -250,16 +274,95 @@ The BFF serves both the API and the frontend from a single port (4000). This sim
 | --- | --- | --- |
 | Unit (frontend) | Vitest + React Testing Library | API client, hooks, utility functions, component rendering |
 | Unit (BFF) | Vitest | Upstream clients (mocked HTTP), route handlers (mocked deps) |
-| E2E | Playwright | Critical admin workflows against real frontend + BFF with mock upstreams |
+| E2E (workflows) | Playwright | Critical admin workflows against real frontend + BFF with mock upstreams |
+| E2E (accessibility) | Playwright + `@axe-core/playwright` | WCAG 2.1 AA scans on all key pages using the mock harness |
+
+### E2E mock service harness
+
+The Playwright tests use a purpose-built mock harness rather than real upstream services:
+
+- **`MockControlPlane`** (`dashboard/e2e/mocks/control-plane.ts`) — Fastify server on a random port serving all BFF-facing control plane endpoints with configurable canned responses. Supports stateful scenarios (deploy, delete, sleep, wake) and an SSE `pushEvent()` API for testing real-time transitions.
+- **`MockPrometheus`** (`dashboard/e2e/mocks/prometheus.ts`) — Fastify server serving `/api/v1/query_range` and `/api/v1/query` with pluggable response factories.
+- **Playwright fixtures** (`dashboard/e2e/fixtures.ts`) — per-test fixture that starts both mock servers on random ports, spawns the BFF process pointed at the mocks, and tears everything down after the test.
 
 ## Prometheus Integration
 
-The metrics dashboard queries three metric families:
+The metrics dashboard exposes ten BFF routes, each backed by Prometheus queries:
 
-| Metric | Type | Source | Dashboard chart |
+| BFF route | Metric(s) queried | Type | Dashboard chart |
 | --- | --- | --- | --- |
-| `sardeenz_proxy_request_duration_seconds` | Histogram | Proxy | p95 latency line chart |
-| `sardeenz_proxy_requests_total` | Counter | Proxy | Throughput (req/s) line chart |
-| `sardeenz_control_plane_device_memory_bytes` | Gauge | Control plane | Device memory instant query |
+| `GET /api/metrics/latency` | `sardeenz_proxy_request_duration_seconds` | Histogram | p50/p95/p99 latency line chart |
+| `GET /api/metrics/throughput` | `sardeenz_proxy_requests_total` | Counter | Throughput (req/s) line chart |
+| `GET /api/metrics/connections` | `sardeenz_proxy_active_connections`, `sardeenz_proxy_parked_connections` | Gauge | Active and parked connection gauges |
+| `GET /api/metrics/parking-duration` | `sardeenz_proxy_parking_duration_seconds` | Histogram | p50/p95 parking wait time |
+| `GET /api/metrics/memory` | `sardeenz_control_plane_device_memory_bytes` | Gauge | Device memory instant query |
+| `GET /api/metrics/memory-history` | `sardeenz_control_plane_device_memory_bytes` | Gauge | Device memory over time (range) |
+| `GET /api/metrics/wake-triggers` | `sardeenz_control_plane_wake_triggers_total` | Counter | Wake trigger frequency bar chart |
+| `GET /api/metrics/state-transitions` | `sardeenz_control_plane_state_transitions_total` | Counter | State transitions by type |
+| `GET /api/metrics/evictions` | `sardeenz_control_plane_evictions_total` | Counter | Evictions over time |
+| `GET /api/metrics/operations` | `sardeenz_control_plane_{deploy,sleep,wake,eviction,placement}_duration_seconds` | Histogram | p95 operation duration by type |
 
-Time ranges map to PromQL step sizes: 15m → 15s, 1h → 60s, 6h → 300s, 24h → 900s. The BFF constructs the PromQL and handles time range parameters; the frontend receives chart-ready arrays.
+Time ranges map to PromQL step sizes: 15m → 15s, 1h → 60s, 6h → 300s, 24h → 900s, 7d → 3600s. The BFF constructs the PromQL and handles time range parameters; the frontend receives chart-ready arrays.
+
+## Authentication
+
+The BFF implements a lightweight auth system controlled by the `AUTH_MODE` environment variable.
+
+### Three modes
+
+| Mode | Behavior |
+| --- | --- |
+| `none` (default) | No authentication. `authenticate` and `requireRole` decorators are no-ops. All routes are open. Use for local development and air-gapped deployments. |
+| `simple` | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT. |
+| `oauth` | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens via the configured OIDC issuer, then issues an internal JWT. |
+
+### JWT flow
+
+1. Client authenticates and receives a JWT signed with `JWT_SECRET`.
+2. Subsequent requests include the token as `Authorization: Bearer <token>`.
+3. SSE routes that cannot send headers accept `?token=<jwt>` as a query-parameter fallback.
+4. The `authenticate` preHandler verifies the token; `requireRole('admin-readonly')` checks the `roles` claim.
+
+### Route protection
+
+Protected routes use `{ preHandler: [app.authenticate, app.requireRole('admin-readonly')] }`. Public routes (`/api/health`, `/api/auth/*`, `/healthz`, `/readyz`) are exempt.
+
+## Internationalization (i18n)
+
+The frontend uses **react-i18next** with a namespace-per-page pattern.
+
+### Namespaces
+
+| Namespace | Pages / components |
+| --- | --- |
+| `common` | Shared strings: nav labels, action names, status labels, degraded banner |
+| `cluster` | Cluster Overview page |
+| `models` | Model List, Model Detail, Model Deploy pages |
+| `workers` | Worker List, Worker Detail pages |
+| `metrics` | Metrics Dashboard page |
+| `auth` | Login page, OAuth callback page |
+
+### Configuration
+
+`dashboard/src/i18n.ts` initialises i18next with:
+- Browser language detection (navigator → htmlTag, no localStorage caching)
+- English as the sole locale at present (locale files at `dashboard/src/locales/en/`)
+- `escapeValue: false` (React handles XSS escaping)
+
+New strings go in the appropriate namespace JSON file. New languages add a parallel `locales/<lang>/` directory with the same files.
+
+## Degraded Mode
+
+Two independent conditions can trigger the degraded state indicator:
+
+### Redis fallback (control plane unreachable)
+
+When the BFF cannot reach the control plane, read routes fall back to Redis and include `source: "redis-fallback"` in the response body. The `DegradedContext` on the frontend detects this field across all active TanStack Query results and sets `isDegraded = true`. `DegradedBanner` then shows: "Control plane unreachable — showing cached data".
+
+### SSE degraded state
+
+After 5 consecutive SSE connection failures, `useEventStream` transitions to `degraded` status (reconnect backoff 30s instead of 5s). `DegradedBanner` shows: "Real-time updates unavailable — polling for changes".
+
+### Priority
+
+Redis fallback takes precedence in the banner (more severe: data staleness) over SSE degraded (less severe: push updates delayed). Both conditions auto-clear as soon as fresh data or a healthy SSE connection resumes — no manual dismissal required.

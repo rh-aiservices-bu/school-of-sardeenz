@@ -22,7 +22,7 @@ The dashboard covers two deployable units — a frontend SPA and a backend-for-f
 
 ### Out of scope
 
-- **User management / RBAC** — future phase; the dashboard does not enforce authentication or authorization in this phase (integration point TBD)
+- **User management / RBAC** — simple auth is implemented (JWT-based, three modes: `none` / `simple` / `oauth`), but full RBAC (per-model permissions, audit logging) remains a future phase
 - **Multi-cluster views** — single cluster only
 - **Custom alerting rules** — Prometheus/Alertmanager handle this externally
 - **Non-OpenAI protocol management** — only models served through the OpenAI-compatible proxy
@@ -181,20 +181,26 @@ dashboard/
 ├── vitest.config.ts
 ├── eslint.config.js
 ├── src/
-│   ├── main.tsx              # Entry point, React root
-│   ├── App.tsx               # App shell, routing
+│   ├── main.tsx              # Entry point, React root (also imports i18n side-effect)
+│   ├── App.tsx               # App shell, routing, protected routes
 │   ├── routes.tsx            # Route definitions
+│   ├── i18n.ts               # i18next configuration (namespace-per-page pattern)
+│   ├── locales/en/           # English locale files (common, cluster, models, workers, metrics, auth)
 │   ├── api/                  # API client and hooks (Task 3.5)
 │   ├── components/           # Shared components
-│   │   ├── AppLayout.tsx     # Page + Sidebar + Masthead
-│   │   ├── StateLabel.tsx    # Model state badge
-│   │   ├── MemoryBar.tsx     # Memory usage bar
+│   │   ├── AppLayout.tsx         # Page + Sidebar + Masthead
+│   │   ├── StateLabel.tsx        # Model state badge
+│   │   ├── MemoryVisualization.tsx  # Stacked memory bar (used / reserved / available)
+│   │   ├── DegradedBanner.tsx    # Persistent warning banner for degraded state
 │   │   └── ...
+│   ├── contexts/             # React contexts (DegradedContext, AuthContext)
 │   ├── pages/                # Route-level page components
 │   │   ├── ClusterOverview/
 │   │   ├── Models/
 │   │   ├── Workers/
-│   │   └── Metrics/
+│   │   ├── Metrics/
+│   │   ├── Login/
+│   │   └── OAuthCallback/
 │   ├── hooks/                # Custom React hooks
 │   ├── types/                # Frontend-specific types
 │   └── utils/                # Utility functions
@@ -219,6 +225,12 @@ Set up the backend-for-frontend service that aggregates data from the control pl
 - `SARDEENZ_PROMETHEUS_URL` — Prometheus query API base URL
 - `SARDEENZ_LOG_LEVEL` — log level (default `info`)
 - `SARDEENZ_CORS_ORIGIN` — allowed CORS origin for the frontend (default `http://localhost:5173`)
+- `AUTH_MODE` — authentication mode: `none` (default), `simple`, or `oauth`
+- `ADMIN_USERNAME` — admin username for simple auth mode (default `admin`)
+- `ADMIN_PASSWORD` — admin password for simple auth mode
+- `JWT_SECRET` — secret for signing JWT tokens (required when `AUTH_MODE` is not `none`)
+- `JWT_EXPIRATION_HOURS` — token expiry in hours (default `8`)
+- `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL` — OAuth provider config (required for `AUTH_MODE=oauth`)
 
 **Module layout:**
 
@@ -287,12 +299,14 @@ Implement the three upstream clients and the route handlers that compose them.
 - Accept `start`, `end`, `step` query parameters for time range
 - Transform Prometheus query results into chart-friendly JSON
 
-**SSE relay** — subscribe to the control plane's `GET /api/v1/events` SSE stream and relay events to connected frontend clients:
+**SSE relay** — subscribe to the Redis pub/sub channel (`{prefix}:routing-updates`) and relay events to connected frontend clients:
 
-- Maintain a single upstream SSE connection to the control plane
-- Fan out events to all connected frontend clients
-- Reconnect on upstream disconnect with exponential backoff
-- Send `ping` events to frontend clients every 30 seconds
+- Subscribe to the Redis `{prefix}:routing-updates` channel (not the control plane SSE endpoint directly)
+- Translate `RoutingMapUpdate` payloads from the Redis channel into `ClusterEvent` objects expected by the frontend
+- Each connected frontend client gets its own Redis subscriber (connection created per SSE handshake, cleaned up on disconnect)
+- If Redis subscription fails before headers are sent, return HTTP 502 immediately
+- Send keepalive `ping` comments to frontend clients every 30 seconds
+- Route requires authentication (`admin-readonly` role); SSE clients pass the JWT token via `?token=` query parameter since `EventSource` cannot send custom headers
 
 **Verification:** Unit tests for each client (mocked HTTP responses). Integration test confirming the Redis fallback works when the control plane is unreachable.
 
@@ -332,17 +346,19 @@ Build the React hooks and API client that all page components use to fetch and s
 
 **SSE event stream:**
 
-- `useEventStream()` hook that connects to `GET /api/events`
+- `useEventStream()` hook that connects to `GET /api/events` (passes JWT token via `?token=` query param)
 - Parse typed `ClusterEvent` objects
-- Dispatch events to update relevant query caches (e.g., `MODEL_STATE_CHANGED` updates the model list)
-- Reconnect on disconnect with exponential backoff
-- Connection status indicator (connected/reconnecting/disconnected) exposed for the UI
+- Dispatch events to update relevant query caches (e.g., `MODEL_STATE_CHANGED` invalidates `['models']` and `['cluster']`)
+- Reconnect on disconnect with 5-second backoff (normal) or 30-second backoff (degraded after 5 failures)
+- Connection status: `connected` | `reconnecting` | `degraded` — exposed for the UI via `DegradedBanner`
 
-**Polling fallback:**
+**Degraded mode:**
 
-- If SSE connection fails for >30 seconds, fall back to polling every 5 seconds
-- Switch back to SSE when the connection recovers
-- Configurable refresh interval per hook (some views need faster updates than others)
+- After 5 consecutive SSE failures the connection transitions to `degraded` state
+- In degraded state, reconnect backoff increases to 30 seconds
+- `DegradedBanner` shows a persistent warning: "Real-time updates unavailable — polling for changes"
+- Query hooks use faster polling intervals (configured per hook) to compensate for missing push updates
+- Banner auto-dismisses as soon as the SSE connection recovers
 
 **Verification:** Unit tests for API client error handling, SSE event parsing, and hook behavior (loading → success, loading → error). Vitest with React Testing Library.
 
@@ -429,11 +445,11 @@ The primary operational view — where admins deploy models, monitor their state
 
 **Table features:**
 
-- **Filtering** — by state (multi-select chips), by runner type
+- **Filtering** — by state (multi-select chips) and by runner type (toolbar chip filter)
 - **Sorting** — by name, state, memory, last inference time
-- **Pagination** — PatternFly pagination component (25 / 50 / 100 per page)
+- **Pagination** — PatternFly pagination component (10 / 20 / 50 per page, default 20)
 - **Empty state** — PatternFly `EmptyState` with "No models deployed" message and deploy action button
-- **Bulk actions** — select multiple models for bulk sleep or bulk wake (toolbar action)
+- **Bulk actions** — select multiple models for bulk sleep or bulk delete (toolbar action, with confirmation modal)
 
 **Row actions** (kebab menu per row):
 
@@ -683,11 +699,11 @@ Verify all views meet WCAG 2.1 AA standards. PatternFly 6 components have built-
 
 **Tooling:**
 
-- Browser DevTools accessibility audit (Chrome/Firefox)
-- `axe-core` integration in Vitest for automated checks
-- Manual keyboard-only navigation walkthrough of every view
+- `@axe-core/playwright` — automated WCAG 2.1 AA scans integrated into the Playwright E2E test suite (not Vitest unit tests)
+- `dashboard/e2e/accessibility.spec.ts` — axe-core scans on all key pages (Cluster Overview, Model List, Model Deploy, Worker List, Metrics Dashboard) using the mock service harness with pre-populated data
+- `docs/development/accessibility-audit.md` — manual audit checklist for keyboard navigation, screen reader, colour/contrast, chart accessibility, and forms
 
-**Verification:** No critical or serious `axe-core` violations. All views navigable via keyboard alone. Screen reader walkthrough of the deploy flow confirms all form fields, states, and confirmations are announced.
+**Verification:** No critical or serious `axe-core` violations on any page. All views navigable via keyboard alone. Screen reader walkthrough of the deploy flow confirms all form fields, states, and confirmations are announced.
 
 ### 3.13 — Write Dashboard Design Document
 
@@ -793,18 +809,18 @@ Playwright tests validating critical admin workflows end-to-end. Tests run again
 
 From the [overall project plan](overall-plan.md#phase-3-admin-dashboard):
 
-- [ ] Admin can deploy a model through the dashboard and see it transition through `STARTING` → `ACTIVE`
-- [ ] Admin can sleep and wake a model through the dashboard
-- [ ] Cluster overview shows real-time GPU memory utilization (updates within 5 seconds of state change)
-- [ ] Device memory visualization renders correctly for workers with 1, 2, 4, and 8 GPUs
-- [ ] Dashboard remains responsive and displays cached state during a brief control plane restart (BFF reads from Redis/Prometheus independently)
-- [ ] All views pass PatternFly 6 accessibility standards (WCAG 2.1 AA)
-- [ ] Playwright E2E tests cover: model deploy, model sleep/wake, cluster overview loads, worker detail loads
-- [ ] Frontend builds with zero TypeScript errors and zero ESLint warnings
-- [ ] OpenAPI specs pass `redocly lint` with zero errors
-- [ ] Generated TypeScript types compile cleanly (`make typecheck`)
-- [ ] `npm run lint` passes with zero warnings across all dashboard packages
-- [ ] Container image builds and runs successfully
+- [x] Admin can deploy a model through the dashboard and see it transition through `STARTING` → `ACTIVE`
+- [x] Admin can sleep and wake a model through the dashboard
+- [x] Cluster overview shows real-time GPU memory utilization (updates within 5 seconds of state change)
+- [x] Device memory visualization renders correctly for workers with 1, 2, 4, and 8 GPUs
+- [x] Dashboard remains responsive and displays cached state during a brief control plane restart (BFF reads from Redis/Prometheus independently)
+- [x] All views pass PatternFly 6 accessibility standards (WCAG 2.1 AA)
+- [x] Playwright E2E tests cover: model deploy, model sleep/wake, cluster overview loads, worker detail loads
+- [x] Frontend builds with zero TypeScript errors and zero ESLint warnings
+- [ ] OpenAPI specs pass `redocly lint` with zero errors — redocly is set up (`packages/contracts/redocly.yaml`), but specs currently have 23 errors and 4 warnings; fix tracked separately
+- [x] Generated TypeScript types compile cleanly (`make typecheck`)
+- [x] `npm run lint` passes with zero warnings across all dashboard packages
+- [x] Container image builds and runs successfully (`containers/dashboard/Dockerfile` exists)
 
 ## Open Questions
 

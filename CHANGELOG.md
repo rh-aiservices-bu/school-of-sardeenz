@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Reconciled `docs/project/phase3.md` and `docs/architecture/components/dashboard.md` with the
+  actual Phase 3 implementation (closes #52):
+  - Checked all Definition of Done items and marked 11/12 complete; flagged redocly lint
+    failures as a separate known issue
+  - Corrected "Out of scope" auth statement — auth IS implemented (JWT, three modes)
+  - Updated `MemoryBar` → `MemoryVisualization` throughout; added `DegradedBanner` to
+    shared-components tables
+  - Updated SSE relay description: BFF subscribes to `{prefix}:routing-updates` Redis
+    channel per client (not the control plane SSE endpoint)
+  - Updated SSE connection-status enum: `connected | reconnecting | degraded`
+    (was `connected | connecting | disconnected`); documented degraded-mode behavior
+  - Updated pagination options: 10/20/50 per page (was 25/50/100)
+  - Updated BFF config tables to include all auth env vars
+  - Updated Prometheus integration table to reflect all 10 metric routes; added `7d → 3600s`
+    time-range mapping
+  - Updated accessibility section to reflect `@axe-core/playwright` E2E approach
+  - Added new `Authentication`, `i18n`, and `Degraded Mode` sections to dashboard.md
+  - Updated E2E testing strategy to document MockControlPlane / MockPrometheus harness
+
 ### Added
 
 - UX enhancements to operator views across the admin dashboard (closes #51):
