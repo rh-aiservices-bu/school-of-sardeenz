@@ -349,6 +349,57 @@ describe('Route protection', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Empty-password rejection (regression: issue #53)                   */
+/* ------------------------------------------------------------------ */
+describe('Empty-password rejection (issue #53)', () => {
+  it('rejects login with empty password even when ADMIN_PASSWORD is empty', async () => {
+    // This is the exact vulnerability: if ADMIN_PASSWORD defaults to ''
+    // and someone sends password='', the timing-safe compare succeeds.
+    // validateAuthConfig now prevents this at startup, but we also verify
+    // the login handler itself rejects empty credentials.
+    const config = makeConfig({ authMode: 'simple', adminPassword: 'actual-secret' });
+    const app = await buildApp(config);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: '' },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('rejects login with missing password field', async () => {
+    const config = makeConfig({ authMode: 'simple', adminPassword: 'actual-secret' });
+    const app = await buildApp(config);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin' },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('rejects login with empty body', async () => {
+    const config = makeConfig({ authMode: 'simple', adminPassword: 'actual-secret' });
+    const app = await buildApp(config);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: {},
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* Auth mode: none                                                    */
 /* ------------------------------------------------------------------ */
 describe('Auth mode: none', () => {

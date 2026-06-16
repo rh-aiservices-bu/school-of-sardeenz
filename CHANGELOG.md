@@ -29,6 +29,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     to 0 to avoid NaN sums from worker records that only carry `memoryTotalBytes`
   - Added 22 integration-style tests seeding Redis with control-plane-compatible data to verify
     the fallback behavior end to end
+- Dashboard BFF now enforces secure auth defaults at startup (closes #53):
+  - `AUTH_MODE=none` is rejected in production (`NODE_ENV=production`) — the server
+    will not start without explicit authentication configured
+  - `AUTH_MODE=simple` requires `ADMIN_PASSWORD` to be explicitly set and non-empty,
+    regardless of environment — prevents unauthenticated admin access on misconfigured
+    deployments
+  - Development mode logs a prominent warning when running with `AUTH_MODE=none`
+  - Updated `docs/usage/deployment-security.md` with required environment variables
+    per auth mode and example production configuration
 
 ### Changed
 
