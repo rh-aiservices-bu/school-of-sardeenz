@@ -57,6 +57,10 @@ export function toClusterEvent(update: RoutingMapUpdate): ClusterEvent {
 }
 
 export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  // Design note: each connected SSE client gets its own dedicated Redis subscriber.
+  // This is the simplest approach and is correct at admin-dashboard scale (tens of
+  // concurrent connections). A shared-subscriber fan-out pattern would be needed if
+  // connection counts grew to hundreds+. See docs/architecture/components/dashboard.md.
   app.get('/api/events', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
     const channel = `${deps.redis.keyPrefix}:routing-updates`;
     const subscriber = deps.redis.createSubscriber();
