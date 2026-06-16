@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { ClusterEventType, RoutingMapUpdateType, ModelState } from '@sardeenz/types';
-import type { ProxyControlPlaneComponents } from '@sardeenz/types';
+import type { ControlPlaneComponents, ProxyControlPlaneComponents } from '@sardeenz/types';
 import { toClusterEvent } from '../../routes/events.js';
 
 type RoutingMapUpdate = ProxyControlPlaneComponents['schemas']['RoutingMapUpdate'];
+type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
 const NOW = '2026-06-15T12:00:00.000Z';
 
@@ -128,5 +129,58 @@ describe('toClusterEvent', () => {
         expect(event.modelName).toBeTruthy();
       }
     });
+  });
+});
+
+describe('cluster-events channel passthrough', () => {
+  // Events from the cluster-events channel are already ClusterEvent objects
+  // and should be forwarded as-is without toClusterEvent conversion.
+
+  it('WORKER_JOINED events are valid ClusterEvent objects', () => {
+    const event: ClusterEvent = {
+      type: ClusterEventType.WORKER_JOINED,
+      timestamp: NOW,
+      workerId: 'worker-1',
+      message: 'Worker worker-1 joined the cluster',
+    };
+
+    expect(event.type).toBe(ClusterEventType.WORKER_JOINED);
+    expect(event.timestamp).toBe(NOW);
+    expect(event.workerId).toBe('worker-1');
+  });
+
+  it('WORKER_LEFT events are valid ClusterEvent objects', () => {
+    const event: ClusterEvent = {
+      type: ClusterEventType.WORKER_LEFT,
+      timestamp: NOW,
+      workerId: 'worker-2',
+      message: 'Worker worker-2 left the cluster (dead)',
+    };
+
+    expect(event.type).toBe(ClusterEventType.WORKER_LEFT);
+    expect(event.workerId).toBe('worker-2');
+  });
+
+  it('WORKER_MEMORY_UPDATED events carry worker count in data', () => {
+    const event: ClusterEvent = {
+      type: ClusterEventType.WORKER_MEMORY_UPDATED,
+      timestamp: NOW,
+      data: { workerCount: 3 },
+    };
+
+    expect(event.type).toBe(ClusterEventType.WORKER_MEMORY_UPDATED);
+    expect(event.data?.workerCount).toBe(3);
+  });
+
+  it('cluster-events payloads survive JSON round-trip', () => {
+    const original: ClusterEvent = {
+      type: ClusterEventType.WORKER_JOINED,
+      timestamp: NOW,
+      workerId: 'w1',
+      message: 'Worker w1 joined',
+    };
+
+    const roundTripped = JSON.parse(JSON.stringify(original)) as ClusterEvent;
+    expect(roundTripped).toEqual(original);
   });
 });

@@ -73,21 +73,29 @@ Write operations (deploy, sleep, wake, delete) are proxied to the control plane 
 
 ```
 Browser → EventSource(/api/events?token=<jwt>)
-       → BFF creates a per-client Redis subscriber on channel: {prefix}:routing-updates
-       → Translates RoutingMapUpdate payloads → ClusterEvent objects
-       → Forwards each event as SSE data frames
+       → BFF creates a per-client Redis subscriber on two channels:
+         ├─ {prefix}:routing-updates — model/endpoint state changes
+         └─ {prefix}:cluster-events  — worker lifecycle & memory updates
+       → routing-updates: translates RoutingMapUpdate → ClusterEvent
+       → cluster-events:  forwards ClusterEvent payloads as-is
        → Sends keepalive ping comments every 30 seconds
        → Frontend useEventStream() hook:
          ├─ Parses ClusterEvent objects
          ├─ Dispatches to TanStack Query cache invalidation
+         │  (WORKER_MEMORY_UPDATED invalidation throttled to 1/sec)
          └─ Maintains 100-event ring buffer for event feed display
 ```
 
-The BFF's SSE relay subscribes to the Redis `{prefix}:routing-updates` pub/sub channel (not the control plane's `/api/v1/events` SSE endpoint directly). Each connected browser client gets its own dedicated Redis subscriber connection; the subscriber is created on SSE handshake and cleaned up when the client disconnects.
+The BFF's SSE relay subscribes to two Redis pub/sub channels:
+
+- **`{prefix}:routing-updates`** — Published by `RoutingMapService` during model state transitions and endpoint changes. The BFF translates `RoutingMapUpdate` payloads into `ClusterEvent` objects. The proxy also subscribes to this channel for routing table sync.
+- **`{prefix}:cluster-events`** — Published by `ReconciliationService` during the reconciliation loop. Carries `ClusterEvent` payloads directly (worker join/leave, memory updates). The BFF forwards these as-is without translation.
+
+The two-channel design keeps the proxy's hot path (`routing-updates`) free of events it doesn't consume. Each connected browser client gets its own dedicated Redis subscriber connection; the subscriber is created on SSE handshake and cleaned up when the client disconnects.
 
 **Design note — per-client subscribers vs. shared fan-out:** This implementation uses one Redis subscriber per connected SSE client rather than a single shared subscriber that fans out to all clients. For an admin dashboard with tens of concurrent connections, the per-client model is simpler and entirely adequate — each subscriber is a lightweight pub/sub connection. A shared-subscriber architecture (one Redis connection, in-process fan-out to all SSE responses) would be needed if connection counts grew to hundreds or more, where the per-client approach would create excessive Redis connections. Refactoring to shared fan-out is straightforward if that threshold is ever reached.
 
-Events flow even during control plane restarts, since the control plane publishes to Redis as part of its state transitions.
+Model/endpoint events flow even during control plane restarts, since `RoutingMapService` publishes to Redis as part of its state transitions. Worker/memory events are published by the reconciliation loop and are therefore only emitted while a leader instance is running.
 
 ### Metrics path
 

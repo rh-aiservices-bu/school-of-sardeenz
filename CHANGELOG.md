@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Real-time worker and memory SSE events (closes #56): the control plane's
+  reconciliation loop now publishes `WORKER_JOINED`, `WORKER_LEFT`, and
+  `WORKER_MEMORY_UPDATED` events on a new `{prefix}:cluster-events` Redis
+  pub/sub channel. The BFF SSE relay subscribes to both `routing-updates`
+  (model/endpoint events) and `cluster-events` (worker/memory events),
+  forwarding all as `ClusterEvent` objects to the frontend. The frontend
+  `useEventStream` hook now receives and processes these events with
+  leading+trailing edge throttle (1 event/second) on memory update
+  invalidation to prevent re-render flickering.
+
 ### Fixed
 
 - Converted stale planning language in phase 3 docs to explicit decisions (closes #64):

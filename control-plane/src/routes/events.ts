@@ -7,7 +7,8 @@ export function registerEventRoutes(
   subscriber: Redis,
   keyPrefix: string,
 ): void {
-  const channel = redisKey(keyPrefix, 'routing-updates');
+  const routingChannel = redisKey(keyPrefix, 'routing-updates');
+  const clusterChannel = redisKey(keyPrefix, 'cluster-events');
 
   app.get('/api/v1/events', async (request, reply) => {
     await reply.hijack();
@@ -24,7 +25,7 @@ export function registerEventRoutes(
     };
 
     const clientSubscriber = subscriber.duplicate();
-    await clientSubscriber.subscribe(channel);
+    await clientSubscriber.subscribe(routingChannel, clusterChannel);
 
     const onMessage = (_ch: string, message: string): void => {
       write('message', message);
@@ -40,7 +41,7 @@ export function registerEventRoutes(
     request.raw.on('close', () => {
       clearInterval(pingInterval);
       clientSubscriber.off('message', onMessage);
-      clientSubscriber.unsubscribe(channel).catch(() => {});
+      clientSubscriber.unsubscribe(routingChannel, clusterChannel).catch(() => {});
       clientSubscriber.disconnect();
     });
   });

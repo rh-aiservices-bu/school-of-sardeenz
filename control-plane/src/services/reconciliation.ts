@@ -1,5 +1,8 @@
-import { ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
+import { ClusterEventType, ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 
+import type { Redis } from '../clients/redis.js';
+import { redisKey } from '../clients/redis.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { WorkerPoolService } from './worker-pool.js';
 import type { MemoryBudgetService } from './memory-budget.js';
@@ -27,6 +30,10 @@ export interface ReconciliationConfig {
   readonly sleepTimeoutSecs: number;
 }
 
+type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
+
+const CLUSTER_EVENTS_CHANNEL = 'cluster-events';
+
 const TRANSITIONAL_STATES: ReadonlyMap<ModelLifecycleState, 'deploy' | 'sleep'> = new Map([
   [ModelLifecycleState.STARTING, 'deploy'],
   [ModelLifecycleState.DRAINING, 'sleep'],
@@ -37,6 +44,7 @@ export class ReconciliationService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private wasLeader = false;
   private running = false;
+  private readonly clusterEventsChannel: string;
 
   constructor(
     private readonly lifecycle: ModelLifecycleService,
@@ -46,7 +54,11 @@ export class ReconciliationService {
     private readonly leaderElection: { readonly isLeader: boolean },
     private readonly config: ReconciliationConfig,
     private readonly logger: ReconciliationLogger,
-  ) {}
+    private readonly redis: Redis,
+    keyPrefix: string,
+  ) {
+    this.clusterEventsChannel = redisKey(keyPrefix, CLUSTER_EVENTS_CHANNEL);
+  }
 
   start(): void {
     if (this.timer) return;
@@ -87,10 +99,40 @@ export class ReconciliationService {
 
       reconciliationTicksTotal.inc();
 
+      const workerIdsBefore = new Set(
+        this.workerPool.getAllWorkers().map((w) => w.workerId),
+      );
+
       await this.safeStep('discoverWorkers', () => this.workerPool.discoverWorkers());
       await this.safeStep('checkHeartbeats', () => this.workerPool.checkHeartbeats());
+
+      await this.safeStep('publishWorkerJoinEvents', async () => {
+        for (const w of this.workerPool.getAllWorkers()) {
+          if (!workerIdsBefore.has(w.workerId)) {
+            await this.publishClusterEvent({
+              type: ClusterEventType.WORKER_JOINED,
+              workerId: w.workerId,
+              timestamp: new Date().toISOString(),
+              message: `Worker ${w.workerId} joined the cluster`,
+            });
+          }
+        }
+      });
+
       await this.safeStep('handleDeadWorkers', () => this.handleDeadWorkers());
       await this.safeStep('refreshMemoryBudgets', () => this.memoryBudget.refreshAll());
+
+      await this.safeStep('publishMemoryUpdateEvent', async () => {
+        const budgets = this.memoryBudget.getAllBudgets();
+        if (budgets.length > 0) {
+          await this.publishClusterEvent({
+            type: ClusterEventType.WORKER_MEMORY_UPDATED,
+            timestamp: new Date().toISOString(),
+            data: { workerCount: budgets.length },
+          });
+        }
+      });
+
       await this.safeStep('recoverStuckModels', () => this.recoverStuckModels());
       await this.safeStep('refreshMetrics', () => this.refreshMetrics());
 
@@ -151,6 +193,12 @@ export class ReconciliationService {
         }
       }
 
+      await this.publishClusterEvent({
+        type: ClusterEventType.WORKER_LEFT,
+        workerId: worker.workerId,
+        timestamp: new Date().toISOString(),
+        message: `Worker ${worker.workerId} left the cluster (dead)`,
+      });
       this.workerPool.removeWorker(worker.workerId);
     }
   }
@@ -236,6 +284,17 @@ export class ReconciliationService {
           device.availableBytes,
         );
       }
+    }
+  }
+
+  private async publishClusterEvent(event: ClusterEvent): Promise<void> {
+    try {
+      await this.redis.publish(this.clusterEventsChannel, JSON.stringify(event));
+    } catch (err) {
+      this.logger.error(
+        { eventType: event.type, err: err instanceof Error ? err.message : String(err) },
+        'Failed to publish cluster event',
+      );
     }
   }
 

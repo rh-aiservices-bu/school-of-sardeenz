@@ -36,6 +36,8 @@ export const EventStreamContext = createContext<EventStreamState>({
  * Internal hook that manages the SSE connection and query invalidation.
  * Mount exactly once at app scope via `EventStreamProvider`.
  */
+const MEMORY_THROTTLE_MS = 1_000;
+
 export function useEventStreamConnection(): EventStreamState {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<ConnectionStatus>('reconnecting');
@@ -43,6 +45,8 @@ export function useEventStreamConnection(): EventStreamState {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const failureCountRef = useRef<number>(0);
+  const lastMemoryInvalidationRef = useRef<number>(0);
+  const memoryThrottleTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const connect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -88,10 +92,26 @@ export function useEventStreamConnection(): EventStreamState {
             void queryClient.invalidateQueries({ queryKey: ['workers'] });
             void queryClient.invalidateQueries({ queryKey: ['cluster'] });
             break;
-          case ClusterEventType.WORKER_MEMORY_UPDATED:
-            void queryClient.invalidateQueries({ queryKey: ['cluster', 'memory'] });
-            void queryClient.invalidateQueries({ queryKey: ['workers'] });
+          case ClusterEventType.WORKER_MEMORY_UPDATED: {
+            const now = Date.now();
+            const elapsed = now - lastMemoryInvalidationRef.current;
+
+            const invalidateMemory = (): void => {
+              lastMemoryInvalidationRef.current = Date.now();
+              void queryClient.invalidateQueries({ queryKey: ['cluster', 'memory'] });
+              void queryClient.invalidateQueries({ queryKey: ['workers'] });
+            };
+
+            if (elapsed >= MEMORY_THROTTLE_MS) {
+              invalidateMemory();
+            } else if (!memoryThrottleTimerRef.current) {
+              memoryThrottleTimerRef.current = setTimeout(() => {
+                memoryThrottleTimerRef.current = undefined;
+                invalidateMemory();
+              }, MEMORY_THROTTLE_MS - elapsed);
+            }
             break;
+          }
         }
       } catch {
         // Ignore parse errors (e.g., ping comments)
@@ -122,6 +142,9 @@ export function useEventStreamConnection(): EventStreamState {
       }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (memoryThrottleTimerRef.current) {
+        clearTimeout(memoryThrottleTimerRef.current);
       }
     };
   }, [connect]);

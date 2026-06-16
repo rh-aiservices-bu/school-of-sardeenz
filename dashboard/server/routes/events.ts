@@ -62,22 +62,28 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
   // concurrent connections). A shared-subscriber fan-out pattern would be needed if
   // connection counts grew to hundreds+. See docs/architecture/components/dashboard.md.
   app.get('/api/events', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
-    const channel = `${deps.redis.keyPrefix}:routing-updates`;
+    const routingChannel = `${deps.redis.keyPrefix}:routing-updates`;
+    const clusterChannel = `${deps.redis.keyPrefix}:cluster-events`;
     const subscriber = deps.redis.createSubscriber();
 
     // Subscribe to Redis BEFORE writing SSE headers so failures return a proper error
     try {
-      subscriber.on('message', (_chan: string, message: string): void => {
+      subscriber.on('message', (chan: string, message: string): void => {
         try {
-          const update = JSON.parse(message) as RoutingMapUpdate;
-          const event = toClusterEvent(update);
-          reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (chan === routingChannel) {
+            const update = JSON.parse(message) as RoutingMapUpdate;
+            const event = toClusterEvent(update);
+            reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+          } else if (chan === clusterChannel) {
+            const event = JSON.parse(message) as ClusterEvent;
+            reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
         } catch {
           app.log.warn({ message }, 'Received non-JSON event from Redis pub/sub — skipping');
         }
       });
 
-      await subscriber.subscribe(channel);
+      await subscriber.subscribe(routingChannel, clusterChannel);
     } catch (err) {
       subscriber.disconnect();
       app.log.error({ err }, 'Failed to subscribe to Redis pub/sub for SSE');
@@ -94,7 +100,10 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
     });
     reply.raw.flushHeaders();
 
-    app.log.debug({ channel }, 'SSE client connected — subscribed to Redis channel');
+    app.log.debug(
+      { routingChannel, clusterChannel },
+      'SSE client connected — subscribed to Redis channels',
+    );
 
     const pingTimer = setInterval(() => {
       try {
@@ -109,10 +118,10 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (cleanedUp) return;
       cleanedUp = true;
       clearInterval(pingTimer);
-      subscriber.unsubscribe(channel).catch(() => undefined);
+      subscriber.unsubscribe(routingChannel, clusterChannel).catch(() => undefined);
       subscriber.disconnect();
       reply.raw.end();
-      app.log.debug({ channel }, 'SSE client disconnected — Redis subscriber cleaned up');
+      app.log.debug('SSE client disconnected — Redis subscriber cleaned up');
     };
 
     request.raw.on('close', cleanup);

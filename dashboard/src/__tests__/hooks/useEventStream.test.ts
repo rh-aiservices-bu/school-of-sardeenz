@@ -228,3 +228,102 @@ describe('MockEventSource protocol', () => {
     expect(errorFired).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Memory throttle simulator — mirrors the leading+trailing edge throttle
+// logic in useEventStreamConnection's WORKER_MEMORY_UPDATED case
+// ---------------------------------------------------------------------------
+
+const MEMORY_THROTTLE_MS = 1_000;
+
+interface ThrottleState {
+  lastInvalidationAt: number;
+  pendingTimer: ReturnType<typeof setTimeout> | undefined;
+  invalidationCount: number;
+}
+
+function createThrottle(): ThrottleState {
+  return { lastInvalidationAt: 0, pendingTimer: undefined, invalidationCount: 0 };
+}
+
+function fireMemoryEvent(state: ThrottleState): void {
+  const now = Date.now();
+  const elapsed = now - state.lastInvalidationAt;
+
+  const doInvalidate = (): void => {
+    state.lastInvalidationAt = Date.now();
+    state.invalidationCount++;
+  };
+
+  if (elapsed >= MEMORY_THROTTLE_MS) {
+    doInvalidate();
+  } else if (!state.pendingTimer) {
+    state.pendingTimer = setTimeout(() => {
+      state.pendingTimer = undefined;
+      doInvalidate();
+    }, MEMORY_THROTTLE_MS - elapsed);
+  }
+}
+
+describe('WORKER_MEMORY_UPDATED throttle logic', () => {
+  it('first event fires immediately', () => {
+    const state = createThrottle();
+    fireMemoryEvent(state);
+
+    expect(state.invalidationCount).toBe(1);
+    expect(state.pendingTimer).toBeUndefined();
+  });
+
+  it('second event within 1s is deferred, not dropped', () => {
+    const state = createThrottle();
+
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(1);
+
+    // Fire again within the throttle window
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(1);
+    expect(state.pendingTimer).toBeDefined();
+  });
+
+  it('deferred event fires after the throttle window', () => {
+    const state = createThrottle();
+
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(1);
+
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(1);
+
+    // Advance past the throttle window
+    vi.advanceTimersByTime(MEMORY_THROTTLE_MS);
+    expect(state.invalidationCount).toBe(2);
+    expect(state.pendingTimer).toBeUndefined();
+  });
+
+  it('burst of events results in exactly 2 invalidations (leading + trailing)', () => {
+    const state = createThrottle();
+
+    fireMemoryEvent(state);
+    fireMemoryEvent(state);
+    fireMemoryEvent(state);
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(1);
+
+    vi.advanceTimersByTime(MEMORY_THROTTLE_MS);
+    expect(state.invalidationCount).toBe(2);
+  });
+
+  it('events after the throttle window fire immediately again', () => {
+    const state = createThrottle();
+
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(1);
+
+    vi.advanceTimersByTime(MEMORY_THROTTLE_MS);
+
+    fireMemoryEvent(state);
+    expect(state.invalidationCount).toBe(2);
+    expect(state.pendingTimer).toBeUndefined();
+  });
+});

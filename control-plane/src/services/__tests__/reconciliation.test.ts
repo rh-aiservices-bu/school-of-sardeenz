@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
+import { ClusterEventType, ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 
 import { ReconciliationService } from '../reconciliation.js';
 import type { ReconciliationConfig } from '../reconciliation.js';
@@ -7,6 +8,9 @@ import type { ModelLifecycleService, ModelState } from '../model-lifecycle.js';
 import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RoutingMapService } from '../routing-map.js';
+import type { Redis } from '../../clients/redis.js';
+
+type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
 function makeModelState(
   overrides: Partial<ModelState> & { modelName: string },
@@ -46,10 +50,12 @@ interface MockDeps {
     discoverWorkers: ReturnType<typeof vi.fn>;
     checkHeartbeats: ReturnType<typeof vi.fn>;
     getDeadWorkers: ReturnType<typeof vi.fn>;
+    getAllWorkers: ReturnType<typeof vi.fn>;
     removeWorker: ReturnType<typeof vi.fn>;
   };
   memoryBudget: {
     refreshAll: ReturnType<typeof vi.fn>;
+    getAllBudgets: ReturnType<typeof vi.fn>;
   };
   routingMap: {
     removeModel: ReturnType<typeof vi.fn>;
@@ -62,6 +68,9 @@ interface MockDeps {
     warn: ReturnType<typeof vi.fn>;
     error: ReturnType<typeof vi.fn>;
   };
+  redis: {
+    publish: ReturnType<typeof vi.fn>;
+  };
 }
 
 const DEFAULT_CONFIG: ReconciliationConfig = {
@@ -69,6 +78,8 @@ const DEFAULT_CONFIG: ReconciliationConfig = {
   deployTimeoutSecs: 600,
   sleepTimeoutSecs: 300,
 };
+
+const KEY_PREFIX = 'sardeenz';
 
 function createMocks(): MockDeps {
   return {
@@ -80,10 +91,12 @@ function createMocks(): MockDeps {
       discoverWorkers: vi.fn().mockResolvedValue(undefined),
       checkHeartbeats: vi.fn().mockResolvedValue(undefined),
       getDeadWorkers: vi.fn().mockReturnValue([]),
+      getAllWorkers: vi.fn().mockReturnValue([]),
       removeWorker: vi.fn(),
     },
     memoryBudget: {
       refreshAll: vi.fn().mockResolvedValue(undefined),
+      getAllBudgets: vi.fn().mockReturnValue([]),
     },
     routingMap: {
       removeModel: vi.fn().mockResolvedValue(undefined),
@@ -95,6 +108,9 @@ function createMocks(): MockDeps {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
+    },
+    redis: {
+      publish: vi.fn().mockResolvedValue(1),
     },
   };
 }
@@ -108,6 +124,8 @@ function createService(mocks: MockDeps): ReconciliationService {
     mocks.leaderElection,
     DEFAULT_CONFIG,
     mocks.logger,
+    mocks.redis as unknown as Redis,
+    KEY_PREFIX,
   );
 }
 
@@ -416,6 +434,106 @@ describe('ReconciliationService', () => {
         expect.objectContaining({ step: 'discoverWorkers', err: 'connection lost' }),
         'Reconciliation step failed',
       );
+    });
+  });
+
+  describe('tick — cluster event publishing', () => {
+    const CHANNEL = `${KEY_PREFIX}:cluster-events`;
+
+    it('publishes WORKER_JOINED when a new worker is discovered', async () => {
+      mocks.workerPool.getAllWorkers
+        .mockReturnValueOnce([])
+        .mockReturnValue([makeWorker({ workerId: 'new-w1', status: WorkerStatus.ONLINE })]);
+
+      await service.tick();
+
+      expect(mocks.redis.publish).toHaveBeenCalledWith(
+        CHANNEL,
+        expect.stringContaining(ClusterEventType.WORKER_JOINED),
+      );
+      const call = mocks.redis.publish.mock.calls.find(
+        (c: string[]) => c[1].includes(ClusterEventType.WORKER_JOINED),
+      )!;
+      const event = JSON.parse(call[1] as string) as ClusterEvent;
+      expect(event.workerId).toBe('new-w1');
+    });
+
+    it('does not publish WORKER_JOINED when the same workers are rediscovered', async () => {
+      const existingWorker = makeWorker({ workerId: 'w1', status: WorkerStatus.ONLINE });
+      mocks.workerPool.getAllWorkers.mockReturnValue([existingWorker]);
+
+      await service.tick();
+
+      const joinCalls = mocks.redis.publish.mock.calls.filter(
+        (c: string[]) => c[1].includes(ClusterEventType.WORKER_JOINED),
+      );
+      expect(joinCalls).toHaveLength(0);
+    });
+
+    it('publishes WORKER_LEFT before removing a dead worker', async () => {
+      mocks.workerPool.getAllWorkers.mockReturnValue([]);
+      mocks.workerPool.getDeadWorkers.mockReturnValue([
+        makeWorker({ workerId: 'dead-w1' }),
+      ]);
+      mocks.lifecycle.getAllStates.mockResolvedValue([]);
+
+      await service.tick();
+
+      expect(mocks.redis.publish).toHaveBeenCalledWith(
+        CHANNEL,
+        expect.stringContaining(ClusterEventType.WORKER_LEFT),
+      );
+      const call = mocks.redis.publish.mock.calls.find(
+        (c: string[]) => c[1].includes(ClusterEventType.WORKER_LEFT),
+      )!;
+      const event = JSON.parse(call[1] as string) as ClusterEvent;
+      expect(event.workerId).toBe('dead-w1');
+
+      expect(mocks.workerPool.removeWorker).toHaveBeenCalledWith('dead-w1');
+    });
+
+    it('publishes WORKER_MEMORY_UPDATED after refreshing budgets', async () => {
+      mocks.workerPool.getAllWorkers.mockReturnValue([]);
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([
+        { workerId: 'w1', devices: [], lastReportAt: new Date().toISOString(), stale: false },
+        { workerId: 'w2', devices: [], lastReportAt: new Date().toISOString(), stale: false },
+      ]);
+
+      await service.tick();
+
+      expect(mocks.redis.publish).toHaveBeenCalledWith(
+        CHANNEL,
+        expect.stringContaining(ClusterEventType.WORKER_MEMORY_UPDATED),
+      );
+      const call = mocks.redis.publish.mock.calls.find(
+        (c: string[]) => c[1].includes(ClusterEventType.WORKER_MEMORY_UPDATED),
+      )!;
+      const event = JSON.parse(call[1] as string) as ClusterEvent;
+      expect(event.data.workerCount).toBe(2);
+    });
+
+    it('does not publish WORKER_MEMORY_UPDATED when no budgets exist', async () => {
+      mocks.workerPool.getAllWorkers.mockReturnValue([]);
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([]);
+
+      await service.tick();
+
+      const memoryCalls = mocks.redis.publish.mock.calls.filter(
+        (c: string[]) => c[1].includes(ClusterEventType.WORKER_MEMORY_UPDATED),
+      );
+      expect(memoryCalls).toHaveLength(0);
+    });
+
+    it('continues reconciliation when redis.publish fails', async () => {
+      mocks.workerPool.getAllWorkers
+        .mockReturnValueOnce([])
+        .mockReturnValue([makeWorker({ workerId: 'w1', status: WorkerStatus.ONLINE })]);
+      mocks.redis.publish.mockRejectedValue(new Error('publish failed'));
+
+      await service.tick();
+
+      expect(mocks.memoryBudget.refreshAll).toHaveBeenCalledOnce();
+      expect(mocks.lifecycle.getAllStates).toHaveBeenCalled();
     });
   });
 
