@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   PageSection,
   Content,
@@ -57,41 +59,41 @@ interface FormErrors {
   engineConfig?: string;
 }
 
-function validate(form: FormState): FormErrors {
+function validate(form: FormState, t: TFunction<'models'>): FormErrors {
   const errors: FormErrors = {};
 
   if (!form.modelName.trim()) {
-    errors.modelName = 'Model name is required.';
+    errors.modelName = t('deploy.validation.modelNameRequired');
   }
 
   if (!form.runnerType) {
-    errors.runnerType = 'Runner type is required.';
+    errors.runnerType = t('deploy.validation.runnerTypeRequired');
   }
 
   if (!form.modelPath.trim()) {
-    errors.modelPath = 'Model path is required.';
+    errors.modelPath = t('deploy.validation.modelPathRequired');
   } else if (!form.modelPath.startsWith('/')) {
-    errors.modelPath = 'Model path must start with /.';
+    errors.modelPath = t('deploy.validation.modelPathStartsWithSlash');
   }
 
   const mem = parseFloat(form.requiredMemoryGib);
   if (!form.requiredMemoryGib.trim() || isNaN(mem) || mem <= 0) {
-    errors.requiredMemoryGib = 'Required memory must be a positive number.';
+    errors.requiredMemoryGib = t('deploy.validation.requiredMemoryPositive');
   }
 
   const tp = parseInt(form.tensorParallel, 10);
   if (isNaN(tp) || tp < 1) {
-    errors.tensorParallel = 'Tensor parallelism must be at least 1.';
+    errors.tensorParallel = t('deploy.validation.tensorParallelMin');
   }
 
   if (form.engineConfig.trim()) {
     try {
       const parsed: unknown = JSON.parse(form.engineConfig);
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        errors.engineConfig = 'Engine config must be a JSON object.';
+        errors.engineConfig = t('deploy.validation.engineConfigObject');
       }
     } catch {
-      errors.engineConfig = 'Engine config must be valid JSON.';
+      errors.engineConfig = t('deploy.validation.engineConfigValidJson');
     }
   }
 
@@ -122,6 +124,8 @@ function FieldHelper({ hint, error, showError, fieldId }: FieldHelperProps) {
 }
 
 export function ModelDeploy() {
+  const { t } = useTranslation('models');
+  const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
   const deployModel = useDeployModel();
 
@@ -143,14 +147,14 @@ export function ModelDeploy() {
     const updated = { ...form, [field]: value };
     setForm(updated);
     if (submitted) {
-      setErrors(validate(updated));
+      setErrors(validate(updated, t));
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
-    const errs = validate(form);
+    const errs = validate(form, t);
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
@@ -181,7 +185,7 @@ export function ModelDeploy() {
   return (
     <PageSection>
       <Content>
-        <h1>Deploy Model</h1>
+        <h1>{t('deploy.title')}</h1>
       </Content>
 
       <Card style={{ maxWidth: '720px' }}>
@@ -189,18 +193,18 @@ export function ModelDeploy() {
           {deployModel.isError && (
             <Alert
               variant={AlertVariant.danger}
-              title="Deployment failed"
+              title={t('deploy.errors.deploymentFailed')}
               isInline
               style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
             >
               {deployModel.error instanceof Error
                 ? deployModel.error.message
-                : 'An unexpected error occurred.'}
+                : tCommon('errors.unexpected')}
             </Alert>
           )}
 
           <Form onSubmit={handleSubmit} noValidate>
-            <FormGroup label="Model Name" isRequired fieldId="model-name">
+            <FormGroup label={t('deploy.fields.modelName')} isRequired fieldId="model-name">
               <TextInput
                 id="model-name"
                 value={form.modelName}
@@ -217,12 +221,12 @@ export function ModelDeploy() {
               />
             </FormGroup>
 
-            <FormGroup label="Runner Type" isRequired fieldId="runner-type">
+            <FormGroup label={t('deploy.fields.runnerType')} isRequired fieldId="runner-type">
               <FormSelect
                 id="runner-type"
                 value={form.runnerType}
                 onChange={(_ev, val) => set('runnerType', val)}
-                aria-label="Runner type"
+                aria-label={t('deploy.fields.runnerType')}
               >
                 {RUNNER_OPTIONS.map((opt) => (
                   <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
@@ -235,7 +239,7 @@ export function ModelDeploy() {
               />
             </FormGroup>
 
-            <FormGroup label="Model Path" isRequired fieldId="model-path">
+            <FormGroup label={t('deploy.fields.modelPath')} isRequired fieldId="model-path">
               <TextInput
                 id="model-path"
                 value={form.modelPath}
@@ -246,14 +250,14 @@ export function ModelDeploy() {
                 placeholder="/models/meta-llama/Llama-3.1-8B-Instruct"
               />
               <FieldHelper
-                hint="Absolute path to model weights on shared storage."
+                hint={t('deploy.hints.modelPath')}
                 error={errors.modelPath}
                 showError={submitted}
                 fieldId="model-path"
               />
             </FormGroup>
 
-            <FormGroup label="Required Memory (GiB)" isRequired fieldId="required-memory">
+            <FormGroup label={t('deploy.fields.requiredMemory')} isRequired fieldId="required-memory">
               <TextInput
                 id="required-memory"
                 type="number"
@@ -267,32 +271,32 @@ export function ModelDeploy() {
                 step={0.5}
               />
               <FieldHelper
-                hint="Estimated device memory in GiB. Used for placement."
+                hint={t('deploy.hints.requiredMemory')}
                 error={errors.requiredMemoryGib}
                 showError={submitted}
                 fieldId="required-memory"
               />
             </FormGroup>
 
-            <FormGroup label="Device Type" fieldId="device-type">
+            <FormGroup label={t('deploy.fields.deviceType')} fieldId="device-type">
               <FormSelect
                 id="device-type"
                 value={form.deviceType}
                 onChange={(_ev, val) => set('deviceType', val)}
-                aria-label="Device type"
+                aria-label={t('deploy.fields.deviceType')}
               >
                 {DEVICE_OPTIONS.map((opt) => (
                   <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
                 ))}
               </FormSelect>
               <FieldHelper
-                hint="Required device type. Leave blank to accept any compatible device."
+                hint={t('deploy.hints.deviceType')}
                 showError={false}
                 fieldId="device-type"
               />
             </FormGroup>
 
-            <FormGroup label="Tensor Parallelism" fieldId="tensor-parallel">
+            <FormGroup label={t('deploy.fields.tensorParallel')} fieldId="tensor-parallel">
               <TextInput
                 id="tensor-parallel"
                 type="number"
@@ -304,28 +308,28 @@ export function ModelDeploy() {
                 step={1}
               />
               <FieldHelper
-                hint="Number of devices to split the model across on a single worker."
+                hint={t('deploy.hints.tensorParallel')}
                 error={errors.tensorParallel}
                 showError={submitted}
                 fieldId="tensor-parallel"
               />
             </FormGroup>
 
-            <FormGroup label="Pinned" fieldId="pinned">
+            <FormGroup label={t('deploy.fields.pinned')} fieldId="pinned">
               <Switch
                 id="pinned"
-                label="Pinned"
+                label={t('deploy.fields.pinned')}
                 isChecked={form.pinned}
                 onChange={(_ev, checked) => set('pinned', checked)}
               />
               <FieldHelper
-                hint="Pinned models cannot be evicted by the LRU eviction engine."
+                hint={t('deploy.hints.pinned')}
                 showError={false}
                 fieldId="pinned"
               />
             </FormGroup>
 
-            <FormGroup label="Engine Config (JSON)" fieldId="engine-config">
+            <FormGroup label={t('deploy.fields.engineConfig')} fieldId="engine-config">
               <TextArea
                 id="engine-config"
                 value={form.engineConfig}
@@ -337,7 +341,7 @@ export function ModelDeploy() {
                 style={{ fontFamily: 'monospace' }}
               />
               <FieldHelper
-                hint="Optional engine-specific configuration. Must be valid JSON if provided."
+                hint={t('deploy.hints.engineConfig')}
                 error={errors.engineConfig}
                 showError={submitted}
                 fieldId="engine-config"
@@ -351,10 +355,10 @@ export function ModelDeploy() {
                 isLoading={deployModel.isPending}
                 isDisabled={deployModel.isPending}
               >
-                Deploy
+                {t('deploy.button')}
               </Button>
               <Button variant="link" onClick={() => void navigate('/models')}>
-                Cancel
+                {tCommon('actions.cancel')}
               </Button>
             </ActionGroup>
           </Form>

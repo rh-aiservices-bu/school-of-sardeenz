@@ -20,6 +20,7 @@ import {
   MemoryIcon,
   ServerIcon,
 } from '@patternfly/react-icons';
+import { useTranslation } from 'react-i18next';
 import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
 import { useClusterStatus } from '../../hooks/useCluster';
 import { useEventStream } from '../../hooks/useEventStream';
@@ -34,6 +35,7 @@ type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 // Summary card: Workers
 // ---------------------------------------------------------------------------
 function WorkersCard({ status }: { status: ClusterStatus }) {
+  const { t } = useTranslation('cluster');
   const online = status.workersOnline ?? 0;
   const total = status.workerCount;
   const color: 'green' | 'red' | 'grey' =
@@ -46,7 +48,7 @@ function WorkersCard({ status }: { status: ClusterStatus }) {
           <FlexItem>
             <ServerIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
           </FlexItem>
-          <FlexItem>Workers</FlexItem>
+          <FlexItem>{t('overview.cards.workers.title')}</FlexItem>
         </Flex>
       </CardTitle>
       <CardBody>
@@ -61,7 +63,11 @@ function WorkersCard({ status }: { status: ClusterStatus }) {
         <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> / {total}</span>
         <div style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}>
           <Label color={color} isCompact>
-            {total === 0 ? 'No workers' : online === total ? 'All online' : `${total - online} offline`}
+            {total === 0
+              ? t('overview.cards.workers.noWorkers')
+              : online === total
+                ? t('overview.cards.workers.allOnline')
+                : t('overview.cards.workers.offline', { count: total - online })}
           </Label>
         </div>
       </CardBody>
@@ -73,6 +79,7 @@ function WorkersCard({ status }: { status: ClusterStatus }) {
 // Summary card: Models
 // ---------------------------------------------------------------------------
 function ModelsCard({ status }: { status: ClusterStatus }) {
+  const { t } = useTranslation('cluster');
   const { active = 0, sleeping = 0, total } = status.modelCounts;
 
   return (
@@ -82,7 +89,7 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
           <FlexItem>
             <CubesIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
           </FlexItem>
-          <FlexItem>Models</FlexItem>
+          <FlexItem>{t('overview.cards.models.title')}</FlexItem>
         </Flex>
       </CardTitle>
       <CardBody>
@@ -94,7 +101,7 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
         >
           {total}
         </span>
-        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> total</span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{t('overview.cards.models.total')}</span>
         <div
           style={{
             marginTop: 'var(--pf-t--global--spacer--xs)',
@@ -104,10 +111,10 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
           }}
         >
           <Label color="green" isCompact>
-            {active} active
+            {t('overview.cards.models.active', { count: active })}
           </Label>
           <Label color="blue" isCompact>
-            {sleeping} sleeping
+            {t('overview.cards.models.sleeping', { count: sleeping })}
           </Label>
         </div>
       </CardBody>
@@ -119,6 +126,7 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
 // Summary card: GPU Memory
 // ---------------------------------------------------------------------------
 function GpuMemoryCard({ status }: { status: ClusterStatus }) {
+  const { t } = useTranslation('cluster');
   const { totalBytes, usedBytes, availableBytes } = status.memory;
   const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
 
@@ -129,7 +137,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
           <FlexItem>
             <MemoryIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
           </FlexItem>
-          <FlexItem>GPU Memory</FlexItem>
+          <FlexItem>{t('overview.cards.gpuMemory.title')}</FlexItem>
         </Flex>
       </CardTitle>
       <CardBody>
@@ -141,10 +149,10 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
         >
           {percent}%
         </span>
-        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}> used</span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{t('overview.cards.gpuMemory.used')}</span>
         <Progress
           value={percent}
-          aria-label="GPU memory usage"
+          aria-label={t('overview.cards.gpuMemory.title')}
           style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
         />
         <div
@@ -154,7 +162,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
             color: 'var(--pf-t--global--text--color--subtle)',
           }}
         >
-          {formatBytes(availableBytes)} available of {formatBytes(totalBytes)}
+          {t('overview.cards.gpuMemory.available', { value: formatBytes(availableBytes), total: formatBytes(totalBytes) })}
         </div>
       </CardBody>
     </Card>
@@ -165,6 +173,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
 // Summary card: Alerts
 // ---------------------------------------------------------------------------
 function AlertsCard({ status }: { status: ClusterStatus }) {
+  const { t } = useTranslation('cluster');
   const errorModels = status.modelCounts.error ?? 0;
   const offlineWorkers =
     status.workerCount - (status.workersOnline ?? status.workerCount);
@@ -178,7 +187,7 @@ function AlertsCard({ status }: { status: ClusterStatus }) {
           <FlexItem>
             <ExclamationTriangleIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
           </FlexItem>
-          <FlexItem>Alerts</FlexItem>
+          <FlexItem>{t('overview.cards.alerts.title')}</FlexItem>
         </Flex>
       </CardTitle>
       <CardBody>
@@ -191,7 +200,7 @@ function AlertsCard({ status }: { status: ClusterStatus }) {
           {total}
         </span>
         <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-          {total === 1 ? ' issue' : ' issues'}
+          {total === 1 ? t('overview.cards.alerts.issue') : t('overview.cards.alerts.issues')}
         </span>
         <div
           style={{
@@ -203,17 +212,17 @@ function AlertsCard({ status }: { status: ClusterStatus }) {
         >
           {errorModels > 0 && (
             <Label color="red" isCompact>
-              {errorModels} model error{errorModels !== 1 ? 's' : ''}
+              {t('overview.cards.alerts.modelErrors', { count: errorModels })}
             </Label>
           )}
           {offlineWorkers > 0 && (
             <Label color="red" isCompact>
-              {offlineWorkers} worker{offlineWorkers !== 1 ? 's' : ''} offline
+              {t('overview.cards.alerts.workersOffline', { count: offlineWorkers })}
             </Label>
           )}
           {total === 0 && (
             <Label color={color} isCompact>
-              All clear
+              {t('overview.cards.alerts.allClear')}
             </Label>
           )}
         </div>
@@ -240,40 +249,41 @@ function SummaryCards({ status }: { status: ClusterStatus }) {
 // Row 2: Memory donut chart
 // ---------------------------------------------------------------------------
 function MemoryDonutChart({ status }: { status: ClusterStatus }) {
+  const { t } = useTranslation('cluster');
   const { totalBytes, usedBytes, availableBytes } = status.memory;
   const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
 
   const data = [
-    { x: 'Used', y: usedBytes },
-    { x: 'Available', y: availableBytes },
+    { x: t('overview.vramUsage.used'), y: usedBytes },
+    { x: t('overview.vramUsage.available'), y: availableBytes },
   ];
 
   return (
     <Card>
       <CardTitle>
         <Title headingLevel="h2" size="lg">
-          VRAM Usage
+          {t('overview.vramUsage.title')}
         </Title>
       </CardTitle>
       <CardBody>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--pf-t--global--spacer--xl)' }}>
           <div style={{ height: '200px', width: '200px', flexShrink: 0 }}>
             <ChartDonut
-              ariaDesc="GPU memory usage donut chart"
-              ariaTitle="VRAM Usage"
+              ariaDesc={t('overview.vramUsage.ariaDesc')}
+              ariaTitle={t('overview.vramUsage.title')}
               constrainToVisibleArea
               data={data}
               height={200}
               width={200}
               title={`${percent}%`}
-              subTitle="used"
+              subTitle={t('overview.cards.gpuMemory.used').trim()}
               colorScale={[
                 'var(--pf-t-chart-color-blue-300)',
                 'var(--pf-t-chart-color-blue-100)',
               ]}
               legendData={[
-                { name: `Used: ${formatBytes(usedBytes)}` },
-                { name: `Available: ${formatBytes(availableBytes)}` },
+                { name: `${t('overview.vramUsage.used')}: ${formatBytes(usedBytes)}` },
+                { name: `${t('overview.vramUsage.available')}: ${formatBytes(availableBytes)}` },
               ]}
               legendOrientation="vertical"
               legendPosition="right"
@@ -293,7 +303,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
                   color: 'var(--pf-t--global--text--color--subtle)',
                 }}
               >
-                Used
+                {t('overview.vramUsage.used')}
               </div>
               <div
                 style={{
@@ -311,7 +321,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
                   color: 'var(--pf-t--global--text--color--subtle)',
                 }}
               >
-                Available
+                {t('overview.vramUsage.available')}
               </div>
               <div
                 style={{
@@ -329,7 +339,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
                   color: 'var(--pf-t--global--text--color--subtle)',
                 }}
               >
-                Total
+                {t('overview.vramUsage.total')}
               </div>
               <div style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
                 {formatBytes(totalBytes)}
@@ -377,13 +387,14 @@ function stateCountFromStatus(
 }
 
 function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
+  const { t } = useTranslation('cluster');
   const other = status.modelCounts.other ?? 0;
 
   return (
     <Card>
       <CardTitle>
         <Title headingLevel="h2" size="lg">
-          Model State Breakdown
+          {t('overview.modelStateBreakdown.title')}
         </Title>
       </CardTitle>
       <CardBody>
@@ -432,7 +443,7 @@ function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
               }}
             >
               <Label color="grey" isCompact>
-                Other
+                {t('overview.modelStateBreakdown.other')}
               </Label>
               <span
                 style={{
@@ -537,6 +548,7 @@ function EventEntry({ event }: { event: ClusterEvent }) {
 }
 
 function RecentEvents() {
+  const { t } = useTranslation('cluster');
   const { status: connectionStatus, events } = useEventStream();
   const recent = events.slice(0, 20);
 
@@ -557,17 +569,17 @@ function RecentEvents() {
         >
           <FlexItem>
             <Title headingLevel="h2" size="lg">
-              Recent Events
+              {t('overview.recentEvents.title')}
             </Title>
           </FlexItem>
           <FlexItem>
             <span aria-live="polite">
               <Label color={connectionColor} isCompact>
                 {connectionStatus === 'connected'
-                  ? 'Live'
+                  ? t('overview.recentEvents.connectionStatus.live')
                   : connectionStatus === 'reconnecting'
-                    ? 'Reconnecting…'
-                    : 'Degraded'}
+                    ? t('overview.recentEvents.connectionStatus.reconnecting')
+                    : t('overview.recentEvents.connectionStatus.degraded')}
               </Label>
             </span>
           </FlexItem>
@@ -583,10 +595,10 @@ function RecentEvents() {
               padding: 'var(--pf-t--global--spacer--lg) 0',
             }}
           >
-            No events yet. Waiting for cluster activity…
+            {t('overview.recentEvents.noEvents')}
           </div>
         ) : (
-          <ul aria-live="polite" aria-label="Recent cluster events" style={{ margin: 0, padding: 0 }}>
+          <ul aria-live="polite" aria-label={t('overview.recentEvents.ariaLabel')} style={{ margin: 0, padding: 0 }}>
             {recent.map((event, idx) => (
               <EventEntry key={`${event.timestamp}-${event.type}-${idx}`} event={event} />
             ))}
@@ -601,6 +613,8 @@ function RecentEvents() {
 // Main page component
 // ---------------------------------------------------------------------------
 export function ClusterOverview() {
+  const { t } = useTranslation('cluster');
+  const { t: tCommon } = useTranslation('common');
   const { data: status, isLoading, error } = useClusterStatus();
 
   if (isLoading) {
@@ -608,7 +622,7 @@ export function ClusterOverview() {
       <PageSection>
         <Flex justifyContent={{ default: 'justifyContentCenter' }}>
           <FlexItem>
-            <Spinner size="xl" aria-label="Loading cluster status" />
+            <Spinner size="xl" aria-label={t('overview.loading')} />
           </FlexItem>
         </Flex>
       </PageSection>
@@ -620,11 +634,11 @@ export function ClusterOverview() {
       <PageSection>
         <Alert
           variant="danger"
-          title="Failed to load cluster status"
+          title={t('overview.errors.failedToLoad')}
           isInline
         >
           <Content>
-            {error instanceof Error ? error.message : 'An unexpected error occurred.'}
+            {error instanceof Error ? error.message : tCommon('errors.unexpected')}
           </Content>
         </Alert>
       </PageSection>

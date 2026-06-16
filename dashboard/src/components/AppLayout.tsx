@@ -11,6 +11,7 @@ import {
   NavList,
   NavItem,
 } from '@patternfly/react-core';
+import { useTranslation } from 'react-i18next';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -19,11 +20,12 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation('common');
 
   const masthead = (
     <Masthead>
       <MastheadMain>
-        <MastheadBrand>Sardeenz</MastheadBrand>
+        <MastheadBrand>{t('brand')}</MastheadBrand>
       </MastheadMain>
     </Masthead>
   );
@@ -34,28 +36,28 @@ export function AppLayout({ children }: AppLayoutProps) {
         <Nav>
           <NavList>
             <NavItem itemId="/" isActive={location.pathname === '/'} onClick={() => navigate('/')}>
-              Cluster Overview
+              {t('nav.clusterOverview')}
             </NavItem>
             <NavItem
               itemId="/models"
               isActive={location.pathname.startsWith('/models')}
               onClick={() => navigate('/models')}
             >
-              Models
+              {t('nav.models')}
             </NavItem>
             <NavItem
               itemId="/workers"
               isActive={location.pathname.startsWith('/workers')}
               onClick={() => navigate('/workers')}
             >
-              Workers
+              {t('nav.workers')}
             </NavItem>
             <NavItem
               itemId="/metrics"
               isActive={location.pathname.startsWith('/metrics')}
               onClick={() => navigate('/metrics')}
             >
-              Metrics
+              {t('nav.metrics')}
             </NavItem>
           </NavList>
         </Nav>

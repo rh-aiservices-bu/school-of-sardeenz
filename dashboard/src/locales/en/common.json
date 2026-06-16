@@ -1,0 +1,40 @@
+{
+  "nav": {
+    "clusterOverview": "Cluster Overview",
+    "models": "Models",
+    "workers": "Workers",
+    "metrics": "Metrics"
+  },
+  "brand": "Sardeenz",
+  "actions": {
+    "deploy": "Deploy",
+    "deployModel": "Deploy Model",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "sleep": "Sleep",
+    "wake": "Wake",
+    "retry": "Retry",
+    "clearFilters": "Clear filters",
+    "close": "Close"
+  },
+  "status": {
+    "active": "Active",
+    "sleeping": "Sleeping",
+    "pending": "Pending",
+    "starting": "Starting",
+    "stopping": "Stopping",
+    "stopped": "Stopped",
+    "draining": "Draining",
+    "error": "Error"
+  },
+  "loading": "Loading...",
+  "error": "Error",
+  "noData": "No data",
+  "errors": {
+    "unexpected": "An unexpected error occurred."
+  },
+  "degraded": {
+    "controlPlaneUnreachable": "Control plane unreachable — showing cached data",
+    "sseUnavailable": "Real-time updates unavailable — polling for changes"
+  }
+}

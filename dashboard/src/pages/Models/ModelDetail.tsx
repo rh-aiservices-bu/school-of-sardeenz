@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   PageSection,
   Content,
@@ -34,6 +35,8 @@ import { StateLabel } from '../../components/StateLabel';
 import { formatBytes, formatRelativeTime, formatDateTime } from '../../utils/format';
 
 export function ModelDetail() {
+  const { t } = useTranslation('models');
+  const { t: tCommon } = useTranslation('common');
   const { modelName } = useParams<{ modelName: string }>();
   const navigate = useNavigate();
 
@@ -78,7 +81,7 @@ export function ModelDetail() {
   if (isLoading) {
     return (
       <PageSection>
-        <Spinner aria-label="Loading model details" />
+        <Spinner aria-label={t('detail.fields.state')} />
       </PageSection>
     );
   }
@@ -87,9 +90,9 @@ export function ModelDetail() {
   if (error instanceof ApiError && error.status === 404) {
     return (
       <PageSection>
-        <Alert variant={AlertVariant.warning} title="Model not found" isInline>
-          No model named <strong>{modelName}</strong> exists.{' '}
-          <Link to="/models">Back to models</Link>
+        <Alert variant={AlertVariant.warning} title={t('detail.errors.notFound')} isInline>
+          {t('detail.errors.notFoundBody', { modelName })}{' '}
+          <Link to="/models">{t('detail.errors.backToModels')}</Link>
         </Alert>
       </PageSection>
     );
@@ -99,7 +102,7 @@ export function ModelDetail() {
   if (error || !model) {
     return (
       <PageSection>
-        <Alert variant={AlertVariant.danger} title="Failed to load model" isInline>
+        <Alert variant={AlertVariant.danger} title={t('detail.errors.failedToLoad')} isInline>
           {error instanceof Error ? error.message : 'Unknown error'}
         </Alert>
       </PageSection>
@@ -127,10 +130,10 @@ export function ModelDetail() {
       {/* Breadcrumb */}
       <Breadcrumb style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
         <BreadcrumbItem>
-          <Link to="/">Cluster</Link>
+          <Link to="/">{t('detail.breadcrumb.cluster')}</Link>
         </BreadcrumbItem>
         <BreadcrumbItem>
-          <Link to="/models">Models</Link>
+          <Link to="/models">{t('detail.breadcrumb.models')}</Link>
         </BreadcrumbItem>
         <BreadcrumbItem isActive>{model.modelName}</BreadcrumbItem>
       </Breadcrumb>
@@ -152,7 +155,7 @@ export function ModelDetail() {
             {isActive && (
               <FlexItem>
                 <Button variant="secondary" onClick={() => setShowSleepModal(true)}>
-                  Sleep
+                  {t('detail.sleep.button')}
                 </Button>
               </FlexItem>
             )}
@@ -163,13 +166,13 @@ export function ModelDetail() {
                   onClick={handleWake}
                   isLoading={wakeModel.isPending}
                 >
-                  Wake
+                  {t('detail.wake.button')}
                 </Button>
               </FlexItem>
             )}
             <FlexItem>
               <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-                Delete
+                {t('detail.delete.button')}
               </Button>
             </FlexItem>
           </Flex>
@@ -180,13 +183,13 @@ export function ModelDetail() {
       {mutationError && (
         <Alert
           variant={AlertVariant.danger}
-          title="Action failed"
+          title={t('detail.errors.actionFailed')}
           isInline
           actionClose={
             <Button
               variant="plain"
               onClick={() => setMutationError(null)}
-              aria-label="Close alert"
+              aria-label={t('detail.errors.actionFailed')}
             />
           }
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
@@ -199,7 +202,7 @@ export function ModelDetail() {
       {isError && model.errorMessage && (
         <Alert
           variant={AlertVariant.danger}
-          title="Model error"
+          title={t('detail.errors.modelError')}
           isInline
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           actionLinks={
@@ -210,12 +213,12 @@ export function ModelDetail() {
                   onClick={handleWake}
                   isLoading={wakeModel.isPending}
                 >
-                  Retry
+                  {t('detail.wake.button')}
                 </Button>
               </FlexItem>
               <FlexItem>
                 <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-                  Delete
+                  {t('detail.delete.button')}
                 </Button>
               </FlexItem>
             </Flex>
@@ -229,9 +232,9 @@ export function ModelDetail() {
       {isStarting && model.progress && (
         <div style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
           <Progress
-            aria-label="Model loading progress"
+            aria-label={t('detail.fields.state')}
             value={model.progress.percentComplete ?? 0}
-            title={model.progress.phase ? `Phase: ${model.progress.phase}` : 'Loading…'}
+            title={model.progress.phase ? `${t('detail.progress.phasePrefix')}${model.progress.phase}` : tCommon('loading')}
           />
           {model.progress.message && (
             <Content
@@ -244,7 +247,7 @@ export function ModelDetail() {
             >
               {model.progress.message}
               {model.progress.estimatedRemainingSeconds != null &&
-                ` — ~${model.progress.estimatedRemainingSeconds}s remaining`}
+                t('detail.progress.remainingSeconds', { seconds: model.progress.estimatedRemainingSeconds })}
             </Content>
           )}
         </div>
@@ -257,19 +260,19 @@ export function ModelDetail() {
         style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}
       >
         <DescriptionListGroup>
-          <DescriptionListTerm>State</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.state')}</DescriptionListTerm>
           <DescriptionListDescription>
             <StateLabel state={model.state} />
           </DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Runner Type</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.runnerType')}</DescriptionListTerm>
           <DescriptionListDescription>{model.runnerType}</DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Model Path</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.modelPath')}</DescriptionListTerm>
           <DescriptionListDescription>
             <code style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>
               {model.modelPath}
@@ -278,7 +281,7 @@ export function ModelDetail() {
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Worker</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.worker')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.workerId ? (
               <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>
@@ -291,54 +294,54 @@ export function ModelDetail() {
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Runner Endpoint</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.runnerEndpoint')}</DescriptionListTerm>
           <DescriptionListDescription>{runnerEndpointText}</DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Required Memory</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.requiredMemory')}</DescriptionListTerm>
           <DescriptionListDescription>
             {formatBytes(model.requiredMemory)}
           </DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Current Memory</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.currentMemory')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.currentMemory != null ? formatBytes(model.currentMemory) : '—'}
           </DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Device Type</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.deviceType')}</DescriptionListTerm>
           <DescriptionListDescription>{model.deviceType ?? '—'}</DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Tensor Parallelism</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.tensorParallel')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.tensorParallel != null ? model.tensorParallel : '—'}
           </DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Pinned</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.pinned')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.pinned ? (
               <Flex gap={{ default: 'gapXs' }} alignItems={{ default: 'alignItemsCenter' }}>
                 <FlexItem>
                   <LockIcon aria-hidden />
                 </FlexItem>
-                <FlexItem>Yes</FlexItem>
+                <FlexItem>{t('detail.pinned.yes')}</FlexItem>
               </Flex>
             ) : (
-              'No'
+              t('detail.pinned.no')
             )}
           </DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Last Inference</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.lastInference')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.lastInferenceAt ? (
               <>
@@ -351,13 +354,13 @@ export function ModelDetail() {
                 </span>
               </>
             ) : (
-              'Never'
+              t('detail.neverInferred')
             )}
           </DescriptionListDescription>
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>State Changed</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.stateChanged')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.stateChangedAt ? (
               <>
@@ -376,7 +379,7 @@ export function ModelDetail() {
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>Created</DescriptionListTerm>
+          <DescriptionListTerm>{t('detail.fields.created')}</DescriptionListTerm>
           <DescriptionListDescription>
             {formatDateTime(model.createdAt)}
           </DescriptionListDescription>
@@ -386,7 +389,7 @@ export function ModelDetail() {
       {/* Engine config expandable */}
       {engineConfigJson && (
         <ExpandableSection
-          toggleText={engineConfigExpanded ? 'Hide engine config' : 'Show engine config'}
+          toggleText={engineConfigExpanded ? t('detail.engineConfig.hide') : t('detail.engineConfig.show')}
           isExpanded={engineConfigExpanded}
           onToggle={(_ev, expanded) => setEngineConfigExpanded(expanded)}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
@@ -402,12 +405,11 @@ export function ModelDetail() {
         variant={ModalVariant.small}
         isOpen={showSleepModal}
         onClose={() => setShowSleepModal(false)}
-        aria-label="Confirm sleep"
+        aria-label={t('detail.sleep.confirmTitle')}
       >
-        <ModalHeader title="Put model to sleep?" titleIconVariant="warning" />
+        <ModalHeader title={t('detail.sleep.confirmTitle')} titleIconVariant="warning" />
         <ModalBody>
-          This will put <strong>{model.modelName}</strong> to sleep, freeing its device memory.
-          It can be woken back up on demand.
+          {t('detail.sleep.confirmBody', { modelName: model.modelName })}
         </ModalBody>
         <ModalFooter>
           <Button
@@ -415,10 +417,10 @@ export function ModelDetail() {
             onClick={handleSleepConfirm}
             isLoading={sleepModel.isPending}
           >
-            Sleep
+            {t('detail.sleep.button')}
           </Button>
           <Button variant="link" onClick={() => setShowSleepModal(false)}>
-            Cancel
+            {tCommon('actions.cancel')}
           </Button>
         </ModalFooter>
       </Modal>
@@ -428,12 +430,11 @@ export function ModelDetail() {
         variant={ModalVariant.small}
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        aria-label="Confirm delete"
+        aria-label={t('detail.delete.confirmTitle')}
       >
-        <ModalHeader title="Delete model?" titleIconVariant="danger" />
+        <ModalHeader title={t('detail.delete.confirmTitle')} titleIconVariant="danger" />
         <ModalBody>
-          This will permanently delete <strong>{model.modelName}</strong> and remove it from the
-          cluster. This action cannot be undone.
+          {t('detail.delete.confirmBody', { modelName: model.modelName })}
         </ModalBody>
         <ModalFooter>
           <Button
@@ -441,10 +442,10 @@ export function ModelDetail() {
             onClick={handleDeleteConfirm}
             isLoading={deleteModel.isPending}
           >
-            Delete
+            {t('detail.delete.button')}
           </Button>
           <Button variant="link" onClick={() => setShowDeleteModal(false)}>
-            Cancel
+            {tCommon('actions.cancel')}
           </Button>
         </ModalFooter>
       </Modal>

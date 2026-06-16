@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Card,
   CardBody,
@@ -137,11 +138,12 @@ interface MetricsEmptyStateProps {
   title?: string;
 }
 
-function MetricsEmptyState({ title = 'No metrics data available' }: MetricsEmptyStateProps) {
+function MetricsEmptyState({ title }: MetricsEmptyStateProps) {
+  const { t } = useTranslation('metrics');
   return (
-    <EmptyState variant="sm" icon={ChartLineIcon} titleText={title} headingLevel="h3">
+    <EmptyState variant="sm" icon={ChartLineIcon} titleText={title ?? t('empty.title')} headingLevel="h3">
       <EmptyStateBody>
-        Metrics require a running Prometheus instance and active traffic.
+        {t('empty.body')}
       </EmptyStateBody>
     </EmptyState>
   );
@@ -151,7 +153,8 @@ interface MetricsCardLoadingProps {
   label?: string;
 }
 
-function MetricsCardLoading({ label = 'Loading metrics…' }: MetricsCardLoadingProps) {
+function MetricsCardLoading({ label }: MetricsCardLoadingProps) {
+  const { t } = useTranslation('metrics');
   return (
     <div
       style={{
@@ -161,7 +164,7 @@ function MetricsCardLoading({ label = 'Loading metrics…' }: MetricsCardLoading
         height: '300px',
       }}
     >
-      <Spinner aria-label={label} size="xl" />
+      <Spinner aria-label={label ?? t('loading')} size="xl" />
     </div>
   );
 }
@@ -333,6 +336,7 @@ interface MemoryCardProps {
 }
 
 function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
+  const { t } = useTranslation('metrics');
   const rows = useMemo(() => {
     if (!isPrometheusInstantResult(data)) return [];
     return data.data.result.map((series) => {
@@ -351,10 +355,10 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Device Memory (Current)</CardTitle>
+        <CardTitle>{t('charts.deviceMemoryCurrent')}</CardTitle>
       </CardHeader>
       <CardBody>
-        {isLoading && <MetricsCardLoading label="Loading memory metrics…" />}
+        {isLoading && <MetricsCardLoading label={t('loadingMemory')} />}
         {!isLoading && (hasError || !hasData) && <MetricsEmptyState />}
         {!isLoading && !hasError && hasData && (
           <table
@@ -375,7 +379,7 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
                     fontWeight: 'var(--pf-t--global--font--weight--heading--default)',
                   }}
                 >
-                  Device / Model
+                  {t('table.deviceModel')}
                 </th>
                 <th
                   scope="col"
@@ -386,7 +390,7 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
                     fontWeight: 'var(--pf-t--global--font--weight--heading--default)',
                   }}
                 >
-                  Memory Used
+                  {t('table.memoryUsed')}
                 </th>
               </tr>
             </thead>
@@ -426,6 +430,7 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
 // ---------------------------------------------------------------------------
 
 export function MetricsDashboard() {
+  const { t } = useTranslation('metrics');
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1h');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const { status: sseStatus } = useEventStream();
@@ -518,7 +523,7 @@ export function MetricsDashboard() {
     <>
       <PageSection>
         <Content>
-          <h1>Metrics</h1>
+          <h1>{t('title')}</h1>
         </Content>
       </PageSection>
 
@@ -527,7 +532,7 @@ export function MetricsDashboard() {
           <ToolbarContent>
             <ToolbarGroup>
               <ToolbarItem>
-                <ToggleGroup aria-label="Time range selector">
+                <ToggleGroup aria-label={t('timeRangeSelector')}>
                   {timeRanges.map((range) => (
                     <ToggleGroupItem
                       key={range}
@@ -546,7 +551,7 @@ export function MetricsDashboard() {
               <ToolbarItem>
                 <Switch
                   id="auto-refresh-switch"
-                  label="Auto-refresh"
+                  label={t('autoRefresh')}
                   isChecked={autoRefresh}
                   onChange={(_event, checked) => setAutoRefresh(checked)}
                 />
@@ -561,21 +566,21 @@ export function MetricsDashboard() {
           {/* Row 1: Request Traffic */}
           <GridItem md={6}>
             <LineChartCard
-              title="Request Latency (p50 / p95 / p99)"
+              title={t('charts.requestLatency')}
               isLoading={latency.isLoading}
               hasError={!!latency.error}
               seriesData={latencySeries}
-              yLabel="Latency (s)"
+              yLabel={t('yLabels.latency')}
               formatY={(v) => `${v.toFixed(3)} s`}
             />
           </GridItem>
           <GridItem md={6}>
             <LineChartCard
-              title="Request Throughput"
+              title={t('charts.requestThroughput')}
               isLoading={throughput.isLoading}
               hasError={!!throughput.error}
               seriesData={throughputSeries}
-              yLabel="req/s"
+              yLabel={t('yLabels.throughput')}
               formatY={(v) => `${v.toFixed(2)} req/s`}
             />
           </GridItem>
@@ -583,31 +588,31 @@ export function MetricsDashboard() {
           {/* Row 2: Connections & Parking */}
           <GridItem md={4}>
             <LineChartCard
-              title="Active Connections"
+              title={t('charts.activeConnections')}
               isLoading={connections.isLoading}
               hasError={!!connections.error}
               seriesData={activeConnectionsSeries}
-              yLabel="connections"
+              yLabel={t('yLabels.connections')}
               formatY={(v) => v.toFixed(0)}
             />
           </GridItem>
           <GridItem md={4}>
             <LineChartCard
-              title="Parked Connections"
+              title={t('charts.parkedConnections')}
               isLoading={connections.isLoading}
               hasError={!!connections.error}
               seriesData={parkedConnectionsSeries}
-              yLabel="connections"
+              yLabel={t('yLabels.connections')}
               formatY={(v) => v.toFixed(0)}
             />
           </GridItem>
           <GridItem md={4}>
             <LineChartCard
-              title="Parking Duration (p50 / p95)"
+              title={t('charts.parkingDuration')}
               isLoading={parkingDuration.isLoading}
               hasError={!!parkingDuration.error}
               seriesData={parkingDurationSeries}
-              yLabel="duration (s)"
+              yLabel={t('yLabels.duration')}
               formatY={(v) => `${v.toFixed(3)} s`}
             />
           </GridItem>
@@ -615,31 +620,31 @@ export function MetricsDashboard() {
           {/* Row 3: Model Lifecycle */}
           <GridItem md={4}>
             <LineChartCard
-              title="Wake Triggers"
+              title={t('charts.wakeTriggers')}
               isLoading={wakeTriggers.isLoading}
               hasError={!!wakeTriggers.error}
               seriesData={wakeTriggersSeries}
-              yLabel="triggers/s"
+              yLabel={t('yLabels.triggers')}
               formatY={(v) => `${v.toFixed(3)}/s`}
             />
           </GridItem>
           <GridItem md={4}>
             <LineChartCard
-              title="State Transitions"
+              title={t('charts.stateTransitions')}
               isLoading={stateTransitions.isLoading}
               hasError={!!stateTransitions.error}
               seriesData={stateTransitionsSeries}
-              yLabel="transitions/s"
+              yLabel={t('yLabels.transitions')}
               formatY={(v) => `${v.toFixed(3)}/s`}
             />
           </GridItem>
           <GridItem md={4}>
             <LineChartCard
-              title="Evictions"
+              title={t('charts.evictions')}
               isLoading={evictions.isLoading}
               hasError={!!evictions.error}
               seriesData={evictionsSeries}
-              yLabel="evictions/s"
+              yLabel={t('yLabels.evictions')}
               formatY={(v) => `${v.toFixed(3)}/s`}
             />
           </GridItem>
@@ -647,21 +652,21 @@ export function MetricsDashboard() {
           {/* Row 4: Memory & Operations */}
           <GridItem md={4}>
             <AreaChartCard
-              title="Memory Over Time"
+              title={t('charts.memoryOverTime')}
               isLoading={memoryHistory.isLoading}
               hasError={!!memoryHistory.error}
               seriesData={memoryHistorySeries}
-              yLabel="VRAM"
+              yLabel={t('yLabels.vram')}
               formatY={(v) => formatBytes(v)}
             />
           </GridItem>
           <GridItem md={4}>
             <LineChartCard
-              title="Operation Duration p95"
+              title={t('charts.operationDuration')}
               isLoading={operations.isLoading}
               hasError={!!operations.error}
               seriesData={operationsSeries}
-              yLabel="duration (s)"
+              yLabel={t('yLabels.duration')}
               formatY={(v) => `${v.toFixed(3)} s`}
             />
           </GridItem>
