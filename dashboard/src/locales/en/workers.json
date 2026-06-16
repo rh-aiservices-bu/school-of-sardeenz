@@ -58,6 +58,10 @@
       "total": "{{value}} total",
       "available": "Available: {{value}}",
       "reserved": "Reserved: {{value}}"
+    },
+    "deviceModels": {
+      "title": "Models on this device",
+      "none": "No models assigned"
     }
   }
 }

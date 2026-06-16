@@ -15,7 +15,8 @@
     "wake": "Wake",
     "retry": "Retry",
     "clearFilters": "Clear filters",
-    "close": "Close"
+    "close": "Close",
+    "selectAll": "Select all"
   },
   "status": {
     "active": "Active",

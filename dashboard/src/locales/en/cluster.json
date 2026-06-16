@@ -60,6 +60,7 @@
       "loading": "Loading VRAM allocation data",
       "noData": "No memory data available.",
       "noDevices": "No devices reported.",
+      "clickToExpand": "Click to expand {{device}} memory details",
       "legend": {
         "used": "Used",
         "reserved": "Reserved",

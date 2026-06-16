@@ -8,6 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- UX enhancements to operator views across the admin dashboard (closes #51):
+  - **ModelList**: client-side pagination (PatternFly `Pagination`, default 20 items/page,
+    shown above and below the table); runner-type filter toolbar chip alongside the existing
+    state filter; bulk-action toolbar with "Sleep selected" and "Delete selected" with
+    confirmation modals; memory column replaced with an inline `Progress` bar (sm, green/yellow/red
+    threshold at 80%/95%) plus text below
+  - **ModelDetail**: state-history timeline section showing the deployed timestamp and the
+    most recent state-change timestamp (uses `createdAt` and `stateChangedAt`); faster polling
+    in `useModel` — interval drops from 5 s to 2 s when the model is in `STARTING` or `PENDING`
+    state so loading-progress bars update promptly
+  - **WorkerDetail**: per-device model breakdown inside each `DeviceCard` — shows model names
+    and memory used for single-GPU workers; falls back to the flat running-models table for
+    multi-GPU workers (API does not expose per-device placement for multi-GPU models)
+  - **MemoryVisualization**: each device bar now has PatternFly `Tooltip` on the whole bar
+    (and on individual segments) showing exact bytes + percentage; clicking a bar expands an
+    inline detail panel with used/reserved/available breakdown
+  - New i18n keys added to `models.json` (pagination, bulk actions, runner filter, timeline),
+    `workers.json` (deviceModels), `cluster.json` (clickToExpand), `common.json` (selectAll)
+
 - Accessibility audit and i18n infrastructure for the dashboard (closes #48):
   - Installed `@axe-core/playwright` devDependency for automated WCAG 2.1 AA scanning
   - Created `dashboard/e2e/accessibility.spec.ts`: axe-core scans on all key pages

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Card,
   CardBody,
@@ -6,6 +7,7 @@ import {
   FlexItem,
   Spinner,
   Title,
+  Tooltip,
 } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { type ControlPlaneComponents } from '@sardeenz/types';
@@ -82,7 +84,7 @@ function Legend() {
 }
 
 // ---------------------------------------------------------------------------
-// Single device bar
+// Single device bar (with tooltips + click-to-expand)
 // ---------------------------------------------------------------------------
 interface DeviceBarProps {
   device: DeviceInfo;
@@ -90,120 +92,197 @@ interface DeviceBarProps {
 
 function DeviceBar({ device }: DeviceBarProps) {
   const { t } = useTranslation('cluster');
-  const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes, memoryAvailableBytes, memoryReservedBytes } =
-    device;
+  const [expanded, setExpanded] = useState(false);
+  const {
+    deviceIndex,
+    deviceType,
+    memoryTotalBytes,
+    memoryUsedBytes,
+    memoryAvailableBytes,
+    memoryReservedBytes,
+  } = device;
 
   const total = memoryTotalBytes > 0 ? memoryTotalBytes : 1;
   const usedPercent = Math.min(100, (memoryUsedBytes / total) * 100);
   const reservedPercent = Math.min(100 - usedPercent, ((memoryReservedBytes ?? 0) / total) * 100);
   const availablePercent = Math.max(0, 100 - usedPercent - reservedPercent);
 
-  const usedLabel = `${t('overview.vramAllocation.legend.used')}: ${formatBytes(memoryUsedBytes)}`;
-  const reservedLabel =
+  const usedPct = Math.round(usedPercent);
+  const reservedPct = Math.round(reservedPercent);
+  const availablePct = Math.max(0, 100 - usedPct - reservedPct);
+
+  const usedTooltip = `${t('overview.vramAllocation.legend.used')}: ${formatBytes(memoryUsedBytes)} (${usedPct}%)`;
+  const reservedTooltip =
     (memoryReservedBytes ?? 0) > 0
-      ? ` | ${t('overview.vramAllocation.legend.reserved')}: ${formatBytes(memoryReservedBytes)}`
+      ? `${t('overview.vramAllocation.legend.reserved')}: ${formatBytes(memoryReservedBytes)} (${reservedPct}%)`
       : '';
-  const availableLabel = ` | ${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)}`;
-  const totalLabel = ` | ${t('overview.vramUsage.total')}: ${formatBytes(memoryTotalBytes)}`;
-  const tooltipText = `${usedLabel}${reservedLabel}${availableLabel}${totalLabel}`;
+  const availableTooltip = `${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)} (${availablePct}%)`;
+
+  const fullTooltip = [usedTooltip, reservedTooltip, availableTooltip]
+    .filter(Boolean)
+    .join(' | ');
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--pf-t--global--spacer--md)',
-      }}
-    >
-      {/* Device label */}
+    <div>
       <div
         style={{
-          flexShrink: 0,
-          width: '11ch',
-          fontSize: 'var(--pf-t--global--font--size--sm)',
-          color: 'var(--pf-t--global--text--color--subtle)',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--pf-t--global--spacer--md)',
         }}
-        title={`GPU ${deviceIndex} — ${deviceType}`}
       >
-        GPU {deviceIndex}
-        <span
+        {/* Device label */}
+        <div
           style={{
-            fontSize: 'var(--pf-t--global--font--size--xs)',
-            marginLeft: 'var(--pf-t--global--spacer--xs)',
+            flexShrink: 0,
+            width: '11ch',
+            fontSize: 'var(--pf-t--global--font--size--sm)',
             color: 'var(--pf-t--global--text--color--subtle)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={`GPU ${deviceIndex} — ${deviceType}`}
+        >
+          GPU {deviceIndex}
+          <span
+            style={{
+              fontSize: 'var(--pf-t--global--font--size--xs)',
+              marginLeft: 'var(--pf-t--global--spacer--xs)',
+              color: 'var(--pf-t--global--text--color--subtle)',
+            }}
+          >
+            {deviceType}
+          </span>
+        </div>
+
+        {/* Stacked bar — clickable to expand, segmented tooltips */}
+        <Tooltip content={fullTooltip}>
+          <div
+            style={{
+              flex: 1,
+              height: '24px',
+              borderRadius: '4px',
+              overflow: 'hidden',
+              display: 'flex',
+              background: 'var(--pf-t--global--background--color--secondary--default)',
+              border: '1px solid var(--pf-t--global--border--color--default)',
+              cursor: 'pointer',
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label={t('overview.vramAllocation.clickToExpand', { device: `GPU ${deviceIndex}` })}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((e) => !e)}
+            onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setExpanded((e) => !e); } }}
+          >
+            {usedPercent > 0 && (
+              <Tooltip content={usedTooltip}>
+                <div
+                  style={{
+                    width: `${usedPercent}%`,
+                    background: 'var(--pf-t--global--color--status--info--default)',
+                    transition: 'width 0.3s ease',
+                    height: '100%',
+                  }}
+                />
+              </Tooltip>
+            )}
+            {reservedPercent > 0 && (
+              <Tooltip content={reservedTooltip}>
+                <div
+                  style={{
+                    width: `${reservedPercent}%`,
+                    background: 'var(--pf-t--global--color--status--warning--default)',
+                    transition: 'width 0.3s ease',
+                    height: '100%',
+                  }}
+                />
+              </Tooltip>
+            )}
+            {availablePercent > 0 && (
+              <Tooltip content={availableTooltip}>
+                <div
+                  style={{
+                    width: `${availablePercent}%`,
+                    background: 'var(--pf-t--global--background--color--secondary--default)',
+                    transition: 'width 0.3s ease',
+                    height: '100%',
+                  }}
+                />
+              </Tooltip>
+            )}
+          </div>
+        </Tooltip>
+
+        {/* Memory value label */}
+        <div
+          style={{
+            flexShrink: 0,
+            fontSize: 'var(--pf-t--global--font--size--sm)',
+            textAlign: 'right',
+            whiteSpace: 'nowrap',
+            minWidth: '13ch',
           }}
         >
-          {deviceType}
-        </span>
+          <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+            {formatBytes(memoryUsedBytes)}
+          </span>
+          <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+            {' '}/ {formatBytes(memoryTotalBytes)}
+          </span>
+        </div>
       </div>
 
-      {/* Stacked bar */}
-      <div
-        style={{
-          flex: 1,
-          height: '24px',
-          borderRadius: '4px',
-          overflow: 'hidden',
-          display: 'flex',
-          background: 'var(--pf-t--global--background--color--secondary--default)',
-          border: '1px solid var(--pf-t--global--border--color--default)',
-        }}
-        title={tooltipText}
-        aria-label={tooltipText}
-        role="img"
-      >
-        {usedPercent > 0 && (
-          <div
-            style={{
-              width: `${usedPercent}%`,
-              background: 'var(--pf-t--global--color--status--info--default)',
-              transition: 'width 0.3s ease',
-            }}
-            title={usedLabel}
-          />
-        )}
-        {reservedPercent > 0 && (
-          <div
-            style={{
-              width: `${reservedPercent}%`,
-              background: 'var(--pf-t--global--color--status--warning--default)',
-              transition: 'width 0.3s ease',
-            }}
-            title={`${t('overview.vramAllocation.legend.reserved')}: ${formatBytes(memoryReservedBytes)}`}
-          />
-        )}
-        {availablePercent > 0 && (
-          <div
-            style={{
-              width: `${availablePercent}%`,
-              background: 'var(--pf-t--global--background--color--secondary--default)',
-              transition: 'width 0.3s ease',
-            }}
-            title={`${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)}`}
-          />
-        )}
-      </div>
-
-      {/* Memory value label */}
-      <div
-        style={{
-          flexShrink: 0,
-          fontSize: 'var(--pf-t--global--font--size--sm)',
-          textAlign: 'right',
-          whiteSpace: 'nowrap',
-          minWidth: '13ch',
-        }}
-      >
-        <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-          {formatBytes(memoryUsedBytes)}
-        </span>
-        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-          {' '}/ {formatBytes(memoryTotalBytes)}
-        </span>
-      </div>
+      {/* Expanded detail panel */}
+      {expanded && (
+        <div
+          style={{
+            marginTop: 'var(--pf-t--global--spacer--sm)',
+            marginLeft: 'calc(11ch + var(--pf-t--global--spacer--md))',
+            padding: 'var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md)',
+            background: 'var(--pf-t--global--background--color--secondary--default)',
+            borderRadius: '4px',
+            border: '1px solid var(--pf-t--global--border--color--default)',
+            fontSize: 'var(--pf-t--global--font--size--sm)',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--xs)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--pf-t--global--color--status--info--default)', fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+                {t('overview.vramAllocation.legend.used')}
+              </span>
+              <span>{formatBytes(memoryUsedBytes)} ({usedPct}%)</span>
+            </div>
+            {(memoryReservedBytes ?? 0) > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--pf-t--global--color--status--warning--default)', fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+                  {t('overview.vramAllocation.legend.reserved')}
+                </span>
+                <span>{formatBytes(memoryReservedBytes)} ({reservedPct}%)</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+                {t('overview.vramAllocation.legend.available')}
+              </span>
+              <span>{formatBytes(memoryAvailableBytes)} ({availablePct}%)</span>
+            </div>
+            <div
+              style={{
+                borderTop: '1px solid var(--pf-t--global--border--color--default)',
+                paddingTop: 'var(--pf-t--global--spacer--xs)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontWeight: 'var(--pf-t--global--font--weight--bold)',
+              }}
+            >
+              <span>{t('overview.vramUsage.total')}</span>
+              <span>{formatBytes(memoryTotalBytes)}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
