@@ -178,6 +178,7 @@ function RunningModelsSection({ models }: { models: WorkerModelInfo[] }) {
         <Tr>
           <Th>{t('detail.runningModelsTable.modelName')}</Th>
           <Th>{t('detail.runningModelsTable.state')}</Th>
+          <Th>{t('detail.runningModelsTable.devices')}</Th>
           <Th>{t('detail.runningModelsTable.memoryUsed')}</Th>
         </Tr>
       </Thead>
@@ -191,6 +192,11 @@ function RunningModelsSection({ models }: { models: WorkerModelInfo[] }) {
             </Td>
             <Td dataLabel={t('detail.runningModelsTable.state')}>
               <StateLabel state={model.state} />
+            </Td>
+            <Td dataLabel={t('detail.runningModelsTable.devices')}>
+              {model.deviceIndices
+                ? model.deviceIndices.map((i) => `GPU ${i}`).join(', ')
+                : '—'}
             </Td>
             <Td dataLabel={t('detail.runningModelsTable.memoryUsed')}>
               {model.memoryUsedBytes != null ? formatBytes(model.memoryUsedBytes) : '—'}
@@ -334,28 +340,33 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
       </DescriptionList>
 
       {/* Device memory cards */}
-      {worker.devices.length > 0 && (
-        <div>
-          <Title
-            headingLevel="h2"
-            size="lg"
-            style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
-          >
-            {t('detail.deviceMemory')}
-          </Title>
-          <Gallery hasGutter minWidths={{ default: '280px' }}>
-            {worker.devices.map((device) => (
-              <DeviceCard
-                key={device.deviceIndex}
-                device={device}
-                // Per-device model breakdown: only available when there's one device
-                // (API does not expose deviceIndex on WorkerModelInfo for multi-GPU placement)
-                workerModels={worker.devices.length === 1 ? worker.models : undefined}
-              />
-            ))}
-          </Gallery>
-        </div>
-      )}
+      {worker.devices.length > 0 && (() => {
+        const hasDeviceAttribution = worker.models.some((m) => m.deviceIndices);
+        return (
+          <div>
+            <Title
+              headingLevel="h2"
+              size="lg"
+              style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+            >
+              {t('detail.deviceMemory')}
+            </Title>
+            <Gallery hasGutter minWidths={{ default: '280px' }}>
+              {worker.devices.map((device) => (
+                <DeviceCard
+                  key={device.deviceIndex}
+                  device={device}
+                  workerModels={
+                    hasDeviceAttribution
+                      ? worker.models.filter((m) => m.deviceIndices?.includes(device.deviceIndex))
+                      : undefined
+                  }
+                />
+              ))}
+            </Gallery>
+          </div>
+        );
+      })()}
 
       {/* Running models */}
       <div>

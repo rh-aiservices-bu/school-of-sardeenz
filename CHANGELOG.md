@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Per-device model attribution for multi-GPU workers (closes #60): the
+  control plane now persists device placement indices in Redis `ModelState`
+  during model deployment. The `WorkerModelInfo` and `ModelDetail` contracts
+  include an optional `deviceIndices` array. The dashboard renders per-device
+  model breakdowns on each GPU card for multi-GPU workers (previously only
+  shown for single-GPU workers) and adds a "Devices" column to the running
+  models table. Models deployed before this change gracefully fall back to
+  the previous behavior (no per-device attribution).
 - VRAM visualization enhancements (closes #59): added GiB/percent display
   toggle to the MemoryVisualization card header, click-through navigation
   from worker IDs to worker detail pages, and worker-level model name

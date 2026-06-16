@@ -148,6 +148,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
         workerId: result.workerId,
+        deviceIndices: result.devices.map((d) => d.deviceIndex),
       });
 
       deps.deployOrchestration
@@ -251,6 +252,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         engineConfig: record?.engineConfig ?? undefined,
         pinned: record?.pinned ?? false,
         workerId: state?.workerId ?? undefined,
+        deviceIndices: state?.deviceIndices ?? undefined,
         runnerEndpoint:
           state?.runnerHost && state?.runnerPort
             ? { host: state.runnerHost, port: state.runnerPort }

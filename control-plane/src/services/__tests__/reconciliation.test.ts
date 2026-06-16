@@ -21,6 +21,7 @@ function makeModelState(
     runnerHost: null,
     runnerPort: null,
     runnerId: null,
+    deviceIndices: null,
     lastInferenceAt: null,
     stateChangedAt: new Date().toISOString(),
     errorMessage: null,

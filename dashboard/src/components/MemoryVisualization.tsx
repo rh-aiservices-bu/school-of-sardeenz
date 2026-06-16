@@ -395,14 +395,21 @@ function WorkerSection({ workerId, devices, models, displayMode }: WorkerSection
             {t('overview.vramAllocation.noDevices')}
           </div>
         ) : (
-          devices.map((device) => (
-            <DeviceBar
-              key={device.deviceIndex}
-              device={device}
-              displayMode={displayMode}
-              models={isSingleDevice ? models : undefined}
-            />
-          ))
+          (() => {
+            const hasDeviceAttribution = models?.some((m) => m.deviceIndices);
+            return devices.map((device) => (
+              <DeviceBar
+                key={device.deviceIndex}
+                device={device}
+                displayMode={displayMode}
+                models={
+                  hasDeviceAttribution
+                    ? models?.filter((m) => m.deviceIndices?.includes(device.deviceIndex))
+                    : isSingleDevice ? models : undefined
+                }
+              />
+            ));
+          })()
         )}
       </div>
     </div>

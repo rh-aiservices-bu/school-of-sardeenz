@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
 
-import { isValidTransition, isTerminalState, ModelLifecycleService } from '../model-lifecycle.js';
+import { isValidTransition, isTerminalState, ModelLifecycleService, type ModelState } from '../model-lifecycle.js';
 import type { Redis } from '../../clients/redis.js';
 
 describe('isValidTransition', () => {
@@ -59,6 +59,59 @@ describe('isTerminalState', () => {
 
   it('ERROR is not terminal', () => {
     expect(isTerminalState(ModelLifecycleState.ERROR)).toBe(false);
+  });
+});
+
+describe('ModelLifecycleService.createModel', () => {
+  it('initialises deviceIndices to null', async () => {
+    const redis = {
+      set: vi.fn().mockResolvedValue('OK'),
+    } as unknown as Redis;
+
+    const service = new ModelLifecycleService(redis, 'test');
+    const state = await service.createModel('my-model');
+    expect(state.deviceIndices).toBeNull();
+
+    const storedJson = (redis.set as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    const stored = JSON.parse(storedJson) as ModelState;
+    expect(stored.deviceIndices).toBeNull();
+  });
+});
+
+describe('ModelLifecycleService.transition with deviceIndices', () => {
+  it('passes deviceIndices to Redis eval updates', async () => {
+    const resultState: ModelState = {
+      modelName: 'my-model',
+      state: ModelLifecycleState.STARTING,
+      workerId: 'w1',
+      runnerHost: null,
+      runnerPort: null,
+      runnerId: null,
+      deviceIndices: [0, 2],
+      lastInferenceAt: null,
+      stateChangedAt: '2026-01-01T00:00:00.000Z',
+      errorMessage: null,
+    };
+
+    const redis = {
+      eval: vi.fn().mockResolvedValue(
+        `${ModelLifecycleState.PENDING}|${JSON.stringify(resultState)}`,
+      ),
+    } as unknown as Redis;
+
+    const service = new ModelLifecycleService(redis, 'test');
+    const result = await service.transition('my-model', ModelLifecycleState.STARTING, {
+      workerId: 'w1',
+      deviceIndices: [0, 2],
+    });
+
+    expect(result.deviceIndices).toEqual([0, 2]);
+    expect(result.workerId).toBe('w1');
+    expect(result.state).toBe(ModelLifecycleState.STARTING);
+
+    const updatesArg = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[0]?.[4] as string;
+    const updates = JSON.parse(updatesArg) as Record<string, unknown>;
+    expect(updates.deviceIndices).toEqual([0, 2]);
   });
 });
 

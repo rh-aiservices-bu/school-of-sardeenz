@@ -30,6 +30,7 @@ export interface ModelState {
   runnerHost: string | null;
   runnerPort: number | null;
   runnerId: string | null;
+  deviceIndices: number[] | null;
   lastInferenceAt: string | null;
   stateChangedAt: string;
   errorMessage: string | null;
@@ -104,6 +105,7 @@ export class ModelLifecycleService {
       runnerHost: null,
       runnerPort: null,
       runnerId: null,
+      deviceIndices: null,
       lastInferenceAt: null,
       stateChangedAt: new Date().toISOString(),
       errorMessage: null,
@@ -120,7 +122,10 @@ export class ModelLifecycleService {
     modelName: string,
     to: ModelLifecycleState,
     updates?: Partial<
-      Pick<ModelState, 'workerId' | 'runnerHost' | 'runnerPort' | 'runnerId' | 'errorMessage'>
+      Pick<
+        ModelState,
+        'workerId' | 'runnerHost' | 'runnerPort' | 'runnerId' | 'deviceIndices' | 'errorMessage'
+      >
     >,
   ): Promise<ModelState> {
     const key = modelStateKey(this.keyPrefix, modelName);

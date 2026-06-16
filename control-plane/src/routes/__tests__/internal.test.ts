@@ -28,6 +28,7 @@ function makeSleepingState(overrides: Partial<ModelState> = {}): ModelState {
     runnerHost: '10.0.0.1',
     runnerPort: 5001,
     runnerId: 'runner-abc',
+    deviceIndices: null,
     lastInferenceAt: null,
     stateChangedAt: new Date().toISOString(),
     errorMessage: null,

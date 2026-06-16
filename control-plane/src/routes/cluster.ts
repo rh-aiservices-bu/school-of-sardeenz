@@ -68,6 +68,7 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
         .map((s) => ({
           modelName: s.modelName,
           state: s.state,
+          deviceIndices: s.deviceIndices ?? undefined,
         }));
 
       return {

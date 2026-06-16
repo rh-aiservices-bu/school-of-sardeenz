@@ -11,6 +11,7 @@ function makeModelState(overrides: Partial<ModelState> & { modelName: string }):
     runnerHost: null,
     runnerPort: null,
     runnerId: null,
+    deviceIndices: null,
     lastInferenceAt: null,
     stateChangedAt: new Date(Date.now() - 120_000).toISOString(),
     errorMessage: null,

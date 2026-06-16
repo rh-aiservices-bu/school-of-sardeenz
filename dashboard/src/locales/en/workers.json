@@ -47,6 +47,7 @@
     "runningModelsTable": {
       "modelName": "Model Name",
       "state": "State",
+      "devices": "Devices",
       "memoryUsed": "Memory Used"
     },
     "breadcrumb": {

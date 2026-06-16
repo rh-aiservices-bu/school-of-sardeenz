@@ -51,6 +51,7 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
       .map((s) => ({
         modelName: s.modelName,
         state: s.state,
+        deviceIndices: s.deviceIndices ?? undefined,
       }));
 
     const budget = deps.memoryBudget.getWorkerBudget(workerId);
