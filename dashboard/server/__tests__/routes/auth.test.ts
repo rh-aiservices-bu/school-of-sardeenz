@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
+import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance } from 'fastify';
 import { authPlugin } from '../../plugins/auth.js';
-import { registerAuthRoutes } from '../../routes/auth.js';
+import { registerAuthRoutes, _resetRateLimiter } from '../../routes/auth.js';
 import { registerModelRoutes } from '../../routes/models.js';
 import { BffError } from '../../errors.js';
 import type { RouteDeps } from '../../routes/deps.js';
@@ -78,6 +79,7 @@ async function buildApp(config: Config): Promise<FastifyInstance> {
     return reply.code(500).send({ error: 'Internal error', code: 'INTERNAL_ERROR' });
   });
 
+  await app.register(fastifyCookie);
   await app.register(authPlugin, { config });
 
   const deps = buildDeps(config);
@@ -134,6 +136,7 @@ describe('GET /api/auth/config', () => {
 describe('POST /api/auth/login (simple mode)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetRateLimiter();
   });
 
   it('returns JWT with correct credentials', async () => {
@@ -247,6 +250,10 @@ describe('GET /api/auth/me', () => {
 /* Route protection                                                   */
 /* ------------------------------------------------------------------ */
 describe('Route protection', () => {
+  beforeEach(() => {
+    _resetRateLimiter();
+  });
+
   it('allows access to protected route with valid JWT', async () => {
     const config = makeConfig({ authMode: 'simple' });
     const app = await buildApp(config);
@@ -325,11 +332,10 @@ describe('Route protection', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('accepts token via query parameter (SSE fallback)', async () => {
+  it('accepts token via query parameter (deprecated SSE fallback)', async () => {
     const config = makeConfig({ authMode: 'simple' });
     const app = await buildApp(config);
 
-    // Login
     const loginRes = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
@@ -337,7 +343,6 @@ describe('Route protection', () => {
     });
     const token = extractToken(loginRes);
 
-    // Access with token in query param
     const res = await app.inject({
       method: 'GET',
       url: `/api/models?token=${token}`,
@@ -346,12 +351,57 @@ describe('Route protection', () => {
 
     expect(res.statusCode).toBe(200);
   });
+
+  it('accepts token via sardeenz_sse cookie', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'secret123' },
+    });
+    const token = extractToken(loginRes);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/models',
+      cookies: { sardeenz_sse: token },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('sets sardeenz_sse cookie on login', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'secret123' },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    const setCookieHeader = res.headers['set-cookie'];
+    const cookieStr = Array.isArray(setCookieHeader) ? setCookieHeader.join('; ') : setCookieHeader ?? '';
+    expect(cookieStr).toContain('sardeenz_sse=');
+    expect(cookieStr).toContain('HttpOnly');
+    expect(cookieStr).toContain('Path=/api/events');
+    expect(cookieStr).toContain('SameSite=Strict');
+  });
 });
 
 /* ------------------------------------------------------------------ */
 /* Empty-password rejection (regression: issue #53)                   */
 /* ------------------------------------------------------------------ */
 describe('Empty-password rejection (issue #53)', () => {
+  beforeEach(() => {
+    _resetRateLimiter();
+  });
+
   it('rejects login with empty password even when ADMIN_PASSWORD is empty', async () => {
     // This is the exact vulnerability: if ADMIN_PASSWORD defaults to ''
     // and someone sends password='', the timing-safe compare succeeds.
@@ -430,5 +480,41 @@ describe('Auth mode: none', () => {
     // The key assertion is that we don't get 401 or 403
     expect(res.statusCode).not.toBe(401);
     expect(res.statusCode).not.toBe(403);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* POST /api/auth/logout                                              */
+/* ------------------------------------------------------------------ */
+describe('POST /api/auth/logout', () => {
+  it('clears the sardeenz_sse cookie', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/logout',
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(parseJson(res)).toEqual({ ok: true });
+    const setCookieHeader = res.headers['set-cookie'];
+    const cookieStr = Array.isArray(setCookieHeader) ? setCookieHeader.join('; ') : setCookieHeader ?? '';
+    expect(cookieStr).toContain('sardeenz_sse=');
+    expect(cookieStr).toContain('Max-Age=0');
+  });
+
+  it('is accessible without authentication', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/logout',
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
   });
 });

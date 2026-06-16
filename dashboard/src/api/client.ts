@@ -81,11 +81,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as T;
 }
 
-/** Get the auth token for SSE query parameter (EventSource can't send headers). */
-export function getAuthToken(): string | null {
-  return getToken();
-}
-
 interface MetricsParams {
   start?: string;
   end?: string;

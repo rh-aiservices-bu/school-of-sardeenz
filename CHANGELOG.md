@@ -22,6 +22,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Memory columns are now sortable, using lifecycle-state ordering and numeric
   memory comparison respectively.
 
+### Fixed
+
+- SSE auth now uses HttpOnly cookies instead of query-string tokens, preventing
+  JWT leakage in browser history, access logs, and referrer headers (#66).
+- Frontend validates cached JWT tokens server-side via `/api/auth/me` on boot,
+  instead of trusting client-side decoded claims (#66).
+- OAuth callback routing aligned: server redirects to `/oauth/callback#token=…`
+  matching the frontend route, and the callback page waits for auth state instead
+  of using a blind 100ms timeout (#66).
+- Added `POST /api/auth/logout` endpoint to clear the SSE auth cookie (#66).
+
 ### Changed
 
 - Dynamic runner options in the deploy form de-scoped to Phase 4 (#67):

@@ -5,24 +5,18 @@ import {
   Spinner,
 } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
+import { useAuth } from '../../contexts/AuthContext';
 
-/**
- * Handles the OAuth callback by extracting the token from the URL fragment.
- * The AuthContext init logic already reads `#token=…` from the URL and
- * stores it in sessionStorage, so this page just needs to redirect.
- */
 export function OAuthCallback() {
   const navigate = useNavigate();
   const { t } = useTranslation('auth');
+  const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    // Token extraction happens in AuthContext on mount.
-    // Wait a tick for the auth state to settle, then redirect to root.
-    const timer = setTimeout(() => {
+    if (!isLoading && isAuthenticated) {
       navigate('/', { replace: true });
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [navigate]);
+    }
+  }, [isLoading, isAuthenticated, navigate]);
 
   return (
     <Bullseye>

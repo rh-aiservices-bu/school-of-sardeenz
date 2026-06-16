@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ClusterEventType, type ControlPlaneComponents } from '@sardeenz/types';
-import { BASE_URL, getAuthToken } from '../api/client';
+import { BASE_URL } from '../api/client';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
@@ -53,10 +53,8 @@ export function useEventStreamConnection(): EventStreamState {
       eventSourceRef.current.close();
     }
 
-    // EventSource cannot send custom headers; pass token via query param
-    const token = getAuthToken();
-    const sseUrl = token ? `${BASE_URL}/events?token=${encodeURIComponent(token)}` : `${BASE_URL}/events`;
-    const es = new EventSource(sseUrl);
+    const sseUrl = `${BASE_URL}/events`;
+    const es = new EventSource(sseUrl, { withCredentials: true });
     eventSourceRef.current = es;
 
     es.onopen = () => {

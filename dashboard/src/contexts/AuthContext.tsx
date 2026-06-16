@@ -94,6 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (logoutTimerRef.current) {
       clearTimeout(logoutTimerRef.current);
     }
+    const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
+    void fetch(`${baseUrl}/auth/logout`, { method: 'POST' });
   }, []);
 
   // Listen for 401 events from the API client
@@ -133,9 +135,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [scheduleAutoLogout],
   );
 
-  // Boot: fetch auth config and check existing token
+  // Validate a token server-side and set user from the verified response
+  const validateTokenServerSide = useCallback(
+    async (token: string, baseUrl: string, cancelled: { value: boolean }) => {
+      try {
+        const res = await fetch(`${baseUrl}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok && !cancelled.value) {
+          const data = (await res.json()) as { username: string; roles: string[]; authMode: AuthUser['authMode'] };
+          setUser({ username: data.username, roles: data.roles, authMode: data.authMode });
+          scheduleAutoLogout(token);
+          return true;
+        }
+      } catch {
+        // Server unreachable — fall through
+      }
+      if (!cancelled.value) {
+        clearToken();
+        setUser(null);
+      }
+      return false;
+    },
+    [scheduleAutoLogout],
+  );
+
+  // Boot: fetch auth config and validate existing token server-side
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = { value: false };
 
     async function init() {
       try {
@@ -143,35 +170,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await fetch(`${baseUrl}/auth/config`);
         if (res.ok) {
           const data = (await res.json()) as { authMode: AuthMode };
-          if (!cancelled) setAuthMode(data.authMode);
+          if (!cancelled.value) setAuthMode(data.authMode);
+        }
+
+        // Check for OAuth callback token in URL fragment
+        if (window.location.hash.startsWith('#token=')) {
+          const fragmentToken = window.location.hash.slice(7);
+          storeToken(fragmentToken);
+          if (!cancelled.value) {
+            await validateTokenServerSide(fragmentToken, baseUrl, cancelled);
+          }
+          window.history.replaceState(null, '', window.location.pathname);
+        } else {
+          // Validate existing cached token server-side
+          const token = getStoredToken();
+          if (token && !cancelled.value) {
+            await validateTokenServerSide(token, baseUrl, cancelled);
+          }
         }
       } catch {
         // If we can't reach the server, default to 'none'
       }
 
-      // Check for existing token in sessionStorage
-      const token = getStoredToken();
-      if (token && !cancelled) {
-        setUserFromToken(token);
-      }
-
-      // Check for OAuth callback token in URL fragment
-      if (window.location.hash.startsWith('#token=')) {
-        const token = window.location.hash.slice(7);
-        storeToken(token);
-        if (!cancelled) setUserFromToken(token);
-        // Clean up the URL
-        window.history.replaceState(null, '', window.location.pathname);
-      }
-
-      if (!cancelled) setIsLoading(false);
+      if (!cancelled.value) setIsLoading(false);
     }
 
     void init();
     return () => {
-      cancelled = true;
+      cancelled.value = true;
     };
-  }, [setUserFromToken]);
+  }, [validateTokenServerSide]);
 
   const login = useCallback(
     async (username: string, password: string) => {
@@ -213,9 +241,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth(): AuthState {
   return useContext(AuthContext);
-}
-
-/** Helper to get the current auth token (for SSE query param). */
-export function getAuthToken(): string | null {
-  return getStoredToken();
 }

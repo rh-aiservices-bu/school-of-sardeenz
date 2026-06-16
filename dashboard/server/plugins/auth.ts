@@ -10,7 +10,7 @@ export interface JwtPayload {
 }
 
 /** Routes that never require authentication. */
-const PUBLIC_PATHS = ['/api/health', '/api/auth/config', '/api/auth/login', '/api/auth/callback', '/healthz', '/readyz'];
+const PUBLIC_PATHS = ['/api/health', '/api/auth/config', '/api/auth/login', '/api/auth/callback', '/api/auth/logout', '/healthz', '/readyz'];
 
 function isPublicRoute(url: string): boolean {
   // Strip query string before matching
@@ -44,9 +44,18 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): P
           if (authHeader?.startsWith('Bearer ')) {
             return authHeader.slice(7);
           }
-          // 2. Query-parameter fallback for SSE / EventSource
+          // 2. HttpOnly cookie (SSE / EventSource — browser sends automatically)
+          const cookieToken = (request.cookies as Record<string, string> | undefined)?.['sardeenz_sse'];
+          if (cookieToken) {
+            return cookieToken;
+          }
+          // 3. Query-parameter fallback (deprecated — tokens leak into logs/history)
           const query = request.query as Record<string, string>;
           if (query['token']) {
+            app.log.warn(
+              { url: request.url },
+              'Query-parameter token auth is deprecated — migrate to cookie-based SSE auth',
+            );
             return query['token'];
           }
           return undefined;

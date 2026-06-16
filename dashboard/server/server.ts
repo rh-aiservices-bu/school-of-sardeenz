@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
+import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 
 import type { Config } from './config.js';
@@ -45,6 +46,8 @@ export async function buildServer(deps: ServerDeps) {
       code: 'INTERNAL_ERROR',
     });
   });
+
+  await app.register(fastifyCookie);
 
   // Auth plugin MUST be registered before routes
   await app.register(authPlugin, { config: deps.config });

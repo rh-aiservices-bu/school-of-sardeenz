@@ -1,7 +1,32 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { Config } from '../config.js';
 import type { JwtPayload } from '../plugins/auth.js';
+
+const SSE_COOKIE_NAME = 'sardeenz_sse';
+
+function sseCookieOptions(expiresInSec: number, request: FastifyRequest): CookieSerializeOptions {
+  const isLocalhost = request.hostname === 'localhost' || request.hostname.startsWith('127.');
+  return {
+    path: '/api/events',
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: !isLocalhost,
+    maxAge: expiresInSec,
+  };
+}
+
+function clearSseCookieOptions(request: FastifyRequest): CookieSerializeOptions {
+  const isLocalhost = request.hostname === 'localhost' || request.hostname.startsWith('127.');
+  return {
+    path: '/api/events',
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: !isLocalhost,
+    maxAge: 0,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Simple in-memory rate limiter                                      */
@@ -14,6 +39,11 @@ interface RateLimitEntry {
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
 const RATE_LIMIT_MAX = 10; // max attempts per window
 const loginAttempts = new Map<string, RateLimitEntry>();
+
+/** @internal — exposed for test cleanup only */
+export function _resetRateLimiter(): void {
+  loginAttempts.clear();
+}
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -108,6 +138,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
 
       const token = app.jwt.sign(payload, { expiresIn: expiresInSec });
 
+      void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, request));
       return reply.send({
         token,
         expiresIn: expiresInSec,
@@ -215,8 +246,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       const payload: JwtPayload = { username, roles, authMode: 'oauth' };
       const token = app.jwt.sign(payload, { expiresIn: expiresInSec });
 
-      // Redirect to frontend with token in URL fragment
-      return reply.redirect(`/#token=${token}`);
+      void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, request));
+      return reply.redirect(`/oauth/callback#token=${token}`);
     });
   }
 
@@ -237,5 +268,12 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       roles: user.roles,
       authMode: user.authMode,
     });
+  });
+
+  // ------ POST /api/auth/logout ------
+  // Clears the SSE auth cookie.
+  app.post('/api/auth/logout', async (request: FastifyRequest, reply: FastifyReply) => {
+    void reply.clearCookie(SSE_COOKIE_NAME, clearSseCookieOptions(request));
+    return reply.send({ ok: true });
   });
 }
