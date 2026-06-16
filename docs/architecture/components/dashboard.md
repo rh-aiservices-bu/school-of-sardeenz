@@ -83,7 +83,11 @@ Browser → EventSource(/api/events?token=<jwt>)
          └─ Maintains 100-event ring buffer for event feed display
 ```
 
-The BFF's SSE relay subscribes to the Redis `{prefix}:routing-updates` pub/sub channel (not the control plane's `/api/v1/events` SSE endpoint directly). Each connected browser client gets its own Redis subscriber; the subscriber is cleaned up when the client disconnects. Events flow even during control plane restarts, since the control plane publishes to Redis as part of its state transitions.
+The BFF's SSE relay subscribes to the Redis `{prefix}:routing-updates` pub/sub channel (not the control plane's `/api/v1/events` SSE endpoint directly). Each connected browser client gets its own dedicated Redis subscriber connection; the subscriber is created on SSE handshake and cleaned up when the client disconnects.
+
+**Design note — per-client subscribers vs. shared fan-out:** This implementation uses one Redis subscriber per connected SSE client rather than a single shared subscriber that fans out to all clients. For an admin dashboard with tens of concurrent connections, the per-client model is simpler and entirely adequate — each subscriber is a lightweight pub/sub connection. A shared-subscriber architecture (one Redis connection, in-process fan-out to all SSE responses) would be needed if connection counts grew to hundreds or more, where the per-client approach would create excessive Redis connections. Refactoring to shared fan-out is straightforward if that threshold is ever reached.
+
+Events flow even during control plane restarts, since the control plane publishes to Redis as part of its state transitions.
 
 ### Metrics path
 

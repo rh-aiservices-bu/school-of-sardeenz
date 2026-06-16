@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Updated SSE architecture docs to reflect actual per-client subscriber design (closes #58):
+  the Risks table in `docs/project/phase3.md` previously implied a shared fan-out model;
+  corrected to describe the real per-client Redis subscriber approach with explicit trade-off
+  note (per-client is correct at admin-dashboard scale of tens of connections; shared fan-out
+  would be needed for hundreds+). Expanded the SSE relay section in
+  `docs/architecture/components/dashboard.md` with the same trade-off explanation. Added a
+  brief design comment to `dashboard/server/routes/events.ts`.
+
 - Readiness probe (`/readyz`) no longer reports not-ready when only one data source is
   unavailable (closes #55). The dashboard stays ready in degraded read-only mode as long
   as at least one of the control plane or Redis is healthy. Status is reported as
