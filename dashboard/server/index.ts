@@ -1,4 +1,4 @@
-import { loadConfig, redactUrl } from './config.js';
+import { loadConfig, validateAuthConfig, redactUrl } from './config.js';
 import { buildServer } from './server.js';
 import { ControlPlaneClient } from './clients/control-plane.js';
 import { RedisReader } from './clients/redis.js';
@@ -6,6 +6,7 @@ import { PrometheusClient } from './clients/prometheus.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  validateAuthConfig(config);
 
   const controlPlane = new ControlPlaneClient(config);
   const redis = new RedisReader(config);

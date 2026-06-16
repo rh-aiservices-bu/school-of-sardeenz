@@ -61,6 +61,45 @@ export function loadConfig(): Config {
   };
 }
 
+export interface AuthConfigLogger {
+  warn: (msg: string) => void;
+}
+
+/**
+ * Validate auth configuration for security. Must be called at startup.
+ *
+ * - Fails in production when AUTH_MODE=none (unauthenticated admin access).
+ * - Fails when AUTH_MODE=simple but ADMIN_PASSWORD is empty/unset.
+ * - Logs a prominent warning in development when AUTH_MODE=none.
+ */
+export function validateAuthConfig(config: Config, logger?: AuthConfigLogger): void {
+  const isProduction = process.env['NODE_ENV'] === 'production';
+
+  if (config.authMode === 'none') {
+    if (isProduction) {
+      throw new Error(
+        'AUTH_MODE=none is not allowed in production. ' +
+        'Set AUTH_MODE to "simple" or "oauth" and configure the required credentials. ' +
+        'See docs/usage/deployment-security.md for details.',
+      );
+    }
+
+    // Development/test: warn loudly
+    const warn = logger?.warn ?? console.warn.bind(console);
+    warn(
+      '⚠ AUTH_MODE=none — all routes are unprotected. ' +
+      'Do NOT expose this instance beyond a trusted development network.',
+    );
+  }
+
+  if (config.authMode === 'simple' && !config.adminPassword) {
+    throw new Error(
+      'ADMIN_PASSWORD must be explicitly set and non-empty when AUTH_MODE=simple. ' +
+      'An empty password would allow unauthenticated admin access.',
+    );
+  }
+}
+
 export function redactUrl(url: string): string {
   try {
     const parsed = new URL(url);

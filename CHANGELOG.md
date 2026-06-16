@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Dashboard BFF now enforces secure auth defaults at startup (closes #53):
+  - `AUTH_MODE=none` is rejected in production (`NODE_ENV=production`) — the server
+    will not start without explicit authentication configured
+  - `AUTH_MODE=simple` requires `ADMIN_PASSWORD` to be explicitly set and non-empty,
+    regardless of environment — prevents unauthenticated admin access on misconfigured
+    deployments
+  - Development mode logs a prominent warning when running with `AUTH_MODE=none`
+  - Updated `docs/usage/deployment-security.md` with required environment variables
+    per auth mode and example production configuration
+
 ### Changed
 
 - Reconciled `docs/project/phase3.md` and `docs/architecture/components/dashboard.md` with the
