@@ -34,6 +34,10 @@
   "errors": {
     "unexpected": "An unexpected error occurred."
   },
+  "auth": {
+    "readOnly": "You have read-only access. Contact your administrator to request write access.",
+    "readOnlyAction": "Read-only users cannot perform this action."
+  },
   "degraded": {
     "controlPlaneUnreachable": "Control plane unreachable — showing cached data",
     "sseUnavailable": "Real-time updates unavailable — polling for changes"

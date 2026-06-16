@@ -33,12 +33,14 @@ import { useModel, useSleepModel, useWakeModel, useDeleteModel } from '../../hoo
 import { ApiError } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
 import { formatBytes, formatRelativeTime, formatDateTime } from '../../utils/format';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function ModelDetail() {
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
   const { modelName } = useParams<{ modelName: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
 
   const { data: model, isLoading, error } = useModel(modelName ?? '');
   const sleepModel = useSleepModel();
@@ -150,33 +152,35 @@ export function ModelDetail() {
         <FlexItem>
           <StateLabel state={model.state} />
         </FlexItem>
-        <FlexItem align={{ default: 'alignRight' }}>
-          <Flex gap={{ default: 'gapSm' }}>
-            {isActive && (
+        {isAdmin && (
+          <FlexItem align={{ default: 'alignRight' }}>
+            <Flex gap={{ default: 'gapSm' }}>
+              {isActive && (
+                <FlexItem>
+                  <Button variant="secondary" onClick={() => setShowSleepModal(true)}>
+                    {t('detail.sleep.button')}
+                  </Button>
+                </FlexItem>
+              )}
+              {(isSleeping || isError) && (
+                <FlexItem>
+                  <Button
+                    variant="primary"
+                    onClick={handleWake}
+                    isLoading={wakeModel.isPending}
+                  >
+                    {t('detail.wake.button')}
+                  </Button>
+                </FlexItem>
+              )}
               <FlexItem>
-                <Button variant="secondary" onClick={() => setShowSleepModal(true)}>
-                  {t('detail.sleep.button')}
+                <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
+                  {t('detail.delete.button')}
                 </Button>
               </FlexItem>
-            )}
-            {(isSleeping || isError) && (
-              <FlexItem>
-                <Button
-                  variant="primary"
-                  onClick={handleWake}
-                  isLoading={wakeModel.isPending}
-                >
-                  {t('detail.wake.button')}
-                </Button>
-              </FlexItem>
-            )}
-            <FlexItem>
-              <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-                {t('detail.delete.button')}
-              </Button>
-            </FlexItem>
-          </Flex>
-        </FlexItem>
+            </Flex>
+          </FlexItem>
+        )}
       </Flex>
 
       {/* Mutation error */}
@@ -206,22 +210,24 @@ export function ModelDetail() {
           isInline
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           actionLinks={
-            <Flex gap={{ default: 'gapSm' }}>
-              <FlexItem>
-                <Button
-                  variant="secondary"
-                  onClick={handleWake}
-                  isLoading={wakeModel.isPending}
-                >
-                  {t('detail.wake.button')}
-                </Button>
-              </FlexItem>
-              <FlexItem>
-                <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-                  {t('detail.delete.button')}
-                </Button>
-              </FlexItem>
-            </Flex>
+            isAdmin ? (
+              <Flex gap={{ default: 'gapSm' }}>
+                <FlexItem>
+                  <Button
+                    variant="secondary"
+                    onClick={handleWake}
+                    isLoading={wakeModel.isPending}
+                  >
+                    {t('detail.wake.button')}
+                  </Button>
+                </FlexItem>
+                <FlexItem>
+                  <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
+                    {t('detail.delete.button')}
+                  </Button>
+                </FlexItem>
+              </Flex>
+            ) : undefined
           }
         >
           {model.errorMessage}
