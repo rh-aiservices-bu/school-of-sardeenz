@@ -16,6 +16,5 @@
     "resolveJsonModule": true
   },
   "include": ["src"],
-  "exclude": ["src/**/*.v1.tsx", "src/**/*.v1.ts"],
   "references": [{ "path": "../packages/types" }]
 }
