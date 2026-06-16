@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Tone down WCAG 2.1 AA claim in `docs/development/accessibility-audit.md` to match actual
+  evidence: automated axe-core scanning covers primary views but a full manual audit is pending;
+  checked items in the manual checklist are now annotated with rationale (closes #63)
+- Expand accessibility E2E coverage in `dashboard/e2e/accessibility.spec.ts` to include model
+  detail, worker detail, empty states (no models / no workers), deploy form, and the delete
+  confirmation modal — previously only list pages and metrics were scanned
+
 ### Changed
 
 - Reconciled `docs/project/phase3.md` and `docs/architecture/components/dashboard.md` with the
