@@ -149,7 +149,7 @@ Set up the frontend project at `dashboard/` with the build tooling, app shell, a
 
 PatternFly 6 `Page` layout with:
 
-- `Masthead` — application title, user menu placeholder (auth integration TBD)
+- `Masthead` — application title, user menu (login/logout, username display when auth is enabled)
 - `PageSidebar` with `Nav` — navigation items for each view:
   - Cluster Overview (`/`)
   - Models (`/models`)
@@ -822,15 +822,17 @@ From the [overall project plan](overall-plan.md#phase-3-admin-dashboard):
 - [x] `npm run lint` passes with zero warnings across all dashboard packages
 - [x] Container image builds and runs successfully (`containers/dashboard/Dockerfile` exists)
 
-## Open Questions
+## Decisions
 
-- **BFF or direct API calls?** The architecture specifies a BFF, but for the initial implementation, the frontend could call the control plane API directly (it's already HTTP/JSON with CORS). The BFF adds resilience (Redis fallback) and is the auth integration point. _Decided:_ BFF, per the architecture. The Redis fallback resilience requirement from the definition of done requires it, and retrofitting a BFF after building direct API calls is more rework than starting with one.
-- **State management library?** Options: (a) React hooks + context for data fetching state (no library); (b) TanStack Query (React Query) for caching, deduplication, and background refresh; (c) Zustand or Jotai for global state. _Leaning toward:_ TanStack Query for server state (data fetching) with plain React context for UI state (sidebar open/closed, filters). TanStack Query handles caching, deduplication, refetching, and optimistic updates out of the box — reinventing this with raw hooks would be significant effort.
-- **BFF co-located or separate package?** Should the BFF live in `dashboard/server/` (co-located with the frontend) or in a separate workspace package? Co-located is simpler and keeps the BFF close to its consumer. Separate is cleaner for independent deployment. _Leaning toward:_ co-located in `dashboard/server/`, with a separate `tsconfig.json` for the server build. Single deployment image supports this.
-- **Prometheus query complexity?** The metrics dashboard requires PromQL queries. Should the BFF send raw PromQL and the frontend render results, or should the BFF expose higher-level endpoints (e.g., `/api/metrics/latency?range=1h`) and handle PromQL internally? _Leaning toward:_ BFF handles PromQL — the frontend should not need to know about Prometheus query syntax.
-- **Chart library:** PatternFly react-charts (Victory-based) is the default. For complex visualizations like the memory heatmap, we may need additional components. Should we allow a second chart library (e.g., D3 for custom SVG), or restrict to PatternFly charts only? _Leaning toward:_ PatternFly charts only for the initial implementation. Custom SVG if needed for the memory visualization, but no additional chart libraries unless PatternFly charts prove insufficient.
-- **Dark mode:** PatternFly 6 supports light and dark themes. Should the dashboard support theme switching, or ship with light theme only? _Leaning toward:_ light theme only for the initial implementation. PatternFly's design tokens make adding dark mode later a token swap, not a rewrite.
-- **PF5 → PF6 porting strategy:** v1 uses PatternFly 5 (or possibly 4). Should we port components to PF6 inline during Task 3.1, or copy them as-is and run a batch PF6 migration pass afterward? _Leaning toward:_ port to PF6 inline during Task 3.1. Batch migration risks compounding breakage. Porting one component at a time with immediate visual verification catches PF6 incompatibilities early and keeps each component shippable.
+Former open questions, resolved during Phase 3 implementation:
+
+- **BFF or direct API calls?** _Decided:_ BFF, per the architecture. The Redis fallback resilience requirement from the definition of done requires it, and retrofitting a BFF after building direct API calls is more rework than starting with one. Implemented in `dashboard/server/`.
+- **State management library?** _Decided:_ TanStack Query (`@tanstack/react-query`) for server state (data fetching, caching, deduplication, background refresh) with plain React context for UI state (auth, degraded mode). Implemented in `dashboard/src/hooks/` and `dashboard/src/contexts/`.
+- **BFF co-located or separate package?** _Decided:_ co-located in `dashboard/server/`, with a separate `tsconfig.json` for the server build. Single deployment image keeps it simple.
+- **Prometheus query complexity?** _Decided:_ BFF handles all PromQL — higher-level endpoints (e.g., `GET /api/metrics/latency?range=1h`) translate to PromQL internally; the frontend receives chart-ready JSON and does not need to know about Prometheus query syntax. Implemented in `dashboard/server/clients/prometheus.ts`.
+- **Chart library:** _Decided:_ PatternFly react-charts (`@patternfly/react-charts`, Victory-based) only. No secondary chart libraries were needed for the implemented visualizations. Custom SVG remains an option if future views require it, but no additional libraries are bundled.
+- **Dark mode:** _Future work._ Light theme only for Phase 3. PatternFly's design tokens make adding dark mode later a token swap, not a rewrite.
+- **PF5 → PF6 porting strategy:** _Moot._ v1 already uses PatternFly 6 — no PF version migration was needed. Components were ported with data model and terminology changes only.
 
 ## Dependencies
 

@@ -59,7 +59,7 @@ Component inventory from the [Sardeenz v1 codebase](https://github.com/rh-aiserv
 | --- | --- |
 | Benchmark* (6 components) | v2 Phase 3 scope doesn't include benchmarking |
 | Inference* (12 components) | v2 Phase 3 scope doesn't include inference/chat playground |
-| AuthContext / ProtectedRoute | v2 Phase 3 defers authentication (out of scope) |
+| AuthContext / ProtectedRoute | v1 auth patterns were reference material only — v2 implements JWT-based auth from scratch with three modes (`none` / `simple` / `oauth`); see `dashboard/server/plugins/auth.ts` and `dashboard/src/contexts/AuthContext.tsx` |
 | MoveModelDialog | v2 doesn't support runtime GPU reassignment |
 | SaveConfigurationDialog | v2 has no equivalent configuration save/load |
 | LoadConfigurationDialog | Same as above |
