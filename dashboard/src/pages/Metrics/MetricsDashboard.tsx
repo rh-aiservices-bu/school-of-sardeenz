@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Card,
@@ -6,13 +6,19 @@ import {
   CardHeader,
   CardTitle,
   Content,
+  DatePicker,
   EmptyState,
   EmptyStateBody,
   Grid,
   GridItem,
+  HelperText,
+  HelperTextItem,
   PageSection,
   Spinner,
+  Split,
+  SplitItem,
   Switch,
+  TimePicker,
   ToggleGroup,
   ToggleGroupItem,
   Toolbar,
@@ -42,6 +48,7 @@ import {
   useMemoryHistory,
   useOperationDurations,
   type TimeRange,
+  type CustomRange,
 } from '../../hooks/useMetrics';
 import { useEventStream } from '../../hooks/useEventStream';
 import { formatBytes } from '../../utils/format';
@@ -429,28 +436,78 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
 // Main component
 // ---------------------------------------------------------------------------
 
+function formatDateForPicker(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatTimeForPicker(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function parseDateAndTime(dateStr: string, timeStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  return new Date(year, month - 1, day, hours, minutes);
+}
+
 export function MetricsDashboard() {
   const { t } = useTranslation('metrics');
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1h');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const { status: sseStatus } = useEventStream();
 
+  // Custom range state
+  const defaultEnd = new Date();
+  const defaultStart = new Date(defaultEnd.getTime() - 60 * 60 * 1000);
+  const [customStartDate, setCustomStartDate] = useState(formatDateForPicker(defaultStart));
+  const [customStartTime, setCustomStartTime] = useState(formatTimeForPicker(defaultStart));
+  const [customEndDate, setCustomEndDate] = useState(formatDateForPicker(defaultEnd));
+  const [customEndTime, setCustomEndTime] = useState(formatTimeForPicker(defaultEnd));
+
+  const customRange: CustomRange | undefined = useMemo(() => {
+    if (selectedRange !== 'custom') return undefined;
+    const start = parseDateAndTime(customStartDate, customStartTime);
+    const end = parseDateAndTime(customEndDate, customEndTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return undefined;
+    return { start, end };
+  }, [selectedRange, customStartDate, customStartTime, customEndDate, customEndTime]);
+
+  const isCustomValid = selectedRange !== 'custom' || (
+    customRange != null && customRange.end > customRange.start
+  );
+
+  const isCustom = selectedRange === 'custom';
+
+  // Disable auto-refresh for custom (historical) ranges
+  const effectiveAutoRefresh = isCustom ? false : autoRefresh;
+
   // When SSE is degraded and auto-refresh is on, poll more aggressively to
   // compensate for the loss of real-time push updates.
-  const refetchInterval: number | false = autoRefresh
+  const refetchInterval: number | false = effectiveAutoRefresh
     ? sseStatus === 'degraded' ? 5_000 : 30_000
     : false;
 
-  const latency = useLatencyMetrics(selectedRange, refetchInterval);
-  const throughput = useThroughputMetrics(selectedRange, refetchInterval);
-  const memory = useMemoryMetrics(selectedRange, refetchInterval);
-  const connections = useConnectionMetrics(selectedRange, refetchInterval);
-  const parkingDuration = useParkingDuration(selectedRange, refetchInterval);
-  const wakeTriggers = useWakeTriggers(selectedRange, refetchInterval);
-  const stateTransitions = useStateTransitions(selectedRange, refetchInterval);
-  const evictions = useEvictions(selectedRange, refetchInterval);
-  const memoryHistory = useMemoryHistory(selectedRange, refetchInterval);
-  const operations = useOperationDurations(selectedRange, refetchInterval);
+  const hookCustom = isCustomValid ? customRange : undefined;
+  const latency = useLatencyMetrics(selectedRange, refetchInterval, hookCustom);
+  const throughput = useThroughputMetrics(selectedRange, refetchInterval, hookCustom);
+  const memory = useMemoryMetrics(selectedRange, refetchInterval, hookCustom);
+  const connections = useConnectionMetrics(selectedRange, refetchInterval, hookCustom);
+  const parkingDuration = useParkingDuration(selectedRange, refetchInterval, hookCustom);
+  const wakeTriggers = useWakeTriggers(selectedRange, refetchInterval, hookCustom);
+  const stateTransitions = useStateTransitions(selectedRange, refetchInterval, hookCustom);
+  const evictions = useEvictions(selectedRange, refetchInterval, hookCustom);
+  const memoryHistory = useMemoryHistory(selectedRange, refetchInterval, hookCustom);
+  const operations = useOperationDurations(selectedRange, refetchInterval, hookCustom);
+
+  const handlePresetSelect = useCallback((range: TimeRange) => {
+    setSelectedRange(range);
+    if (range !== 'custom') {
+      setAutoRefresh(true);
+    }
+  }, []);
 
   // Parse latency multi-quantile response
   const latencyData = latency.data as { p50?: unknown; p95?: unknown; p99?: unknown } | undefined;
@@ -517,7 +574,7 @@ export function MetricsDashboard() {
     );
   }, [operationsData]);
 
-  const timeRanges: TimeRange[] = ['15m', '1h', '6h', '24h', '7d'];
+  const presetRanges: Exclude<TimeRange, 'custom'>[] = ['15m', '1h', '6h', '24h', '7d'];
 
   return (
     <>
@@ -533,17 +590,25 @@ export function MetricsDashboard() {
             <ToolbarGroup>
               <ToolbarItem>
                 <ToggleGroup aria-label={t('timeRangeSelector')}>
-                  {timeRanges.map((range) => (
+                  {presetRanges.map((range) => (
                     <ToggleGroupItem
                       key={range}
                       text={range}
                       isSelected={selectedRange === range}
                       onChange={(_event, selected) => {
-                        if (selected) setSelectedRange(range);
+                        if (selected) handlePresetSelect(range);
                       }}
                       buttonId={`time-range-${range}`}
                     />
                   ))}
+                  <ToggleGroupItem
+                    text={t('customRange')}
+                    isSelected={selectedRange === 'custom'}
+                    onChange={(_event, selected) => {
+                      if (selected) setSelectedRange('custom');
+                    }}
+                    buttonId="time-range-custom"
+                  />
                 </ToggleGroup>
               </ToolbarItem>
             </ToolbarGroup>
@@ -552,12 +617,62 @@ export function MetricsDashboard() {
                 <Switch
                   id="auto-refresh-switch"
                   label={t('autoRefresh')}
-                  isChecked={autoRefresh}
+                  isChecked={effectiveAutoRefresh}
+                  isDisabled={isCustom}
                   onChange={(_event, checked) => setAutoRefresh(checked)}
                 />
               </ToolbarItem>
             </ToolbarGroup>
           </ToolbarContent>
+          {isCustom && (
+            <ToolbarContent>
+              <ToolbarItem>
+                <Split hasGutter>
+                  <SplitItem>
+                    <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', marginRight: 'var(--pf-t--global--spacer--sm)' }}>
+                      {t('customRangeStart')}
+                    </span>
+                    <DatePicker
+                      value={customStartDate}
+                      onChange={(_event, value) => setCustomStartDate(value)}
+                      aria-label={t('customRangeStart')}
+                    />
+                    <TimePicker
+                      time={customStartTime}
+                      onChange={(_event, time) => setCustomStartTime(time)}
+                      is24Hour
+                      aria-label={t('customRangeStartTime')}
+                      style={{ marginLeft: 'var(--pf-t--global--spacer--sm)' }}
+                    />
+                  </SplitItem>
+                  <SplitItem>
+                    <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', marginRight: 'var(--pf-t--global--spacer--sm)' }}>
+                      {t('customRangeEnd')}
+                    </span>
+                    <DatePicker
+                      value={customEndDate}
+                      onChange={(_event, value) => setCustomEndDate(value)}
+                      aria-label={t('customRangeEnd')}
+                    />
+                    <TimePicker
+                      time={customEndTime}
+                      onChange={(_event, time) => setCustomEndTime(time)}
+                      is24Hour
+                      aria-label={t('customRangeEndTime')}
+                      style={{ marginLeft: 'var(--pf-t--global--spacer--sm)' }}
+                    />
+                  </SplitItem>
+                </Split>
+              </ToolbarItem>
+              {!isCustomValid && (
+                <ToolbarItem>
+                  <HelperText>
+                    <HelperTextItem variant="error">{t('customRangeInvalid')}</HelperTextItem>
+                  </HelperText>
+                </ToolbarItem>
+              )}
+            </ToolbarContent>
+          )}
         </Toolbar>
       </PageSection>
 

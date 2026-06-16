@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Custom date/time range picker for MetricsDashboard (closes #62): operators
+  can select arbitrary historical time windows in addition to the existing
+  preset ranges (15m, 1h, 6h, 24h, 7d). Auto-refresh is disabled while a
+  custom range is active.
+- Clickable model-state breakdown in ClusterOverview (closes #62): clicking a
+  state row navigates to the model list pre-filtered by that state.
+- Optimistic updates for model mutations (closes #62): deploy, sleep, wake,
+  and delete actions immediately reflect transitional states (PENDING,
+  DRAINING, STARTING, STOPPING) in the UI before server confirmation, with
+  automatic rollback on error.
+- Sort by state and memory in the model list (closes #62): the State and
+  Memory columns are now sortable, using lifecycle-state ordering and numeric
+  memory comparison respectively.
+
+### Changed
+
+- Dynamic runner options in the deploy form de-scoped to Phase 4 (#67):
+  requires adding `runnerCapabilities` to the `WorkerInfo` list endpoint and
+  a corresponding backend change. The dropdown remains hardcoded for now.
+
 - Per-device model attribution for multi-GPU workers (closes #60): the
   control plane now persists device placement indices in Redis `ModelState`
   during model deployment. The `WorkerModelInfo` and `ModelDetail` contracts

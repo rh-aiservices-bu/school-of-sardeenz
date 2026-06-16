@@ -21,6 +21,7 @@ import {
   ServerIcon,
 } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
 import { useClusterStatus } from '../../hooks/useCluster';
 import { useEventStream } from '../../hooks/useEventStream';
@@ -386,9 +387,34 @@ function stateCountFromStatus(
   }
 }
 
+const OTHER_STATES = [
+  ModelLifecycleState.PENDING,
+  ModelLifecycleState.DRAINING,
+  ModelLifecycleState.STOPPING,
+  ModelLifecycleState.STOPPED,
+];
+
 function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
+  const navigate = useNavigate();
   const other = status.modelCounts.other ?? 0;
+
+  const stateRowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'var(--pf-t--global--spacer--md)',
+    cursor: 'pointer',
+    padding: 'var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm)',
+    borderRadius: 'var(--pf-t--global--border--radius--small)',
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, url: string) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void navigate(url);
+    }
+  };
 
   return (
     <Card>
@@ -407,17 +433,17 @@ function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
         >
           {MODEL_STATE_DISPLAY_ORDER.map((state) => {
             const count = stateCountFromStatus(status, state);
-            // Skip zero-count states (except ACTIVE always shown)
             if (count === 0 && state !== ModelLifecycleState.ACTIVE) return null;
+            const url = `/models?state=${state}`;
             return (
               <div
                 key={state}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 'var(--pf-t--global--spacer--md)',
-                }}
+                role="link"
+                tabIndex={0}
+                onClick={() => void navigate(url)}
+                onKeyDown={(e) => handleKeyDown(e, url)}
+                aria-label={t('overview.modelStateBreakdown.viewModels', { state, count })}
+                style={stateRowStyle}
               >
                 <StateLabel state={state} isCompact />
                 <span
@@ -435,12 +461,12 @@ function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
           })}
           {other > 0 && (
             <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 'var(--pf-t--global--spacer--md)',
-              }}
+              role="link"
+              tabIndex={0}
+              onClick={() => void navigate(`/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)}
+              onKeyDown={(e) => handleKeyDown(e, `/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)}
+              aria-label={t('overview.modelStateBreakdown.viewModels', { state: t('overview.modelStateBreakdown.other'), count: other })}
+              style={stateRowStyle}
             >
               <Label color="grey" isCompact>
                 {t('overview.modelStateBreakdown.other')}

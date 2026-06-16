@@ -43,7 +43,8 @@
     },
     "modelStateBreakdown": {
       "title": "Model State Breakdown",
-      "other": "Other"
+      "other": "Other",
+      "viewModels": "View {{count}} {{state}} models"
     },
     "recentEvents": {
       "title": "Recent Events",

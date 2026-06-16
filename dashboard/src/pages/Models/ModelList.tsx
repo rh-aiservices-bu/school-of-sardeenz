@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   PageSection,
@@ -43,8 +43,26 @@ import { StateLabel } from '../../components/StateLabel';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
 
-type SortField = 'modelName' | 'lastInferenceAt';
+type SortField = 'modelName' | 'state' | 'currentMemory' | 'lastInferenceAt';
 type SortDirection = 'asc' | 'desc';
+
+const STATE_SORT_ORDER: Record<ModelLifecycleState, number> = {
+  [ModelLifecycleState.ACTIVE]: 0,
+  [ModelLifecycleState.STARTING]: 1,
+  [ModelLifecycleState.PENDING]: 2,
+  [ModelLifecycleState.DRAINING]: 3,
+  [ModelLifecycleState.SLEEPING]: 4,
+  [ModelLifecycleState.STOPPING]: 5,
+  [ModelLifecycleState.STOPPED]: 6,
+  [ModelLifecycleState.ERROR]: 7,
+};
+
+const SORT_COLUMN_INDEX: Record<SortField, number> = {
+  modelName: 1,
+  state: 2,
+  currentMemory: 5,
+  lastInferenceAt: 6,
+};
 
 const ALL_STATES: ModelLifecycleState[] = [
   ModelLifecycleState.PENDING,
@@ -81,6 +99,7 @@ export function ModelList() {
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isAdmin } = useAuth();
   const { data: models, isLoading, error } = useModels();
   const sleepModel = useSleepModel();
@@ -91,9 +110,13 @@ export function ModelList() {
   const [sortField, setSortField] = useState<SortField>('modelName');
   const [sortDir, setSortDir] = useState<SortDirection>('asc');
 
-  // State filter
+  // State filter — initialise from URL search params (e.g. ?state=ACTIVE&state=SLEEPING)
   const [stateFilterOpen, setStateFilterOpen] = useState(false);
-  const [selectedStates, setSelectedStates] = useState<string[]>([]);
+  const [selectedStates, setSelectedStates] = useState<string[]>(() =>
+    searchParams.getAll('state').filter((s): s is ModelLifecycleState =>
+      ALL_STATES.includes(s as ModelLifecycleState),
+    ),
+  );
 
   // Runner-type filter
   const [runnerFilterOpen, setRunnerFilterOpen] = useState(false);
@@ -130,10 +153,10 @@ export function ModelList() {
   };
 
   const getSortParams = (field: SortField): ThProps['sort'] => {
-    const columnIndex = field === 'modelName' ? 1 : 6;
+    const columnIndex = SORT_COLUMN_INDEX[field];
     return {
       sortBy: {
-        index: sortField === 'modelName' ? 1 : 6,
+        index: SORT_COLUMN_INDEX[sortField],
         direction: sortDir,
       },
       onSort: () => handleSort(field),
@@ -163,12 +186,22 @@ export function ModelList() {
     .filter((m) => selectedRunners.length === 0 || selectedRunners.includes(m.runnerType))
     .sort((a, b) => {
       let cmp = 0;
-      if (sortField === 'modelName') {
-        cmp = a.modelName.localeCompare(b.modelName);
-      } else {
-        const aTime = a.lastInferenceAt ? new Date(a.lastInferenceAt).getTime() : 0;
-        const bTime = b.lastInferenceAt ? new Date(b.lastInferenceAt).getTime() : 0;
-        cmp = aTime - bTime;
+      switch (sortField) {
+        case 'modelName':
+          cmp = a.modelName.localeCompare(b.modelName);
+          break;
+        case 'state':
+          cmp = STATE_SORT_ORDER[a.state] - STATE_SORT_ORDER[b.state];
+          break;
+        case 'currentMemory':
+          cmp = (a.currentMemory ?? -1) - (b.currentMemory ?? -1);
+          break;
+        case 'lastInferenceAt': {
+          const aTime = a.lastInferenceAt ? new Date(a.lastInferenceAt).getTime() : 0;
+          const bTime = b.lastInferenceAt ? new Date(b.lastInferenceAt).getTime() : 0;
+          cmp = aTime - bTime;
+          break;
+        }
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
@@ -537,10 +570,10 @@ export function ModelList() {
                   />
                 )}
                 <Th sort={getSortParams('modelName')}>{t('list.table.modelName')}</Th>
-                <Th>{t('list.table.state')}</Th>
+                <Th sort={getSortParams('state')}>{t('list.table.state')}</Th>
                 <Th>{t('list.table.runnerType')}</Th>
                 <Th>{t('list.table.worker')}</Th>
-                <Th>{t('list.table.memory')}</Th>
+                <Th sort={getSortParams('currentMemory')}>{t('list.table.memory')}</Th>
                 <Th sort={getSortParams('lastInferenceAt')}>{t('list.table.lastInference')}</Th>
                 <Th>{t('list.table.pinned')}</Th>
                 {isAdmin && <Th aria-label={t('list.table.actions')} />}

@@ -466,7 +466,7 @@ PatternFly `Form` in a full page (not a modal, since the form has enough fields 
 | Field | Type | Validation |
 | --- | --- | --- |
 | Model Name | `TextInput` | Required, unique (show 409 error inline) |
-| Runner Type | `FormSelect` | Required, populated from worker capabilities |
+| Runner Type | `FormSelect` | Required, hardcoded list (dynamic population from worker capabilities de-scoped to Phase 4 — requires adding `runnerCapabilities` to the `WorkerInfo` list endpoint and a backend change; see #67) |
 | Model Path | `TextInput` | Required, must start with `/` |
 | Required Memory | `TextInput` + unit selector (GiB/MiB) | Required, positive integer |
 | Device Type | `FormSelect` | Optional (`CUDA`, `ROCM`, `CPU`), default "Any" |
