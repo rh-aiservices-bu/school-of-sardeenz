@@ -19,10 +19,16 @@ export function registerProbes(app: FastifyInstance, deps: RouteDeps): void {
       prometheus: promHealthy ? 'ok' : 'warning',
     };
 
-    const ready = cpHealthy && redisHealthy;
+    // The dashboard stays ready in degraded read-only mode as long as at
+    // least one data source (control plane OR Redis) is available.  Only
+    // report not-ready when both are down and no data can be served.
+    const ready = cpHealthy || redisHealthy;
+    const degraded = ready && !(cpHealthy && redisHealthy);
+
+    const status = degraded ? 'degraded' : ready ? 'ready' : 'not_ready';
 
     return reply.code(ready ? 200 : 503).send({
-      status: ready ? 'ready' : 'not_ready',
+      status,
       checks,
     });
   });
