@@ -75,11 +75,7 @@ dev-dashboard:
 	npm run dev -w @sardeenz/dashboard
 
 dev-proxy:
-ifdef CARGO
-	cd proxy && cargo watch -x run
-else
-	$(error Rust toolchain not installed — see docs/development/setup.md)
-endif
+	./scripts/dev-proxy.sh
 
 # --- Cleanup ---
 

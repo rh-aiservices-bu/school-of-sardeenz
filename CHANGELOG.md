@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Dev server logging infrastructure: `dev:logged` scripts pipe component output
+  to `logs/` via `tee` (proxy, control-plane, dashboard, BFF server).
+  Convenience scripts for tailing (`logs:proxy`, `logs:cp`, `logs:dashboard`,
+  `logs:bff`, `logs:all`) and clearing (`logs:clear`). Root `dev` and
+  `dev:logged` scripts run all four components concurrently with colored,
+  prefixed output. The proxy gracefully skips if Rust is not installed.
 - Redis-backed E2E test harness with three core resilience scenarios (#57):
   degraded mode with Redis fallback, SSE-driven model state transitions via
   Redis pub/sub, and multi-GPU VRAM visualization with known proportions.

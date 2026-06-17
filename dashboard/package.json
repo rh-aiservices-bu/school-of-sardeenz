@@ -4,13 +4,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:logged": "mkdir -p ../logs && vite 2>&1 | tee ../logs/dashboard.log",
     "dev:server": "node --import tsx server/index.ts",
+    "dev:server:logged": "mkdir -p ../logs && node --import tsx server/index.ts 2>&1 | tee ../logs/dashboard-server.log",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "logs": "tail -f ../logs/dashboard.log",
+    "logs:server": "tail -f ../logs/dashboard-server.log",
+    "logs:clear": "rm -f ../logs/dashboard.log ../logs/dashboard-server.log"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

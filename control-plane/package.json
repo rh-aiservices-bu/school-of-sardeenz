@@ -7,10 +7,13 @@
   "scripts": {
     "build": "tsc --build",
     "dev": "node --import tsx src/index.ts",
+    "dev:logged": "mkdir -p ../logs && node --import tsx src/index.ts 2>&1 | tee ../logs/control-plane.log",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "logs": "tail -f ../logs/control-plane.log",
+    "logs:clear": "rm -f ../logs/control-plane.log"
   },
   "dependencies": {
     "@sardeenz/types": "*",
