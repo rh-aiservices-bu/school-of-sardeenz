@@ -39,11 +39,7 @@ class MockRedis {
    * SCAN mock — returns all matching keys in a single cursor iteration.
    * Supports basic glob patterns with `*` as wildcard.
    */
-  scan(
-    _cursor: string,
-    _match: string,
-    pattern: string,
-  ): Promise<[string, string[]]> {
+  scan(_cursor: string, _match: string, pattern: string): Promise<[string, string[]]> {
     const regex = new RegExp(
       '^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$',
     );

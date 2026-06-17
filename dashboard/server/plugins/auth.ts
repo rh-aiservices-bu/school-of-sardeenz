@@ -10,7 +10,15 @@ export interface JwtPayload {
 }
 
 /** Routes that never require authentication. */
-const PUBLIC_PATHS = ['/api/health', '/api/auth/config', '/api/auth/login', '/api/auth/callback', '/api/auth/logout', '/healthz', '/readyz'];
+const PUBLIC_PATHS = [
+  '/api/health',
+  '/api/auth/config',
+  '/api/auth/login',
+  '/api/auth/callback',
+  '/api/auth/logout',
+  '/healthz',
+  '/readyz',
+];
 
 function isPublicRoute(url: string): boolean {
   // Strip query string before matching
@@ -45,7 +53,9 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): P
             return authHeader.slice(7);
           }
           // 2. HttpOnly cookie (SSE / EventSource — browser sends automatically)
-          const cookieToken = (request.cookies as Record<string, string> | undefined)?.['sardeenz_sse'];
+          const cookieToken = (request.cookies as Record<string, string> | undefined)?.[
+            'sardeenz_sse'
+          ];
           if (cookieToken) {
             return cookieToken;
           }
@@ -88,7 +98,8 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): P
       }
 
       // `admin` role implies `admin-readonly`
-      const hasRole = user.roles.includes(role) || (role === 'admin-readonly' && user.roles.includes('admin'));
+      const hasRole =
+        user.roles.includes(role) || (role === 'admin-readonly' && user.roles.includes('admin'));
 
       if (!hasRole) {
         return reply.code(403).send({ error: 'Forbidden', code: 'FORBIDDEN' });

@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::{TestProxy, insert_sleeping_model, MockControlPlaneBuilder};
 use crate::common::proxy_builder::TestProxyConfig;
+use crate::common::{insert_sleeping_model, MockControlPlaneBuilder, TestProxy};
 
 #[tokio::test]
 async fn test_per_model_parking_limit() {
@@ -45,9 +45,7 @@ async fn test_per_model_parking_limit() {
         let c = client.clone();
         let url = format!("{}/v1/chat/completions", proxy.proxy_url());
         let p = payload.clone();
-        handles.push(tokio::spawn(async move {
-            c.post(url).json(&p).send().await
-        }));
+        handles.push(tokio::spawn(async move { c.post(url).json(&p).send().await }));
     }
 
     // Give the parked requests a moment to register.
@@ -109,9 +107,7 @@ async fn test_global_parking_limit() {
             "model": model,
             "messages": [{"role": "user", "content": "Hi"}]
         });
-        handles.push(tokio::spawn(async move {
-            c.post(url).json(&p).send().await
-        }));
+        handles.push(tokio::spawn(async move { c.post(url).json(&p).send().await }));
     }
 
     tokio::time::sleep(Duration::from_millis(200)).await;

@@ -19,8 +19,7 @@ import { WorkerClient } from '../../../clients/worker.js';
 
 const REDIS_URL = process.env['SARDEENZ_REDIS_URL'] ?? 'redis://localhost:6379/1';
 const DATABASE_URL =
-  process.env['SARDEENZ_DATABASE_URL'] ??
-  'postgresql://sardeenz:sardeenz@localhost:5432/sardeenz';
+  process.env['SARDEENZ_DATABASE_URL'] ?? 'postgresql://sardeenz:sardeenz@localhost:5432/sardeenz';
 
 export interface TestHarness {
   redis: Redis;
@@ -134,7 +133,8 @@ export function createHarness(): TestHarness {
       reportedAt: new Date().toISOString(),
     };
 
-    await redis.pipeline()
+    await redis
+      .pipeline()
       .set(infoKey, JSON.stringify(info))
       .set(heartbeatKey, new Date().toISOString())
       .set(memoryKey, JSON.stringify(memoryReport))
@@ -148,7 +148,11 @@ export function createHarness(): TestHarness {
     await redis.connect();
     const migrationsDir = join(
       dirname(fileURLToPath(import.meta.url)),
-      '..', '..', '..', '..', 'migrations',
+      '..',
+      '..',
+      '..',
+      '..',
+      'migrations',
     );
     await runMigrations(db, migrationsDir);
     await db.query('TRUNCATE models, memory_profiles, benchmarks, settings CASCADE');

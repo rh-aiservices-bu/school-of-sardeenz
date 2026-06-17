@@ -17,9 +17,12 @@ export function useModels(state?: string) {
   });
 
   useEffect(() => {
-    const isFallback = (raw.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
+    const isFallback =
+      (raw.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
     reportFallback('models-list', isFallback);
-    return () => { reportFallback('models-list', false); };
+    return () => {
+      reportFallback('models-list', false);
+    };
   }, [raw.data, reportFallback]);
 
   return { ...raw, data: raw.data?.models };
@@ -43,9 +46,12 @@ export function useModel(name: string) {
   });
 
   useEffect(() => {
-    const isFallback = (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
+    const isFallback =
+      (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
     reportFallback(`model-${name}`, isFallback);
-    return () => { reportFallback(`model-${name}`, false); };
+    return () => {
+      reportFallback(`model-${name}`, false);
+    };
   }, [query.data, name, reportFallback]);
 
   return query;
@@ -67,9 +73,8 @@ function createOptimisticMutation<TArg>(
     onMutate: async (arg: TArg): Promise<{ previous: Snapshot }> => {
       await queryClient.cancelQueries({ queryKey: ['models'] });
       const previous = queryClient.getQueriesData<ModelListData>({ queryKey: ['models'] });
-      queryClient.setQueriesData<ModelListData>(
-        { queryKey: ['models'] },
-        (old) => old ? { ...old, models: updater(old.models, arg) } : old,
+      queryClient.setQueriesData<ModelListData>({ queryKey: ['models'] }, (old) =>
+        old ? { ...old, models: updater(old.models, arg) } : old,
       );
       return { previous };
     },
@@ -89,55 +94,63 @@ function createOptimisticMutation<TArg>(
 
 export function useDeployModel() {
   const queryClient = useQueryClient();
-  return useMutation(createOptimisticMutation<ModelDeploymentRequest>(
-    queryClient,
-    (body) => api.models.deploy(body),
-    (models, body) => [
-      ...models,
-      {
-        modelName: body.modelName,
-        state: ModelLifecycleState.PENDING,
-        runnerType: body.runnerType,
-        requiredMemory: body.requiredMemory,
-        pinned: body.pinned ?? false,
-        createdAt: new Date().toISOString(),
-      },
-    ],
-  ));
+  return useMutation(
+    createOptimisticMutation<ModelDeploymentRequest>(
+      queryClient,
+      (body) => api.models.deploy(body),
+      (models, body) => [
+        ...models,
+        {
+          modelName: body.modelName,
+          state: ModelLifecycleState.PENDING,
+          runnerType: body.runnerType,
+          requiredMemory: body.requiredMemory,
+          pinned: body.pinned ?? false,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    ),
+  );
 }
 
 export function useSleepModel() {
   const queryClient = useQueryClient();
-  return useMutation(createOptimisticMutation<string>(
-    queryClient,
-    (name) => api.models.sleep(name),
-    (models, name) =>
-      models.map((m) =>
-        m.modelName === name ? { ...m, state: ModelLifecycleState.DRAINING } : m,
-      ),
-  ));
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.sleep(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.DRAINING } : m,
+        ),
+    ),
+  );
 }
 
 export function useWakeModel() {
   const queryClient = useQueryClient();
-  return useMutation(createOptimisticMutation<string>(
-    queryClient,
-    (name) => api.models.wake(name),
-    (models, name) =>
-      models.map((m) =>
-        m.modelName === name ? { ...m, state: ModelLifecycleState.STARTING } : m,
-      ),
-  ));
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.wake(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STARTING } : m,
+        ),
+    ),
+  );
 }
 
 export function useDeleteModel() {
   const queryClient = useQueryClient();
-  return useMutation(createOptimisticMutation<string>(
-    queryClient,
-    (name) => api.models.delete(name),
-    (models, name) =>
-      models.map((m) =>
-        m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
-      ),
-  ));
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.delete(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
+        ),
+    ),
+  );
 }

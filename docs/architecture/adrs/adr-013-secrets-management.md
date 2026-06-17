@@ -14,11 +14,11 @@ The proxy already redacts Redis URL credentials before logging (`proxy/src/main.
 
 Secrets are injected via **environment variables** at all stages:
 
-| Stage | Source | Mechanism |
-| --- | --- | --- |
-| Local development | `.env` files, `compose.yaml` | Docker/Podman Compose `environment:` or `env_file:` |
-| CI | Pipeline secret store | Injected as env vars by the CI runner |
-| Production (K8s) | Kubernetes Secrets | Projected into pods as env vars via `envFrom` or `env[].valueFrom.secretKeyRef` |
+| Stage             | Source                       | Mechanism                                                                       |
+| ----------------- | ---------------------------- | ------------------------------------------------------------------------------- |
+| Local development | `.env` files, `compose.yaml` | Docker/Podman Compose `environment:` or `env_file:`                             |
+| CI                | Pipeline secret store        | Injected as env vars by the CI runner                                           |
+| Production (K8s)  | Kubernetes Secrets           | Projected into pods as env vars via `envFrom` or `env[].valueFrom.secretKeyRef` |
 
 No vault integration is planned. If a secrets vault (e.g., HashiCorp Vault, AWS Secrets Manager) becomes necessary, it will be introduced behind the same env-var interface — the application code reads env vars regardless of the upstream secret source.
 
@@ -32,11 +32,11 @@ SARDEENZ_<COMPONENT>_<PURPOSE>_{URL|KEY|SECRET|PASSWORD|TOKEN}
 
 The suffix (`_URL`, `_KEY`, `_SECRET`, `_PASSWORD`, `_TOKEN`) marks a variable as secret-bearing. Examples:
 
-| Variable | Component | Contains |
-| --- | --- | --- |
-| `SARDEENZ_REDIS_URL` | Proxy, Control Plane | Connection URL (may embed credentials) |
-| `SARDEENZ_CP_API_KEY` | Proxy → Control Plane | Inter-component auth token |
-| `SARDEENZ_DB_PASSWORD` | Control Plane | Database password (if applicable) |
+| Variable               | Component             | Contains                               |
+| ---------------------- | --------------------- | -------------------------------------- |
+| `SARDEENZ_REDIS_URL`   | Proxy, Control Plane  | Connection URL (may embed credentials) |
+| `SARDEENZ_CP_API_KEY`  | Proxy → Control Plane | Inter-component auth token             |
+| `SARDEENZ_DB_PASSWORD` | Control Plane         | Database password (if applicable)      |
 
 The suffix-based convention makes secrets greppable for auditing and CI checks.
 

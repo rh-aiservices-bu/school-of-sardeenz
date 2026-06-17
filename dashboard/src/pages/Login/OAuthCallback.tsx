@@ -1,9 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Bullseye,
-  Spinner,
-} from '@patternfly/react-core';
+import { Bullseye, Spinner } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 

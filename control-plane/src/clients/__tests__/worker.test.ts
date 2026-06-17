@@ -42,7 +42,10 @@ describe('WorkerClient', () => {
       const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(url).toBe('http://worker-1:8080/runners');
       expect((opts as Record<string, unknown>).method).toBe('POST');
-      expect(JSON.parse((opts as Record<string, unknown>).body as string)).toMatchObject({ modelName: 'llama-3', runnerType: 'vllm' });
+      expect(JSON.parse((opts as Record<string, unknown>).body as string)).toMatchObject({
+        modelName: 'llama-3',
+        runnerType: 'vllm',
+      });
     });
 
     it('strips trailing slashes from baseUrl', async () => {

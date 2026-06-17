@@ -30,8 +30,8 @@ The control plane reads these keys in a Redis pipeline when building eviction ca
 
 ### Key format
 
-| Key | Value | Written by | Read by |
-| --- | --- | --- | --- |
+| Key                                   | Value                     | Written by                                   | Read by                                           |
+| ------------------------------------- | ------------------------- | -------------------------------------------- | ------------------------------------------------- |
 | `{prefix}:inference:last:{modelName}` | ISO-8601 timestamp string | Proxy (on each inference request, debounced) | Control plane (during eviction candidate scoring) |
 
 The key prefix matches the existing `SARDEENZ_REDIS_KEY_PREFIX` configuration, consistent with all other Redis keys in the system (ADR-009).

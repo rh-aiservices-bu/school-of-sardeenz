@@ -37,14 +37,30 @@ const mockConfig: Config = {
 const sampleWorkerInfo: WorkerInfo = {
   workerId: 'worker-1',
   status: WorkerStatus.ONLINE,
-  devices: [{ deviceIndex: 0, deviceType: 'GPU', memoryTotalBytes: 8_000_000_000, memoryUsedBytes: 2_000_000_000, memoryAvailableBytes: 6_000_000_000 }],
+  devices: [
+    {
+      deviceIndex: 0,
+      deviceType: 'GPU',
+      memoryTotalBytes: 8_000_000_000,
+      memoryUsedBytes: 2_000_000_000,
+      memoryAvailableBytes: 6_000_000_000,
+    },
+  ],
   modelCount: 1,
 };
 
 const sampleWorkerDetail: WorkerDetail = {
   workerId: 'worker-1',
   status: WorkerStatus.ONLINE,
-  devices: [{ deviceIndex: 0, deviceType: 'GPU', memoryTotalBytes: 8_000_000_000, memoryUsedBytes: 2_000_000_000, memoryAvailableBytes: 6_000_000_000 }],
+  devices: [
+    {
+      deviceIndex: 0,
+      deviceType: 'GPU',
+      memoryTotalBytes: 8_000_000_000,
+      memoryUsedBytes: 2_000_000_000,
+      memoryAvailableBytes: 6_000_000_000,
+    },
+  ],
   models: [{ modelName: 'llama-3', state: ModelLifecycleState.ACTIVE }],
   runnerCapabilities: [],
   joinedAt: '2026-01-01T00:00:00.000Z',
@@ -137,7 +153,10 @@ describe('GET /api/workers', () => {
     await app.close();
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ source: 'redis-fallback', workers: [{ workerId: 'worker-1' }] });
+    expect(res.json()).toMatchObject({
+      source: 'redis-fallback',
+      workers: [{ workerId: 'worker-1' }],
+    });
   });
 });
 

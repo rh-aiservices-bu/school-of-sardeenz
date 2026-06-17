@@ -96,7 +96,12 @@ describe('GET /api/cluster/status', () => {
   });
 
   it('proxies to control plane and returns the response on success', async () => {
-    const statusData = { workerCount: 2, workersOnline: 2, modelCounts: { total: 1, active: 1, sleeping: 0, starting: 0, error: 0, other: 0 }, memory: { totalBytes: 1000, usedBytes: 500, availableBytes: 500 } };
+    const statusData = {
+      workerCount: 2,
+      workersOnline: 2,
+      modelCounts: { total: 1, active: 1, sleeping: 0, starting: 0, error: 0, other: 0 },
+      memory: { totalBytes: 1000, usedBytes: 500, availableBytes: 500 },
+    };
     getClusterStatusFn.mockResolvedValue({ status: 200, data: statusData });
 
     const app = await buildApp(buildDeps());
@@ -110,7 +115,12 @@ describe('GET /api/cluster/status', () => {
 
   it('falls back to Redis when control plane throws', async () => {
     getClusterStatusFn.mockRejectedValue(BffError.upstreamError('Control plane down'));
-    getRedisClusterStatusFn.mockResolvedValue({ workerCount: 1, workersOnline: 1, modelCounts: { total: 0, active: 0, sleeping: 0, starting: 0, error: 0, other: 0 }, memory: { totalBytes: 500, usedBytes: 0, availableBytes: 500 } });
+    getRedisClusterStatusFn.mockResolvedValue({
+      workerCount: 1,
+      workersOnline: 1,
+      modelCounts: { total: 0, active: 0, sleeping: 0, starting: 0, error: 0, other: 0 },
+      memory: { totalBytes: 500, usedBytes: 0, availableBytes: 500 },
+    });
 
     const app = await buildApp(buildDeps());
     const res = await app.inject({ method: 'GET', url: '/api/cluster/status' });

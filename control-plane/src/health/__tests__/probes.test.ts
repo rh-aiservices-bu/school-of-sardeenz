@@ -25,18 +25,14 @@ async function buildApp(deps: ProbesDeps) {
 
 describe('/healthz', () => {
   it('returns 200 for the leader', async () => {
-    const app = await buildApp(
-      makeHealthyDeps({ leaderElection: { isLeader: true } }),
-    );
+    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: true } }));
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
     await app.close();
   });
 
   it('returns 200 for a follower — liveness is independent of leadership', async () => {
-    const app = await buildApp(
-      makeHealthyDeps({ leaderElection: { isLeader: false } }),
-    );
+    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: false } }));
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
     await app.close();
@@ -56,9 +52,7 @@ describe('/readyz', () => {
   });
 
   it('returns 200 when leader and infra is healthy', async () => {
-    const app = await buildApp(
-      makeHealthyDeps({ leaderElection: { isLeader: true } }),
-    );
+    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: true } }));
     const res = await app.inject({ method: 'GET', url: '/readyz' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body) as { status: string; checks: Record<string, string> };
@@ -68,9 +62,7 @@ describe('/readyz', () => {
   });
 
   it('returns 503 for a follower even when infra is healthy (regression for #36)', async () => {
-    const app = await buildApp(
-      makeHealthyDeps({ leaderElection: { isLeader: false } }),
-    );
+    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: false } }));
     const res = await app.inject({ method: 'GET', url: '/readyz' });
     expect(res.statusCode).toBe(503);
     const body = JSON.parse(res.body) as { status: string; checks: Record<string, string> };

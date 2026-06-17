@@ -98,44 +98,48 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     expect(entry!.endpoints[0].port).toBe(runner.port);
   });
 
-  it('deploy timeout: runner stays STARTING → model transitions to ERROR', { timeout: 15_000 }, async () => {
-    const WORKER_ID = 'w2';
-    const MODEL = 'stuck-model';
-    const MEM = 4_000_000_000;
+  it(
+    'deploy timeout: runner stays STARTING → model transitions to ERROR',
+    { timeout: 15_000 },
+    async () => {
+      const WORKER_ID = 'w2';
+      const MODEL = 'stuck-model';
+      const MEM = 4_000_000_000;
 
-    await harness.registerWorker({
-      workerId: WORKER_ID,
-      managementUrl: worker.url,
-      devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
-    });
-
-    await harness.modelRepository.create({
-      name: MODEL,
-      runnerType: 'vllm',
-      modelPath: '/models/stuck',
-      requiredMemory: MEM,
-      deviceType: 'CUDA',
-    });
-
-    await harness.lifecycle.createModel(MODEL, WORKER_ID);
-    await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING);
-
-    // Runner stays in STARTING — never becomes READY
-    runner.setHealthState(RunnerState.STARTING);
-
-    await expect(
-      harness.deployOrchestration.deployModel({
-        modelName: MODEL,
+      await harness.registerWorker({
         workerId: WORKER_ID,
+        managementUrl: worker.url,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+      });
+
+      await harness.modelRepository.create({
+        name: MODEL,
         runnerType: 'vllm',
         modelPath: '/models/stuck',
         requiredMemory: MEM,
-        tensorParallel: 1,
-        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
-      }),
-    ).rejects.toThrow(/timeout/i);
+        deviceType: 'CUDA',
+      });
 
-    const state = await harness.lifecycle.getState(MODEL);
-    expect(state?.state).toBe(ModelLifecycleState.ERROR);
-  });
+      await harness.lifecycle.createModel(MODEL, WORKER_ID);
+      await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING);
+
+      // Runner stays in STARTING — never becomes READY
+      runner.setHealthState(RunnerState.STARTING);
+
+      await expect(
+        harness.deployOrchestration.deployModel({
+          modelName: MODEL,
+          workerId: WORKER_ID,
+          runnerType: 'vllm',
+          modelPath: '/models/stuck',
+          requiredMemory: MEM,
+          tensorParallel: 1,
+          devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        }),
+      ).rejects.toThrow(/timeout/i);
+
+      const state = await harness.lifecycle.getState(MODEL);
+      expect(state?.state).toBe(ModelLifecycleState.ERROR);
+    },
+  );
 });

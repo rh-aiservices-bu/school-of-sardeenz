@@ -1,9 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import {
-  LoginPage,
-  LoginForm,
-} from '@patternfly/react-core';
+import { LoginPage, LoginForm } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 

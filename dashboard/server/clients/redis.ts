@@ -121,7 +121,8 @@ export class RedisReader {
       // Prefer the dedicated inference timestamp key over the blob field.
       const inferenceRaw = await this.client.get(`${this.prefix}:inference:last:${name}`);
       const lastInferenceAt =
-        inferenceRaw ?? (typeof blob['lastInferenceAt'] === 'string' ? blob['lastInferenceAt'] : null);
+        inferenceRaw ??
+        (typeof blob['lastInferenceAt'] === 'string' ? blob['lastInferenceAt'] : null);
       if (lastInferenceAt) model.lastInferenceAt = lastInferenceAt;
 
       return model;
@@ -200,9 +201,7 @@ export class RedisReader {
             : WorkerStatus.OFFLINE;
 
         const devicesRaw = obj['devices'];
-        const devices = Array.isArray(devicesRaw)
-          ? (devicesRaw as WorkerInfo['devices'])
-          : [];
+        const devices = Array.isArray(devicesRaw) ? (devicesRaw as WorkerInfo['devices']) : [];
 
         const worker: WorkerInfo = {
           workerId: String(obj['workerId']),
@@ -271,9 +270,7 @@ export class RedisReader {
         const obj = parsed as Record<string, unknown>;
 
         const devicesRaw = obj['devices'];
-        const devices = Array.isArray(devicesRaw)
-          ? (devicesRaw as WorkerInfo['devices'])
-          : [];
+        const devices = Array.isArray(devicesRaw) ? (devicesRaw as WorkerInfo['devices']) : [];
 
         // Derive status from heartbeat age (same logic as control plane).
         const HEARTBEAT_TIMEOUT_SECS = 30;

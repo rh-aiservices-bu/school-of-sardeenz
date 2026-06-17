@@ -3,7 +3,7 @@
 
 use reqwest::StatusCode;
 
-use crate::common::{MockRunner, TestProxy, insert_active_model_multi};
+use crate::common::{insert_active_model_multi, MockRunner, TestProxy};
 
 #[tokio::test]
 async fn test_weighted_round_robin() {
@@ -16,12 +16,8 @@ async fn test_weighted_round_robin() {
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
     // Register both endpoints with their respective weights.
-    insert_active_model_multi(
-        &proxy.routing_cache,
-        model,
-        vec![(heavy.addr, 3), (light.addr, 1)],
-    )
-    .await;
+    insert_active_model_multi(&proxy.routing_cache, model, vec![(heavy.addr, 3), (light.addr, 1)])
+        .await;
 
     let client = reqwest::Client::new();
     let payload = serde_json::json!({
@@ -44,11 +40,7 @@ async fn test_weighted_round_robin() {
     let heavy_count = heavy.request_count();
     let light_count = light.request_count();
 
-    assert_eq!(
-        heavy_count + light_count,
-        TOTAL,
-        "total requests should be {TOTAL}"
-    );
+    assert_eq!(heavy_count + light_count, TOTAL, "total requests should be {TOTAL}");
 
     // Heavy endpoint (weight 3) should get ~75% of traffic.
     // Light endpoint (weight 1) should get ~25%.

@@ -12,9 +12,7 @@ import type { Redis } from '../../clients/redis.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
-function makeModelState(
-  overrides: Partial<ModelState> & { modelName: string },
-): ModelState {
+function makeModelState(overrides: Partial<ModelState> & { modelName: string }): ModelState {
   return {
     state: ModelLifecycleState.ACTIVE,
     workerId: 'w1',
@@ -452,8 +450,8 @@ describe('ReconciliationService', () => {
         CHANNEL,
         expect.stringContaining(ClusterEventType.WORKER_JOINED),
       );
-      const call = mocks.redis.publish.mock.calls.find(
-        (c: string[]) => c[1].includes(ClusterEventType.WORKER_JOINED),
+      const call = mocks.redis.publish.mock.calls.find((c: string[]) =>
+        c[1].includes(ClusterEventType.WORKER_JOINED),
       )!;
       const event = JSON.parse(call[1] as string) as ClusterEvent;
       expect(event.workerId).toBe('new-w1');
@@ -465,17 +463,15 @@ describe('ReconciliationService', () => {
 
       await service.tick();
 
-      const joinCalls = mocks.redis.publish.mock.calls.filter(
-        (c: string[]) => c[1].includes(ClusterEventType.WORKER_JOINED),
+      const joinCalls = mocks.redis.publish.mock.calls.filter((c: string[]) =>
+        c[1].includes(ClusterEventType.WORKER_JOINED),
       );
       expect(joinCalls).toHaveLength(0);
     });
 
     it('publishes WORKER_LEFT before removing a dead worker', async () => {
       mocks.workerPool.getAllWorkers.mockReturnValue([]);
-      mocks.workerPool.getDeadWorkers.mockReturnValue([
-        makeWorker({ workerId: 'dead-w1' }),
-      ]);
+      mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'dead-w1' })]);
       mocks.lifecycle.getAllStates.mockResolvedValue([]);
 
       await service.tick();
@@ -484,8 +480,8 @@ describe('ReconciliationService', () => {
         CHANNEL,
         expect.stringContaining(ClusterEventType.WORKER_LEFT),
       );
-      const call = mocks.redis.publish.mock.calls.find(
-        (c: string[]) => c[1].includes(ClusterEventType.WORKER_LEFT),
+      const call = mocks.redis.publish.mock.calls.find((c: string[]) =>
+        c[1].includes(ClusterEventType.WORKER_LEFT),
       )!;
       const event = JSON.parse(call[1] as string) as ClusterEvent;
       expect(event.workerId).toBe('dead-w1');
@@ -506,11 +502,11 @@ describe('ReconciliationService', () => {
         CHANNEL,
         expect.stringContaining(ClusterEventType.WORKER_MEMORY_UPDATED),
       );
-      const call = mocks.redis.publish.mock.calls.find(
-        (c: string[]) => c[1].includes(ClusterEventType.WORKER_MEMORY_UPDATED),
+      const call = mocks.redis.publish.mock.calls.find((c: string[]) =>
+        c[1].includes(ClusterEventType.WORKER_MEMORY_UPDATED),
       )!;
       const event = JSON.parse(call[1] as string) as ClusterEvent;
-      expect(event.data.workerCount).toBe(2);
+      expect(event.data!.workerCount).toBe(2);
     });
 
     it('does not publish WORKER_MEMORY_UPDATED when no budgets exist', async () => {
@@ -519,8 +515,8 @@ describe('ReconciliationService', () => {
 
       await service.tick();
 
-      const memoryCalls = mocks.redis.publish.mock.calls.filter(
-        (c: string[]) => c[1].includes(ClusterEventType.WORKER_MEMORY_UPDATED),
+      const memoryCalls = mocks.redis.publish.mock.calls.filter((c: string[]) =>
+        c[1].includes(ClusterEventType.WORKER_MEMORY_UPDATED),
       );
       expect(memoryCalls).toHaveLength(0);
     });

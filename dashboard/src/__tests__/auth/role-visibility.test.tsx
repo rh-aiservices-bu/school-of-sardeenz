@@ -93,7 +93,10 @@ describe('AdminRoute — guard logic', () => {
    * Simulates what AdminRoute does: returns the target or a redirect.
    * Mirrors the condition in App.tsx AdminRoute component.
    */
-  function adminRouteResult(isAdmin: boolean, isLoading: boolean): 'render' | 'loading' | 'redirect' {
+  function adminRouteResult(
+    isAdmin: boolean,
+    isLoading: boolean,
+  ): 'render' | 'loading' | 'redirect' {
     if (isLoading) return 'loading';
     if (!isAdmin) return 'redirect';
     return 'render';
@@ -135,14 +138,17 @@ describe('Component visibility guards', () => {
 
   describe('ModelList', () => {
     it('admin sees Deploy button', () => expect(shouldShowDeployButton(true)).toBe(true));
-    it('readonly does NOT see Deploy button', () => expect(shouldShowDeployButton(false)).toBe(false));
+    it('readonly does NOT see Deploy button', () =>
+      expect(shouldShowDeployButton(false)).toBe(false));
 
-    it('admin sees bulk actions toolbar', () => expect(shouldShowBulkActionsToolbar(true)).toBe(true));
+    it('admin sees bulk actions toolbar', () =>
+      expect(shouldShowBulkActionsToolbar(true)).toBe(true));
     it('readonly does NOT see bulk actions toolbar', () =>
       expect(shouldShowBulkActionsToolbar(false)).toBe(false));
 
     it('admin sees select column', () => expect(shouldShowSelectColumn(true)).toBe(true));
-    it('readonly does NOT see select column', () => expect(shouldShowSelectColumn(false)).toBe(false));
+    it('readonly does NOT see select column', () =>
+      expect(shouldShowSelectColumn(false)).toBe(false));
 
     it('admin sees per-row action menu', () => expect(shouldShowPerRowActionMenu(true)).toBe(true));
     it('readonly does NOT see per-row action menu', () =>
@@ -167,7 +173,8 @@ describe('Component visibility guards', () => {
     });
 
     it('admin sees Delete button', () => expect(shouldShowDeleteButton(true)).toBe(true));
-    it('readonly does NOT see Delete button', () => expect(shouldShowDeleteButton(false)).toBe(false));
+    it('readonly does NOT see Delete button', () =>
+      expect(shouldShowDeleteButton(false)).toBe(false));
 
     it('admin sees error alert action links', () =>
       expect(shouldShowErrorAlertActions(true)).toBe(true));

@@ -114,7 +114,9 @@ function FieldHelper({ hint, error, showError, fieldId }: FieldHelperProps) {
     <FormHelperText>
       <HelperText>
         {hasError ? (
-          <HelperTextItem id={`${fieldId}-helper`} variant="error">{error}</HelperTextItem>
+          <HelperTextItem id={`${fieldId}-helper`} variant="error">
+            {error}
+          </HelperTextItem>
         ) : hint ? (
           <HelperTextItem id={`${fieldId}-helper`}>{hint}</HelperTextItem>
         ) : null}
@@ -214,11 +216,7 @@ export function ModelDeploy() {
                 aria-describedby="model-name-helper"
                 placeholder="meta-llama/Llama-3.1-8B-Instruct"
               />
-              <FieldHelper
-                error={errors.modelName}
-                showError={submitted}
-                fieldId="model-name"
-              />
+              <FieldHelper error={errors.modelName} showError={submitted} fieldId="model-name" />
             </FormGroup>
 
             <FormGroup label={t('deploy.fields.runnerType')} isRequired fieldId="runner-type">
@@ -232,11 +230,7 @@ export function ModelDeploy() {
                   <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
                 ))}
               </FormSelect>
-              <FieldHelper
-                error={errors.runnerType}
-                showError={submitted}
-                fieldId="runner-type"
-              />
+              <FieldHelper error={errors.runnerType} showError={submitted} fieldId="runner-type" />
             </FormGroup>
 
             <FormGroup label={t('deploy.fields.modelPath')} isRequired fieldId="model-path">
@@ -257,7 +251,11 @@ export function ModelDeploy() {
               />
             </FormGroup>
 
-            <FormGroup label={t('deploy.fields.requiredMemory')} isRequired fieldId="required-memory">
+            <FormGroup
+              label={t('deploy.fields.requiredMemory')}
+              isRequired
+              fieldId="required-memory"
+            >
               <TextInput
                 id="required-memory"
                 type="number"
@@ -322,11 +320,7 @@ export function ModelDeploy() {
                 isChecked={form.pinned}
                 onChange={(_ev, checked) => set('pinned', checked)}
               />
-              <FieldHelper
-                hint={t('deploy.hints.pinned')}
-                showError={false}
-                fieldId="pinned"
-              />
+              <FieldHelper hint={t('deploy.hints.pinned')} showError={false} fieldId="pinned" />
             </FormGroup>
 
             <FormGroup label={t('deploy.fields.engineConfig')} fieldId="engine-config">

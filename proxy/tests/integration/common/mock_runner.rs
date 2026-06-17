@@ -11,16 +11,16 @@
 
 use std::net::SocketAddr;
 use std::sync::{
-    Arc,
     atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
-use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum::Router;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
@@ -112,16 +112,10 @@ async fn handle_inference(
 
     // Peek at request body to decide streaming vs. non-streaming.
     let (_parts, body) = req.into_parts();
-    let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
-        .await
-        .unwrap_or_default();
-    let body_json: serde_json::Value =
-        serde_json::from_slice(&body_bytes).unwrap_or_default();
+    let body_bytes = axum::body::to_bytes(body, 1024 * 1024).await.unwrap_or_default();
+    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or_default();
 
-    let streaming = body_json
-        .get("stream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let streaming = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if streaming {
         sse_response(&state.model_name).into_response()
@@ -203,10 +197,7 @@ fn sse_response(model: &str) -> impl IntoResponse {
 
     (
         StatusCode::OK,
-        [
-            ("content-type", "text/event-stream"),
-            ("cache-control", "no-cache"),
-        ],
+        [("content-type", "text/event-stream"), ("cache-control", "no-cache")],
         body_str,
     )
 }

@@ -158,9 +158,7 @@ describe('MemoryVisualization — model names', () => {
   });
 
   it('shows dash when memoryUsedBytes is missing', () => {
-    const models: WorkerModelInfo[] = [
-      { modelName: 'unknown-mem', state: 'LOADING' as never },
-    ];
+    const models: WorkerModelInfo[] = [{ modelName: 'unknown-mem', state: 'LOADING' as never }];
     const lines = buildModelTooltipLines(models);
     expect(lines).toEqual(['unknown-mem (—)']);
   });

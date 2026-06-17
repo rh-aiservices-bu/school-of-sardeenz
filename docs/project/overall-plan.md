@@ -12,12 +12,12 @@ The platform replaces the [Sardeenz v1 prototype](https://github.com/rh-aiservic
 
 Four components, each independently deployable:
 
-| Component | What it does | Tech stack |
-| --- | --- | --- |
-| **Routing Proxy** | Routes every inference request to the right model, parks connections when models are waking up | Rust (axum / tokio) |
-| **Control Plane** | Decides where models run, manages GPU memory budgets, orchestrates sleep/wake/eviction | TypeScript (Fastify) |
-| **Admin Dashboard** | Shows cluster state, lets admins deploy/manage models, visualizes GPU memory | React + PatternFly 6 (frontend), TypeScript Fastify (backend) |
-| **Engine Runners** | Run the actual inference engines (vLLM, Triton, etc.) inside worker pods | Engine-specific, behind a common contract |
+| Component           | What it does                                                                                   | Tech stack                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| **Routing Proxy**   | Routes every inference request to the right model, parks connections when models are waking up | Rust (axum / tokio)                                           |
+| **Control Plane**   | Decides where models run, manages GPU memory budgets, orchestrates sleep/wake/eviction         | TypeScript (Fastify)                                          |
+| **Admin Dashboard** | Shows cluster state, lets admins deploy/manage models, visualizes GPU memory                   | React + PatternFly 6 (frontend), TypeScript Fastify (backend) |
+| **Engine Runners**  | Run the actual inference engines (vLLM, Triton, etc.) inside worker pods                       | Engine-specific, behind a common contract                     |
 
 All four communicate through OpenAPI contracts (the single source of truth for cross-language types) and a shared Redis/Valkey state store. Full architecture details: [`docs/architecture/overview.md`](../architecture/overview.md).
 
@@ -43,11 +43,11 @@ Phases are sequential because each depends on the output of the previous one. Ph
 
 #### Deliverables
 
-| # | Deliverable | Format |
-| --- | --- | --- |
-| 0.1 | Runner contract OpenAPI specification | `packages/contracts/specs/engine-runner.yaml` |
-| 0.2 | Generated TypeScript types from the spec | `packages/types/src/generated/` |
-| 0.3 | Runner contract design document | `docs/architecture/components/runner-contract.md` |
+| #   | Deliverable                              | Format                                            |
+| --- | ---------------------------------------- | ------------------------------------------------- |
+| 0.1 | Runner contract OpenAPI specification    | `packages/contracts/specs/engine-runner.yaml`     |
+| 0.2 | Generated TypeScript types from the spec | `packages/types/src/generated/`                   |
+| 0.3 | Runner contract design document          | `docs/architecture/components/runner-contract.md` |
 
 #### Scope
 
@@ -71,9 +71,9 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Contract misses a capability needed by a future engine | Rework in later phases | Validate against three known runner types (vLLM, Triton, MLServer) before sign-off |
+| Risk                                                           | Impact                   | Mitigation                                                                                |
+| -------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
+| Contract misses a capability needed by a future engine         | Rework in later phases   | Validate against three known runner types (vLLM, Triton, MLServer) before sign-off        |
 | Over-engineering the contract for engines we haven't built yet | Complexity without value | Start minimal; the contract should support vLLM fully and accommodate others structurally |
 
 ---
@@ -86,12 +86,12 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 1.1 | Routing proxy binary | `proxy/` — production-ready Rust binary |
-| 1.2 | Proxy ↔ Control Plane OpenAPI spec | Wake trigger API, routing map schema, model state definitions |
-| 1.3 | Container image | Multi-stage Docker build for the proxy |
-| 1.4 | Integration test suite | Tests covering all four request flow scenarios |
+| #   | Deliverable                              | Description                                                               |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------- |
+| 1.1 | Routing proxy binary                     | `proxy/` — production-ready Rust binary                                   |
+| 1.2 | Proxy ↔ Control Plane OpenAPI spec       | Wake trigger API, routing map schema, model state definitions             |
+| 1.3 | Container image                          | Multi-stage Docker build for the proxy                                    |
+| 1.4 | Integration test suite                   | Tests covering all four request flow scenarios                            |
 | 1.5 | Structured output compatibility solution | Documented approach for handling structured output across engine versions |
 
 #### Scope
@@ -127,11 +127,11 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Structured output compatibility across engine versions | Proxy may need to transform or validate response schemas | Research early; prototype before full implementation |
-| Connection parking memory under sustained load | High parked connection count could exhaust proxy memory | Configurable limits with backpressure; load test with 10K+ parked connections |
-| SSE streaming edge cases | Partial frames, client disconnects mid-stream | Comprehensive integration tests with fault injection |
+| Risk                                                   | Impact                                                   | Mitigation                                                                    |
+| ------------------------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Structured output compatibility across engine versions | Proxy may need to transform or validate response schemas | Research early; prototype before full implementation                          |
+| Connection parking memory under sustained load         | High parked connection count could exhaust proxy memory  | Configurable limits with backpressure; load test with 10K+ parked connections |
+| SSE streaming edge cases                               | Partial frames, client disconnects mid-stream            | Comprehensive integration tests with fault injection                          |
 
 ---
 
@@ -141,14 +141,14 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 2.1 | Control plane service | `control-plane/` — Fastify application |
-| 2.2 | Control plane OpenAPI spec | Full admin API for model lifecycle, worker management, cluster state |
-| 2.3 | Dashboard ↔ Control Plane OpenAPI spec | API contract the dashboard will consume |
-| 2.4 | Database migrations | PostgreSQL schema for configurations, benchmarks, memory profiles |
-| 2.5 | Integration test suite | Tests for placement, eviction, sleep/wake, state machine transitions |
-| 2.6 | Container image | Docker build for the control plane |
+| #   | Deliverable                            | Description                                                          |
+| --- | -------------------------------------- | -------------------------------------------------------------------- |
+| 2.1 | Control plane service                  | `control-plane/` — Fastify application                               |
+| 2.2 | Control plane OpenAPI spec             | Full admin API for model lifecycle, worker management, cluster state |
+| 2.3 | Dashboard ↔ Control Plane OpenAPI spec | API contract the dashboard will consume                              |
+| 2.4 | Database migrations                    | PostgreSQL schema for configurations, benchmarks, memory profiles    |
+| 2.5 | Integration test suite                 | Tests for placement, eviction, sleep/wake, state machine transitions |
+| 2.6 | Container image                        | Docker build for the control plane                                   |
 
 #### Scope
 
@@ -187,11 +187,11 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| State machine edge cases under concurrent operations | Models stuck in intermediate states, orphaned runners | Exhaustive state transition tests; timeout-based recovery for every non-terminal state |
-| Eviction cascades | Evicting model A to load model B triggers eviction of model C, thrashing the cluster | Configurable eviction limits (max evictions per cycle); circuit breaker on eviction frequency |
-| Worker self-report lag | Control plane makes placement decisions on stale memory data | Heartbeat timeout detection; placement pipeline re-validates capacity before starting a runner |
+| Risk                                                 | Impact                                                                               | Mitigation                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| State machine edge cases under concurrent operations | Models stuck in intermediate states, orphaned runners                                | Exhaustive state transition tests; timeout-based recovery for every non-terminal state         |
+| Eviction cascades                                    | Evicting model A to load model B triggers eviction of model C, thrashing the cluster | Configurable eviction limits (max evictions per cycle); circuit breaker on eviction frequency  |
+| Worker self-report lag                               | Control plane makes placement decisions on stale memory data                         | Heartbeat timeout detection; placement pipeline re-validates capacity before starting a runner |
 
 ---
 
@@ -203,12 +203,12 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 3.1 | Dashboard frontend | `dashboard/` — React + PatternFly 6 + Vite SPA |
+| #   | Deliverable             | Description                                                       |
+| --- | ----------------------- | ----------------------------------------------------------------- |
+| 3.1 | Dashboard frontend      | `dashboard/` — React + PatternFly 6 + Vite SPA                    |
 | 3.2 | Dashboard backend (BFF) | Fastify service aggregating from control plane, Redis, Prometheus |
-| 3.3 | Container image(s) | Frontend static build + backend service |
-| 3.4 | E2E test suite | Playwright tests for critical admin workflows |
+| 3.3 | Container image(s)      | Frontend static build + backend service                           |
+| 3.4 | E2E test suite          | Playwright tests for critical admin workflows                     |
 
 #### Scope
 
@@ -252,11 +252,11 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
+| Risk                                                   | Impact                                           | Mitigation                                                                                                          |
+| ------------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | PatternFly 6 is newer and community examples are fewer | Slower UI development, unexpected component gaps | Use official PatternFly.org docs as sole reference; avoid Context7 for PF components (may return outdated versions) |
-| Real-time updates create excessive Redis load | Dashboard polling degrades proxy performance | Use pub/sub for state changes, not polling; rate-limit dashboard subscriptions |
-| v1 component porting takes longer than expected | UI delivery slows | Time-box porting to 2 days per component; rebuild only if porting costs more than building new |
+| Real-time updates create excessive Redis load          | Dashboard polling degrades proxy performance     | Use pub/sub for state changes, not polling; rate-limit dashboard subscriptions                                      |
+| v1 component porting takes longer than expected        | UI delivery slows                                | Time-box porting to 2 days per component; rebuild only if porting costs more than building new                      |
 
 ---
 
@@ -268,14 +268,14 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
+| #   | Deliverable                 | Description                                                               |
+| --- | --------------------------- | ------------------------------------------------------------------------- |
 | 4.1 | Base worker container image | `containers/worker-base/` — slim image with OS, accelerator drivers, Lmod |
-| 4.2 | EasyBuild configurations | `easyconfigs/` — build recipes for vLLM and initial engine set |
-| 4.3 | Module load/unload IPC | Control plane → worker communication for `module load`/`unload` |
-| 4.4 | CephFS mount architecture | Storage layout documentation and K8s volume configuration |
-| 4.5 | Squashfs/erofs packaging | Packaged modules to mitigate CephFS metadata storms |
-| 4.6 | Integration test suite | Tests for module load, runner start, version switch, canary deployment |
+| 4.2 | EasyBuild configurations    | `easyconfigs/` — build recipes for vLLM and initial engine set            |
+| 4.3 | Module load/unload IPC      | Control plane → worker communication for `module load`/`unload`           |
+| 4.4 | CephFS mount architecture   | Storage layout documentation and K8s volume configuration                 |
+| 4.5 | Squashfs/erofs packaging    | Packaged modules to mitigate CephFS metadata storms                       |
+| 4.6 | Integration test suite      | Tests for module load, runner start, version switch, canary deployment    |
 
 #### Scope
 
@@ -311,11 +311,11 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| CephFS metadata storms at scale | Slow module loads, worker timeouts | Squashfs/erofs packaging (deliverable 4.5); benchmark at target scale early |
-| EasyBuild recipe complexity for GPU-accelerated Python stacks | Slow initial builds, hard-to-debug failures | Start with vLLM only; leverage existing Highlander community recipes where available |
-| Lmod/EasyBuild unfamiliarity on the team | Slower delivery, integration surprises | Time-box a spike at phase start to validate the full load/unload cycle before committing to the implementation plan |
+| Risk                                                          | Impact                                      | Mitigation                                                                                                          |
+| ------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| CephFS metadata storms at scale                               | Slow module loads, worker timeouts          | Squashfs/erofs packaging (deliverable 4.5); benchmark at target scale early                                         |
+| EasyBuild recipe complexity for GPU-accelerated Python stacks | Slow initial builds, hard-to-debug failures | Start with vLLM only; leverage existing Highlander community recipes where available                                |
+| Lmod/EasyBuild unfamiliarity on the team                      | Slower delivery, integration surprises      | Time-box a spike at phase start to validate the full load/unload cycle before committing to the implementation plan |
 
 ---
 
@@ -329,11 +329,11 @@ All inter-component communication is defined by OpenAPI specs in `packages/contr
 
 ### Testing Strategy
 
-| Level | Scope | Tooling |
-| --- | --- | --- |
-| Unit | Individual functions and modules | Vitest (TypeScript), `cargo test` (Rust) |
-| Integration | Component against real data stores | Vitest + test containers (TypeScript), integration test harness (Rust) |
-| E2E | Full system workflows | Playwright (dashboard), custom harness (proxy + control plane + runner) |
+| Level       | Scope                              | Tooling                                                                 |
+| ----------- | ---------------------------------- | ----------------------------------------------------------------------- |
+| Unit        | Individual functions and modules   | Vitest (TypeScript), `cargo test` (Rust)                                |
+| Integration | Component against real data stores | Vitest + test containers (TypeScript), integration test harness (Rust)  |
+| E2E         | Full system workflows              | Playwright (dashboard), custom harness (proxy + control plane + runner) |
 
 Integration tests use real Redis and PostgreSQL instances — no mocks for data stores.
 

@@ -211,7 +211,9 @@ describe('MockEventSource protocol', () => {
   it('triggerMessage parses JSON and calls onmessage', () => {
     const es = new MockEventSource('http://localhost/events');
     const received: unknown[] = [];
-    es.onmessage = (event) => { received.push(JSON.parse(event.data as string)); };
+    es.onmessage = (event) => {
+      received.push(JSON.parse(event.data as string));
+    };
 
     const event = { type: 'MODEL_STATE_CHANGED', modelName: 'llama3' };
     es.triggerMessage(event);
@@ -223,7 +225,9 @@ describe('MockEventSource protocol', () => {
   it('triggerError calls onerror', () => {
     const es = new MockEventSource('http://localhost/events');
     let errorFired = false;
-    es.onerror = () => { errorFired = true; };
+    es.onerror = () => {
+      errorFired = true;
+    };
     es.triggerError();
     expect(errorFired).toBe(true);
   });

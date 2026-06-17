@@ -17,10 +17,7 @@ impl WakeTriggerClient {
 
     pub async fn trigger_wake(&self, model_name: &str) -> anyhow::Result<()> {
         let url = format!("{}/api/v1/wake", self.base_url);
-        let request = WakeTriggerRequest {
-            model_name: model_name.to_string(),
-            request_id: None,
-        };
+        let request = WakeTriggerRequest { model_name: model_name.to_string(), request_id: None };
 
         let response = self
             .client
@@ -36,9 +33,7 @@ impl WakeTriggerClient {
         } else {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!(
-                "wake trigger returned {status}: {body}"
-            ))
+            Err(anyhow::anyhow!("wake trigger returned {status}: {body}"))
         }
     }
 }

@@ -61,9 +61,7 @@ describe('validateAuthConfig', () => {
     process.env['NODE_ENV'] = 'production';
     const config = makeConfig({ authMode: 'none' });
 
-    expect(() => validateAuthConfig(config)).toThrow(
-      'AUTH_MODE=none is not allowed in production',
-    );
+    expect(() => validateAuthConfig(config)).toThrow('AUTH_MODE=none is not allowed in production');
   });
 
   it('includes remediation guidance in the production error', () => {

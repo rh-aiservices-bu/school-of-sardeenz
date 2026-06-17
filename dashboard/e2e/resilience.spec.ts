@@ -117,9 +117,9 @@ test.describe('Resilience & live updates', () => {
     await page.goto(bffUrl(bffPort, '/'));
 
     // The degraded banner should appear
-    await expect(
-      page.getByText('Control plane unreachable — showing cached data'),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Control plane unreachable — showing cached data')).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Data from Redis should still be visible — navigate to models list
     await page.goto(bffUrl(bffPort, '/models'));

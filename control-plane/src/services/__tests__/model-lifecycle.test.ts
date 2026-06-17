@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
 
-import { isValidTransition, isTerminalState, ModelLifecycleService, type ModelState } from '../model-lifecycle.js';
+import {
+  isValidTransition,
+  isTerminalState,
+  ModelLifecycleService,
+  type ModelState,
+} from '../model-lifecycle.js';
 import type { Redis } from '../../clients/redis.js';
 
 describe('isValidTransition', () => {
@@ -94,9 +99,9 @@ describe('ModelLifecycleService.transition with deviceIndices', () => {
     };
 
     const redis = {
-      eval: vi.fn().mockResolvedValue(
-        `${ModelLifecycleState.PENDING}|${JSON.stringify(resultState)}`,
-      ),
+      eval: vi
+        .fn()
+        .mockResolvedValue(`${ModelLifecycleState.PENDING}|${JSON.stringify(resultState)}`),
     } as unknown as Redis;
 
     const service = new ModelLifecycleService(redis, 'test');
@@ -120,11 +125,11 @@ describe('ModelLifecycleService.getLastInferenceTimestamps', () => {
     return {
       pipeline: () => ({
         get: vi.fn().mockReturnThis(),
-        exec: vi.fn().mockResolvedValue(
-          Object.keys(data).length > 0
-            ? Object.values(data).map((v) => [null, v])
-            : [],
-        ),
+        exec: vi
+          .fn()
+          .mockResolvedValue(
+            Object.keys(data).length > 0 ? Object.values(data).map((v) => [null, v]) : [],
+          ),
       }),
     } as unknown as Redis;
   }

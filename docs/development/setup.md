@@ -129,12 +129,12 @@ npm run dev:server:logged -w @sardeenz/dashboard
 
 Each logged variant uses `tee` to write to both the terminal and a log file:
 
-| Component     | Log file                     |
-| ------------- | ---------------------------- |
-| Proxy         | `logs/proxy.log`             |
-| Control plane | `logs/control-plane.log`     |
-| Dashboard     | `logs/dashboard.log`         |
-| BFF server    | `logs/dashboard-server.log`  |
+| Component     | Log file                    |
+| ------------- | --------------------------- |
+| Proxy         | `logs/proxy.log`            |
+| Control plane | `logs/control-plane.log`    |
+| Dashboard     | `logs/dashboard.log`        |
+| BFF server    | `logs/dashboard-server.log` |
 
 The proxy requires Rust/cargo — if not installed, it prints a warning and is skipped (the TypeScript components still start).
 

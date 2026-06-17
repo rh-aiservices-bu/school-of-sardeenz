@@ -1,12 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import {
-  Bullseye,
-  EmptyState,
-  EmptyStateBody,
-  PageSection,
-  Spinner,
-} from '@patternfly/react-core';
+import { Bullseye, EmptyState, EmptyStateBody, PageSection, Spinner } from '@patternfly/react-core';
 import { useAuth } from './contexts/AuthContext';
 import { DegradedProvider } from './contexts/DegradedContext';
 import { DegradedBanner } from './components/DegradedBanner';
@@ -106,11 +100,7 @@ function AdminRoute({ children }: { children: ReactNode }) {
 
 function EventStreamProvider({ children }: { children: ReactNode }) {
   const state = useEventStreamConnection();
-  return (
-    <EventStreamContext.Provider value={state}>
-      {children}
-    </EventStreamContext.Provider>
-  );
+  return <EventStreamContext.Provider value={state}>{children}</EventStreamContext.Provider>;
 }
 
 export function App() {

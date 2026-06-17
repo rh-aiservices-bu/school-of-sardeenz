@@ -10,11 +10,11 @@ The dashboard BFF enforces secure authentication defaults at startup:
 
 ### Required environment variables by auth mode
 
-| Auth Mode | Required Variables |
-| --- | --- |
-| `simple` | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>` |
-| `oauth` | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `JWT_SECRET=<non-empty>` |
-| `none` | Only allowed when `NODE_ENV` is not `production` (development/testing) |
+| Auth Mode | Required Variables                                                                                        |
+| --------- | --------------------------------------------------------------------------------------------------------- |
+| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                |
+| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `JWT_SECRET=<non-empty>` |
+| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                    |
 
 ### Example production configuration
 
@@ -33,15 +33,15 @@ The control plane does not implement its own authentication. It **must only be d
 
 Any caller with network access to the control plane can:
 
-| Operation | Endpoint | Impact |
-| --- | --- | --- |
-| Deploy models | `POST /api/v1/models` | Allocates GPU resources |
-| Delete models | `DELETE /api/v1/models/:name` | Frees GPU resources, stops runners |
-| Sleep / wake models | `POST /api/v1/models/:name/sleep\|wake` | Changes resource allocation |
-| Read cluster topology | `GET /api/v1/workers`, `GET /api/v1/cluster/*` | Reveals infrastructure details |
-| Read routing map | `GET /api/v1/models` | Reveals model endpoints |
-| Consume SSE events | `GET /api/v1/events` | Real-time cluster state stream |
-| Scrape metrics | `GET /metrics` | Prometheus operational data |
+| Operation             | Endpoint                                       | Impact                             |
+| --------------------- | ---------------------------------------------- | ---------------------------------- |
+| Deploy models         | `POST /api/v1/models`                          | Allocates GPU resources            |
+| Delete models         | `DELETE /api/v1/models/:name`                  | Frees GPU resources, stops runners |
+| Sleep / wake models   | `POST /api/v1/models/:name/sleep\|wake`        | Changes resource allocation        |
+| Read cluster topology | `GET /api/v1/workers`, `GET /api/v1/cluster/*` | Reveals infrastructure details     |
+| Read routing map      | `GET /api/v1/models`                           | Reveals model endpoints            |
+| Consume SSE events    | `GET /api/v1/events`                           | Real-time cluster state stream     |
+| Scrape metrics        | `GET /metrics`                                 | Prometheus operational data        |
 
 ### Recommended deployment constraints
 

@@ -41,7 +41,11 @@ test.describe('Model Management', () => {
       await expect(page.getByText(SLEEPING_MODEL.modelName)).toBeVisible();
     });
 
-    test('shows empty state when no models deployed', async ({ page, bffPort, mockControlPlane }) => {
+    test('shows empty state when no models deployed', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([]);
 
       await page.goto(bffUrl(bffPort, '/models'));
@@ -49,7 +53,11 @@ test.describe('Model Management', () => {
       await expect(page.getByText('No models deployed')).toBeVisible();
     });
 
-    test('shows Deploy Model button in toolbar when models exist', async ({ page, bffPort, mockControlPlane }) => {
+    test('shows Deploy Model button in toolbar when models exist', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([ACTIVE_MODEL]);
 
       await page.goto(bffUrl(bffPort, '/models'));
@@ -57,7 +65,11 @@ test.describe('Model Management', () => {
       await expect(page.getByRole('button', { name: 'Deploy Model' })).toBeVisible();
     });
 
-    test('shows Deploy Model button in empty state', async ({ page, bffPort, mockControlPlane }) => {
+    test('shows Deploy Model button in empty state', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([]);
 
       await page.goto(bffUrl(bffPort, '/models'));
@@ -65,7 +77,11 @@ test.describe('Model Management', () => {
       await expect(page.getByRole('button', { name: 'Deploy Model' })).toBeVisible();
     });
 
-    test('Deploy Model button navigates to deploy form', async ({ page, bffPort, mockControlPlane }) => {
+    test('Deploy Model button navigates to deploy form', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([ACTIVE_MODEL]);
 
       await page.goto(bffUrl(bffPort, '/models'));
@@ -74,14 +90,18 @@ test.describe('Model Management', () => {
       await expect(page).toHaveURL(/\/models\/deploy$/);
     });
 
-    test('clicking model name navigates to model detail', async ({ page, bffPort, mockControlPlane }) => {
+    test('clicking model name navigates to model detail', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([ACTIVE_MODEL]);
 
       await page.goto(bffUrl(bffPort, '/models'));
       await page.getByText(ACTIVE_MODEL.modelName).click();
 
       await expect(page).toHaveURL(
-        new RegExp(`/models/${encodeURIComponent(ACTIVE_MODEL.modelName).replace(/\//g, '%2F')}`)
+        new RegExp(`/models/${encodeURIComponent(ACTIVE_MODEL.modelName).replace(/\//g, '%2F')}`),
       );
     });
   });
@@ -118,7 +138,11 @@ test.describe('Model Management', () => {
       await expect(page.getByText('required', { exact: false }).first()).toBeVisible();
     });
 
-    test('deploy form cancel returns to model list', async ({ page, bffPort, mockControlPlane }) => {
+    test('deploy form cancel returns to model list', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([]);
 
       await page.goto(bffUrl(bffPort, '/models/deploy'));
@@ -127,7 +151,11 @@ test.describe('Model Management', () => {
       await expect(page).toHaveURL(/\/models$/);
     });
 
-    test('deploy flow: fill form and submit deploys model', async ({ page, bffPort, mockControlPlane }) => {
+    test('deploy flow: fill form and submit deploys model', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([]);
 
       await page.goto(bffUrl(bffPort, '/models/deploy'));
@@ -150,7 +178,9 @@ test.describe('Model Management', () => {
 
       await page.goto(bffUrl(bffPort, '/models'));
 
-      const actionsButton = page.locator(`button[aria-label="Actions for ${ACTIVE_MODEL.modelName}"]`);
+      const actionsButton = page.locator(
+        `button[aria-label="Actions for ${ACTIVE_MODEL.modelName}"]`,
+      );
       await expect(actionsButton).toBeVisible();
     });
 
@@ -168,7 +198,11 @@ test.describe('Model Management', () => {
       await expect(page.getByText('Delete model?')).toBeVisible();
     });
 
-    test('delete confirmation removes model from list', async ({ page, bffPort, mockControlPlane }) => {
+    test('delete confirmation removes model from list', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([ACTIVE_MODEL, SLEEPING_MODEL]);
 
       await page.goto(bffUrl(bffPort, '/models'));
@@ -184,7 +218,11 @@ test.describe('Model Management', () => {
       await expect(page.getByText(ACTIVE_MODEL.modelName)).not.toBeVisible({ timeout: 5_000 });
     });
 
-    test('cancel on delete modal keeps model in list', async ({ page, bffPort, mockControlPlane }) => {
+    test('cancel on delete modal keeps model in list', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setModels([ACTIVE_MODEL]);
 
       await page.goto(bffUrl(bffPort, '/models'));

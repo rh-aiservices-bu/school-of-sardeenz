@@ -88,7 +88,10 @@ describe('GET /api/metrics/memory', () => {
   });
 
   it('queries sardeenz_control_plane_device_memory_bytes — not the old misnamed metric', async () => {
-    queryInstantFn.mockResolvedValue({ status: 'success', data: { resultType: 'vector', result: [] } });
+    queryInstantFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'vector', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/memory' });
@@ -101,7 +104,10 @@ describe('GET /api/metrics/memory', () => {
   });
 
   it('returns the Prometheus response body to the caller', async () => {
-    const promResponse = { status: 'success', data: { resultType: 'vector', result: [{ metric: {}, value: [1, '1024'] }] } };
+    const promResponse = {
+      status: 'success',
+      data: { resultType: 'vector', result: [{ metric: {}, value: [1, '1024'] }] },
+    };
     queryInstantFn.mockResolvedValue(promResponse);
 
     const app = await buildApp(buildDeps());
@@ -113,7 +119,9 @@ describe('GET /api/metrics/memory', () => {
   });
 
   it('returns 502 when Prometheus is unreachable', async () => {
-    queryInstantFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+    queryInstantFn.mockRejectedValue(
+      new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'),
+    );
 
     const app = await buildApp(buildDeps());
     const res = await app.inject({ method: 'GET', url: '/api/metrics/memory' });
@@ -129,7 +137,10 @@ describe('GET /api/metrics/latency', () => {
   });
 
   it('queries sardeenz_proxy_request_duration_seconds_bucket — matching the Rust proxy export', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/latency' });
@@ -144,7 +155,10 @@ describe('GET /api/metrics/latency', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -160,7 +174,10 @@ describe('GET /api/metrics/latency', () => {
   });
 
   it('uses default time range and step when query params are absent', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/latency' });
@@ -187,7 +204,10 @@ describe('GET /api/metrics/throughput', () => {
   });
 
   it('queries sardeenz_proxy_requests_total — matching the Rust proxy export', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/throughput' });
@@ -201,7 +221,10 @@ describe('GET /api/metrics/throughput', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -266,7 +289,10 @@ describe('GET /api/metrics/latency (multi-quantile)', () => {
   });
 
   it('passes start, end, step to each quantile query', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -300,7 +326,10 @@ describe('GET /api/metrics/connections', () => {
   });
 
   it('queries sardeenz_proxy_active_connections and sardeenz_proxy_parked_connections', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/connections' });
@@ -312,7 +341,10 @@ describe('GET /api/metrics/connections', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -346,21 +378,29 @@ describe('GET /api/metrics/parking-duration', () => {
   });
 
   it('queries sardeenz_proxy_parking_duration_seconds_bucket with histogram_quantile', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/parking-duration' });
     await app.close();
 
     const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
-    expect(queries.every((q) => q.includes('sardeenz_proxy_parking_duration_seconds_bucket'))).toBe(true);
+    expect(queries.every((q) => q.includes('sardeenz_proxy_parking_duration_seconds_bucket'))).toBe(
+      true,
+    );
     expect(queries.every((q) => q.includes('histogram_quantile'))).toBe(true);
     expect(queries.some((q) => q.includes('0.50'))).toBe(true);
     expect(queries.some((q) => q.includes('0.95'))).toBe(true);
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -394,7 +434,10 @@ describe('GET /api/metrics/wake-triggers', () => {
   });
 
   it('queries sardeenz_control_plane_wake_triggers_total with rate()', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/wake-triggers' });
@@ -406,7 +449,10 @@ describe('GET /api/metrics/wake-triggers', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -438,7 +484,10 @@ describe('GET /api/metrics/state-transitions', () => {
   });
 
   it('queries sardeenz_control_plane_state_transitions_total with rate()', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/state-transitions' });
@@ -450,7 +499,10 @@ describe('GET /api/metrics/state-transitions', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -482,7 +534,10 @@ describe('GET /api/metrics/evictions', () => {
   });
 
   it('queries sardeenz_control_plane_evictions_total with rate()', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/evictions' });
@@ -494,7 +549,10 @@ describe('GET /api/metrics/evictions', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -526,7 +584,10 @@ describe('GET /api/metrics/memory-history', () => {
   });
 
   it('queries sardeenz_control_plane_device_memory_bytes as a range query', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({ method: 'GET', url: '/api/metrics/memory-history' });
@@ -537,7 +598,10 @@ describe('GET /api/metrics/memory-history', () => {
   });
 
   it('passes start, end, step query params to Prometheus', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({
@@ -569,7 +633,10 @@ describe('GET /api/metrics/operations', () => {
   });
 
   it('queries p95 of deploy, sleep, wake, eviction, and placement duration histograms', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });
@@ -579,11 +646,21 @@ describe('GET /api/metrics/operations', () => {
     // 5 parallel queries
     expect(queryRangeFn).toHaveBeenCalledTimes(5);
     const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
-    expect(queries.some((q) => q.includes('sardeenz_control_plane_deploy_duration_seconds_bucket'))).toBe(true);
-    expect(queries.some((q) => q.includes('sardeenz_control_plane_sleep_duration_seconds_bucket'))).toBe(true);
-    expect(queries.some((q) => q.includes('sardeenz_control_plane_wake_duration_seconds_bucket'))).toBe(true);
-    expect(queries.some((q) => q.includes('sardeenz_control_plane_eviction_duration_seconds_bucket'))).toBe(true);
-    expect(queries.some((q) => q.includes('sardeenz_control_plane_placement_duration_seconds_bucket'))).toBe(true);
+    expect(
+      queries.some((q) => q.includes('sardeenz_control_plane_deploy_duration_seconds_bucket')),
+    ).toBe(true);
+    expect(
+      queries.some((q) => q.includes('sardeenz_control_plane_sleep_duration_seconds_bucket')),
+    ).toBe(true);
+    expect(
+      queries.some((q) => q.includes('sardeenz_control_plane_wake_duration_seconds_bucket')),
+    ).toBe(true);
+    expect(
+      queries.some((q) => q.includes('sardeenz_control_plane_eviction_duration_seconds_bucket')),
+    ).toBe(true);
+    expect(
+      queries.some((q) => q.includes('sardeenz_control_plane_placement_duration_seconds_bucket')),
+    ).toBe(true);
     expect(queries.every((q) => q.includes('0.95'))).toBe(true);
     // Response must have all operation keys
     expect(res.json()).toHaveProperty('deploy');
@@ -594,7 +671,10 @@ describe('GET /api/metrics/operations', () => {
   });
 
   it('passes start, end, step query params to each Prometheus query', async () => {
-    queryRangeFn.mockResolvedValue({ status: 'success', data: { resultType: 'matrix', result: [] } });
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
 
     const app = await buildApp(buildDeps());
     await app.inject({

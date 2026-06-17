@@ -7,34 +7,34 @@ Stateless Rust (axum/tokio) routing proxy for OpenAI-compatible inference reques
 
 ## Module Map
 
-| Module | Path | Role |
-| --- | --- | --- |
-| `config` | `src/config.rs` | Configuration from env vars (`Config::from_env()`) |
-| `error` | `src/error.rs` | `ProxyError` enum with HTTP status code mappings |
-| `forwarding` | `src/forwarding/` | `ForwardingClient`, `CircuitBreaker`, `WeightedRoundRobin` |
-| `generated` | `src/generated/` | Hand-maintained Rust types mirroring OpenAPI specs |
-| `handlers` | `src/handlers.rs` | Inference handlers + `/metrics` endpoint |
-| `health` | `src/health/` | `/healthz`, `/readyz`, Prometheus metric descriptions |
+| Module              | Path                       | Role                                                                 |
+| ------------------- | -------------------------- | -------------------------------------------------------------------- |
+| `config`            | `src/config.rs`            | Configuration from env vars (`Config::from_env()`)                   |
+| `error`             | `src/error.rs`             | `ProxyError` enum with HTTP status code mappings                     |
+| `forwarding`        | `src/forwarding/`          | `ForwardingClient`, `CircuitBreaker`, `WeightedRoundRobin`           |
+| `generated`         | `src/generated/`           | Hand-maintained Rust types mirroring OpenAPI specs                   |
+| `handlers`          | `src/handlers.rs`          | Inference handlers + `/metrics` endpoint                             |
+| `health`            | `src/health/`              | `/healthz`, `/readyz`, Prometheus metric descriptions                |
 | `inference_tracker` | `src/inference_tracker.rs` | Per-model inference timestamps to Redis (debounced, fire-and-forget) |
-| `parking` | `src/parking/` | `ParkingManager`, `WakeTriggerClient`, thundering herd prevention |
-| `protocol` | `src/protocol/` | Request parsing (model extraction), OpenAI response building |
-| `routing` | `src/routing/` | `RoutingMapCache` (watch-based), `ModelResolver` |
-| `state` | `src/state/` | `AppState` (shared state), `start_redis_sync` (Redis loop) |
+| `parking`           | `src/parking/`             | `ParkingManager`, `WakeTriggerClient`, thundering herd prevention    |
+| `protocol`          | `src/protocol/`            | Request parsing (model extraction), OpenAI response building         |
+| `routing`           | `src/routing/`             | `RoutingMapCache` (watch-based), `ModelResolver`                     |
+| `state`             | `src/state/`               | `AppState` (shared state), `start_redis_sync` (Redis loop)           |
 
 ## Key Types
 
-| Type | Module | Role |
-| --- | --- | --- |
-| `AppState` | `state` | Shared across handlers: config, caches, managers, metrics handle |
-| `Config` | `config` | All env-var configuration (see table below) |
-| `ProxyError` | `error` | Error variants → HTTP status codes via `IntoResponse` |
-| `Resolution` | `routing` | Enum: `Active` / `Sleeping` / `Starting` — drives parking vs. forwarding |
-| `RoutingMapCache` | `routing` | In-memory model→entry map with `tokio::sync::watch` notifications |
-| `ParkingManager` | `parking` | Parks requests, enforces limits, fires wake triggers |
-| `CircuitBreaker` | `forwarding` | Per-endpoint Closed/Open/HalfOpen state machine |
-| `ForwardingClient` | `forwarding` | reqwest-based HTTP forwarder with hop-by-hop header filtering |
-| `WeightedRoundRobin` | `forwarding` | Endpoint selection by cumulative weight |
-| `InferenceTracker` | `inference_tracker` | Debounced per-model timestamp writes to Redis for LRU eviction |
+| Type                 | Module              | Role                                                                     |
+| -------------------- | ------------------- | ------------------------------------------------------------------------ |
+| `AppState`           | `state`             | Shared across handlers: config, caches, managers, metrics handle         |
+| `Config`             | `config`            | All env-var configuration (see table below)                              |
+| `ProxyError`         | `error`             | Error variants → HTTP status codes via `IntoResponse`                    |
+| `Resolution`         | `routing`           | Enum: `Active` / `Sleeping` / `Starting` — drives parking vs. forwarding |
+| `RoutingMapCache`    | `routing`           | In-memory model→entry map with `tokio::sync::watch` notifications        |
+| `ParkingManager`     | `parking`           | Parks requests, enforces limits, fires wake triggers                     |
+| `CircuitBreaker`     | `forwarding`        | Per-endpoint Closed/Open/HalfOpen state machine                          |
+| `ForwardingClient`   | `forwarding`        | reqwest-based HTTP forwarder with hop-by-hop header filtering            |
+| `WeightedRoundRobin` | `forwarding`        | Endpoint selection by cumulative weight                                  |
+| `InferenceTracker`   | `inference_tracker` | Debounced per-model timestamp writes to Redis for LRU eviction           |
 
 ## Hand-Maintained Types
 
@@ -60,12 +60,12 @@ Rationale: [ADR-005](../docs/architecture/adrs/adr-005-openapi-contracts.md)
 
 No Redis required. Routing data injected directly into `RoutingMapCache`.
 
-| Helper | File | Purpose |
-| --- | --- | --- |
-| `TestProxy` | `common/proxy_builder.rs` | Spawns proxy + admin servers on random ports |
-| `MockRunner` | `common/mock_runner.rs` | Mock OpenAI-compatible runner with request counting |
-| `MockControlPlane` | `common/mock_control_plane.rs` | Mock wake trigger endpoint, auto-transition to Active |
-| Routing helpers | `common/routing.rs` | `insert_active_model()`, `insert_sleeping_model()`, etc. |
+| Helper             | File                           | Purpose                                                  |
+| ------------------ | ------------------------------ | -------------------------------------------------------- |
+| `TestProxy`        | `common/proxy_builder.rs`      | Spawns proxy + admin servers on random ports             |
+| `MockRunner`       | `common/mock_runner.rs`        | Mock OpenAI-compatible runner with request counting      |
+| `MockControlPlane` | `common/mock_control_plane.rs` | Mock wake trigger endpoint, auto-transition to Active    |
+| Routing helpers    | `common/routing.rs`            | `insert_active_model()`, `insert_sleeping_model()`, etc. |
 
 ### Redis integration tests (`tests/integration/test_redis.rs`)
 
@@ -89,21 +89,21 @@ cargo test --lib                               # Unit tests only
 
 All env vars read at startup by `Config::from_env()`.
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SARDEENZ_LISTEN_ADDR` | `0.0.0.0:8080` | Inference server bind address |
-| `SARDEENZ_ADMIN_ADDR` | `0.0.0.0:9099` | Admin server (health + metrics) |
-| `SARDEENZ_REDIS_URL` | `redis://127.0.0.1:6379` | Redis/Valkey connection |
-| `SARDEENZ_CONTROL_PLANE_URL` | `http://127.0.0.1:3000` | Control plane for wake triggers |
-| `SARDEENZ_LOG_LEVEL` | `info` | Tracing log level |
-| `SARDEENZ_UPSTREAM_TIMEOUT_SECS` | `300` | Forwarded request timeout |
-| `SARDEENZ_REDIS_KEY_PREFIX` | `sardeenz` | Redis key/channel prefix |
-| `SARDEENZ_PARKING_TIMEOUT_SECS` | `120` | Max parking wait before 503 |
-| `SARDEENZ_PARKING_MAX_PER_MODEL` | `1000` | Per-model parked connection limit |
-| `SARDEENZ_PARKING_MAX_GLOBAL` | `10000` | Global parked connection limit |
-| `SARDEENZ_CB_FAILURE_THRESHOLD` | `5` | Failures to trip circuit breaker |
-| `SARDEENZ_CB_FAILURE_WINDOW_SECS` | `30` | Circuit breaker failure window |
-| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `15` | Open → HalfOpen transition time |
+| Variable                            | Default                  | Description                       |
+| ----------------------------------- | ------------------------ | --------------------------------- |
+| `SARDEENZ_LISTEN_ADDR`              | `0.0.0.0:8080`           | Inference server bind address     |
+| `SARDEENZ_ADMIN_ADDR`               | `0.0.0.0:9099`           | Admin server (health + metrics)   |
+| `SARDEENZ_REDIS_URL`                | `redis://127.0.0.1:6379` | Redis/Valkey connection           |
+| `SARDEENZ_CONTROL_PLANE_URL`        | `http://127.0.0.1:3000`  | Control plane for wake triggers   |
+| `SARDEENZ_LOG_LEVEL`                | `info`                   | Tracing log level                 |
+| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`    | `300`                    | Forwarded request timeout         |
+| `SARDEENZ_REDIS_KEY_PREFIX`         | `sardeenz`               | Redis key/channel prefix          |
+| `SARDEENZ_PARKING_TIMEOUT_SECS`     | `120`                    | Max parking wait before 503       |
+| `SARDEENZ_PARKING_MAX_PER_MODEL`    | `1000`                   | Per-model parked connection limit |
+| `SARDEENZ_PARKING_MAX_GLOBAL`       | `10000`                  | Global parked connection limit    |
+| `SARDEENZ_CB_FAILURE_THRESHOLD`     | `5`                      | Failures to trip circuit breaker  |
+| `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | `30`                     | Circuit breaker failure window    |
+| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `15`                     | Open → HalfOpen transition time   |
 
 ## Conventions
 

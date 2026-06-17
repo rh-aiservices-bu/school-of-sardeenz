@@ -49,23 +49,23 @@ The dashboard covers two deployable units — a frontend SPA and a backend-for-f
 
 ## Tasks
 
-| # | Task | Status | Output |
-| --- | --- | --- | --- |
-| 3.1 | Inventory and port v1 dashboard components | Complete | Ported components + v1 → v2 mapping notes |
-| 3.2 | Scaffold dashboard frontend | Complete | Vite + React + PF6 app shell with routing |
-| 3.3 | Scaffold dashboard backend (BFF) | Complete | Fastify service with config, logging, routes |
-| 3.4 | Implement BFF data aggregation layer | Complete | Control plane proxy, Redis reader, Prometheus client, SSE relay |
-| 3.5 | Implement frontend data fetching layer | Complete | API client, React hooks, SSE subscription |
-| 3.6 | Implement cluster overview page | Complete | Worker status, aggregate memory, model counts |
-| 3.7 | Implement model management page | Complete | Model table, deploy form, sleep/wake/delete actions |
-| 3.8 | Implement model detail view | Complete | Full model info, loading progress, state timeline |
-| 3.9 | Implement worker detail page | Complete | Per-device GPU memory, running models, capabilities |
-| 3.10 | Implement device memory visualization | Complete | Graphical VRAM allocation across devices and workers |
-| 3.11 | Implement metrics dashboard | Complete | Prometheus-backed latency, throughput, utilization charts |
-| 3.12 | Accessibility audit | Complete | WCAG 2.1 AA compliance verified across all views |
-| 3.13 | Write dashboard design document | Complete | `docs/architecture/components/dashboard.md` |
-| 3.14 | Build container images | Complete | `containers/dashboard/Dockerfile` (frontend + BFF) |
-| 3.15 | E2E test suite | Complete | Playwright tests for critical admin workflows |
+| #    | Task                                       | Status   | Output                                                          |
+| ---- | ------------------------------------------ | -------- | --------------------------------------------------------------- |
+| 3.1  | Inventory and port v1 dashboard components | Complete | Ported components + v1 → v2 mapping notes                       |
+| 3.2  | Scaffold dashboard frontend                | Complete | Vite + React + PF6 app shell with routing                       |
+| 3.3  | Scaffold dashboard backend (BFF)           | Complete | Fastify service with config, logging, routes                    |
+| 3.4  | Implement BFF data aggregation layer       | Complete | Control plane proxy, Redis reader, Prometheus client, SSE relay |
+| 3.5  | Implement frontend data fetching layer     | Complete | API client, React hooks, SSE subscription                       |
+| 3.6  | Implement cluster overview page            | Complete | Worker status, aggregate memory, model counts                   |
+| 3.7  | Implement model management page            | Complete | Model table, deploy form, sleep/wake/delete actions             |
+| 3.8  | Implement model detail view                | Complete | Full model info, loading progress, state timeline               |
+| 3.9  | Implement worker detail page               | Complete | Per-device GPU memory, running models, capabilities             |
+| 3.10 | Implement device memory visualization      | Complete | Graphical VRAM allocation across devices and workers            |
+| 3.11 | Implement metrics dashboard                | Complete | Prometheus-backed latency, throughput, utilization charts       |
+| 3.12 | Accessibility audit                        | Complete | WCAG 2.1 AA compliance verified across all views                |
+| 3.13 | Write dashboard design document            | Complete | `docs/architecture/components/dashboard.md`                     |
+| 3.14 | Build container images                     | Complete | `containers/dashboard/Dockerfile` (frontend + BFF)              |
+| 3.15 | E2E test suite                             | Complete | Playwright tests for critical admin workflows                   |
 
 ## Task Details
 
@@ -89,12 +89,12 @@ Walk the v1 source tree and catalog every reusable component, hook, utility, and
 
 Map v1 data types to v2 equivalents from `@sardeenz/types`:
 
-| v1 concept | v2 equivalent | Mapping notes |
-| --- | --- | --- |
-| Model states | `ModelLifecycleState` enum | v2 adds `DRAINING`, `PENDING`; map v1 states |
-| GPU memory per device | `DeviceInfo` schema | v2 adds `memoryReservedBytes` |
-| Worker status | `WorkerStatus` enum | v2 adds `DEGRADED` |
-| Deploy request fields | `ModelDeploymentRequest` | v2 adds `pinned`, `engineConfig` |
+| v1 concept            | v2 equivalent              | Mapping notes                                |
+| --------------------- | -------------------------- | -------------------------------------------- |
+| Model states          | `ModelLifecycleState` enum | v2 adds `DRAINING`, `PENDING`; map v1 states |
+| GPU memory per device | `DeviceInfo` schema        | v2 adds `memoryReservedBytes`                |
+| Worker status         | `WorkerStatus` enum        | v2 adds `DEGRADED`                           |
+| Deploy request fields | `ModelDeploymentRequest`   | v2 adds `pinned`, `engineConfig`             |
 
 **Step 3 — Port components:**
 
@@ -160,15 +160,15 @@ PatternFly 6 `Page` layout with:
 
 **Client-side routing:**
 
-| Path | Component | View |
-| --- | --- | --- |
-| `/` | `ClusterOverview` | Cluster overview (default landing) |
-| `/models` | `ModelList` | Model management table |
-| `/models/deploy` | `ModelDeploy` | Deploy form |
-| `/models/:modelName` | `ModelDetail` | Model detail view |
-| `/workers` | `WorkerList` | Worker list (redirects to overview if few workers) |
-| `/workers/:workerId` | `WorkerDetail` | Worker detail view |
-| `/metrics` | `MetricsDashboard` | Metrics charts |
+| Path                 | Component          | View                                               |
+| -------------------- | ------------------ | -------------------------------------------------- |
+| `/`                  | `ClusterOverview`  | Cluster overview (default landing)                 |
+| `/models`            | `ModelList`        | Model management table                             |
+| `/models/deploy`     | `ModelDeploy`      | Deploy form                                        |
+| `/models/:modelName` | `ModelDetail`      | Model detail view                                  |
+| `/workers`           | `WorkerList`       | Worker list (redirects to overview if few workers) |
+| `/workers/:workerId` | `WorkerDetail`     | Worker detail view                                 |
+| `/metrics`           | `MetricsDashboard` | Metrics charts                                     |
 
 **Module layout:**
 
@@ -270,18 +270,18 @@ Implement the three upstream clients and the route handlers that compose them.
 
 **Control plane client** — typed HTTP client for the control plane API:
 
-| BFF route | Upstream call | Behavior |
-| --- | --- | --- |
-| `POST /api/models` | `POST /api/v1/models` | Pass-through with validation |
-| `GET /api/models` | `GET /api/v1/models` | Pass-through, fall back to Redis on CP failure |
-| `GET /api/models/:name` | `GET /api/v1/models/{modelName}` | Pass-through, fall back to Redis on CP failure |
-| `DELETE /api/models/:name` | `DELETE /api/v1/models/{modelName}` | Pass-through |
-| `POST /api/models/:name/sleep` | `POST /api/v1/models/{modelName}/sleep` | Pass-through |
-| `POST /api/models/:name/wake` | `POST /api/v1/models/{modelName}/wake` | Pass-through |
-| `GET /api/workers` | `GET /api/v1/workers` | Pass-through, fall back to Redis on CP failure |
-| `GET /api/workers/:id` | `GET /api/v1/workers/{workerId}` | Pass-through, fall back to Redis on CP failure |
-| `GET /api/cluster/status` | `GET /api/v1/cluster/status` | Pass-through, fall back to Redis on CP failure |
-| `GET /api/cluster/memory` | `GET /api/v1/cluster/memory` | Pass-through, fall back to Redis on CP failure |
+| BFF route                      | Upstream call                           | Behavior                                       |
+| ------------------------------ | --------------------------------------- | ---------------------------------------------- |
+| `POST /api/models`             | `POST /api/v1/models`                   | Pass-through with validation                   |
+| `GET /api/models`              | `GET /api/v1/models`                    | Pass-through, fall back to Redis on CP failure |
+| `GET /api/models/:name`        | `GET /api/v1/models/{modelName}`        | Pass-through, fall back to Redis on CP failure |
+| `DELETE /api/models/:name`     | `DELETE /api/v1/models/{modelName}`     | Pass-through                                   |
+| `POST /api/models/:name/sleep` | `POST /api/v1/models/{modelName}/sleep` | Pass-through                                   |
+| `POST /api/models/:name/wake`  | `POST /api/v1/models/{modelName}/wake`  | Pass-through                                   |
+| `GET /api/workers`             | `GET /api/v1/workers`                   | Pass-through, fall back to Redis on CP failure |
+| `GET /api/workers/:id`         | `GET /api/v1/workers/{workerId}`        | Pass-through, fall back to Redis on CP failure |
+| `GET /api/cluster/status`      | `GET /api/v1/cluster/status`            | Pass-through, fall back to Redis on CP failure |
+| `GET /api/cluster/memory`      | `GET /api/v1/cluster/memory`            | Pass-through, fall back to Redis on CP failure |
 
 **Redis direct reader** — for resilience during control plane restarts:
 
@@ -325,24 +325,24 @@ Build the React hooks and API client that all page components use to fetch and s
 
 **React hooks:**
 
-| Hook | Source | Returns |
-| --- | --- | --- |
-| `useClusterStatus()` | `GET /api/cluster/status` | `ClusterStatus` + loading/error state |
-| `useClusterMemory()` | `GET /api/cluster/memory` | `ClusterMemory` + loading/error state |
-| `useModels(filter?)` | `GET /api/models` | `ModelInfo[]` + loading/error state |
-| `useModel(name)` | `GET /api/models/:name` | `ModelDetail` + loading/error state |
-| `useWorkers()` | `GET /api/workers` | `WorkerInfo[]` + loading/error state |
-| `useWorker(id)` | `GET /api/workers/:id` | `WorkerDetail` + loading/error state |
-| `useMetrics(query, range)` | `GET /api/metrics/*` | Chart data + loading/error state |
+| Hook                       | Source                    | Returns                               |
+| -------------------------- | ------------------------- | ------------------------------------- |
+| `useClusterStatus()`       | `GET /api/cluster/status` | `ClusterStatus` + loading/error state |
+| `useClusterMemory()`       | `GET /api/cluster/memory` | `ClusterMemory` + loading/error state |
+| `useModels(filter?)`       | `GET /api/models`         | `ModelInfo[]` + loading/error state   |
+| `useModel(name)`           | `GET /api/models/:name`   | `ModelDetail` + loading/error state   |
+| `useWorkers()`             | `GET /api/workers`        | `WorkerInfo[]` + loading/error state  |
+| `useWorker(id)`            | `GET /api/workers/:id`    | `WorkerDetail` + loading/error state  |
+| `useMetrics(query, range)` | `GET /api/metrics/*`      | Chart data + loading/error state      |
 
 **Mutation hooks:**
 
-| Hook | Action | Optimistic update |
-| --- | --- | --- |
-| `useDeployModel()` | `POST /api/models` | Add model in `PENDING` state to local list |
-| `useSleepModel()` | `POST /api/models/:name/sleep` | Update model state to `DRAINING` locally |
-| `useWakeModel()` | `POST /api/models/:name/wake` | Update model state to `STARTING` locally |
-| `useDeleteModel()` | `DELETE /api/models/:name` | Mark model as `STOPPING` locally |
+| Hook               | Action                         | Optimistic update                          |
+| ------------------ | ------------------------------ | ------------------------------------------ |
+| `useDeployModel()` | `POST /api/models`             | Add model in `PENDING` state to local list |
+| `useSleepModel()`  | `POST /api/models/:name/sleep` | Update model state to `DRAINING` locally   |
+| `useWakeModel()`   | `POST /api/models/:name/wake`  | Update model state to `STARTING` locally   |
+| `useDeleteModel()` | `DELETE /api/models/:name`     | Mark model as `STOPPING` locally           |
 
 **SSE event stream:**
 
@@ -374,12 +374,12 @@ The landing page — a dashboard view showing aggregate cluster health at a glan
 
 **Row 1 — Summary cards** (`Card` components in a 4-column grid):
 
-| Card | Data source | Content |
-| --- | --- | --- |
-| Workers | `useClusterStatus()` | `workersOnline` / `workerCount`, status badge |
-| Models | `useClusterStatus()` | `modelCounts.active` active, `modelCounts.sleeping` sleeping, `modelCounts.total` total |
-| GPU Memory | `useClusterStatus()` | Used / Total with percentage bar, available highlighted |
-| Alerts | `useClusterStatus()` | Count of models in `ERROR` state, workers `OFFLINE` |
+| Card       | Data source          | Content                                                                                 |
+| ---------- | -------------------- | --------------------------------------------------------------------------------------- |
+| Workers    | `useClusterStatus()` | `workersOnline` / `workerCount`, status badge                                           |
+| Models     | `useClusterStatus()` | `modelCounts.active` active, `modelCounts.sleeping` sleeping, `modelCounts.total` total |
+| GPU Memory | `useClusterStatus()` | Used / Total with percentage bar, available highlighted                                 |
+| Alerts     | `useClusterStatus()` | Count of models in `ERROR` state, workers `OFFLINE`                                     |
 
 **Row 2 — Aggregate memory visualization:**
 
@@ -403,16 +403,16 @@ The landing page — a dashboard view showing aggregate cluster health at a glan
 
 **State color mapping** (consistent across all views):
 
-| State | Color | PF6 token |
-| --- | --- | --- |
-| `ACTIVE` | Green | `--pf-t--global--color--status--success--default` |
-| `SLEEPING` | Blue | `--pf-t--global--color--status--info--default` |
-| `STARTING` | Cyan | `--pf-t--global--color--status--custom--default` |
-| `DRAINING` | Orange | `--pf-t--global--color--status--warning--default` |
-| `ERROR` | Red | `--pf-t--global--color--status--danger--default` |
-| `STOPPING` | Gray | `--pf-t--global--color--status--disabled--default` |
-| `STOPPED` | Gray (dimmed) | `--pf-t--global--color--status--disabled--default` |
-| `PENDING` | Yellow | `--pf-t--global--color--status--warning--default` |
+| State      | Color         | PF6 token                                          |
+| ---------- | ------------- | -------------------------------------------------- |
+| `ACTIVE`   | Green         | `--pf-t--global--color--status--success--default`  |
+| `SLEEPING` | Blue          | `--pf-t--global--color--status--info--default`     |
+| `STARTING` | Cyan          | `--pf-t--global--color--status--custom--default`   |
+| `DRAINING` | Orange        | `--pf-t--global--color--status--warning--default`  |
+| `ERROR`    | Red           | `--pf-t--global--color--status--danger--default`   |
+| `STOPPING` | Gray          | `--pf-t--global--color--status--disabled--default` |
+| `STOPPED`  | Gray (dimmed) | `--pf-t--global--color--status--disabled--default` |
+| `PENDING`  | Yellow        | `--pf-t--global--color--status--warning--default`  |
 
 **Real-time behavior:**
 
@@ -432,16 +432,16 @@ The primary operational view — where admins deploy models, monitor their state
 
 **Model list** (PatternFly `Table`):
 
-| Column | Source field | Features |
-| --- | --- | --- |
-| Model Name | `modelName` | Link to detail view |
-| State | `state` | Color-coded `Label` component (see 3.6 color mapping) |
-| Runner Type | `runnerType` | Text |
-| Worker | `workerId` | Link to worker detail, or "—" if unplaced |
-| Memory | `currentMemory` / `requiredMemory` | Bar showing used vs. configured |
-| Last Inference | `lastInferenceAt` | Relative time ("2m ago"), or "Never" |
-| Pinned | `pinned` | Lock icon if pinned |
-| Actions | — | Kebab menu (see below) |
+| Column         | Source field                       | Features                                              |
+| -------------- | ---------------------------------- | ----------------------------------------------------- |
+| Model Name     | `modelName`                        | Link to detail view                                   |
+| State          | `state`                            | Color-coded `Label` component (see 3.6 color mapping) |
+| Runner Type    | `runnerType`                       | Text                                                  |
+| Worker         | `workerId`                         | Link to worker detail, or "—" if unplaced             |
+| Memory         | `currentMemory` / `requiredMemory` | Bar showing used vs. configured                       |
+| Last Inference | `lastInferenceAt`                  | Relative time ("2m ago"), or "Never"                  |
+| Pinned         | `pinned`                           | Lock icon if pinned                                   |
+| Actions        | —                                  | Kebab menu (see below)                                |
 
 **Table features:**
 
@@ -453,26 +453,26 @@ The primary operational view — where admins deploy models, monitor their state
 
 **Row actions** (kebab menu per row):
 
-| Action | Condition | Behavior |
-| --- | --- | --- |
-| Sleep | State is `ACTIVE` | Confirmation modal → `POST /api/models/:name/sleep` |
-| Wake | State is `SLEEPING` | `POST /api/models/:name/wake` (no confirmation needed) |
+| Action | Condition              | Behavior                                               |
+| ------ | ---------------------- | ------------------------------------------------------ |
+| Sleep  | State is `ACTIVE`      | Confirmation modal → `POST /api/models/:name/sleep`    |
+| Wake   | State is `SLEEPING`    | `POST /api/models/:name/wake` (no confirmation needed) |
 | Delete | Any non-terminal state | Danger confirmation modal → `DELETE /api/models/:name` |
 
 **Deploy form** (`/models/deploy` route):
 
 PatternFly `Form` in a full page (not a modal, since the form has enough fields to warrant its own view):
 
-| Field | Type | Validation |
-| --- | --- | --- |
-| Model Name | `TextInput` | Required, unique (show 409 error inline) |
-| Runner Type | `FormSelect` | Required, hardcoded list (dynamic population from worker capabilities de-scoped to Phase 4 — requires adding `runnerCapabilities` to the `WorkerInfo` list endpoint and a backend change; see #67) |
-| Model Path | `TextInput` | Required, must start with `/` |
-| Required Memory | `TextInput` + unit selector (GiB/MiB) | Required, positive integer |
-| Device Type | `FormSelect` | Optional (`CUDA`, `ROCM`, `CPU`), default "Any" |
-| Tensor Parallelism | `NumberInput` | Min 1, default 1 |
-| Pinned | `Switch` | Default off |
-| Engine Config | `TextArea` (JSON) | Optional, validated as valid JSON |
+| Field              | Type                                  | Validation                                                                                                                                                                                         |
+| ------------------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model Name         | `TextInput`                           | Required, unique (show 409 error inline)                                                                                                                                                           |
+| Runner Type        | `FormSelect`                          | Required, hardcoded list (dynamic population from worker capabilities de-scoped to Phase 4 — requires adding `runnerCapabilities` to the `WorkerInfo` list endpoint and a backend change; see #67) |
+| Model Path         | `TextInput`                           | Required, must start with `/`                                                                                                                                                                      |
+| Required Memory    | `TextInput` + unit selector (GiB/MiB) | Required, positive integer                                                                                                                                                                         |
+| Device Type        | `FormSelect`                          | Optional (`CUDA`, `ROCM`, `CPU`), default "Any"                                                                                                                                                    |
+| Tensor Parallelism | `NumberInput`                         | Min 1, default 1                                                                                                                                                                                   |
+| Pinned             | `Switch`                              | Default off                                                                                                                                                                                        |
+| Engine Config      | `TextArea` (JSON)                     | Optional, validated as valid JSON                                                                                                                                                                  |
 
 Submit button triggers `useDeployModel()`. On success, navigate to the model detail view. On error, display inline error alert.
 
@@ -502,21 +502,21 @@ Full detail view for a single model (`/models/:modelName`). This is where operat
 
 **Detail section** (PatternFly `DescriptionList`):
 
-| Field | Source | Display |
-| --- | --- | --- |
-| State | `state` | Color-coded label |
-| Runner Type | `runnerType` | Text |
-| Model Path | `modelPath` | Monospace text |
-| Worker | `workerId` | Link to worker detail |
-| Runner Endpoint | `runnerEndpoint` | `host:port` or "—" |
-| Required Memory | `requiredMemory` | Formatted with unit (e.g., "16.0 GiB") |
-| Current Memory | `currentMemory` | Formatted with unit, or "—" if not running |
-| Device Type | `deviceType` | Text |
-| Tensor Parallelism | `tensorParallel` | Number |
-| Pinned | `pinned` | Yes/No with icon |
-| Last Inference | `lastInferenceAt` | Absolute + relative time |
-| State Changed | `stateChangedAt` | Absolute + relative time |
-| Created | `createdAt` | Absolute time |
+| Field              | Source            | Display                                    |
+| ------------------ | ----------------- | ------------------------------------------ |
+| State              | `state`           | Color-coded label                          |
+| Runner Type        | `runnerType`      | Text                                       |
+| Model Path         | `modelPath`       | Monospace text                             |
+| Worker             | `workerId`        | Link to worker detail                      |
+| Runner Endpoint    | `runnerEndpoint`  | `host:port` or "—"                         |
+| Required Memory    | `requiredMemory`  | Formatted with unit (e.g., "16.0 GiB")     |
+| Current Memory     | `currentMemory`   | Formatted with unit, or "—" if not running |
+| Device Type        | `deviceType`      | Text                                       |
+| Tensor Parallelism | `tensorParallel`  | Number                                     |
+| Pinned             | `pinned`          | Yes/No with icon                           |
+| Last Inference     | `lastInferenceAt` | Absolute + relative time                   |
+| State Changed      | `stateChangedAt`  | Absolute + relative time                   |
+| Created            | `createdAt`       | Absolute time                              |
 
 **Loading progress** (shown when state is `STARTING`):
 
@@ -569,11 +569,11 @@ Each card shows:
 
 **Running models table** (PatternFly `Table`):
 
-| Column | Source | Features |
-| --- | --- | --- |
-| Model Name | `modelName` | Link to model detail |
-| State | `state` | Color-coded label |
-| Memory Used | `memoryUsedBytes` | Formatted with unit |
+| Column      | Source            | Features             |
+| ----------- | ----------------- | -------------------- |
+| Model Name  | `modelName`       | Link to model detail |
+| State       | `state`           | Color-coded label    |
+| Memory Used | `memoryUsedBytes` | Formatted with unit  |
 
 **Capabilities section** (expandable, PatternFly `ExpandableSection`):
 
@@ -584,15 +584,15 @@ Each card shows:
 
 If the cluster has more than a few workers, a table view is also needed:
 
-| Column | Source | Features |
-| --- | --- | --- |
-| Worker ID | `workerId` | Link to detail |
-| Status | `status` | Color-coded label |
-| Devices | `devices.length` | Count |
-| Memory Used | Sum of `memoryUsedBytes` | Formatted |
-| Memory Total | Sum of `memoryTotalBytes` | Formatted |
-| Models | `modelCount` | Count |
-| Last Heartbeat | `lastHeartbeatAt` | Relative time |
+| Column         | Source                    | Features          |
+| -------------- | ------------------------- | ----------------- |
+| Worker ID      | `workerId`                | Link to detail    |
+| Status         | `status`                  | Color-coded label |
+| Devices        | `devices.length`          | Count             |
+| Memory Used    | Sum of `memoryUsedBytes`  | Formatted         |
+| Memory Total   | Sum of `memoryTotalBytes` | Formatted         |
+| Models         | `modelCount`              | Count             |
+| Last Heartbeat | `lastHeartbeatAt`         | Relative time     |
 
 **Real-time behavior:**
 
@@ -784,18 +784,18 @@ Playwright tests validating critical admin workflows end-to-end. Tests run again
 
 **Test scenarios:**
 
-| # | Scenario | What it validates |
-| --- | --- | --- |
-| 1 | Cluster overview loads | Page renders with worker cards, memory summary, model counts |
-| 2 | Model deploy flow | Navigate to deploy form → fill fields → submit → redirect to detail → see PENDING state |
-| 3 | Model state transitions | Deploy model → observe PENDING → STARTING (with progress) → ACTIVE via mock SSE events |
-| 4 | Model sleep/wake | Sleep an ACTIVE model → confirm modal → see DRAINING → SLEEPING. Wake → see STARTING → ACTIVE |
-| 5 | Model delete | Delete a model → confirm danger modal → model removed from list |
-| 6 | Worker detail loads | Navigate to worker detail → see GPU memory cards, running models |
-| 7 | Memory visualization | Cluster overview shows stacked bars with correct proportions for multi-GPU worker |
-| 8 | Degraded mode | Control plane mock returns errors → BFF falls back to Redis → dashboard shows degraded indicator |
-| 9 | Navigation and breadcrumbs | Navigate through all routes, verify breadcrumbs update, sidebar highlights correct item |
-| 10 | Deploy form validation | Submit with missing required fields → inline validation errors shown, form does not submit |
+| #   | Scenario                   | What it validates                                                                                |
+| --- | -------------------------- | ------------------------------------------------------------------------------------------------ |
+| 1   | Cluster overview loads     | Page renders with worker cards, memory summary, model counts                                     |
+| 2   | Model deploy flow          | Navigate to deploy form → fill fields → submit → redirect to detail → see PENDING state          |
+| 3   | Model state transitions    | Deploy model → observe PENDING → STARTING (with progress) → ACTIVE via mock SSE events           |
+| 4   | Model sleep/wake           | Sleep an ACTIVE model → confirm modal → see DRAINING → SLEEPING. Wake → see STARTING → ACTIVE    |
+| 5   | Model delete               | Delete a model → confirm danger modal → model removed from list                                  |
+| 6   | Worker detail loads        | Navigate to worker detail → see GPU memory cards, running models                                 |
+| 7   | Memory visualization       | Cluster overview shows stacked bars with correct proportions for multi-GPU worker                |
+| 8   | Degraded mode              | Control plane mock returns errors → BFF falls back to Redis → dashboard shows degraded indicator |
+| 9   | Navigation and breadcrumbs | Navigate through all routes, verify breadcrumbs update, sidebar highlights correct item          |
+| 10  | Deploy form validation     | Submit with missing required fields → inline validation errors shown, form does not submit       |
 
 **Playwright configuration:**
 
@@ -849,14 +849,14 @@ Former open questions, resolved during Phase 3 implementation:
 
 ## Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| PatternFly 6 is newer with fewer community examples | Slower UI development, unexpected component gaps or behavioral differences | Use official PatternFly.org docs as sole reference; use the `/patternfly-6-development` skill; avoid Context7 for PF components |
-| Real-time updates create excessive Redis/SSE load | Dashboard polling or fan-out degrades proxy/control plane performance | Per-client Redis subscriber in BFF (one subscriber per connected browser); this is simple and correct at admin-dashboard scale (tens of connections); a shared-subscriber fan-out pattern would be needed if connection counts grew to hundreds+; throttle memory update re-renders to 1/second |
-| v1 component porting takes longer than expected | UI delivery slows as PF5→PF6 upgrades or v1→v2 data model changes prove harder than expected | Time-box porting to 2 days per component; rebuild from scratch only if porting costs more than building new. Track port verdicts in `v1-component-mapping.md` to catch patterns early (e.g., if PF5→PF6 migration is consistently painful, batch the upgrade separately) |
-| Prometheus integration complexity | PromQL query authoring and result transformation adds unexpected scope | Start with simple queries (rate, histogram_quantile); BFF handles all PromQL; frontend receives chart-ready JSON |
-| BFF adds latency to every request | Dashboard feels slower than direct API calls | Keep BFF thin — proxy requests without transformation where possible; add caching only where it adds value |
-| TanStack Query learning curve | Data fetching bugs if team is unfamiliar with the library's caching model | Start with simple `useQuery`/`useMutation` patterns; avoid advanced features (optimistic updates, infinite queries) until needed |
+| Risk                                                | Impact                                                                                       | Mitigation                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PatternFly 6 is newer with fewer community examples | Slower UI development, unexpected component gaps or behavioral differences                   | Use official PatternFly.org docs as sole reference; use the `/patternfly-6-development` skill; avoid Context7 for PF components                                                                                                                                                                 |
+| Real-time updates create excessive Redis/SSE load   | Dashboard polling or fan-out degrades proxy/control plane performance                        | Per-client Redis subscriber in BFF (one subscriber per connected browser); this is simple and correct at admin-dashboard scale (tens of connections); a shared-subscriber fan-out pattern would be needed if connection counts grew to hundreds+; throttle memory update re-renders to 1/second |
+| v1 component porting takes longer than expected     | UI delivery slows as PF5→PF6 upgrades or v1→v2 data model changes prove harder than expected | Time-box porting to 2 days per component; rebuild from scratch only if porting costs more than building new. Track port verdicts in `v1-component-mapping.md` to catch patterns early (e.g., if PF5→PF6 migration is consistently painful, batch the upgrade separately)                        |
+| Prometheus integration complexity                   | PromQL query authoring and result transformation adds unexpected scope                       | Start with simple queries (rate, histogram_quantile); BFF handles all PromQL; frontend receives chart-ready JSON                                                                                                                                                                                |
+| BFF adds latency to every request                   | Dashboard feels slower than direct API calls                                                 | Keep BFF thin — proxy requests without transformation where possible; add caching only where it adds value                                                                                                                                                                                      |
+| TanStack Query learning curve                       | Data fetching bugs if team is unfamiliar with the library's caching model                    | Start with simple `useQuery`/`useMutation` patterns; avoid advanced features (optimistic updates, infinite queries) until needed                                                                                                                                                                |
 
 ## References
 

@@ -53,7 +53,9 @@ function WorkerRow({ worker }: { worker: WorkerInfo }) {
       <Td dataLabel={t('list.table.models')}>
         {worker.modelCount != null ? worker.modelCount : '—'}
       </Td>
-      <Td dataLabel={t('list.table.lastHeartbeat')}>{formatRelativeTime(worker.lastHeartbeatAt)}</Td>
+      <Td dataLabel={t('list.table.lastHeartbeat')}>
+        {formatRelativeTime(worker.lastHeartbeatAt)}
+      </Td>
     </Tr>
   );
 }
@@ -79,9 +81,7 @@ export function WorkerList() {
     return (
       <PageSection>
         <Alert variant="danger" title={t('list.errors.failedToLoad')} isInline>
-          <Content>
-            {error instanceof Error ? error.message : tCommon('errors.unexpected')}
-          </Content>
+          <Content>{error instanceof Error ? error.message : tCommon('errors.unexpected')}</Content>
         </Alert>
       </PageSection>
     );
@@ -106,9 +106,7 @@ export function WorkerList() {
 
         {isEmpty ? (
           <EmptyState headingLevel="h2" icon={ServerIcon} titleText={t('list.empty.title')}>
-            <EmptyStateBody>
-              {t('list.empty.body')}
-            </EmptyStateBody>
+            <EmptyStateBody>{t('list.empty.body')}</EmptyStateBody>
           </EmptyState>
         ) : (
           <Table aria-label={t('list.title')} variant="compact">

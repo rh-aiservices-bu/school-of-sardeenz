@@ -1,7 +1,7 @@
 mod redis_sync;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::forwarding::{CircuitBreaker, ForwardingClient, WeightedRoundRobin};
@@ -29,7 +29,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(config: Config, metrics_handle: metrics_exporter_prometheus::PrometheusHandle) -> Self {
+    pub fn new(
+        config: Config,
+        metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+    ) -> Self {
         Self::new_with_cache(config, metrics_handle, None, false)
     }
 
@@ -45,17 +48,12 @@ impl AppState {
         let routing_cache = existing_cache.unwrap_or_default();
         let wake_client = WakeTriggerClient::new(&config.control_plane_url);
         let resolver = Arc::new(ModelResolver::new(routing_cache.clone()));
-        let parking = ParkingManager::new(
-            config.parking.clone(),
-            routing_cache.clone(),
-            wake_client,
-        );
+        let parking =
+            ParkingManager::new(config.parking.clone(), routing_cache.clone(), wake_client);
         let circuit_breaker = CircuitBreaker::new(config.circuit_breaker.clone());
         let forwarding_client = ForwardingClient::new(config.upstream_timeout);
-        let inference_tracker = InferenceTracker::new(
-            config.redis_url.clone(),
-            config.redis_key_prefix.clone(),
-        );
+        let inference_tracker =
+            InferenceTracker::new(config.redis_url.clone(), config.redis_key_prefix.clone());
 
         Self {
             config,

@@ -6,8 +6,7 @@ use reqwest::StatusCode;
 use sardeenz_proxy::generated::proxy_control_plane::ModelState;
 
 use crate::common::{
-    MockRunner, TestProxy,
-    insert_active_model, insert_active_model_with_metadata, insert_model,
+    insert_active_model, insert_active_model_with_metadata, insert_model, MockRunner, TestProxy,
 };
 
 #[tokio::test]
@@ -32,13 +31,7 @@ async fn test_models_endpoint_active_and_sleeping() {
     .await;
 
     // Draining model — should NOT appear.
-    insert_model(
-        &proxy.routing_cache,
-        draining_model,
-        ModelState::Draining,
-        runner.addr,
-    )
-    .await;
+    insert_model(&proxy.routing_cache, draining_model, ModelState::Draining, runner.addr).await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -54,29 +47,15 @@ async fn test_models_endpoint_active_and_sleeping() {
 
     let data = body["data"].as_array().expect("data should be array");
 
-    let ids: Vec<&str> = data
-        .iter()
-        .map(|m| m["id"].as_str().unwrap_or(""))
-        .collect();
+    let ids: Vec<&str> = data.iter().map(|m| m["id"].as_str().unwrap_or("")).collect();
 
-    assert!(
-        ids.contains(&active_model),
-        "active model should appear in /v1/models"
-    );
-    assert!(
-        ids.contains(&sleeping_model),
-        "sleeping model should appear in /v1/models"
-    );
-    assert!(
-        !ids.contains(&draining_model),
-        "draining model should NOT appear in /v1/models"
-    );
+    assert!(ids.contains(&active_model), "active model should appear in /v1/models");
+    assert!(ids.contains(&sleeping_model), "sleeping model should appear in /v1/models");
+    assert!(!ids.contains(&draining_model), "draining model should NOT appear in /v1/models");
 
     // Standard OpenAI model object fields.
-    let active = data
-        .iter()
-        .find(|m| m["id"] == active_model)
-        .expect("active model not in response");
+    let active =
+        data.iter().find(|m| m["id"] == active_model).expect("active model not in response");
     assert_eq!(active["object"], "model");
 }
 
@@ -87,13 +66,7 @@ async fn test_models_endpoint_metadata() {
     let runner = MockRunner::spawn(model).await;
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
-    insert_active_model_with_metadata(
-        &proxy.routing_cache,
-        model,
-        runner.addr,
-        "my-org",
-    )
-    .await;
+    insert_active_model_with_metadata(&proxy.routing_cache, model, runner.addr, "my-org").await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -105,15 +78,9 @@ async fn test_models_endpoint_metadata() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     let data = body["data"].as_array().unwrap();
-    let entry = data
-        .iter()
-        .find(|m| m["id"] == model)
-        .expect("model not in response");
+    let entry = data.iter().find(|m| m["id"] == model).expect("model not in response");
 
-    assert_eq!(
-        entry["owned_by"], "my-org",
-        "owned_by from metadata should override the default"
-    );
+    assert_eq!(entry["owned_by"], "my-org", "owned_by from metadata should override the default");
 }
 
 #[tokio::test]

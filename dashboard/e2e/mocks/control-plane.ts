@@ -357,9 +357,8 @@ export class MockControlPlane {
       sleeping: models.filter((m) => m.state === 'SLEEPING').length,
       starting: models.filter((m) => m.state === 'STARTING').length,
       error: models.filter((m) => m.state === 'ERROR').length,
-      other: models.filter(
-        (m) => !['ACTIVE', 'SLEEPING', 'STARTING', 'ERROR'].includes(m.state),
-      ).length,
+      other: models.filter((m) => !['ACTIVE', 'SLEEPING', 'STARTING', 'ERROR'].includes(m.state))
+        .length,
     };
 
     const workersOnline = workers.filter((w) => w.status === 'ONLINE').length;

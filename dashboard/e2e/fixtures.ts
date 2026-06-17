@@ -89,11 +89,11 @@ async function startBff(
     NODE_ENV: 'test',
   };
 
-  const bffProc = spawn(
-    'node',
-    ['--import', 'tsx', join(ROOT, 'server', 'index.ts')],
-    { env, stdio: 'pipe', cwd: ROOT },
-  );
+  const bffProc = spawn('node', ['--import', 'tsx', join(ROOT, 'server', 'index.ts')], {
+    env,
+    stdio: 'pipe',
+    cwd: ROOT,
+  });
 
   // Forward BFF stderr to process stderr only on error (keep output clean)
   bffProc.stderr?.on('data', (chunk: Buffer) => {
@@ -189,4 +189,9 @@ export function bffUrl(port: number, path: string): string {
 // ---------------------------------------------------------------------------
 export type { MockControlPlane, MockPrometheus };
 export type { RedisTestHelper } from './helpers/redis.js';
-export type { MockModelInfo, MockWorkerInfo, MockWorkerDetail, MockSseEvent } from './mocks/control-plane.js';
+export type {
+  MockModelInfo,
+  MockWorkerInfo,
+  MockWorkerDetail,
+  MockSseEvent,
+} from './mocks/control-plane.js';

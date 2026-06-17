@@ -15,12 +15,9 @@ export class PrometheusClient {
     try {
       res = await fetch(url);
     } catch (cause) {
-      throw new BffError(
-        502,
-        'PROMETHEUS_ERROR',
-        'Prometheus unreachable',
-        { cause: cause instanceof Error ? cause.message : String(cause) },
-      );
+      throw new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable', {
+        cause: cause instanceof Error ? cause.message : String(cause),
+      });
     }
     if (!res.ok) {
       throw new BffError(502, 'PROMETHEUS_ERROR', `Prometheus returned ${res.status.toString()}`);
@@ -35,12 +32,9 @@ export class PrometheusClient {
     try {
       res = await fetch(url);
     } catch (cause) {
-      throw new BffError(
-        502,
-        'PROMETHEUS_ERROR',
-        'Prometheus unreachable',
-        { cause: cause instanceof Error ? cause.message : String(cause) },
-      );
+      throw new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable', {
+        cause: cause instanceof Error ? cause.message : String(cause),
+      });
     }
     if (!res.ok) {
       throw new BffError(502, 'PROMETHEUS_ERROR', `Prometheus returned ${res.status.toString()}`);

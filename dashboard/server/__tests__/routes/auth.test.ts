@@ -151,7 +151,11 @@ describe('POST /api/auth/login (simple mode)', () => {
     await app.close();
 
     expect(res.statusCode).toBe(200);
-    const body = parseJson<{ token: string; expiresIn: number; user: { username: string; roles: string[] } }>(res);
+    const body = parseJson<{
+      token: string;
+      expiresIn: number;
+      user: { username: string; roles: string[] };
+    }>(res);
     expect(body.token).toBeTruthy();
     expect(body.expiresIn).toBe(8 * 3600);
     expect(body.user.username).toBe('admin');
@@ -386,7 +390,9 @@ describe('Route protection', () => {
 
     expect(res.statusCode).toBe(200);
     const setCookieHeader = res.headers['set-cookie'];
-    const cookieStr = Array.isArray(setCookieHeader) ? setCookieHeader.join('; ') : setCookieHeader ?? '';
+    const cookieStr = Array.isArray(setCookieHeader)
+      ? setCookieHeader.join('; ')
+      : (setCookieHeader ?? '');
     expect(cookieStr).toContain('sardeenz_sse=');
     expect(cookieStr).toContain('HttpOnly');
     expect(cookieStr).toContain('Path=/api/events');
@@ -500,7 +506,9 @@ describe('POST /api/auth/logout', () => {
     expect(res.statusCode).toBe(200);
     expect(parseJson(res)).toEqual({ ok: true });
     const setCookieHeader = res.headers['set-cookie'];
-    const cookieStr = Array.isArray(setCookieHeader) ? setCookieHeader.join('; ') : setCookieHeader ?? '';
+    const cookieStr = Array.isArray(setCookieHeader)
+      ? setCookieHeader.join('; ')
+      : (setCookieHeader ?? '');
     expect(cookieStr).toContain('sardeenz_sse=');
     expect(cookieStr).toContain('Max-Age=0');
   });

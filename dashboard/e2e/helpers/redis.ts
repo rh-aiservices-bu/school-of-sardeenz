@@ -153,7 +153,13 @@ export class RedisTestHelper {
   async flushTestKeys(): Promise<void> {
     let cursor = '0';
     do {
-      const [nextCursor, keys] = await this.client.scan(cursor, 'MATCH', `${this.prefix}:*`, 'COUNT', 100);
+      const [nextCursor, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        `${this.prefix}:*`,
+        'COUNT',
+        100,
+      );
       cursor = nextCursor;
       if (keys.length > 0) await this.client.del(...keys);
     } while (cursor !== '0');

@@ -34,11 +34,15 @@ test.describe('Auth — none mode (default)', () => {
   test('auth config endpoint reports none mode', async ({ page, bffPort }) => {
     const response = await page.request.get(bffUrl(bffPort, '/api/auth/config'));
     expect(response.ok()).toBeTruthy();
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body['authMode']).toBe('none');
   });
 
-  test('API routes are accessible without token in none mode', async ({ page, bffPort, mockControlPlane }) => {
+  test('API routes are accessible without token in none mode', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setModels([]);
 
     const response = await page.request.get(bffUrl(bffPort, '/api/models'));

@@ -111,26 +111,26 @@ The frontend never constructs PromQL queries. The BFF owns the query templates a
 
 ### Technology stack
 
-| Layer | Choice | Rationale |
-| --- | --- | --- |
-| Framework | React 18 | Industry standard, large ecosystem, team familiarity |
-| UI library | PatternFly 6 | Red Hat design system, built-in accessibility, consistent with v1 |
-| Build tool | Vite | Fast dev server, optimized production builds |
-| Server state | TanStack Query v5 | Caching, deduplication, background refresh, optimistic updates |
-| Routing | React Router v6 | Client-side routing with nested layouts |
-| Testing | Vitest + React Testing Library | Fast, Vite-native test runner |
+| Layer        | Choice                         | Rationale                                                         |
+| ------------ | ------------------------------ | ----------------------------------------------------------------- |
+| Framework    | React 18                       | Industry standard, large ecosystem, team familiarity              |
+| UI library   | PatternFly 6                   | Red Hat design system, built-in accessibility, consistent with v1 |
+| Build tool   | Vite                           | Fast dev server, optimized production builds                      |
+| Server state | TanStack Query v5              | Caching, deduplication, background refresh, optimistic updates    |
+| Routing      | React Router v6                | Client-side routing with nested layouts                           |
+| Testing      | Vitest + React Testing Library | Fast, Vite-native test runner                                     |
 
 ### Route structure
 
-| Path | Component | View |
-| --- | --- | --- |
-| `/` | `ClusterOverview` | Cluster health dashboard (landing page) |
-| `/models` | `ModelList` | Model management table with filtering/sorting |
-| `/models/deploy` | `ModelDeploy` | Deploy form (full page) |
-| `/models/:modelName` | `ModelDetail` | Model detail with progress/error display |
-| `/workers` | `WorkerList` | Worker list table |
-| `/workers/:workerId` | `WorkerDetail` | Per-worker GPU memory breakdown |
-| `/metrics` | `MetricsDashboard` | Prometheus-backed performance charts |
+| Path                 | Component          | View                                          |
+| -------------------- | ------------------ | --------------------------------------------- |
+| `/`                  | `ClusterOverview`  | Cluster health dashboard (landing page)       |
+| `/models`            | `ModelList`        | Model management table with filtering/sorting |
+| `/models/deploy`     | `ModelDeploy`      | Deploy form (full page)                       |
+| `/models/:modelName` | `ModelDetail`      | Model detail with progress/error display      |
+| `/workers`           | `WorkerList`       | Worker list table                             |
+| `/workers/:workerId` | `WorkerDetail`     | Per-worker GPU memory breakdown               |
+| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts          |
 
 ### State management
 
@@ -156,37 +156,37 @@ In degraded state, the `DegradedBanner` component shows a persistent warning: "R
 
 ### Shared components
 
-| Component | Purpose |
-| --- | --- |
-| `AppLayout` | PF6 Page shell with masthead, sidebar nav, active highlighting |
-| `StateLabel` | Model lifecycle state as a colored PF6 Label with state-appropriate icons |
+| Component             | Purpose                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------- |
+| `AppLayout`           | PF6 Page shell with masthead, sidebar nav, active highlighting                                    |
+| `StateLabel`          | Model lifecycle state as a colored PF6 Label with state-appropriate icons                         |
 | `MemoryVisualization` | Stacked memory bar (used / reserved / available) with tooltips and expandable inline detail panel |
-| `DegradedBanner` | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state |
+| `DegradedBanner`      | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state     |
 
 ### State color mapping
 
 Consistent across all views:
 
-| State | PF6 Label color | Semantic meaning |
-| --- | --- | --- |
-| `ACTIVE` | green | Healthy, serving inference |
-| `SLEEPING` | blue | Weights offloaded, can be woken |
-| `STARTING` | teal | Loading weights, spinner icon |
-| `DRAINING` | orange | Completing in-flight requests |
-| `ERROR` | red | Requires operator intervention |
-| `STOPPING` / `STOPPED` | grey | Being removed or removed |
-| `PENDING` | yellow | Deployment accepted, not yet placed |
+| State                  | PF6 Label color | Semantic meaning                    |
+| ---------------------- | --------------- | ----------------------------------- |
+| `ACTIVE`               | green           | Healthy, serving inference          |
+| `SLEEPING`             | blue            | Weights offloaded, can be woken     |
+| `STARTING`             | teal            | Loading weights, spinner icon       |
+| `DRAINING`             | orange          | Completing in-flight requests       |
+| `ERROR`                | red             | Requires operator intervention      |
+| `STOPPING` / `STOPPED` | grey            | Being removed or removed            |
+| `PENDING`              | yellow          | Deployment accepted, not yet placed |
 
 ## BFF Architecture
 
 ### Technology stack
 
-| Layer | Choice | Rationale |
-| --- | --- | --- |
-| Framework | Fastify 5 | High performance, structured logging, plugin ecosystem |
-| Redis client | ioredis | Cluster support, pub/sub, SCAN iteration |
-| HTTP client | undici (via fetch) | Node.js native, connection pooling |
-| Logging | pino (via Fastify) | JSON structured logging, request ID propagation |
+| Layer        | Choice             | Rationale                                              |
+| ------------ | ------------------ | ------------------------------------------------------ |
+| Framework    | Fastify 5          | High performance, structured logging, plugin ecosystem |
+| Redis client | ioredis            | Cluster support, pub/sub, SCAN iteration               |
+| HTTP client  | undici (via fetch) | Node.js native, connection pooling                     |
+| Logging      | pino (via Fastify) | JSON structured logging, request ID propagation        |
 
 ### Upstream clients
 
@@ -217,24 +217,24 @@ Write routes (POST, DELETE) never fall back. They return the upstream error to t
 
 ### Fallback coverage
 
-| Route | Fallback | Degraded behavior |
-| --- | --- | --- |
-| `GET /api/models` | Redis | Full model list, may be stale |
-| `GET /api/models/:name` | Redis | Full model detail, may be stale |
-| `GET /api/workers` | Redis | Worker list, may be stale |
-| `GET /api/workers/:id` | Redis | Worker detail, may be stale |
-| `GET /api/cluster/status` | Redis | Aggregate status, may be stale |
-| `GET /api/cluster/memory` | Redis | Per-device memory, may be stale |
-| `GET /api/metrics/*` | None | Metrics unavailable (Prometheus dependency) |
-| `GET /api/events` | None | SSE stream disconnected |
-| `POST/DELETE /api/models/*` | None | Mutating operations fail with 502 |
+| Route                       | Fallback | Degraded behavior                           |
+| --------------------------- | -------- | ------------------------------------------- |
+| `GET /api/models`           | Redis    | Full model list, may be stale               |
+| `GET /api/models/:name`     | Redis    | Full model detail, may be stale             |
+| `GET /api/workers`          | Redis    | Worker list, may be stale                   |
+| `GET /api/workers/:id`      | Redis    | Worker detail, may be stale                 |
+| `GET /api/cluster/status`   | Redis    | Aggregate status, may be stale              |
+| `GET /api/cluster/memory`   | Redis    | Per-device memory, may be stale             |
+| `GET /api/metrics/*`        | None     | Metrics unavailable (Prometheus dependency) |
+| `GET /api/events`           | None     | SSE stream disconnected                     |
+| `POST/DELETE /api/models/*` | None     | Mutating operations fail with 502           |
 
 ### Health probes
 
-| Endpoint | Purpose | Checks |
-| --- | --- | --- |
-| `GET /healthz` | Liveness | Always returns 200 |
-| `GET /readyz` | Readiness | Checks control plane, Redis, Prometheus connectivity |
+| Endpoint       | Purpose   | Checks                                               |
+| -------------- | --------- | ---------------------------------------------------- |
+| `GET /healthz` | Liveness  | Always returns 200                                   |
+| `GET /readyz`  | Readiness | Checks control plane, Redis, Prometheus connectivity |
 
 ### Static file serving
 
@@ -244,31 +244,31 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 
 ### BFF environment variables
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SARDEENZ_BFF_LISTEN_ADDR` | `0.0.0.0:4000` | BFF listen address and port |
-| `SARDEENZ_CONTROL_PLANE_URL` | `http://localhost:3000` | Control plane base URL |
-| `SARDEENZ_REDIS_URL` | `redis://localhost:6379` | Redis/Valkey connection string |
-| `SARDEENZ_REDIS_KEY_PREFIX` | `sardeenz` | Prefix for all Redis keys |
-| `SARDEENZ_PROMETHEUS_URL` | `http://localhost:9090` | Prometheus query API base URL |
-| `SARDEENZ_CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin (dev only) |
-| `SARDEENZ_LOG_LEVEL` | `info` | Pino log level |
-| `AUTH_MODE` | `none` | Authentication mode: `none`, `simple`, or `oauth` |
-| `ADMIN_USERNAME` | `admin` | Admin username for `simple` auth mode |
-| `ADMIN_PASSWORD` | _(empty)_ | Admin password for `simple` auth mode |
-| `JWT_SECRET` | _(empty)_ | JWT signing secret (required when `AUTH_MODE` is not `none`) |
-| `JWT_EXPIRATION_HOURS` | `8` | JWT token expiration in hours |
-| `OAUTH_CLIENT_ID` | `sardeenz` | OAuth client ID (for `oauth` mode) |
-| `OAUTH_CLIENT_SECRET` | _(empty)_ | OAuth client secret (for `oauth` mode) |
-| `OAUTH_ISSUER_URL` | _(empty)_ | OAuth OIDC issuer URL (for `oauth` mode) |
-| `K8S_API_URL` | _(empty)_ | Kubernetes API URL for RBAC role resolution (for `oauth` mode) |
-| `NAMESPACE` | `sardeenz` | Kubernetes namespace for RBAC scope (for `oauth` mode) |
+| Variable                     | Default                  | Description                                                    |
+| ---------------------------- | ------------------------ | -------------------------------------------------------------- |
+| `SARDEENZ_BFF_LISTEN_ADDR`   | `0.0.0.0:4000`           | BFF listen address and port                                    |
+| `SARDEENZ_CONTROL_PLANE_URL` | `http://localhost:3000`  | Control plane base URL                                         |
+| `SARDEENZ_REDIS_URL`         | `redis://localhost:6379` | Redis/Valkey connection string                                 |
+| `SARDEENZ_REDIS_KEY_PREFIX`  | `sardeenz`               | Prefix for all Redis keys                                      |
+| `SARDEENZ_PROMETHEUS_URL`    | `http://localhost:9090`  | Prometheus query API base URL                                  |
+| `SARDEENZ_CORS_ORIGIN`       | `http://localhost:5173`  | Allowed CORS origin (dev only)                                 |
+| `SARDEENZ_LOG_LEVEL`         | `info`                   | Pino log level                                                 |
+| `AUTH_MODE`                  | `none`                   | Authentication mode: `none`, `simple`, or `oauth`              |
+| `ADMIN_USERNAME`             | `admin`                  | Admin username for `simple` auth mode                          |
+| `ADMIN_PASSWORD`             | _(empty)_                | Admin password for `simple` auth mode                          |
+| `JWT_SECRET`                 | _(empty)_                | JWT signing secret (required when `AUTH_MODE` is not `none`)   |
+| `JWT_EXPIRATION_HOURS`       | `8`                      | JWT token expiration in hours                                  |
+| `OAUTH_CLIENT_ID`            | `sardeenz`               | OAuth client ID (for `oauth` mode)                             |
+| `OAUTH_CLIENT_SECRET`        | _(empty)_                | OAuth client secret (for `oauth` mode)                         |
+| `OAUTH_ISSUER_URL`           | _(empty)_                | OAuth OIDC issuer URL (for `oauth` mode)                       |
+| `K8S_API_URL`                | _(empty)_                | Kubernetes API URL for RBAC role resolution (for `oauth` mode) |
+| `NAMESPACE`                  | `sardeenz`               | Kubernetes namespace for RBAC scope (for `oauth` mode)         |
 
 ### Frontend environment variables
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `VITE_API_URL` | `/api` | BFF API base URL (for non-proxied setups) |
+| Variable       | Default | Description                               |
+| -------------- | ------- | ----------------------------------------- |
+| `VITE_API_URL` | `/api`  | BFF API base URL (for non-proxied setups) |
 
 ## Container Image
 
@@ -282,12 +282,12 @@ The BFF serves both the API and the frontend from a single port (4000). This sim
 
 ## Testing Strategy
 
-| Level | Tool | Scope |
-| --- | --- | --- |
-| Unit (frontend) | Vitest + React Testing Library | API client, hooks, utility functions, component rendering |
-| Unit (BFF) | Vitest | Upstream clients (mocked HTTP), route handlers (mocked deps) |
-| E2E (workflows) | Playwright | Critical admin workflows against real frontend + BFF with mock upstreams |
-| E2E (accessibility) | Playwright + `@axe-core/playwright` | WCAG 2.1 AA scans on all key pages using the mock harness |
+| Level               | Tool                                | Scope                                                                    |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+| Unit (frontend)     | Vitest + React Testing Library      | API client, hooks, utility functions, component rendering                |
+| Unit (BFF)          | Vitest                              | Upstream clients (mocked HTTP), route handlers (mocked deps)             |
+| E2E (workflows)     | Playwright                          | Critical admin workflows against real frontend + BFF with mock upstreams |
+| E2E (accessibility) | Playwright + `@axe-core/playwright` | WCAG 2.1 AA scans on all key pages using the mock harness                |
 
 ### E2E mock service harness
 
@@ -301,18 +301,18 @@ The Playwright tests use a purpose-built mock harness rather than real upstream 
 
 The metrics dashboard exposes ten BFF routes, each backed by Prometheus queries:
 
-| BFF route | Metric(s) queried | Type | Dashboard chart |
-| --- | --- | --- | --- |
-| `GET /api/metrics/latency` | `sardeenz_proxy_request_duration_seconds` | Histogram | p50/p95/p99 latency line chart |
-| `GET /api/metrics/throughput` | `sardeenz_proxy_requests_total` | Counter | Throughput (req/s) line chart |
-| `GET /api/metrics/connections` | `sardeenz_proxy_active_connections`, `sardeenz_proxy_parked_connections` | Gauge | Active and parked connection gauges |
-| `GET /api/metrics/parking-duration` | `sardeenz_proxy_parking_duration_seconds` | Histogram | p50/p95 parking wait time |
-| `GET /api/metrics/memory` | `sardeenz_control_plane_device_memory_bytes` | Gauge | Device memory instant query |
-| `GET /api/metrics/memory-history` | `sardeenz_control_plane_device_memory_bytes` | Gauge | Device memory over time (range) |
-| `GET /api/metrics/wake-triggers` | `sardeenz_control_plane_wake_triggers_total` | Counter | Wake trigger frequency bar chart |
-| `GET /api/metrics/state-transitions` | `sardeenz_control_plane_state_transitions_total` | Counter | State transitions by type |
-| `GET /api/metrics/evictions` | `sardeenz_control_plane_evictions_total` | Counter | Evictions over time |
-| `GET /api/metrics/operations` | `sardeenz_control_plane_{deploy,sleep,wake,eviction,placement}_duration_seconds` | Histogram | p95 operation duration by type |
+| BFF route                            | Metric(s) queried                                                                | Type      | Dashboard chart                     |
+| ------------------------------------ | -------------------------------------------------------------------------------- | --------- | ----------------------------------- |
+| `GET /api/metrics/latency`           | `sardeenz_proxy_request_duration_seconds`                                        | Histogram | p50/p95/p99 latency line chart      |
+| `GET /api/metrics/throughput`        | `sardeenz_proxy_requests_total`                                                  | Counter   | Throughput (req/s) line chart       |
+| `GET /api/metrics/connections`       | `sardeenz_proxy_active_connections`, `sardeenz_proxy_parked_connections`         | Gauge     | Active and parked connection gauges |
+| `GET /api/metrics/parking-duration`  | `sardeenz_proxy_parking_duration_seconds`                                        | Histogram | p50/p95 parking wait time           |
+| `GET /api/metrics/memory`            | `sardeenz_control_plane_device_memory_bytes`                                     | Gauge     | Device memory instant query         |
+| `GET /api/metrics/memory-history`    | `sardeenz_control_plane_device_memory_bytes`                                     | Gauge     | Device memory over time (range)     |
+| `GET /api/metrics/wake-triggers`     | `sardeenz_control_plane_wake_triggers_total`                                     | Counter   | Wake trigger frequency bar chart    |
+| `GET /api/metrics/state-transitions` | `sardeenz_control_plane_state_transitions_total`                                 | Counter   | State transitions by type           |
+| `GET /api/metrics/evictions`         | `sardeenz_control_plane_evictions_total`                                         | Counter   | Evictions over time                 |
+| `GET /api/metrics/operations`        | `sardeenz_control_plane_{deploy,sleep,wake,eviction,placement}_duration_seconds` | Histogram | p95 operation duration by type      |
 
 Time ranges map to PromQL step sizes: 15m → 15s, 1h → 60s, 6h → 300s, 24h → 900s, 7d → 3600s. The BFF constructs the PromQL and handles time range parameters; the frontend receives chart-ready arrays.
 
@@ -322,11 +322,11 @@ The BFF implements a lightweight auth system controlled by the `AUTH_MODE` envir
 
 ### Three modes
 
-| Mode | Behavior |
-| --- | --- |
+| Mode             | Behavior                                                                                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `none` (default) | No authentication. `authenticate` and `requireRole` decorators are no-ops. All routes are open. Use for local development and air-gapped deployments. |
-| `simple` | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT. |
-| `oauth` | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens via the configured OIDC issuer, then issues an internal JWT. |
+| `simple`         | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT.           |
+| `oauth`          | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens via the configured OIDC issuer, then issues an internal JWT.     |
 
 ### JWT flow
 
@@ -345,18 +345,19 @@ The frontend uses **react-i18next** with a namespace-per-page pattern.
 
 ### Namespaces
 
-| Namespace | Pages / components |
-| --- | --- |
-| `common` | Shared strings: nav labels, action names, status labels, degraded banner |
-| `cluster` | Cluster Overview page |
-| `models` | Model List, Model Detail, Model Deploy pages |
-| `workers` | Worker List, Worker Detail pages |
-| `metrics` | Metrics Dashboard page |
-| `auth` | Login page, OAuth callback page |
+| Namespace | Pages / components                                                       |
+| --------- | ------------------------------------------------------------------------ |
+| `common`  | Shared strings: nav labels, action names, status labels, degraded banner |
+| `cluster` | Cluster Overview page                                                    |
+| `models`  | Model List, Model Detail, Model Deploy pages                             |
+| `workers` | Worker List, Worker Detail pages                                         |
+| `metrics` | Metrics Dashboard page                                                   |
+| `auth`    | Login page, OAuth callback page                                          |
 
 ### Configuration
 
 `dashboard/src/i18n.ts` initialises i18next with:
+
 - Browser language detection (navigator → htmlTag, no localStorage caching)
 - English as the sole locale at present (locale files at `dashboard/src/locales/en/`)
 - `escapeValue: false` (React handles XSS escaping)

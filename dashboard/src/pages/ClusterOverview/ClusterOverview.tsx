@@ -39,8 +39,7 @@ function WorkersCard({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
   const online = status.workersOnline ?? 0;
   const total = status.workerCount;
-  const color: 'green' | 'red' | 'grey' =
-    total === 0 ? 'grey' : online === total ? 'green' : 'red';
+  const color: 'green' | 'red' | 'grey' = total === 0 ? 'grey' : online === total ? 'green' : 'red';
 
   return (
     <Card isCompact>
@@ -102,7 +101,9 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
         >
           {total}
         </span>
-        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{t('overview.cards.models.total')}</span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+          {t('overview.cards.models.total')}
+        </span>
         <div
           style={{
             marginTop: 'var(--pf-t--global--spacer--xs)',
@@ -150,7 +151,9 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
         >
           {percent}%
         </span>
-        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{t('overview.cards.gpuMemory.used')}</span>
+        <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+          {t('overview.cards.gpuMemory.used')}
+        </span>
         <Progress
           value={percent}
           aria-label={t('overview.cards.gpuMemory.title')}
@@ -163,7 +166,10 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
             color: 'var(--pf-t--global--text--color--subtle)',
           }}
         >
-          {t('overview.cards.gpuMemory.available', { value: formatBytes(availableBytes), total: formatBytes(totalBytes) })}
+          {t('overview.cards.gpuMemory.available', {
+            value: formatBytes(availableBytes),
+            total: formatBytes(totalBytes),
+          })}
         </div>
       </CardBody>
     </Card>
@@ -176,8 +182,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
 function AlertsCard({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
   const errorModels = status.modelCounts.error ?? 0;
-  const offlineWorkers =
-    status.workerCount - (status.workersOnline ?? status.workerCount);
+  const offlineWorkers = status.workerCount - (status.workersOnline ?? status.workerCount);
   const total = errorModels + offlineWorkers;
   const color: 'red' | 'green' = total > 0 ? 'red' : 'green';
 
@@ -186,7 +191,9 @@ function AlertsCard({ status }: { status: ClusterStatus }) {
       <CardTitle>
         <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
           <FlexItem>
-            <ExclamationTriangleIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
+            <ExclamationTriangleIcon
+              style={{ color: 'var(--pf-t--global--text--color--subtle)' }}
+            />
           </FlexItem>
           <FlexItem>{t('overview.cards.alerts.title')}</FlexItem>
         </Flex>
@@ -267,7 +274,9 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
         </Title>
       </CardTitle>
       <CardBody>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--pf-t--global--spacer--xl)' }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--pf-t--global--spacer--xl)' }}
+        >
           <div style={{ height: '200px', width: '200px', flexShrink: 0 }}>
             <ChartDonut
               ariaDesc={t('overview.vramUsage.ariaDesc')}
@@ -278,10 +287,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               width={200}
               title={`${percent}%`}
               subTitle={t('overview.cards.gpuMemory.used').trim()}
-              colorScale={[
-                'var(--pf-t-chart-color-blue-300)',
-                'var(--pf-t-chart-color-blue-100)',
-              ]}
+              colorScale={['var(--pf-t-chart-color-blue-300)', 'var(--pf-t-chart-color-blue-100)']}
               legendData={[
                 { name: `${t('overview.vramUsage.used')}: ${formatBytes(usedBytes)}` },
                 { name: `${t('overview.vramUsage.available')}: ${formatBytes(availableBytes)}` },
@@ -367,10 +373,7 @@ const MODEL_STATE_DISPLAY_ORDER: ModelLifecycleState[] = [
   ModelLifecycleState.ERROR,
 ];
 
-function stateCountFromStatus(
-  status: ClusterStatus,
-  state: ModelLifecycleState,
-): number {
+function stateCountFromStatus(status: ClusterStatus, state: ModelLifecycleState): number {
   const mc = status.modelCounts;
   switch (state) {
     case ModelLifecycleState.ACTIVE:
@@ -463,9 +466,16 @@ function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
             <div
               role="link"
               tabIndex={0}
-              onClick={() => void navigate(`/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)}
-              onKeyDown={(e) => handleKeyDown(e, `/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)}
-              aria-label={t('overview.modelStateBreakdown.viewModels', { state: t('overview.modelStateBreakdown.other'), count: other })}
+              onClick={() =>
+                void navigate(`/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)
+              }
+              onKeyDown={(e) =>
+                handleKeyDown(e, `/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)
+              }
+              aria-label={t('overview.modelStateBreakdown.viewModels', {
+                state: t('overview.modelStateBreakdown.other'),
+                count: other,
+              })}
               style={stateRowStyle}
             >
               <Label color="grey" isCompact>
@@ -624,7 +634,11 @@ function RecentEvents() {
             {t('overview.recentEvents.noEvents')}
           </div>
         ) : (
-          <ul aria-live="polite" aria-label={t('overview.recentEvents.ariaLabel')} style={{ margin: 0, padding: 0 }}>
+          <ul
+            aria-live="polite"
+            aria-label={t('overview.recentEvents.ariaLabel')}
+            style={{ margin: 0, padding: 0 }}
+          >
             {recent.map((event, idx) => (
               <EventEntry key={`${event.timestamp}-${event.type}-${idx}`} event={event} />
             ))}
@@ -658,14 +672,8 @@ export function ClusterOverview() {
   if (error || !status) {
     return (
       <PageSection>
-        <Alert
-          variant="danger"
-          title={t('overview.errors.failedToLoad')}
-          isInline
-        >
-          <Content>
-            {error instanceof Error ? error.message : tCommon('errors.unexpected')}
-          </Content>
+        <Alert variant="danger" title={t('overview.errors.failedToLoad')} isInline>
+          <Content>{error instanceof Error ? error.message : tCommon('errors.unexpected')}</Content>
         </Alert>
       </PageSection>
     );

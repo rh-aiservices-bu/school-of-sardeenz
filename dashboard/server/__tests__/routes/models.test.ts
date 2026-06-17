@@ -133,7 +133,10 @@ describe('GET /api/models', () => {
     await app.close();
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ source: 'redis-fallback', models: [{ modelName: 'llama-3' }] });
+    expect(res.json()).toMatchObject({
+      source: 'redis-fallback',
+      models: [{ modelName: 'llama-3' }],
+    });
   });
 });
 

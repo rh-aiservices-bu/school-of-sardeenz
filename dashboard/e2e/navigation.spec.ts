@@ -18,7 +18,11 @@ test.describe('Navigation', () => {
     await expect(page.locator('[itemid="/"].pf-m-current')).toBeVisible();
   });
 
-  test('sidebar shows all primary navigation items', async ({ page, bffPort, mockControlPlane }) => {
+  test('sidebar shows all primary navigation items', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setClusterStatus({
       workerCount: 0,
       workersOnline: 0,
@@ -28,9 +32,11 @@ test.describe('Navigation', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByRole('link', { name: 'Cluster Overview' }).or(
-      page.locator('nav').getByText('Cluster Overview')
-    )).toBeVisible();
+    await expect(
+      page
+        .getByRole('link', { name: 'Cluster Overview' })
+        .or(page.locator('nav').getByText('Cluster Overview')),
+    ).toBeVisible();
     await expect(page.locator('nav').getByText('Models')).toBeVisible();
     await expect(page.locator('nav').getByText('Workers')).toBeVisible();
     await expect(page.locator('nav').getByText('Metrics')).toBeVisible();
@@ -58,7 +64,11 @@ test.describe('Navigation', () => {
     await expect(page).toHaveURL(/\/metrics$/);
   });
 
-  test('sidebar highlights active nav item for models page', async ({ page, bffPort, mockControlPlane }) => {
+  test('sidebar highlights active nav item for models page', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setModels([]);
 
     await page.goto(bffUrl(bffPort, '/models'));
@@ -66,7 +76,11 @@ test.describe('Navigation', () => {
     await expect(modelsNavItem).toHaveClass(/pf-m-current/);
   });
 
-  test('sidebar highlights active nav item for workers page', async ({ page, bffPort, mockControlPlane }) => {
+  test('sidebar highlights active nav item for workers page', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setWorkers([]);
 
     await page.goto(bffUrl(bffPort, '/workers'));

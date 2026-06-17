@@ -47,8 +47,16 @@ interface DeviceCardProps {
 
 function DeviceCard({ device, workerModels }: DeviceCardProps) {
   const { t } = useTranslation('workers');
-  const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes, memoryAvailableBytes, memoryReservedBytes } = device;
-  const usedPercent = memoryTotalBytes > 0 ? Math.round((memoryUsedBytes / memoryTotalBytes) * 100) : 0;
+  const {
+    deviceIndex,
+    deviceType,
+    memoryTotalBytes,
+    memoryUsedBytes,
+    memoryAvailableBytes,
+    memoryReservedBytes,
+  } = device;
+  const usedPercent =
+    memoryTotalBytes > 0 ? Math.round((memoryUsedBytes / memoryTotalBytes) * 100) : 0;
 
   return (
     <Card isCompact>
@@ -65,10 +73,7 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
             gap: 'var(--pf-t--global--spacer--sm)',
           }}
         >
-          <Progress
-            value={usedPercent}
-            aria-label={`GPU ${deviceIndex} memory usage`}
-          />
+          <Progress value={usedPercent} aria-label={`GPU ${deviceIndex} memory usage`} />
           <div
             style={{
               display: 'flex',
@@ -120,11 +125,22 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
                 {t('detail.deviceModels.title')}
               </div>
               {workerModels.length === 0 ? (
-                <div style={{ fontSize: 'var(--pf-t--global--font--size--sm)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+                <div
+                  style={{
+                    fontSize: 'var(--pf-t--global--font--size--sm)',
+                    color: 'var(--pf-t--global--text--color--subtle)',
+                  }}
+                >
                   {t('detail.deviceModels.none')}
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--xs)' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--pf-t--global--spacer--xs)',
+                  }}
+                >
                   {workerModels.map((m) => (
                     <div
                       key={m.modelName}
@@ -134,10 +150,24 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
                         fontSize: 'var(--pf-t--global--font--size--sm)',
                       }}
                     >
-                      <Link to={`/models/${encodeURIComponent(m.modelName)}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
+                      <Link
+                        to={`/models/${encodeURIComponent(m.modelName)}`}
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          maxWidth: '60%',
+                        }}
+                      >
                         {m.modelName}
                       </Link>
-                      <span style={{ color: 'var(--pf-t--global--text--color--subtle)', whiteSpace: 'nowrap', marginLeft: 'var(--pf-t--global--spacer--xs)' }}>
+                      <span
+                        style={{
+                          color: 'var(--pf-t--global--text--color--subtle)',
+                          whiteSpace: 'nowrap',
+                          marginLeft: 'var(--pf-t--global--spacer--xs)',
+                        }}
+                      >
                         {m.memoryUsedBytes != null ? formatBytes(m.memoryUsedBytes) : '—'}
                       </span>
                     </div>
@@ -186,17 +216,13 @@ function RunningModelsSection({ models }: { models: WorkerModelInfo[] }) {
         {models.map((model) => (
           <Tr key={model.modelName}>
             <Td dataLabel={t('detail.runningModelsTable.modelName')}>
-              <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
-                {model.modelName}
-              </Link>
+              <Link to={`/models/${encodeURIComponent(model.modelName)}`}>{model.modelName}</Link>
             </Td>
             <Td dataLabel={t('detail.runningModelsTable.state')}>
               <StateLabel state={model.state} />
             </Td>
             <Td dataLabel={t('detail.runningModelsTable.devices')}>
-              {model.deviceIndices
-                ? model.deviceIndices.map((i) => `GPU ${i}`).join(', ')
-                : '—'}
+              {model.deviceIndices ? model.deviceIndices.map((i) => `GPU ${i}`).join(', ') : '—'}
             </Td>
             <Td dataLabel={t('detail.runningModelsTable.memoryUsed')}>
               {model.memoryUsedBytes != null ? formatBytes(model.memoryUsedBytes) : '—'}
@@ -264,8 +290,7 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
   const statusColor = getWorkerStatusColor(worker.status);
   const statusLabel = worker.status.charAt(0) + worker.status.slice(1).toLowerCase();
 
-  const hasCapabilities =
-    worker.runnerCapabilities != null && worker.runnerCapabilities.length > 0;
+  const hasCapabilities = worker.runnerCapabilities != null && worker.runnerCapabilities.length > 0;
 
   const [capabilitiesExpanded, setCapabilitiesExpanded] = useState(false);
 
@@ -308,7 +333,12 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
             {worker.lastHeartbeatAt ? (
               <>
                 {formatRelativeTime(worker.lastHeartbeatAt)}{' '}
-                <span style={{ color: 'var(--pf-t--global--text--color--subtle)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+                <span
+                  style={{
+                    color: 'var(--pf-t--global--text--color--subtle)',
+                    fontSize: 'var(--pf-t--global--font--size--sm)',
+                  }}
+                >
                   ({formatDateTime(worker.lastHeartbeatAt)})
                 </span>
               </>
@@ -340,33 +370,34 @@ function WorkerDetailContent({ worker }: { worker: WorkerDetail }) {
       </DescriptionList>
 
       {/* Device memory cards */}
-      {worker.devices.length > 0 && (() => {
-        const hasDeviceAttribution = worker.models.some((m) => m.deviceIndices);
-        return (
-          <div>
-            <Title
-              headingLevel="h2"
-              size="lg"
-              style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
-            >
-              {t('detail.deviceMemory')}
-            </Title>
-            <Gallery hasGutter minWidths={{ default: '280px' }}>
-              {worker.devices.map((device) => (
-                <DeviceCard
-                  key={device.deviceIndex}
-                  device={device}
-                  workerModels={
-                    hasDeviceAttribution
-                      ? worker.models.filter((m) => m.deviceIndices?.includes(device.deviceIndex))
-                      : undefined
-                  }
-                />
-              ))}
-            </Gallery>
-          </div>
-        );
-      })()}
+      {worker.devices.length > 0 &&
+        (() => {
+          const hasDeviceAttribution = worker.models.some((m) => m.deviceIndices);
+          return (
+            <div>
+              <Title
+                headingLevel="h2"
+                size="lg"
+                style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+              >
+                {t('detail.deviceMemory')}
+              </Title>
+              <Gallery hasGutter minWidths={{ default: '280px' }}>
+                {worker.devices.map((device) => (
+                  <DeviceCard
+                    key={device.deviceIndex}
+                    device={device}
+                    workerModels={
+                      hasDeviceAttribution
+                        ? worker.models.filter((m) => m.deviceIndices?.includes(device.deviceIndex))
+                        : undefined
+                    }
+                  />
+                ))}
+              </Gallery>
+            </div>
+          );
+        })()}
 
       {/* Running models */}
       <div>
@@ -434,9 +465,7 @@ export function WorkerDetail() {
     return (
       <PageSection>
         <Alert variant="danger" title={t('detail.errors.failedToLoad')} isInline>
-          <Content>
-            {error instanceof Error ? error.message : tCommon('errors.unexpected')}
-          </Content>
+          <Content>{error instanceof Error ? error.message : tCommon('errors.unexpected')}</Content>
         </Alert>
       </PageSection>
     );

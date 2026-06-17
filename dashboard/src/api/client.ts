@@ -9,7 +9,15 @@ type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
 type WorkerDetail = ControlPlaneComponents['schemas']['WorkerDetail'];
 type ErrorResponse = ControlPlaneComponents['schemas']['ErrorResponse'];
 
-export { type ModelInfo, type ModelDetail, type ModelDeploymentRequest, type ClusterStatus, type ClusterMemory, type WorkerInfo, type WorkerDetail };
+export {
+  type ModelInfo,
+  type ModelDetail,
+  type ModelDeploymentRequest,
+  type ClusterStatus,
+  type ClusterMemory,
+  type WorkerInfo,
+  type WorkerDetail,
+};
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -18,12 +26,7 @@ export class ApiError extends Error {
   readonly code?: string;
   readonly details?: Record<string, unknown>;
 
-  constructor(
-    status: number,
-    message: string,
-    code?: string,
-    details?: Record<string, unknown>,
-  ) {
+  constructor(status: number, message: string, code?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -44,7 +47,7 @@ function getToken(): string | null {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${BASE_URL}${path}`;
-  const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
+  const headers: Record<string, string> = { ...(options?.headers as Record<string, string>) };
   if (options?.body) {
     headers['Content-Type'] = 'application/json';
   }
@@ -59,7 +62,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (res.status === 401) {
     // Clear token and notify AuthContext
-    try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch {
+      /* ignore */
+    }
     window.dispatchEvent(new Event('auth:unauthorized'));
   }
 
@@ -99,10 +106,8 @@ export { type MetricsParams };
 
 export const api = {
   cluster: {
-    getStatus: (signal?: AbortSignal) =>
-      request<ClusterStatus>('/cluster/status', { signal }),
-    getMemory: (signal?: AbortSignal) =>
-      request<ClusterMemory>('/cluster/memory', { signal }),
+    getStatus: (signal?: AbortSignal) => request<ClusterStatus>('/cluster/status', { signal }),
+    getMemory: (signal?: AbortSignal) => request<ClusterMemory>('/cluster/memory', { signal }),
   },
   models: {
     list: (state?: string, signal?: AbortSignal) => {
@@ -121,8 +126,7 @@ export const api = {
       request<unknown>(`/models/${encodeURIComponent(name)}/wake`, { method: 'POST' }),
   },
   workers: {
-    list: (signal?: AbortSignal) =>
-      request<{ workers: WorkerInfo[] }>('/workers', { signal }),
+    list: (signal?: AbortSignal) => request<{ workers: WorkerInfo[] }>('/workers', { signal }),
     get: (id: string, signal?: AbortSignal) =>
       request<WorkerDetail>(`/workers/${encodeURIComponent(id)}`, { signal }),
   },

@@ -123,9 +123,7 @@ export function ModelDetail() {
         ? model.runnerEndpoint.host
         : '—';
 
-  const engineConfigJson = model.engineConfig
-    ? JSON.stringify(model.engineConfig, null, 2)
-    : null;
+  const engineConfigJson = model.engineConfig ? JSON.stringify(model.engineConfig, null, 2) : null;
 
   return (
     <PageSection>
@@ -164,11 +162,7 @@ export function ModelDetail() {
               )}
               {(isSleeping || isError) && (
                 <FlexItem>
-                  <Button
-                    variant="primary"
-                    onClick={handleWake}
-                    isLoading={wakeModel.isPending}
-                  >
+                  <Button variant="primary" onClick={handleWake} isLoading={wakeModel.isPending}>
                     {t('detail.wake.button')}
                   </Button>
                 </FlexItem>
@@ -213,11 +207,7 @@ export function ModelDetail() {
             isAdmin ? (
               <Flex gap={{ default: 'gapSm' }}>
                 <FlexItem>
-                  <Button
-                    variant="secondary"
-                    onClick={handleWake}
-                    isLoading={wakeModel.isPending}
-                  >
+                  <Button variant="secondary" onClick={handleWake} isLoading={wakeModel.isPending}>
                     {t('detail.wake.button')}
                   </Button>
                 </FlexItem>
@@ -240,7 +230,11 @@ export function ModelDetail() {
           <Progress
             aria-label={t('detail.fields.state')}
             value={model.progress.percentComplete ?? 0}
-            title={model.progress.phase ? `${t('detail.progress.phasePrefix')}${model.progress.phase}` : tCommon('loading')}
+            title={
+              model.progress.phase
+                ? `${t('detail.progress.phasePrefix')}${model.progress.phase}`
+                : tCommon('loading')
+            }
           />
           {model.progress.message && (
             <Content
@@ -253,7 +247,9 @@ export function ModelDetail() {
             >
               {model.progress.message}
               {model.progress.estimatedRemainingSeconds != null &&
-                t('detail.progress.remainingSeconds', { seconds: model.progress.estimatedRemainingSeconds })}
+                t('detail.progress.remainingSeconds', {
+                  seconds: model.progress.estimatedRemainingSeconds,
+                })}
             </Content>
           )}
         </div>
@@ -290,9 +286,7 @@ export function ModelDetail() {
           <DescriptionListTerm>{t('detail.fields.worker')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.workerId ? (
-              <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>
-                {model.workerId}
-              </Link>
+              <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>{model.workerId}</Link>
             ) : (
               '—'
             )}
@@ -351,11 +345,8 @@ export function ModelDetail() {
           <DescriptionListDescription>
             {model.lastInferenceAt ? (
               <>
-                {formatRelativeTime(model.lastInferenceAt)}
-                {' '}
-                <span
-                  style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}
-                >
+                {formatRelativeTime(model.lastInferenceAt)}{' '}
+                <span style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}>
                   ({formatDateTime(model.lastInferenceAt)})
                 </span>
               </>
@@ -370,11 +361,8 @@ export function ModelDetail() {
           <DescriptionListDescription>
             {model.stateChangedAt ? (
               <>
-                {formatRelativeTime(model.stateChangedAt)}
-                {' '}
-                <span
-                  style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}
-                >
+                {formatRelativeTime(model.stateChangedAt)}{' '}
+                <span style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}>
                   ({formatDateTime(model.stateChangedAt)})
                 </span>
               </>
@@ -386,15 +374,17 @@ export function ModelDetail() {
 
         <DescriptionListGroup>
           <DescriptionListTerm>{t('detail.fields.created')}</DescriptionListTerm>
-          <DescriptionListDescription>
-            {formatDateTime(model.createdAt)}
-          </DescriptionListDescription>
+          <DescriptionListDescription>{formatDateTime(model.createdAt)}</DescriptionListDescription>
         </DescriptionListGroup>
       </DescriptionList>
 
       {/* State timeline */}
       <div style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
-        <Title headingLevel="h2" size="md" style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
+        <Title
+          headingLevel="h2"
+          size="md"
+          style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}
+        >
           {t('detail.timeline.title')}
         </Title>
         <div
@@ -408,10 +398,20 @@ export function ModelDetail() {
         >
           {/* Created event */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+            <span
+              style={{
+                fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                fontSize: 'var(--pf-t--global--font--size--sm)',
+              }}
+            >
               {t('detail.timeline.deployed')}
             </span>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+            <span
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--sm)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
+            >
               {formatDateTime(model.createdAt)}
             </span>
           </div>
@@ -419,10 +419,20 @@ export function ModelDetail() {
           {/* State changed event (if different from created) */}
           {model.stateChangedAt && model.stateChangedAt !== model.createdAt && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+              <span
+                style={{
+                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                  fontSize: 'var(--pf-t--global--font--size--sm)',
+                }}
+              >
                 {t('detail.timeline.stateChanged')} <StateLabel state={model.state} />
               </span>
-              <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+              <span
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--sm)',
+                  color: 'var(--pf-t--global--text--color--subtle)',
+                }}
+              >
                 {formatDateTime(model.stateChangedAt)}
               </span>
             </div>
@@ -433,7 +443,9 @@ export function ModelDetail() {
       {/* Engine config expandable */}
       {engineConfigJson && (
         <ExpandableSection
-          toggleText={engineConfigExpanded ? t('detail.engineConfig.hide') : t('detail.engineConfig.show')}
+          toggleText={
+            engineConfigExpanded ? t('detail.engineConfig.hide') : t('detail.engineConfig.show')
+          }
           isExpanded={engineConfigExpanded}
           onToggle={(_ev, expanded) => setEngineConfigExpanded(expanded)}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
@@ -452,15 +464,9 @@ export function ModelDetail() {
         aria-label={t('detail.sleep.confirmTitle')}
       >
         <ModalHeader title={t('detail.sleep.confirmTitle')} titleIconVariant="warning" />
-        <ModalBody>
-          {t('detail.sleep.confirmBody', { modelName: model.modelName })}
-        </ModalBody>
+        <ModalBody>{t('detail.sleep.confirmBody', { modelName: model.modelName })}</ModalBody>
         <ModalFooter>
-          <Button
-            variant="primary"
-            onClick={handleSleepConfirm}
-            isLoading={sleepModel.isPending}
-          >
+          <Button variant="primary" onClick={handleSleepConfirm} isLoading={sleepModel.isPending}>
             {t('detail.sleep.button')}
           </Button>
           <Button variant="link" onClick={() => setShowSleepModal(false)}>
@@ -477,15 +483,9 @@ export function ModelDetail() {
         aria-label={t('detail.delete.confirmTitle')}
       >
         <ModalHeader title={t('detail.delete.confirmTitle')} titleIconVariant="danger" />
-        <ModalBody>
-          {t('detail.delete.confirmBody', { modelName: model.modelName })}
-        </ModalBody>
+        <ModalBody>{t('detail.delete.confirmBody', { modelName: model.modelName })}</ModalBody>
         <ModalFooter>
-          <Button
-            variant="danger"
-            onClick={handleDeleteConfirm}
-            isLoading={deleteModel.isPending}
-          >
+          <Button variant="danger" onClick={handleDeleteConfirm} isLoading={deleteModel.isPending}>
             {t('detail.delete.button')}
           </Button>
           <Button variant="link" onClick={() => setShowDeleteModal(false)}>

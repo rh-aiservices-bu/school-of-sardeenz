@@ -2,4 +2,4 @@
 # Remove this file (or individual entries) once the schemas are referenced.
 specs/proxy-control-plane.yaml:
   no-unused-components:
-    - "#/components/schemas/RoutingMapUpdate"
+    - '#/components/schemas/RoutingMapUpdate'

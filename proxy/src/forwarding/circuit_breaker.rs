@@ -31,10 +31,7 @@ pub struct CircuitBreaker {
 
 impl CircuitBreaker {
     pub fn new(config: CircuitBreakerConfig) -> Self {
-        Self {
-            config,
-            circuits: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { config, circuits: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     #[allow(dead_code)]
@@ -69,14 +66,12 @@ impl CircuitBreaker {
 
     pub async fn record_failure(&self, key: &str) {
         let mut circuits = self.circuits.lock().await;
-        let circuit = circuits
-            .entry(key.to_string())
-            .or_insert_with(|| EndpointCircuit {
-                state: CircuitState::Closed,
-                failures: Vec::new(),
-                last_state_change: Instant::now(),
-                half_open_probe_in_flight: false,
-            });
+        let circuit = circuits.entry(key.to_string()).or_insert_with(|| EndpointCircuit {
+            state: CircuitState::Closed,
+            failures: Vec::new(),
+            last_state_change: Instant::now(),
+            half_open_probe_in_flight: false,
+        });
 
         if circuit.state == CircuitState::HalfOpen {
             circuit.state = CircuitState::Open;
@@ -102,14 +97,12 @@ impl CircuitBreaker {
 
     pub async fn is_allowed(&self, key: &str) -> bool {
         let mut circuits = self.circuits.lock().await;
-        let circuit = circuits
-            .entry(key.to_string())
-            .or_insert_with(|| EndpointCircuit {
-                state: CircuitState::Closed,
-                failures: Vec::new(),
-                last_state_change: Instant::now(),
-                half_open_probe_in_flight: false,
-            });
+        let circuit = circuits.entry(key.to_string()).or_insert_with(|| EndpointCircuit {
+            state: CircuitState::Closed,
+            failures: Vec::new(),
+            last_state_change: Instant::now(),
+            half_open_probe_in_flight: false,
+        });
 
         match circuit.state {
             CircuitState::Closed => true,

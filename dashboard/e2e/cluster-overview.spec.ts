@@ -67,7 +67,11 @@ test.describe('Cluster Overview', () => {
     await expect(page.getByText('Alerts')).toBeVisible();
   });
 
-  test('summary cards show correct counts from mock data', async ({ page, bffPort, mockControlPlane }) => {
+  test('summary cards show correct counts from mock data', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setClusterStatus(CLUSTER_STATUS_WITH_DATA);
 
     await page.goto(bffUrl(bffPort, '/'));
@@ -105,7 +109,11 @@ test.describe('Cluster Overview', () => {
     await expect(page.getByText('Recent Events')).toBeVisible();
   });
 
-  test('worker online count shown as all online when all workers up', async ({ page, bffPort, mockControlPlane }) => {
+  test('worker online count shown as all online when all workers up', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setWorkers([WORKER_1]);
     mockControlPlane.setClusterStatus({
       ...CLUSTER_STATUS_WITH_DATA,
@@ -119,7 +127,11 @@ test.describe('Cluster Overview', () => {
     await expect(workersCard.getByText('All online')).toBeVisible();
   });
 
-  test('alerts card shows all clear when no issues', async ({ page, bffPort, mockControlPlane }) => {
+  test('alerts card shows all clear when no issues', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setClusterStatus({
       workerCount: 1,
       workersOnline: 1,

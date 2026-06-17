@@ -99,9 +99,7 @@ export class ReconciliationService {
 
       reconciliationTicksTotal.inc();
 
-      const workerIdsBefore = new Set(
-        this.workerPool.getAllWorkers().map((w) => w.workerId),
-      );
+      const workerIdsBefore = new Set(this.workerPool.getAllWorkers().map((w) => w.workerId));
 
       await this.safeStep('discoverWorkers', () => this.workerPool.discoverWorkers());
       await this.safeStep('checkHeartbeats', () => this.workerPool.checkHeartbeats());
@@ -212,9 +210,7 @@ export class ReconciliationService {
       if (timeoutType === undefined) continue;
 
       const timeoutSecs =
-        timeoutType === 'deploy'
-          ? this.config.deployTimeoutSecs
-          : this.config.sleepTimeoutSecs;
+        timeoutType === 'deploy' ? this.config.deployTimeoutSecs : this.config.sleepTimeoutSecs;
       const timeoutMs = timeoutSecs * 1000;
 
       const stateAge = now - new Date(model.stateChangedAt).getTime();

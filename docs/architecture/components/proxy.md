@@ -19,11 +19,11 @@ The proxy owns the **inference request path** — from client connection to runn
 
 The proxy exposes three inference endpoints on its primary port (default `0.0.0.0:8080`):
 
-| Endpoint | Method | Purpose |
-| --- | --- | --- |
-| `/v1/chat/completions` | `POST` | Chat inference (forwarded to runner) |
-| `/v1/completions` | `POST` | Text completion inference (forwarded to runner) |
-| `/v1/models` | `GET` | List active and sleeping models |
+| Endpoint               | Method | Purpose                                         |
+| ---------------------- | ------ | ----------------------------------------------- |
+| `/v1/chat/completions` | `POST` | Chat inference (forwarded to runner)            |
+| `/v1/completions`      | `POST` | Text completion inference (forwarded to runner) |
+| `/v1/models`           | `GET`  | List active and sleeping models                 |
 
 A separate admin server on `0.0.0.0:9099` exposes `/healthz`, `/readyz`, and `/metrics`. The admin port is never exposed outside the cluster.
 
@@ -179,11 +179,11 @@ When the resolver returns `Resolution::Starting`, the model's wake is already in
 
 The parking loop checks for three terminal conditions on every wake from `receiver.changed()`:
 
-| State in cache | Action |
-| --- | --- |
-| `ACTIVE` | Remove from `pending_wakes`, return `Ok(())`, proceed to forward |
-| `ERROR` | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 |
-| Entry removed | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404 |
+| State in cache | Action                                                            |
+| -------------- | ----------------------------------------------------------------- |
+| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward  |
+| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 |
+| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404    |
 
 Any other state (`SLEEPING`, `STARTING`, `DRAINING`) causes the loop to re-wait.
 
@@ -191,11 +191,11 @@ Any other state (`SLEEPING`, `STARTING`, `DRAINING`) causes the loop to re-wait.
 
 Two independent limits protect the proxy from runaway parking:
 
-| Limit | Config key | Default | Scope |
-| --- | --- | --- | --- |
-| Per-model cap | `SARDEENZ_PARKING_MAX_PER_MODEL` | 1000 | Per model name |
-| Global cap | `SARDEENZ_PARKING_MAX_GLOBAL` | 10000 | Across all models |
-| Deadline | `SARDEENZ_PARKING_TIMEOUT_SECS` | 120 | Per parked request |
+| Limit         | Config key                       | Default | Scope              |
+| ------------- | -------------------------------- | ------- | ------------------ |
+| Per-model cap | `SARDEENZ_PARKING_MAX_PER_MODEL` | 1000    | Per model name     |
+| Global cap    | `SARDEENZ_PARKING_MAX_GLOBAL`    | 10000   | Across all models  |
+| Deadline      | `SARDEENZ_PARKING_TIMEOUT_SECS`  | 120     | Per parked request |
 
 Limits are checked before incrementing the count. Excess requests receive a 503 (`parking_limit_reached`). The deadline uses `tokio::time::sleep_until` inside a `select!` with the `receiver.changed()` future — if the deadline fires first, the task returns `Err(ParkingTimeout)` → 503 (`parking_timeout`).
 
@@ -205,10 +205,10 @@ Limits are checked before incrementing the count. Excess requests receive a 503 
 
 The control plane maintains the routing map as a Redis hash:
 
-| Key | Type | Description |
-| --- | --- | --- |
-| `sardeenz:routing-map` | Hash | One field per model. Field name = model name. Value = JSON-serialized `RoutingEntry`. |
-| `sardeenz:routing-updates` | Pub/sub channel | Receives `RoutingMapUpdate` JSON on every routing map change. |
+| Key                        | Type            | Description                                                                           |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------- |
+| `sardeenz:routing-map`     | Hash            | One field per model. Field name = model name. Value = JSON-serialized `RoutingEntry`. |
+| `sardeenz:routing-updates` | Pub/sub channel | Receives `RoutingMapUpdate` JSON on every routing map change.                         |
 
 ### RoutingEntry Format
 
@@ -240,13 +240,13 @@ A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. The m
 
 ### Model States
 
-| State | Proxy action |
-| --- | --- |
-| `ACTIVE` | Forward to endpoints via round-robin |
-| `SLEEPING` | Park connection, fire wake trigger |
+| State      | Proxy action                                           |
+| ---------- | ------------------------------------------------------ |
+| `ACTIVE`   | Forward to endpoints via round-robin                   |
+| `SLEEPING` | Park connection, fire wake trigger                     |
 | `STARTING` | Park connection, no wake trigger (already in progress) |
-| `DRAINING` | Reject with 503 (`model_unavailable`) |
-| `ERROR` | Reject with 503 (`model_unavailable`) |
+| `DRAINING` | Reject with 503 (`model_unavailable`)                  |
+| `ERROR`    | Reject with 503 (`model_unavailable`)                  |
 
 ### Refresh Strategy
 
@@ -271,11 +271,11 @@ If the Redis connection drops, `start_redis_sync` returns an error. The main loo
 
 The full-refresh strategy (HGETALL on every pub/sub event) is designed for the following envelope:
 
-| Dimension | Expected range | Notes |
-| --- | --- | --- |
-| Model count | 10–100 | One routing entry per deployed model |
-| Entry size | < 1 KB each | A few endpoints + metadata per model |
-| Total map size | < 100 KB | Fits comfortably in a single HGETALL |
+| Dimension         | Expected range             | Notes                                   |
+| ----------------- | -------------------------- | --------------------------------------- |
+| Model count       | 10–100                     | One routing entry per deployed model    |
+| Entry size        | < 1 KB each                | A few endpoints + metadata per model    |
+| Total map size    | < 100 KB                   | Fits comfortably in a single HGETALL    |
 | Pub/sub frequency | < 1 event/second sustained | Bursts during batch operations are fine |
 
 **When to revisit:** If the model count exceeds ~500, or if pub/sub events exceed ~10/second sustained, the full-refresh approach may become a bottleneck. At that point, consider incremental delta application (using the `RoutingMapUpdate` type already defined in the spec) or per-model key reads instead of HGETALL.
@@ -301,19 +301,19 @@ stateDiagram-v2
     Closed --> Closed : record_success() or<br/>failures < threshold
 ```
 
-| State | `is_allowed()` | Description |
-| --- | --- | --- |
-| `Closed` | `true` | Normal operation. Failures accumulate in a sliding window. |
-| `Open` | `false` | Endpoint is excluded from routing. |
-| `HalfOpen` | `true` | Probe phase — one request is allowed through to test recovery. |
+| State      | `is_allowed()` | Description                                                    |
+| ---------- | -------------- | -------------------------------------------------------------- |
+| `Closed`   | `true`         | Normal operation. Failures accumulate in a sliding window.     |
+| `Open`     | `false`        | Endpoint is excluded from routing.                             |
+| `HalfOpen` | `true`         | Probe phase — one request is allowed through to test recovery. |
 
 ### Thresholds and Recovery
 
-| Parameter | Config key | Default | Description |
-| --- | --- | --- | --- |
-| Failure threshold | `SARDEENZ_CB_FAILURE_THRESHOLD` | 5 | Failures within window that trip the breaker |
-| Failure window | `SARDEENZ_CB_FAILURE_WINDOW_SECS` | 30 | Sliding window for failure counting (seconds) |
-| Recovery timeout | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | 15 | Time in `Open` before transitioning to `HalfOpen` |
+| Parameter         | Config key                          | Default | Description                                       |
+| ----------------- | ----------------------------------- | ------- | ------------------------------------------------- |
+| Failure threshold | `SARDEENZ_CB_FAILURE_THRESHOLD`     | 5       | Failures within window that trip the breaker      |
+| Failure window    | `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | 30      | Sliding window for failure counting (seconds)     |
+| Recovery timeout  | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | 15      | Time in `Open` before transitioning to `HalfOpen` |
 
 Failures outside the window are pruned on each `record_failure()` call. The state check is lazy — `Open → HalfOpen` transition is computed when `state()` or `is_allowed()` is called, not on a timer.
 
@@ -327,21 +327,21 @@ Circuit breaker state is per-replica and not shared across proxy replicas. A fai
 
 All configuration is read from environment variables at startup via `Config::from_env()`.
 
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `SARDEENZ_LISTEN_ADDR` | `SocketAddr` | `0.0.0.0:8080` | Inference server bind address |
-| `SARDEENZ_ADMIN_ADDR` | `SocketAddr` | `0.0.0.0:9099` | Admin server bind address (health + metrics) |
-| `SARDEENZ_REDIS_URL` | `String` | `redis://127.0.0.1:6379` | Redis/Valkey connection URL |
-| `SARDEENZ_CONTROL_PLANE_URL` | `String` | `http://127.0.0.1:3000` | Control plane base URL for wake triggers |
-| `SARDEENZ_LOG_LEVEL` | `String` | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
-| `SARDEENZ_UPSTREAM_TIMEOUT_SECS` | `u64` | `300` | Timeout for forwarded requests to runners (includes streaming) |
-| `SARDEENZ_REDIS_KEY_PREFIX` | `String` | `sardeenz` | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`) |
-| `SARDEENZ_PARKING_TIMEOUT_SECS` | `u64` | `120` | Max time a request can be parked before returning 503 |
-| `SARDEENZ_PARKING_MAX_PER_MODEL` | `usize` | `1000` | Max concurrently parked requests per model |
-| `SARDEENZ_PARKING_MAX_GLOBAL` | `usize` | `10000` | Max concurrently parked requests across all models |
-| `SARDEENZ_CB_FAILURE_THRESHOLD` | `u32` | `5` | Failures within window to trip a circuit breaker |
-| `SARDEENZ_CB_FAILURE_WINDOW_SECS` | `u64` | `30` | Sliding window for circuit breaker failure counting |
-| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `u64` | `15` | Time before an open circuit transitions to half-open |
+| Variable                            | Type         | Default                  | Description                                                              |
+| ----------------------------------- | ------------ | ------------------------ | ------------------------------------------------------------------------ |
+| `SARDEENZ_LISTEN_ADDR`              | `SocketAddr` | `0.0.0.0:8080`           | Inference server bind address                                            |
+| `SARDEENZ_ADMIN_ADDR`               | `SocketAddr` | `0.0.0.0:9099`           | Admin server bind address (health + metrics)                             |
+| `SARDEENZ_REDIS_URL`                | `String`     | `redis://127.0.0.1:6379` | Redis/Valkey connection URL                                              |
+| `SARDEENZ_CONTROL_PLANE_URL`        | `String`     | `http://127.0.0.1:3000`  | Control plane base URL for wake triggers                                 |
+| `SARDEENZ_LOG_LEVEL`                | `String`     | `info`                   | Log level (`trace`, `debug`, `info`, `warn`, `error`)                    |
+| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`    | `u64`        | `300`                    | Timeout for forwarded requests to runners (includes streaming)           |
+| `SARDEENZ_REDIS_KEY_PREFIX`         | `String`     | `sardeenz`               | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`) |
+| `SARDEENZ_PARKING_TIMEOUT_SECS`     | `u64`        | `120`                    | Max time a request can be parked before returning 503                    |
+| `SARDEENZ_PARKING_MAX_PER_MODEL`    | `usize`      | `1000`                   | Max concurrently parked requests per model                               |
+| `SARDEENZ_PARKING_MAX_GLOBAL`       | `usize`      | `10000`                  | Max concurrently parked requests across all models                       |
+| `SARDEENZ_CB_FAILURE_THRESHOLD`     | `u32`        | `5`                      | Failures within window to trip a circuit breaker                         |
+| `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                      |
+| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `u64`        | `15`                     | Time before an open circuit transitions to half-open                     |
 
 All socket address and numeric values are validated at startup; a parse failure causes the process to exit immediately.
 
@@ -349,15 +349,15 @@ All socket address and numeric values are validated at startup; a parse failure 
 
 Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). All metric names use the `sardeenz_proxy_` prefix.
 
-| Metric | Type | Labels | Description |
-| --- | --- | --- | --- |
-| `sardeenz_proxy_requests_total` | Counter | `model`, `endpoint`, `status_code` | Total inference requests, by outcome |
-| `sardeenz_proxy_request_duration_seconds` | Histogram | — | End-to-end request latency, excluding parking wait time |
-| `sardeenz_proxy_active_connections` | Gauge | — | Currently active forwarded connections |
-| `sardeenz_proxy_parked_connections` | Gauge | `model` | Currently parked connections, per model |
-| `sardeenz_proxy_wake_triggers_total` | Counter | — | Wake triggers fired to the control plane |
-| `sardeenz_proxy_parking_duration_seconds` | Histogram | — | Time a request spent parked before forwarding |
-| `sardeenz_proxy_circuit_breaker_state` | Gauge | `endpoint` | Circuit breaker state: 0=closed, 1=open, 2=half-open |
+| Metric                                    | Type      | Labels                             | Description                                             |
+| ----------------------------------------- | --------- | ---------------------------------- | ------------------------------------------------------- |
+| `sardeenz_proxy_requests_total`           | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                    |
+| `sardeenz_proxy_request_duration_seconds` | Histogram | —                                  | End-to-end request latency, excluding parking wait time |
+| `sardeenz_proxy_active_connections`       | Gauge     | —                                  | Currently active forwarded connections                  |
+| `sardeenz_proxy_parked_connections`       | Gauge     | `model`                            | Currently parked connections, per model                 |
+| `sardeenz_proxy_wake_triggers_total`      | Counter   | —                                  | Wake triggers fired to the control plane                |
+| `sardeenz_proxy_parking_duration_seconds` | Histogram | —                                  | Time a request spent parked before forwarding           |
+| `sardeenz_proxy_circuit_breaker_state`    | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open    |
 
 ## Health Endpoints
 
@@ -379,10 +379,10 @@ The proxy and control plane communicate through two channels: Redis (shared stat
 
 ### What the Proxy Reads
 
-| Redis key | Access pattern | Purpose |
-| --- | --- | --- |
-| `sardeenz:routing-map` (hash) | Full read at startup; full re-read on every pub/sub event | Populate and refresh routing cache |
-| `sardeenz:routing-updates` (pub/sub) | Subscription | Trigger routing cache refresh |
+| Redis key                            | Access pattern                                            | Purpose                            |
+| ------------------------------------ | --------------------------------------------------------- | ---------------------------------- |
+| `sardeenz:routing-map` (hash)        | Full read at startup; full re-read on every pub/sub event | Populate and refresh routing cache |
+| `sardeenz:routing-updates` (pub/sub) | Subscription                                              | Trigger routing cache refresh      |
 
 The proxy never writes to Redis.
 
@@ -413,18 +413,18 @@ The full wake trigger schema is defined in [`packages/contracts/specs/proxy-cont
 
 ### Division of Responsibility
 
-| Concern | Owner |
-| --- | --- |
-| VRAM budget accounting | Control plane |
+| Concern                                   | Owner         |
+| ----------------------------------------- | ------------- |
+| VRAM budget accounting                    | Control plane |
 | Eviction decisions (which model to sleep) | Control plane |
-| Runner health polling | Control plane |
-| Routing map writes | Control plane |
-| Wake orchestration (commands to runner) | Control plane |
-| Request routing | Proxy |
-| Connection parking | Proxy |
-| Per-endpoint circuit breaking | Proxy |
-| Client-facing streaming | Proxy |
-| Redis pub/sub subscription | Proxy |
+| Runner health polling                     | Control plane |
+| Routing map writes                        | Control plane |
+| Wake orchestration (commands to runner)   | Control plane |
+| Request routing                           | Proxy         |
+| Connection parking                        | Proxy         |
+| Per-endpoint circuit breaking             | Proxy         |
+| Client-facing streaming                   | Proxy         |
+| Redis pub/sub subscription                | Proxy         |
 
 ## Security and Trust Model
 
@@ -434,12 +434,12 @@ The proxy trusts the routing map completely. It forwards requests to whatever `h
 
 ### Trust Boundaries
 
-| Trust boundary | What it protects | Required controls |
-| --- | --- | --- |
-| Redis/Valkey access | Routing map integrity | AUTH/ACLs, network policy, TLS in transit |
-| Control plane API | Routing map writes, wake orchestration | Authentication, authorization, network isolation |
-| Proxy admin port (9099) | Health/readiness/metrics exposure | Not exposed outside the cluster |
-| Proxy ↔ runners | Inference traffic integrity | Network policy; mTLS for sensitive workloads |
+| Trust boundary          | What it protects                       | Required controls                                |
+| ----------------------- | -------------------------------------- | ------------------------------------------------ |
+| Redis/Valkey access     | Routing map integrity                  | AUTH/ACLs, network policy, TLS in transit        |
+| Control plane API       | Routing map writes, wake orchestration | Authentication, authorization, network isolation |
+| Proxy admin port (9099) | Health/readiness/metrics exposure      | Not exposed outside the cluster                  |
+| Proxy ↔ runners         | Inference traffic integrity            | Network policy; mTLS for sensitive workloads     |
 
 ### Deployment Requirements
 

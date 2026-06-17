@@ -10,7 +10,11 @@
 import { test, expect, bffUrl } from './fixtures.js';
 
 test.describe('SSE & Real-time', () => {
-  test('Recent Events section shows Live connection status', async ({ page, bffPort, mockControlPlane }) => {
+  test('Recent Events section shows Live connection status', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setClusterStatus({
       workerCount: 0,
       workersOnline: 0,
@@ -26,7 +30,11 @@ test.describe('SSE & Real-time', () => {
     await expect(connectionLabel).toHaveText('Live', { timeout: 10_000 });
   });
 
-  test('Recent Events section shows waiting message when no events', async ({ page, bffPort, mockControlPlane }) => {
+  test('Recent Events section shows waiting message when no events', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
     mockControlPlane.setClusterStatus({
       workerCount: 0,
       workersOnline: 0,
@@ -37,7 +45,7 @@ test.describe('SSE & Real-time', () => {
     await page.goto(bffUrl(bffPort, '/'));
 
     await expect(
-      page.getByText('No events yet').or(page.getByText('Waiting for cluster activity'))
+      page.getByText('No events yet').or(page.getByText('Waiting for cluster activity')),
     ).toBeVisible();
   });
 
@@ -60,8 +68,8 @@ test.describe('SSE & Real-time', () => {
     await page.goto(bffUrl(bffPort, '/'));
 
     // With Redis serving fallback data, the degraded banner should show
-    await expect(
-      page.getByText('Control plane unreachable — showing cached data'),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Control plane unreachable — showing cached data')).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });

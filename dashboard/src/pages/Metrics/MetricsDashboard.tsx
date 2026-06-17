@@ -148,10 +148,13 @@ interface MetricsEmptyStateProps {
 function MetricsEmptyState({ title }: MetricsEmptyStateProps) {
   const { t } = useTranslation('metrics');
   return (
-    <EmptyState variant="sm" icon={ChartLineIcon} titleText={title ?? t('empty.title')} headingLevel="h3">
-      <EmptyStateBody>
-        {t('empty.body')}
-      </EmptyStateBody>
+    <EmptyState
+      variant="sm"
+      icon={ChartLineIcon}
+      titleText={title ?? t('empty.title')}
+      headingLevel="h3"
+    >
+      <EmptyStateBody>{t('empty.body')}</EmptyStateBody>
     </EmptyState>
   );
 }
@@ -348,10 +351,7 @@ function MemoryCard({ isLoading, hasError, data }: MemoryCardProps) {
     if (!isPrometheusInstantResult(data)) return [];
     return data.data.result.map((series) => {
       const label =
-        series.metric['model'] ??
-        series.metric['device'] ??
-        series.metric['instance'] ??
-        'unknown';
+        series.metric['model'] ?? series.metric['device'] ?? series.metric['instance'] ?? 'unknown';
       const bytes = parseFloat(series.value[1]);
       return { label, bytes };
     });
@@ -475,9 +475,8 @@ export function MetricsDashboard() {
     return { start, end };
   }, [selectedRange, customStartDate, customStartTime, customEndDate, customEndTime]);
 
-  const isCustomValid = selectedRange !== 'custom' || (
-    customRange != null && customRange.end > customRange.start
-  );
+  const isCustomValid =
+    selectedRange !== 'custom' || (customRange != null && customRange.end > customRange.start);
 
   const isCustom = selectedRange === 'custom';
 
@@ -487,7 +486,9 @@ export function MetricsDashboard() {
   // When SSE is degraded and auto-refresh is on, poll more aggressively to
   // compensate for the loss of real-time push updates.
   const refetchInterval: number | false = effectiveAutoRefresh
-    ? sseStatus === 'degraded' ? 5_000 : 30_000
+    ? sseStatus === 'degraded'
+      ? 5_000
+      : 30_000
     : false;
 
   const hookCustom = isCustomValid ? customRange : undefined;
@@ -534,7 +535,10 @@ export function MetricsDashboard() {
     const series = parseRangeSeries(connectionsData?.active);
     return series.map((s) => s.map((pt) => ({ ...pt, name: 'active' })));
   }, [connectionsData?.active]);
-  const parkedConnectionsSeries = useMemo(() => parseRangeSeries(connectionsData?.parked), [connectionsData?.parked]);
+  const parkedConnectionsSeries = useMemo(
+    () => parseRangeSeries(connectionsData?.parked),
+    [connectionsData?.parked],
+  );
 
   // Parking duration
   const parkingData = parkingDuration.data as { p50?: unknown; p95?: unknown } | undefined;
@@ -546,21 +550,35 @@ export function MetricsDashboard() {
     const series = parseRangeSeries(parkingData?.p95);
     return series.map((s) => s.map((pt) => ({ ...pt, name: 'p95' })));
   }, [parkingData?.p95]);
-  const parkingDurationSeries = useMemo<ChartPoint[][]>(() => [...parkingP50, ...parkingP95], [parkingP50, parkingP95]);
+  const parkingDurationSeries = useMemo<ChartPoint[][]>(
+    () => [...parkingP50, ...parkingP95],
+    [parkingP50, parkingP95],
+  );
 
-  const wakeTriggersSeries = useMemo(() => parseRangeSeries(wakeTriggers.data), [wakeTriggers.data]);
-  const stateTransitionsSeries = useMemo(() => parseRangeSeries(stateTransitions.data), [stateTransitions.data]);
+  const wakeTriggersSeries = useMemo(
+    () => parseRangeSeries(wakeTriggers.data),
+    [wakeTriggers.data],
+  );
+  const stateTransitionsSeries = useMemo(
+    () => parseRangeSeries(stateTransitions.data),
+    [stateTransitions.data],
+  );
   const evictionsSeries = useMemo(() => parseRangeSeries(evictions.data), [evictions.data]);
-  const memoryHistorySeries = useMemo(() => parseRangeSeries(memoryHistory.data), [memoryHistory.data]);
+  const memoryHistorySeries = useMemo(
+    () => parseRangeSeries(memoryHistory.data),
+    [memoryHistory.data],
+  );
 
   // Operations — each key is a separate Prometheus range result
-  const operationsData = operations.data as {
-    deploy?: unknown;
-    sleep?: unknown;
-    wake?: unknown;
-    eviction?: unknown;
-    placement?: unknown;
-  } | undefined;
+  const operationsData = operations.data as
+    | {
+        deploy?: unknown;
+        sleep?: unknown;
+        wake?: unknown;
+        eviction?: unknown;
+        placement?: unknown;
+      }
+    | undefined;
   const operationsSeries = useMemo<ChartPoint[][]>(() => {
     const entries: Array<[string, unknown]> = [
       ['deploy', operationsData?.deploy],
@@ -629,7 +647,12 @@ export function MetricsDashboard() {
               <ToolbarItem>
                 <Split hasGutter>
                   <SplitItem>
-                    <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', marginRight: 'var(--pf-t--global--spacer--sm)' }}>
+                    <span
+                      style={{
+                        fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                        marginRight: 'var(--pf-t--global--spacer--sm)',
+                      }}
+                    >
                       {t('customRangeStart')}
                     </span>
                     <DatePicker
@@ -646,7 +669,12 @@ export function MetricsDashboard() {
                     />
                   </SplitItem>
                   <SplitItem>
-                    <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)', marginRight: 'var(--pf-t--global--spacer--sm)' }}>
+                    <span
+                      style={{
+                        fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                        marginRight: 'var(--pf-t--global--spacer--sm)',
+                      }}
+                    >
                       {t('customRangeEnd')}
                     </span>
                     <DatePicker
@@ -786,11 +814,7 @@ export function MetricsDashboard() {
             />
           </GridItem>
           <GridItem md={4}>
-            <MemoryCard
-              isLoading={memory.isLoading}
-              hasError={!!memory.error}
-              data={memory.data}
-            />
+            <MemoryCard isLoading={memory.isLoading} hasError={!!memory.error} data={memory.data} />
           </GridItem>
         </Grid>
       </PageSection>

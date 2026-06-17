@@ -6,9 +6,11 @@ test.describe('Metrics Dashboard', () => {
     test('metrics page renders heading', async ({ page, bffPort }) => {
       await page.goto(bffUrl(bffPort, '/metrics'));
 
-      await expect(page.getByRole('heading', { name: 'Metrics' }).or(
-        page.locator('h1').filter({ hasText: 'Metrics' })
-      )).toBeVisible();
+      await expect(
+        page
+          .getByRole('heading', { name: 'Metrics' })
+          .or(page.locator('h1').filter({ hasText: 'Metrics' })),
+      ).toBeVisible();
     });
 
     test('shows time range selector with all options', async ({ page, bffPort }) => {
@@ -32,9 +34,15 @@ test.describe('Metrics Dashboard', () => {
       await page.goto(bffUrl(bffPort, '/metrics'));
 
       await page.getByRole('button', { name: '6h' }).click();
-      await expect(page.getByRole('button', { name: '6h' })).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByRole('button', { name: '6h' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
       // Previous selection should no longer be active
-      await expect(page.getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByRole('button', { name: '1h' })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
     });
 
     test('auto-refresh switch is visible and on by default', async ({ page, bffPort }) => {
@@ -55,7 +63,11 @@ test.describe('Metrics Dashboard', () => {
   });
 
   test.describe('Empty state (no Prometheus data)', () => {
-    test('shows empty state when Prometheus returns no results', async ({ page, bffPort, mockPrometheus }) => {
+    test('shows empty state when Prometheus returns no results', async ({
+      page,
+      bffPort,
+      mockPrometheus,
+    }) => {
       // Default state: Prometheus returns empty results
       mockPrometheus.reset();
 

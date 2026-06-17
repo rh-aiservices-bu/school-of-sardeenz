@@ -91,7 +91,7 @@ const DEFAULT_PAGE_SIZE = 20;
 /** Return progress bar colour based on current/required ratio */
 function getMemoryVariant(ratio: number): 'success' | 'warning' | 'danger' {
   if (ratio >= 0.95) return 'danger';
-  if (ratio >= 0.80) return 'warning';
+  if (ratio >= 0.8) return 'warning';
   return 'success';
 }
 
@@ -113,9 +113,9 @@ export function ModelList() {
   // State filter — initialise from URL search params (e.g. ?state=ACTIVE&state=SLEEPING)
   const [stateFilterOpen, setStateFilterOpen] = useState(false);
   const [selectedStates, setSelectedStates] = useState<string[]>(() =>
-    searchParams.getAll('state').filter((s): s is ModelLifecycleState =>
-      ALL_STATES.includes(s as ModelLifecycleState),
-    ),
+    searchParams
+      .getAll('state')
+      .filter((s): s is ModelLifecycleState => ALL_STATES.includes(s as ModelLifecycleState)),
   );
 
   // Runner-type filter
@@ -317,11 +317,7 @@ export function ModelList() {
   if (error) {
     return (
       <PageSection>
-        <Alert
-          variant={AlertVariant.danger}
-          title={t('list.errors.failedToLoad')}
-          isInline
-        >
+        <Alert variant={AlertVariant.danger} title={t('list.errors.failedToLoad')} isInline>
           {error instanceof Error ? error.message : 'Unknown error'}
         </Alert>
       </PageSection>
@@ -369,7 +365,13 @@ export function ModelList() {
           variant={AlertVariant.danger}
           title={t('list.errors.actionFailed')}
           isInline
-          actionClose={<Button variant="plain" onClick={() => setMutationError(null)} aria-label={t('list.errors.actionFailed')} />}
+          actionClose={
+            <Button
+              variant="plain"
+              onClick={() => setMutationError(null)}
+              aria-label={t('list.errors.actionFailed')}
+            />
+          }
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
           {mutationError}
@@ -423,12 +425,17 @@ export function ModelList() {
           {/* State filter */}
           <ToolbarItem>
             <ToolbarFilter
-              labels={selectedStates.map((s) => tCommon(STATE_LOCALE_KEYS[s as ModelLifecycleState]))}
+              labels={selectedStates.map((s) =>
+                tCommon(STATE_LOCALE_KEYS[s as ModelLifecycleState]),
+              )}
               deleteLabel={(_category, label) => {
                 const val = ALL_STATES.find((s) => tCommon(STATE_LOCALE_KEYS[s]) === label);
                 if (val) onStateFilterSelect(val);
               }}
-              deleteLabelGroup={() => { setSelectedStates([]); setCurrentPage(1); }}
+              deleteLabelGroup={() => {
+                setSelectedStates([]);
+                setCurrentPage(1);
+              }}
               categoryName={t('list.filterByState')}
             >
               <Select
@@ -470,7 +477,10 @@ export function ModelList() {
               <ToolbarFilter
                 labels={selectedRunners}
                 deleteLabel={(_category, label) => onRunnerFilterSelect(label as string)}
-                deleteLabelGroup={() => { setSelectedRunners([]); setCurrentPage(1); }}
+                deleteLabelGroup={() => {
+                  setSelectedRunners([]);
+                  setCurrentPage(1);
+                }}
                 categoryName={t('list.filterByRunner')}
               >
                 <Select
@@ -517,22 +527,14 @@ export function ModelList() {
 
           {/* Pagination top */}
           {!isEmpty && !hasNoResults && (
-            <ToolbarItem align={{ default: 'alignEnd' }}>
-              {paginationComponent('top')}
-            </ToolbarItem>
+            <ToolbarItem align={{ default: 'alignEnd' }}>{paginationComponent('top')}</ToolbarItem>
           )}
         </ToolbarContent>
       </Toolbar>
 
       {isEmpty ? (
-        <EmptyState
-          headingLevel="h2"
-          icon={CubesIcon}
-          titleText={t('list.empty.title')}
-        >
-          <EmptyStateBody>
-            {t('list.empty.body')}
-          </EmptyStateBody>
+        <EmptyState headingLevel="h2" icon={CubesIcon} titleText={t('list.empty.title')}>
+          <EmptyStateBody>{t('list.empty.body')}</EmptyStateBody>
           {isAdmin && (
             <EmptyStateFooter>
               <EmptyStateActions>
@@ -548,7 +550,13 @@ export function ModelList() {
           <EmptyStateBody>{t('list.emptyFiltered.body')}</EmptyStateBody>
           <EmptyStateFooter>
             <EmptyStateActions>
-              <Button variant="link" onClick={() => { setSelectedStates([]); setSelectedRunners([]); }}>
+              <Button
+                variant="link"
+                onClick={() => {
+                  setSelectedStates([]);
+                  setSelectedRunners([]);
+                }}
+              >
                 {tCommon('actions.clearFilters')}
               </Button>
             </EmptyStateActions>
@@ -642,16 +650,16 @@ export function ModelList() {
                       {formatRelativeTime(model.lastInferenceAt)}
                     </Td>
                     <Td dataLabel={t('list.table.pinned')}>
-                      {model.pinned ? (
-                        <LockIcon aria-label={t('list.table.pinned')} />
-                      ) : null}
+                      {model.pinned ? <LockIcon aria-label={t('list.table.pinned')} /> : null}
                     </Td>
                     {isAdmin && (
                       <Td dataLabel={t('list.table.actions')} isActionCell>
                         <Dropdown
                           isOpen={openMenuId === model.modelName}
                           onSelect={() => setOpenMenuId(null)}
-                          onOpenChange={(isOpen) => { if (!isOpen) setOpenMenuId(null); }}
+                          onOpenChange={(isOpen) => {
+                            if (!isOpen) setOpenMenuId(null);
+                          }}
                           toggle={(toggleRef) => (
                             <MenuToggle
                               ref={toggleRef}
@@ -745,19 +753,12 @@ export function ModelList() {
         onClose={() => setDeleteConfirmModel(null)}
         aria-label={t('list.delete.confirmTitle')}
       >
-        <ModalHeader
-          title={t('list.delete.confirmTitle')}
-          titleIconVariant="danger"
-        />
+        <ModalHeader title={t('list.delete.confirmTitle')} titleIconVariant="danger" />
         <ModalBody>
           {t('list.delete.confirmBody', { modelName: deleteConfirmModel?.modelName })}
         </ModalBody>
         <ModalFooter>
-          <Button
-            variant="danger"
-            onClick={handleDeleteConfirm}
-            isLoading={deleteModel.isPending}
-          >
+          <Button variant="danger" onClick={handleDeleteConfirm} isLoading={deleteModel.isPending}>
             {t('list.delete.menuItem')}
           </Button>
           <Button variant="link" onClick={() => setDeleteConfirmModel(null)}>
@@ -774,9 +775,7 @@ export function ModelList() {
         aria-label={t('list.bulkActions.sleep')}
       >
         <ModalHeader title={t('list.bulkActions.sleepConfirmTitle')} />
-        <ModalBody>
-          {t('list.bulkActions.sleepConfirmBody', { count: selectedCount })}
-        </ModalBody>
+        <ModalBody>{t('list.bulkActions.sleepConfirmBody', { count: selectedCount })}</ModalBody>
         <ModalFooter>
           <Button variant="primary" onClick={handleBulkSleep} isLoading={sleepModel.isPending}>
             {t('list.bulkActions.sleep')}
@@ -794,13 +793,8 @@ export function ModelList() {
         onClose={() => setBulkDeleteOpen(false)}
         aria-label={t('list.bulkActions.delete')}
       >
-        <ModalHeader
-          title={t('list.bulkActions.deleteConfirmTitle')}
-          titleIconVariant="danger"
-        />
-        <ModalBody>
-          {t('list.bulkActions.deleteConfirmBody', { count: selectedCount })}
-        </ModalBody>
+        <ModalHeader title={t('list.bulkActions.deleteConfirmTitle')} titleIconVariant="danger" />
+        <ModalBody>{t('list.bulkActions.deleteConfirmBody', { count: selectedCount })}</ModalBody>
         <ModalFooter>
           <Button variant="danger" onClick={handleBulkDelete} isLoading={deleteModel.isPending}>
             {t('list.bulkActions.delete')}

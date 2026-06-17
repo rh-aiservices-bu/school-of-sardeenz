@@ -44,7 +44,9 @@ function Legend() {
             />
           </FlexItem>
           <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>{t('overview.vramAllocation.legend.used')}</span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+              {t('overview.vramAllocation.legend.used')}
+            </span>
           </FlexItem>
         </Flex>
       </FlexItem>
@@ -62,7 +64,9 @@ function Legend() {
             />
           </FlexItem>
           <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>{t('overview.vramAllocation.legend.reserved')}</span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+              {t('overview.vramAllocation.legend.reserved')}
+            </span>
           </FlexItem>
         </Flex>
       </FlexItem>
@@ -81,7 +85,9 @@ function Legend() {
             />
           </FlexItem>
           <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>{t('overview.vramAllocation.legend.available')}</span>
+            <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
+              {t('overview.vramAllocation.legend.available')}
+            </span>
           </FlexItem>
         </Flex>
       </FlexItem>
@@ -126,7 +132,9 @@ function DeviceBar({ device, displayMode, models }: DeviceBarProps) {
       : '';
   const availableTooltip = `${t('overview.vramAllocation.legend.available')}: ${formatBytes(memoryAvailableBytes)} (${availablePct}%)`;
 
-  const modelTooltipLines = models?.map((m) => `${m.modelName} (${m.memoryUsedBytes != null ? formatBytes(m.memoryUsedBytes) : '—'})`);
+  const modelTooltipLines = models?.map(
+    (m) => `${m.modelName} (${m.memoryUsedBytes != null ? formatBytes(m.memoryUsedBytes) : '—'})`,
+  );
 
   const fullTooltip = [
     usedTooltip,
@@ -186,10 +194,17 @@ function DeviceBar({ device, displayMode, models }: DeviceBarProps) {
             }}
             role="button"
             tabIndex={0}
-            aria-label={t('overview.vramAllocation.clickToExpand', { device: `GPU ${deviceIndex}` })}
+            aria-label={t('overview.vramAllocation.clickToExpand', {
+              device: `GPU ${deviceIndex}`,
+            })}
             aria-expanded={expanded}
             onClick={() => setExpanded((e) => !e)}
-            onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setExpanded((e) => !e); } }}
+            onKeyDown={(ev) => {
+              if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                setExpanded((e) => !e);
+              }
+            }}
           >
             {usedPercent > 0 && (
               <Tooltip content={usedTooltip}>
@@ -246,12 +261,15 @@ function DeviceBar({ device, displayMode, models }: DeviceBarProps) {
                 {formatBytes(memoryUsedBytes)}
               </span>
               <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-                {' '}/ {formatBytes(memoryTotalBytes)}
+                {' '}
+                / {formatBytes(memoryTotalBytes)}
               </span>
             </>
           ) : (
             <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-              {t('overview.vramAllocation.usedPercent', { value: formatPercentage(memoryUsedBytes, memoryTotalBytes) })}
+              {t('overview.vramAllocation.usedPercent', {
+                value: formatPercentage(memoryUsedBytes, memoryTotalBytes),
+              })}
             </span>
           )}
         </div>
@@ -270,26 +288,48 @@ function DeviceBar({ device, displayMode, models }: DeviceBarProps) {
             fontSize: 'var(--pf-t--global--font--size--sm)',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--xs)' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--pf-t--global--spacer--xs)',
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--pf-t--global--color--status--info--default)', fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+              <span
+                style={{
+                  color: 'var(--pf-t--global--color--status--info--default)',
+                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                }}
+              >
                 {t('overview.vramAllocation.legend.used')}
               </span>
-              <span>{formatBytes(memoryUsedBytes)} ({usedPct}%)</span>
+              <span>
+                {formatBytes(memoryUsedBytes)} ({usedPct}%)
+              </span>
             </div>
             {(memoryReservedBytes ?? 0) > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--pf-t--global--color--status--warning--default)', fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
+                <span
+                  style={{
+                    color: 'var(--pf-t--global--color--status--warning--default)',
+                    fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                  }}
+                >
                   {t('overview.vramAllocation.legend.reserved')}
                 </span>
-                <span>{formatBytes(memoryReservedBytes)} ({reservedPct}%)</span>
+                <span>
+                  {formatBytes(memoryReservedBytes)} ({reservedPct}%)
+                </span>
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
                 {t('overview.vramAllocation.legend.available')}
               </span>
-              <span>{formatBytes(memoryAvailableBytes)} ({availablePct}%)</span>
+              <span>
+                {formatBytes(memoryAvailableBytes)} ({availablePct}%)
+              </span>
             </div>
             <div
               style={{
@@ -405,7 +445,9 @@ function WorkerSection({ workerId, devices, models, displayMode }: WorkerSection
                 models={
                   hasDeviceAttribution
                     ? models?.filter((m) => m.deviceIndices?.includes(device.deviceIndex))
-                    : isSingleDevice ? models : undefined
+                    : isSingleDevice
+                      ? models
+                      : undefined
                 }
               />
             ));
@@ -465,19 +507,26 @@ export function MemoryVisualization({ data: externalData }: MemoryVisualizationP
             </Title>
           </FlexItem>
           <FlexItem>
-            <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+            <Flex
+              spaceItems={{ default: 'spaceItemsMd' }}
+              alignItems={{ default: 'alignItemsCenter' }}
+            >
               <FlexItem>
                 <ToggleGroup aria-label={t('overview.vramAllocation.displayModeLabel')}>
                   <ToggleGroupItem
                     text={t('overview.vramAllocation.displayGiB')}
                     isSelected={displayMode === 'bytes'}
-                    onChange={(_event, selected) => { if (selected) setDisplayMode('bytes'); }}
+                    onChange={(_event, selected) => {
+                      if (selected) setDisplayMode('bytes');
+                    }}
                     buttonId="display-mode-bytes"
                   />
                   <ToggleGroupItem
                     text={t('overview.vramAllocation.displayPercent')}
                     isSelected={displayMode === 'percent'}
-                    onChange={(_event, selected) => { if (selected) setDisplayMode('percent'); }}
+                    onChange={(_event, selected) => {
+                      if (selected) setDisplayMode('percent');
+                    }}
                     buttonId="display-mode-percent"
                   />
                 </ToggleGroup>

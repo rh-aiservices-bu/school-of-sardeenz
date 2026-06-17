@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 
 use sardeenz_proxy::generated::proxy_control_plane::ModelState;
 
-use crate::common::{TestProxy, insert_model};
+use crate::common::{insert_model, TestProxy};
 
 #[tokio::test]
 async fn test_draining_model_returns_503() {
@@ -28,11 +28,7 @@ async fn test_draining_model_returns_503() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::SERVICE_UNAVAILABLE,
-        "draining model should return 503"
-    );
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "draining model should return 503");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(
@@ -40,10 +36,7 @@ async fn test_draining_model_returns_503() {
         "error type should be model_unavailable"
     );
     assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("draining"),
+        body["error"]["message"].as_str().unwrap_or("").contains("draining"),
         "error message should mention draining"
     );
 }
@@ -67,11 +60,7 @@ async fn test_error_model_returns_503() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::SERVICE_UNAVAILABLE,
-        "error model should return 503"
-    );
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "error model should return 503");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(
@@ -79,10 +68,7 @@ async fn test_error_model_returns_503() {
         "error type should be model_unavailable"
     );
     assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("error state"),
+        body["error"]["message"].as_str().unwrap_or("").contains("error state"),
         "error message should mention error state"
     );
 }

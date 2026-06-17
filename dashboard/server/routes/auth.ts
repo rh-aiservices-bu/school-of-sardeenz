@@ -173,7 +173,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       }
 
       if (!code) {
-        return reply.code(400).send({ error: 'Missing authorization code', code: 'INVALID_REQUEST' });
+        return reply
+          .code(400)
+          .send({ error: 'Missing authorization code', code: 'INVALID_REQUEST' });
       }
 
       // Exchange code for OAuth token
@@ -192,7 +194,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
 
       if (!tokenRes.ok) {
         app.log.error({ status: tokenRes.status }, 'OAuth token exchange failed');
-        return reply.code(502).send({ error: 'OAuth token exchange failed', code: 'UPSTREAM_ERROR' });
+        return reply
+          .code(502)
+          .send({ error: 'OAuth token exchange failed', code: 'UPSTREAM_ERROR' });
       }
 
       const tokenData = (await tokenRes.json()) as { access_token: string };
@@ -205,7 +209,11 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
 
       let username = 'unknown';
       if (userInfoRes.ok) {
-        const userInfo = (await userInfoRes.json()) as { preferred_username?: string; name?: string; sub?: string };
+        const userInfo = (await userInfoRes.json()) as {
+          preferred_username?: string;
+          name?: string;
+          sub?: string;
+        };
         username = userInfo.preferred_username ?? userInfo.name ?? userInfo.sub ?? 'unknown';
       }
 
@@ -253,22 +261,24 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
 
   // ------ GET /api/auth/me ------
   // Returns current user info from JWT. Requires authentication.
-  app.get('/api/auth/me', {
-    preHandler: config.authMode !== 'none'
-      ? [app.authenticate]
-      : [],
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    if (config.authMode === 'none') {
-      return reply.send({ username: 'anonymous', roles: ['admin'], authMode: 'none' });
-    }
+  app.get(
+    '/api/auth/me',
+    {
+      preHandler: config.authMode !== 'none' ? [app.authenticate] : [],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (config.authMode === 'none') {
+        return reply.send({ username: 'anonymous', roles: ['admin'], authMode: 'none' });
+      }
 
-    const user = request.user as JwtPayload;
-    return reply.send({
-      username: user.username,
-      roles: user.roles,
-      authMode: user.authMode,
-    });
-  });
+      const user = request.user as JwtPayload;
+      return reply.send({
+        username: user.username,
+        roles: user.roles,
+        authMode: user.authMode,
+      });
+    },
+  );
 
   // ------ POST /api/auth/logout ------
   // Clears the SSE auth cookie.

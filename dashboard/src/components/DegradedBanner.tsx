@@ -23,11 +23,5 @@ export function DegradedBanner() {
     ? t('degraded.controlPlaneUnreachable', 'Control plane unreachable — showing cached data')
     : t('degraded.sseUnavailable', 'Real-time updates unavailable — polling for changes');
 
-  return (
-    <Alert
-      variant="warning"
-      isInline
-      title={title}
-    />
-  );
+  return <Alert variant="warning" isInline title={title} />;
 }

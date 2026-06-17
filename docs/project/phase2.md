@@ -51,26 +51,26 @@ The control plane covers eight functional areas:
 
 ## Tasks
 
-| #    | Task                                          | Status  | Output                                                                         |
-| ---- | --------------------------------------------- | ------- | ------------------------------------------------------------------------------ |
-| 2.1  | Write control plane OpenAPI specs             | Done    | `packages/contracts/specs/control-plane.yaml`                                  |
-| 2.2  | Write dashboard ↔ control plane OpenAPI spec  | Done    | Merged into 2.1 (single admin API spec + SSE events endpoint)                  |
-| 2.3  | Set up TypeScript codegen for new specs       | Done    | `packages/types/src/generated/control-plane.ts`                                |
-| 2.4  | Scaffold control plane service                | Done    | Compilable Fastify app with config, logging, errors, graceful shutdown         |
-| 2.5  | Design PostgreSQL schema and migrations       | Done    | `control-plane/migrations/001-initial-schema.sql`                              |
-| 2.6  | Implement model lifecycle state machine       | Done    | Atomic CAS transitions via Lua, SET NX for creation, SCAN for enumeration     |
-| 2.7  | Implement device memory budget tracking       | Done    | Redis-based reader + in-memory reservations + staleness detection              |
-| 2.8  | Implement workload placement pipeline         | Done    | Four-stage placement with MostAvailableCapacity spread strategy                |
-| 2.9  | Implement LRU eviction engine                 | Done    | LRU with circuit breaker, max-per-cycle, pinned exclusion, min-active-time    |
-| 2.10 | Implement sleep/wake coordination             | Done    | Runner HTTP client + drain polling + wake polling with timeout                 |
-| 2.11 | Implement routing map management              | Done    | Atomic Lua scripts for endpoint add/remove/update + MULTI/EXEC for state      |
-| 2.12 | Implement worker pool management              | Done    | SCAN-based discovery, heartbeat detection (ONLINE/DEGRADED/OFFLINE)            |
-| 2.13 | Implement wake trigger + routing map APIs     | Done    | `POST /api/v1/wake` (matches spec contract), `GET /api/v1/routing-map`        |
-| 2.14 | Implement admin APIs                          | Done    | Model CRUD, worker list/get, cluster status/memory, SSE events                 |
-| 2.15 | Implement leader election                     | Done    | K8s Lease API with local dev mode fallback, token refresh every 60s            |
-| 2.16 | Implement health and metrics                  | Done    | `/healthz`, `/readyz`, `/metrics` with 13 Prometheus metrics                   |
-| 2.17 | Build container image                         | Done    | `containers/control-plane/Dockerfile` (multi-stage, non-root)                  |
-| 2.18 | Integration test suite                        | Done    | 128 unit tests + 7 integration tests (real Redis + PostgreSQL)                 |
+| #    | Task                                         | Status | Output                                                                     |
+| ---- | -------------------------------------------- | ------ | -------------------------------------------------------------------------- |
+| 2.1  | Write control plane OpenAPI specs            | Done   | `packages/contracts/specs/control-plane.yaml`                              |
+| 2.2  | Write dashboard ↔ control plane OpenAPI spec | Done   | Merged into 2.1 (single admin API spec + SSE events endpoint)              |
+| 2.3  | Set up TypeScript codegen for new specs      | Done   | `packages/types/src/generated/control-plane.ts`                            |
+| 2.4  | Scaffold control plane service               | Done   | Compilable Fastify app with config, logging, errors, graceful shutdown     |
+| 2.5  | Design PostgreSQL schema and migrations      | Done   | `control-plane/migrations/001-initial-schema.sql`                          |
+| 2.6  | Implement model lifecycle state machine      | Done   | Atomic CAS transitions via Lua, SET NX for creation, SCAN for enumeration  |
+| 2.7  | Implement device memory budget tracking      | Done   | Redis-based reader + in-memory reservations + staleness detection          |
+| 2.8  | Implement workload placement pipeline        | Done   | Four-stage placement with MostAvailableCapacity spread strategy            |
+| 2.9  | Implement LRU eviction engine                | Done   | LRU with circuit breaker, max-per-cycle, pinned exclusion, min-active-time |
+| 2.10 | Implement sleep/wake coordination            | Done   | Runner HTTP client + drain polling + wake polling with timeout             |
+| 2.11 | Implement routing map management             | Done   | Atomic Lua scripts for endpoint add/remove/update + MULTI/EXEC for state   |
+| 2.12 | Implement worker pool management             | Done   | SCAN-based discovery, heartbeat detection (ONLINE/DEGRADED/OFFLINE)        |
+| 2.13 | Implement wake trigger + routing map APIs    | Done   | `POST /api/v1/wake` (matches spec contract), `GET /api/v1/routing-map`     |
+| 2.14 | Implement admin APIs                         | Done   | Model CRUD, worker list/get, cluster status/memory, SSE events             |
+| 2.15 | Implement leader election                    | Done   | K8s Lease API with local dev mode fallback, token refresh every 60s        |
+| 2.16 | Implement health and metrics                 | Done   | `/healthz`, `/readyz`, `/metrics` with 13 Prometheus metrics               |
+| 2.17 | Build container image                        | Done   | `containers/control-plane/Dockerfile` (multi-stage, non-root)              |
+| 2.18 | Integration test suite                       | Done   | 128 unit tests + 7 integration tests (real Redis + PostgreSQL)             |
 
 ## Task Details
 
@@ -218,53 +218,53 @@ Design and implement the PostgreSQL schema for persistent configuration data. Re
 
 **`models`** — model deployment configurations (what the admin requested, not the runtime state):
 
-| Column              | Type                      | Description                                           |
-| ------------------- | ------------------------- | ----------------------------------------------------- |
-| `id`                | `uuid` PK                | Internal identifier                                   |
-| `name`              | `text` UNIQUE NOT NULL    | Model name (routing key, e.g., `meta-llama/Llama-3`)  |
-| `runner_type`       | `text` NOT NULL           | Required runner type (e.g., `vllm`, `triton`)         |
-| `model_path`        | `text` NOT NULL           | Path to model weights on shared storage               |
-| `required_memory`   | `bigint`                  | Estimated device memory requirement (bytes)           |
-| `device_type`       | `text`                    | Required device type (`CUDA`, `ROCM`, `CPU`)          |
-| `tensor_parallel`   | `integer` DEFAULT 1       | Tensor parallelism degree                             |
-| `engine_config`     | `jsonb`                   | Engine-specific configuration (passed to runner)      |
-| `created_at`        | `timestamptz` NOT NULL    | Deployment creation time                              |
-| `updated_at`        | `timestamptz` NOT NULL    | Last configuration update                             |
+| Column            | Type                   | Description                                          |
+| ----------------- | ---------------------- | ---------------------------------------------------- |
+| `id`              | `uuid` PK              | Internal identifier                                  |
+| `name`            | `text` UNIQUE NOT NULL | Model name (routing key, e.g., `meta-llama/Llama-3`) |
+| `runner_type`     | `text` NOT NULL        | Required runner type (e.g., `vllm`, `triton`)        |
+| `model_path`      | `text` NOT NULL        | Path to model weights on shared storage              |
+| `required_memory` | `bigint`               | Estimated device memory requirement (bytes)          |
+| `device_type`     | `text`                 | Required device type (`CUDA`, `ROCM`, `CPU`)         |
+| `tensor_parallel` | `integer` DEFAULT 1    | Tensor parallelism degree                            |
+| `engine_config`   | `jsonb`                | Engine-specific configuration (passed to runner)     |
+| `created_at`      | `timestamptz` NOT NULL | Deployment creation time                             |
+| `updated_at`      | `timestamptz` NOT NULL | Last configuration update                            |
 
 **`memory_profiles`** — observed memory footprints for model/engine combinations:
 
-| Column              | Type                      | Description                                               |
-| ------------------- | ------------------------- | --------------------------------------------------------- |
-| `id`                | `uuid` PK                | Internal identifier                                       |
-| `model_name`        | `text` NOT NULL           | Model name                                                |
-| `runner_type`       | `text` NOT NULL           | Runner type used for the measurement                      |
-| `device_type`       | `text` NOT NULL           | Device type for this profile                              |
-| `weights_bytes`     | `bigint`                  | Memory consumed by model weights                          |
-| `kv_cache_bytes`    | `bigint`                  | Memory consumed by KV cache at max context                |
-| `overhead_bytes`    | `bigint`                  | Runtime overhead (CUDA context, allocator, etc.)          |
-| `total_bytes`       | `bigint` NOT NULL         | Total device memory consumption                           |
-| `measured_at`       | `timestamptz` NOT NULL    | When the profile was recorded                             |
+| Column           | Type                   | Description                                      |
+| ---------------- | ---------------------- | ------------------------------------------------ |
+| `id`             | `uuid` PK              | Internal identifier                              |
+| `model_name`     | `text` NOT NULL        | Model name                                       |
+| `runner_type`    | `text` NOT NULL        | Runner type used for the measurement             |
+| `device_type`    | `text` NOT NULL        | Device type for this profile                     |
+| `weights_bytes`  | `bigint`               | Memory consumed by model weights                 |
+| `kv_cache_bytes` | `bigint`               | Memory consumed by KV cache at max context       |
+| `overhead_bytes` | `bigint`               | Runtime overhead (CUDA context, allocator, etc.) |
+| `total_bytes`    | `bigint` NOT NULL      | Total device memory consumption                  |
+| `measured_at`    | `timestamptz` NOT NULL | When the profile was recorded                    |
 
 **`benchmarks`** — performance benchmarks for model deployments:
 
-| Column                    | Type                      | Description                                    |
-| ------------------------- | ------------------------- | ---------------------------------------------- |
-| `id`                      | `uuid` PK                | Internal identifier                            |
-| `model_name`              | `text` NOT NULL           | Model name                                     |
-| `runner_type`             | `text` NOT NULL           | Runner type used                               |
-| `tokens_per_second`       | `real`                    | Measured throughput                             |
-| `time_to_first_token_ms`  | `real`                    | Measured TTFT                                   |
-| `context_length`          | `integer`                 | Context length used for benchmark              |
-| `batch_size`              | `integer`                 | Batch size used                                |
-| `measured_at`             | `timestamptz` NOT NULL    | When the benchmark was run                     |
+| Column                   | Type                   | Description                       |
+| ------------------------ | ---------------------- | --------------------------------- |
+| `id`                     | `uuid` PK              | Internal identifier               |
+| `model_name`             | `text` NOT NULL        | Model name                        |
+| `runner_type`            | `text` NOT NULL        | Runner type used                  |
+| `tokens_per_second`      | `real`                 | Measured throughput               |
+| `time_to_first_token_ms` | `real`                 | Measured TTFT                     |
+| `context_length`         | `integer`              | Context length used for benchmark |
+| `batch_size`             | `integer`              | Batch size used                   |
+| `measured_at`            | `timestamptz` NOT NULL | When the benchmark was run        |
 
 **`settings`** — persistent configuration (eviction thresholds, global defaults):
 
-| Column    | Type                     | Description                        |
-| --------- | ------------------------ | ---------------------------------- |
-| `key`     | `text` PK               | Setting key (e.g., `eviction.max`) |
-| `value`   | `jsonb` NOT NULL         | Setting value                      |
-| `updated_at` | `timestamptz` NOT NULL | Last update time                |
+| Column       | Type                   | Description                        |
+| ------------ | ---------------------- | ---------------------------------- |
+| `key`        | `text` PK              | Setting key (e.g., `eviction.max`) |
+| `value`      | `jsonb` NOT NULL       | Setting value                      |
+| `updated_at` | `timestamptz` NOT NULL | Last update time                   |
 
 **Migration tooling:** Use a migration library compatible with ESM TypeScript (e.g., `postgres-migrations`, `umzug`, or raw SQL files with a simple runner). Migrations are numbered and idempotent.
 
@@ -299,21 +299,21 @@ PENDING ──────► STARTING ──────► ACTIVE
 
 **Valid transitions:**
 
-| From       | To         | Trigger                                                     |
-| ---------- | ---------- | ----------------------------------------------------------- |
-| `PENDING`  | `STARTING` | Placement succeeds, runner start command issued              |
-| `STARTING` | `ACTIVE`   | Runner reports `READY` via health check                     |
-| `STARTING` | `ERROR`    | Runner reports `ERROR` or start times out                   |
-| `ACTIVE`   | `DRAINING` | Sleep or stop requested — proxy stops new requests          |
-| `DRAINING` | `SLEEPING` | All in-flight requests complete, sleep command succeeds     |
-| `DRAINING` | `STOPPING` | All in-flight requests complete, stop command issued        |
-| `DRAINING` | `ERROR`    | Drain times out or sleep/stop command fails                 |
-| `SLEEPING` | `STARTING` | Wake trigger received, wake command issued to runner        |
-| `SLEEPING` | `STOPPING` | Model removed while sleeping                                |
-| `STOPPING` | `STOPPED`  | Runner process exits, confirmed via health check failure    |
-| `STOPPING` | `ERROR`    | Stop times out                                              |
-| `ERROR`    | `STOPPED`  | Error acknowledged or recovery timeout expires              |
-| `ERROR`    | `STARTING` | Admin-initiated retry                                       |
+| From       | To         | Trigger                                                  |
+| ---------- | ---------- | -------------------------------------------------------- |
+| `PENDING`  | `STARTING` | Placement succeeds, runner start command issued          |
+| `STARTING` | `ACTIVE`   | Runner reports `READY` via health check                  |
+| `STARTING` | `ERROR`    | Runner reports `ERROR` or start times out                |
+| `ACTIVE`   | `DRAINING` | Sleep or stop requested — proxy stops new requests       |
+| `DRAINING` | `SLEEPING` | All in-flight requests complete, sleep command succeeds  |
+| `DRAINING` | `STOPPING` | All in-flight requests complete, stop command issued     |
+| `DRAINING` | `ERROR`    | Drain times out or sleep/stop command fails              |
+| `SLEEPING` | `STARTING` | Wake trigger received, wake command issued to runner     |
+| `SLEEPING` | `STOPPING` | Model removed while sleeping                             |
+| `STOPPING` | `STOPPED`  | Runner process exits, confirmed via health check failure |
+| `STOPPING` | `ERROR`    | Stop times out                                           |
+| `ERROR`    | `STOPPED`  | Error acknowledged or recovery timeout expires           |
+| `ERROR`    | `STARTING` | Admin-initiated retry                                    |
 
 **State storage:**
 
@@ -343,6 +343,7 @@ Maintain a global view of device memory allocation across all workers. Workers s
 **Budget data structure (in-memory):**
 
 Per worker, per device:
+
 - `totalBytes` — total device memory (from worker capability report)
 - `usedBytes` — last reported usage (from worker memory push)
 - `reservedBytes` — memory reserved by the control plane for models being started (not yet reflected in worker reports)
@@ -409,10 +410,7 @@ When the placement pipeline (Task 2.8) finds no worker with sufficient capacity,
 
 ```typescript
 interface EvictionStrategy {
-  selectVictims(
-    candidates: EvictionCandidate[],
-    requiredBytes: number,
-  ): EvictionCandidate[];
+  selectVictims(candidates: EvictionCandidate[], requiredBytes: number): EvictionCandidate[];
 }
 ```
 
@@ -435,15 +433,15 @@ HTTP client for the runner contract endpoints. The control plane calls these to 
 
 **Runner contract client:**
 
-| Runner endpoint    | Method | When the control plane calls it                                |
-| ------------------ | ------ | -------------------------------------------------------------- |
-| `GET /health`      | GET    | Periodically, to detect readiness and monitor state            |
-| `GET /memory-report` | GET  | After runner is ready, to update device memory budget          |
-| `POST /sleep`      | POST   | When evicting or explicitly sleeping a model                   |
-| `POST /wake`       | POST   | When waking a sleeping model (from proxy trigger or admin)     |
-| `GET /sleep-status` | GET   | To verify sleep state before attempting wake                   |
-| `GET /progress`    | GET    | During startup, to report loading progress to dashboard        |
-| `GET /capabilities` | GET   | Once after runner starts, cached for placement decisions       |
+| Runner endpoint      | Method | When the control plane calls it                            |
+| -------------------- | ------ | ---------------------------------------------------------- |
+| `GET /health`        | GET    | Periodically, to detect readiness and monitor state        |
+| `GET /memory-report` | GET    | After runner is ready, to update device memory budget      |
+| `POST /sleep`        | POST   | When evicting or explicitly sleeping a model               |
+| `POST /wake`         | POST   | When waking a sleeping model (from proxy trigger or admin) |
+| `GET /sleep-status`  | GET    | To verify sleep state before attempting wake               |
+| `GET /progress`      | GET    | During startup, to report loading progress to dashboard    |
+| `GET /capabilities`  | GET    | Once after runner starts, cached for placement decisions   |
 
 **Health polling:**
 
@@ -474,17 +472,17 @@ The control plane is the sole writer of the routing map in Redis/Valkey. The pro
 
 **Write operations:**
 
-| Operation              | Redis commands                                        | Pub/sub event type      |
-| ---------------------- | ----------------------------------------------------- | ----------------------- |
-| Model deployed         | `HSET` routing entry with state `STARTING`            | `MODEL_ADDED`           |
-| Model becomes active   | `HSET` with state `ACTIVE` + endpoint list            | `MODEL_STATE_CHANGED`   |
-| Model entering drain   | `HSET` with state `DRAINING`                          | `MODEL_STATE_CHANGED`   |
-| Model sleeping         | `HSET` with state `SLEEPING`, empty endpoints         | `MODEL_STATE_CHANGED`   |
-| Model waking           | `HSET` with state `STARTING`                          | `MODEL_STATE_CHANGED`   |
-| Model removed          | `HDEL` routing entry                                  | `MODEL_REMOVED`         |
-| Endpoint added         | `HSET` with updated endpoint list                     | `ENDPOINT_ADDED`        |
-| Endpoint removed       | `HSET` with updated endpoint list                     | `ENDPOINT_REMOVED`      |
-| Endpoint health change | `HSET` with updated `healthy` flag on endpoint        | `ENDPOINT_UPDATED`      |
+| Operation              | Redis commands                                 | Pub/sub event type    |
+| ---------------------- | ---------------------------------------------- | --------------------- |
+| Model deployed         | `HSET` routing entry with state `STARTING`     | `MODEL_ADDED`         |
+| Model becomes active   | `HSET` with state `ACTIVE` + endpoint list     | `MODEL_STATE_CHANGED` |
+| Model entering drain   | `HSET` with state `DRAINING`                   | `MODEL_STATE_CHANGED` |
+| Model sleeping         | `HSET` with state `SLEEPING`, empty endpoints  | `MODEL_STATE_CHANGED` |
+| Model waking           | `HSET` with state `STARTING`                   | `MODEL_STATE_CHANGED` |
+| Model removed          | `HDEL` routing entry                           | `MODEL_REMOVED`       |
+| Endpoint added         | `HSET` with updated endpoint list              | `ENDPOINT_ADDED`      |
+| Endpoint removed       | `HSET` with updated endpoint list              | `ENDPOINT_REMOVED`    |
+| Endpoint health change | `HSET` with updated `healthy` flag on endpoint | `ENDPOINT_UPDATED`    |
 
 **Atomicity:** Use Redis transactions (MULTI/EXEC) to ensure the routing map update and pub/sub notification are atomic. The proxy must never see a state change without the corresponding pub/sub notification.
 
@@ -608,27 +606,27 @@ Health endpoints and Prometheus metrics.
 
 **Health endpoints** (on the main listen port):
 
-| Endpoint   | Purpose                                                                                    |
-| ---------- | ------------------------------------------------------------------------------------------ |
-| `/healthz` | Liveness probe — returns 200 if the process is running                                     |
+| Endpoint   | Purpose                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------- |
+| `/healthz` | Liveness probe — returns 200 if the process is running                                                        |
 | `/readyz`  | Readiness probe — returns 200 if Redis is connected, PostgreSQL is connected, and leader election is resolved |
 
 **Prometheus metrics** (on `/metrics`):
 
-| Metric                                                  | Type      | Description                                                   |
-| ------------------------------------------------------- | --------- | ------------------------------------------------------------- |
-| `sardeenz_control_plane_models_total`                   | Gauge     | Number of models by state (`ACTIVE`, `SLEEPING`, etc.)        |
-| `sardeenz_control_plane_workers_total`                  | Gauge     | Number of registered workers by status                        |
-| `sardeenz_control_plane_device_memory_bytes`            | Gauge     | Device memory by worker and state (total, used, available)    |
-| `sardeenz_control_plane_placement_duration_seconds`     | Histogram | Time to complete placement pipeline                           |
-| `sardeenz_control_plane_evictions_total`                | Counter   | Evictions triggered, labeled by reason (placement, manual)    |
-| `sardeenz_control_plane_eviction_duration_seconds`      | Histogram | Time to complete eviction cycle                               |
-| `sardeenz_control_plane_sleep_duration_seconds`         | Histogram | Time for runner sleep operation                               |
-| `sardeenz_control_plane_wake_duration_seconds`          | Histogram | Time for runner wake operation                                |
-| `sardeenz_control_plane_wake_triggers_total`            | Counter   | Wake triggers received from proxy                             |
-| `sardeenz_control_plane_state_transitions_total`        | Counter   | Model state transitions, labeled by from/to state             |
-| `sardeenz_control_plane_leader_is_leader`               | Gauge     | 1 if this instance is the leader, 0 otherwise                 |
-| `sardeenz_control_plane_runner_health_check_errors_total` | Counter | Failed runner health checks                                  |
+| Metric                                                    | Type      | Description                                                |
+| --------------------------------------------------------- | --------- | ---------------------------------------------------------- |
+| `sardeenz_control_plane_models_total`                     | Gauge     | Number of models by state (`ACTIVE`, `SLEEPING`, etc.)     |
+| `sardeenz_control_plane_workers_total`                    | Gauge     | Number of registered workers by status                     |
+| `sardeenz_control_plane_device_memory_bytes`              | Gauge     | Device memory by worker and state (total, used, available) |
+| `sardeenz_control_plane_placement_duration_seconds`       | Histogram | Time to complete placement pipeline                        |
+| `sardeenz_control_plane_evictions_total`                  | Counter   | Evictions triggered, labeled by reason (placement, manual) |
+| `sardeenz_control_plane_eviction_duration_seconds`        | Histogram | Time to complete eviction cycle                            |
+| `sardeenz_control_plane_sleep_duration_seconds`           | Histogram | Time for runner sleep operation                            |
+| `sardeenz_control_plane_wake_duration_seconds`            | Histogram | Time for runner wake operation                             |
+| `sardeenz_control_plane_wake_triggers_total`              | Counter   | Wake triggers received from proxy                          |
+| `sardeenz_control_plane_state_transitions_total`          | Counter   | Model state transitions, labeled by from/to state          |
+| `sardeenz_control_plane_leader_is_leader`                 | Gauge     | 1 if this instance is the leader, 0 otherwise              |
+| `sardeenz_control_plane_runner_health_check_errors_total` | Counter   | Failed runner health checks                                |
 
 **Structured logging** — all log lines are JSON with fields for request ID, model name, worker ID, duration, and outcome. State transitions log both the old and new state.
 
@@ -670,23 +668,23 @@ Integration tests that validate the control plane's core orchestration scenarios
 
 **Test scenarios:**
 
-| #   | Scenario                         | What it validates                                                                               |
-| --- | -------------------------------- | ----------------------------------------------------------------------------------------------- |
-| 1   | Model deployment — happy path    | Deploy request → placement → runner start → health poll → ACTIVE → routing map updated          |
-| 2   | Model deployment with eviction   | Deploy when no capacity → evict LRU model → freed capacity → deploy succeeds                    |
-| 3   | Sleep/wake round-trip            | Sleep command → runner offloads → SLEEPING → wake trigger → runner reloads → ACTIVE             |
-| 4   | Wake trigger from proxy          | `POST /api/v1/wake` → model wakes → routing map updated → pub/sub notification sent             |
-| 5   | Thundering herd (control plane)  | Multiple concurrent wake triggers for same model → only one wake operation                      |
-| 6   | State machine transitions        | All valid transitions succeed; all invalid transitions rejected                                 |
-| 7   | Timeout recovery                 | Model stuck in STARTING beyond timeout → transitions to ERROR                                   |
-| 8   | Worker join/leave                | New worker detected → available for placement; worker leaves → models recovered                 |
-| 9   | Eviction safeguards              | Eviction respects max-per-cycle limit; pinned models not evicted                                |
-| 10  | Routing map consistency          | Every state change produces a routing map update + pub/sub notification                         |
-| 11  | Model stop                       | Delete model → DRAINING → STOPPING → STOPPED → removed from routing map                        |
-| 12  | Placement pipeline               | Multi-worker setup: correct runner type, hardware, and capacity filtering                       |
-| 13  | Admin wake/sleep                  | Admin-initiated sleep and wake via API (separate from proxy wake trigger)                       |
-| 14  | Runner health check failure       | Runner goes ERROR → model transitions to ERROR → routing map updated                           |
-| 15  | Cluster status accuracy          | `GET /api/v1/cluster/status` reflects actual cluster state                                      |
+| #   | Scenario                        | What it validates                                                                      |
+| --- | ------------------------------- | -------------------------------------------------------------------------------------- |
+| 1   | Model deployment — happy path   | Deploy request → placement → runner start → health poll → ACTIVE → routing map updated |
+| 2   | Model deployment with eviction  | Deploy when no capacity → evict LRU model → freed capacity → deploy succeeds           |
+| 3   | Sleep/wake round-trip           | Sleep command → runner offloads → SLEEPING → wake trigger → runner reloads → ACTIVE    |
+| 4   | Wake trigger from proxy         | `POST /api/v1/wake` → model wakes → routing map updated → pub/sub notification sent    |
+| 5   | Thundering herd (control plane) | Multiple concurrent wake triggers for same model → only one wake operation             |
+| 6   | State machine transitions       | All valid transitions succeed; all invalid transitions rejected                        |
+| 7   | Timeout recovery                | Model stuck in STARTING beyond timeout → transitions to ERROR                          |
+| 8   | Worker join/leave               | New worker detected → available for placement; worker leaves → models recovered        |
+| 9   | Eviction safeguards             | Eviction respects max-per-cycle limit; pinned models not evicted                       |
+| 10  | Routing map consistency         | Every state change produces a routing map update + pub/sub notification                |
+| 11  | Model stop                      | Delete model → DRAINING → STOPPING → STOPPED → removed from routing map                |
+| 12  | Placement pipeline              | Multi-worker setup: correct runner type, hardware, and capacity filtering              |
+| 13  | Admin wake/sleep                | Admin-initiated sleep and wake via API (separate from proxy wake trigger)              |
+| 14  | Runner health check failure     | Runner goes ERROR → model transitions to ERROR → routing map updated                   |
+| 15  | Cluster status accuracy         | `GET /api/v1/cluster/status` reflects actual cluster state                             |
 
 **Verification:** `npm test` passes. Integration tests pass with running Redis and PostgreSQL instances.
 
@@ -727,14 +725,14 @@ From the [overall project plan](overall-plan.md#phase-2-control-plane-sleepwake-
 
 ## Risks
 
-| Risk                                                    | Impact                                                           | Mitigation                                                                                                |
-| ------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| State machine edge cases under concurrent operations    | Models stuck in intermediate states, orphaned runners            | Exhaustive state transition tests; timeout-based recovery for every non-terminal state                    |
-| Eviction cascades                                       | Evicting A to load B triggers eviction of C, thrashing cluster   | Configurable eviction limits (max per cycle); circuit breaker on eviction frequency                       |
-| Worker self-report lag                                  | Placement decisions on stale memory data                         | Heartbeat timeout detection; placement pipeline re-validates capacity before starting a runner             |
-| Leader election during active orchestration             | In-flight operations (sleep, wake, placement) interrupted        | On promotion, new leader reconciles state and retries stuck transitions                                   |
-| Runner contract timeout tuning                          | Sleep/wake timeouts too short for large models, or too long      | Configurable per-operation timeouts; monitor actual durations via metrics and adjust                       |
-| PostgreSQL migration complexity over time               | Schema changes break running deployments                         | Use idempotent, versioned migrations; test migrations against populated databases                         |
+| Risk                                                 | Impact                                                         | Mitigation                                                                                     |
+| ---------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| State machine edge cases under concurrent operations | Models stuck in intermediate states, orphaned runners          | Exhaustive state transition tests; timeout-based recovery for every non-terminal state         |
+| Eviction cascades                                    | Evicting A to load B triggers eviction of C, thrashing cluster | Configurable eviction limits (max per cycle); circuit breaker on eviction frequency            |
+| Worker self-report lag                               | Placement decisions on stale memory data                       | Heartbeat timeout detection; placement pipeline re-validates capacity before starting a runner |
+| Leader election during active orchestration          | In-flight operations (sleep, wake, placement) interrupted      | On promotion, new leader reconciles state and retries stuck transitions                        |
+| Runner contract timeout tuning                       | Sleep/wake timeouts too short for large models, or too long    | Configurable per-operation timeouts; monitor actual durations via metrics and adjust           |
+| PostgreSQL migration complexity over time            | Schema changes break running deployments                       | Use idempotent, versioned migrations; test migrations against populated databases              |
 
 ## References
 

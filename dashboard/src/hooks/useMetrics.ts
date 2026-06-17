@@ -8,7 +8,10 @@ export interface CustomRange {
   end: Date;
 }
 
-const TIME_RANGE_DURATIONS: Record<Exclude<TimeRange, 'custom'>, { durationMs: number; step: string }> = {
+const TIME_RANGE_DURATIONS: Record<
+  Exclude<TimeRange, 'custom'>,
+  { durationMs: number; step: string }
+> = {
   '15m': { durationMs: 15 * 60 * 1000, step: '15s' },
   '1h': { durationMs: 60 * 60 * 1000, step: '60s' },
   '6h': { durationMs: 6 * 60 * 60 * 1000, step: '300s' },
@@ -45,7 +48,11 @@ function customQueryKey(custom?: CustomRange): string | undefined {
   return `${custom.start.getTime()}-${custom.end.getTime()}`;
 }
 
-export function useLatencyMetrics(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useLatencyMetrics(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'latency', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getLatency(buildFreshParams(range, custom), signal),
@@ -53,7 +60,11 @@ export function useLatencyMetrics(range: TimeRange, refetchInterval: number | fa
   });
 }
 
-export function useThroughputMetrics(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useThroughputMetrics(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'throughput', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getThroughput(buildFreshParams(range, custom), signal),
@@ -61,7 +72,11 @@ export function useThroughputMetrics(range: TimeRange, refetchInterval: number |
   });
 }
 
-export function useMemoryMetrics(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useMemoryMetrics(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'memory', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getMemory(buildFreshParams(range, custom), signal),
@@ -69,7 +84,11 @@ export function useMemoryMetrics(range: TimeRange, refetchInterval: number | fal
   });
 }
 
-export function useConnectionMetrics(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useConnectionMetrics(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'connections', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getConnections(buildFreshParams(range, custom), signal),
@@ -77,15 +96,24 @@ export function useConnectionMetrics(range: TimeRange, refetchInterval: number |
   });
 }
 
-export function useParkingDuration(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useParkingDuration(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'parking-duration', range, customQueryKey(custom)],
-    queryFn: ({ signal }) => api.metrics.getParkingDuration(buildFreshParams(range, custom), signal),
+    queryFn: ({ signal }) =>
+      api.metrics.getParkingDuration(buildFreshParams(range, custom), signal),
     refetchInterval,
   });
 }
 
-export function useWakeTriggers(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useWakeTriggers(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'wake-triggers', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getWakeTriggers(buildFreshParams(range, custom), signal),
@@ -93,15 +121,24 @@ export function useWakeTriggers(range: TimeRange, refetchInterval: number | fals
   });
 }
 
-export function useStateTransitions(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useStateTransitions(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'state-transitions', range, customQueryKey(custom)],
-    queryFn: ({ signal }) => api.metrics.getStateTransitions(buildFreshParams(range, custom), signal),
+    queryFn: ({ signal }) =>
+      api.metrics.getStateTransitions(buildFreshParams(range, custom), signal),
     refetchInterval,
   });
 }
 
-export function useEvictions(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useEvictions(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'evictions', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getEvictions(buildFreshParams(range, custom), signal),
@@ -109,7 +146,11 @@ export function useEvictions(range: TimeRange, refetchInterval: number | false =
   });
 }
 
-export function useMemoryHistory(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useMemoryHistory(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'memory-history', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getMemoryHistory(buildFreshParams(range, custom), signal),
@@ -117,7 +158,11 @@ export function useMemoryHistory(range: TimeRange, refetchInterval: number | fal
   });
 }
 
-export function useOperationDurations(range: TimeRange, refetchInterval: number | false = 30_000, custom?: CustomRange) {
+export function useOperationDurations(
+  range: TimeRange,
+  refetchInterval: number | false = 30_000,
+  custom?: CustomRange,
+) {
   return useQuery({
     queryKey: ['metrics', 'operations', range, customQueryKey(custom)],
     queryFn: ({ signal }) => api.metrics.getOperations(buildFreshParams(range, custom), signal),

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { formatBytes, formatRelativeTime, formatPercentage, formatDateTime } from '../../utils/format';
+import {
+  formatBytes,
+  formatRelativeTime,
+  formatPercentage,
+  formatDateTime,
+} from '../../utils/format';
 
 describe('formatBytes', () => {
   it('returns "0 B" for 0', () => {

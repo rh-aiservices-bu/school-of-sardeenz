@@ -329,11 +329,13 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const totalBytes = 16_000_000_000;
     const reservedBytes = 6_000_000_000;
 
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-      ]),
-    );
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
@@ -352,11 +354,13 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const totalBytes = 16_000_000_000;
     const reservedBytes = 6_000_000_000;
 
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-      ]),
-    );
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
@@ -376,11 +380,13 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const totalBytes = 16_000_000_000;
     const reservedBytes = 6_000_000_000;
 
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-      ]),
-    );
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
@@ -401,11 +407,13 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const totalBytes = 16_000_000_000;
     const reservedBytes = 4_000_000_000;
 
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-      ]),
-    );
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 

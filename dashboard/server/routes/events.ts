@@ -61,76 +61,80 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
   // This is the simplest approach and is correct at admin-dashboard scale (tens of
   // concurrent connections). A shared-subscriber fan-out pattern would be needed if
   // connection counts grew to hundreds+. See docs/architecture/components/dashboard.md.
-  app.get('/api/events', { preHandler: [app.authenticate, app.requireRole('admin-readonly')] }, async (request, reply) => {
-    const routingChannel = `${deps.redis.keyPrefix}:routing-updates`;
-    const clusterChannel = `${deps.redis.keyPrefix}:cluster-events`;
-    const subscriber = deps.redis.createSubscriber();
+  app.get(
+    '/api/events',
+    { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
+    async (request, reply) => {
+      const routingChannel = `${deps.redis.keyPrefix}:routing-updates`;
+      const clusterChannel = `${deps.redis.keyPrefix}:cluster-events`;
+      const subscriber = deps.redis.createSubscriber();
 
-    // Subscribe to Redis BEFORE writing SSE headers so failures return a proper error
-    try {
-      subscriber.on('message', (chan: string, message: string): void => {
-        try {
-          if (chan === routingChannel) {
-            const update = JSON.parse(message) as RoutingMapUpdate;
-            const event = toClusterEvent(update);
-            reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
-          } else if (chan === clusterChannel) {
-            const event = JSON.parse(message) as ClusterEvent;
-            reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
-          }
-        } catch {
-          app.log.warn({ message }, 'Received non-JSON event from Redis pub/sub — skipping');
-        }
-      });
-
-      await subscriber.subscribe(routingChannel, clusterChannel);
-    } catch (err) {
-      subscriber.disconnect();
-      app.log.error({ err }, 'Failed to subscribe to Redis pub/sub for SSE');
-      return reply.code(502).send({ error: 'Event stream unavailable', code: 'UPSTREAM_ERROR' });
-    }
-
-    // Redis subscription succeeded — now take over the raw socket
-    reply.hijack();
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    reply.raw.flushHeaders();
-
-    app.log.debug(
-      { routingChannel, clusterChannel },
-      'SSE client connected — subscribed to Redis channels',
-    );
-
-    const pingTimer = setInterval(() => {
+      // Subscribe to Redis BEFORE writing SSE headers so failures return a proper error
       try {
-        reply.raw.write(': ping\n\n');
-      } catch {
-        // Client already disconnected — cleanup will run on the 'close' event
+        subscriber.on('message', (chan: string, message: string): void => {
+          try {
+            if (chan === routingChannel) {
+              const update = JSON.parse(message) as RoutingMapUpdate;
+              const event = toClusterEvent(update);
+              reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+            } else if (chan === clusterChannel) {
+              const event = JSON.parse(message) as ClusterEvent;
+              reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+          } catch {
+            app.log.warn({ message }, 'Received non-JSON event from Redis pub/sub — skipping');
+          }
+        });
+
+        await subscriber.subscribe(routingChannel, clusterChannel);
+      } catch (err) {
+        subscriber.disconnect();
+        app.log.error({ err }, 'Failed to subscribe to Redis pub/sub for SSE');
+        return reply.code(502).send({ error: 'Event stream unavailable', code: 'UPSTREAM_ERROR' });
       }
-    }, PING_INTERVAL_MS);
 
-    let cleanedUp = false;
-    const cleanup = (): void => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      clearInterval(pingTimer);
-      subscriber.unsubscribe(routingChannel, clusterChannel).catch(() => undefined);
-      subscriber.disconnect();
-      reply.raw.end();
-      app.log.debug('SSE client disconnected — Redis subscriber cleaned up');
-    };
+      // Redis subscription succeeded — now take over the raw socket
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders();
 
-    request.raw.on('close', cleanup);
-    request.raw.on('error', cleanup);
+      app.log.debug(
+        { routingChannel, clusterChannel },
+        'SSE client connected — subscribed to Redis channels',
+      );
 
-    // Keep the handler alive until the client disconnects
-    await new Promise<void>((resolve) => {
-      request.raw.on('close', resolve);
-      request.raw.on('error', resolve);
-    });
-  });
+      const pingTimer = setInterval(() => {
+        try {
+          reply.raw.write(': ping\n\n');
+        } catch {
+          // Client already disconnected — cleanup will run on the 'close' event
+        }
+      }, PING_INTERVAL_MS);
+
+      let cleanedUp = false;
+      const cleanup = (): void => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        clearInterval(pingTimer);
+        subscriber.unsubscribe(routingChannel, clusterChannel).catch(() => undefined);
+        subscriber.disconnect();
+        reply.raw.end();
+        app.log.debug('SSE client disconnected — Redis subscriber cleaned up');
+      };
+
+      request.raw.on('close', cleanup);
+      request.raw.on('error', cleanup);
+
+      // Keep the handler alive until the client disconnects
+      await new Promise<void>((resolve) => {
+        request.raw.on('close', resolve);
+        request.raw.on('error', resolve);
+      });
+    },
+  );
 }

@@ -22,11 +22,7 @@ impl Default for RoutingMapCache {
 impl RoutingMapCache {
     pub fn new() -> Self {
         let (notify, receiver) = watch::channel(());
-        Self {
-            inner: Arc::new(RwLock::new(HashMap::new())),
-            notify,
-            receiver,
-        }
+        Self { inner: Arc::new(RwLock::new(HashMap::new())), notify, receiver }
     }
 
     pub async fn get(&self, model_name: &str) -> Option<RoutingEntry> {

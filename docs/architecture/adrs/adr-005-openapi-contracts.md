@@ -45,18 +45,18 @@ After a spec reaches `1.0.0`, standard semver applies: breaking changes require 
 
 ### Breaking vs. non-breaking changes
 
-| Change | Classification |
-| --- | --- |
-| Add optional field to request/response | Non-breaking |
-| Add new endpoint | Non-breaking |
-| Add new enum value (consumers must handle unknown) | Non-breaking |
-| Add optional query/header parameter | Non-breaking |
-| Remove or rename a field | **Breaking** |
-| Change a field's type | **Breaking** |
-| Make an optional field required | **Breaking** |
-| Remove an enum value | **Breaking** |
-| Change a URL path | **Breaking** |
-| Remove an endpoint | **Breaking** |
+| Change                                             | Classification |
+| -------------------------------------------------- | -------------- |
+| Add optional field to request/response             | Non-breaking   |
+| Add new endpoint                                   | Non-breaking   |
+| Add new enum value (consumers must handle unknown) | Non-breaking   |
+| Add optional query/header parameter                | Non-breaking   |
+| Remove or rename a field                           | **Breaking**   |
+| Change a field's type                              | **Breaking**   |
+| Make an optional field required                    | **Breaking**   |
+| Remove an enum value                               | **Breaking**   |
+| Change a URL path                                  | **Breaking**   |
+| Remove an endpoint                                 | **Breaking**   |
 
 ### Rollout compatibility
 

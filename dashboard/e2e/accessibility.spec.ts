@@ -116,9 +116,7 @@ const A11Y_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'];
 // ---------------------------------------------------------------------------
 
 async function runA11yCheck(page: Page): Promise<void> {
-  const results = await new AxeBuilder({ page })
-    .withTags(A11Y_TAGS)
-    .analyze();
+  const results = await new AxeBuilder({ page }).withTags(A11Y_TAGS).analyze();
 
   const violations = results.violations.map(
     (v) => `[${v.impact}] ${v.id}: ${v.description} (${v.nodes.length} node(s))`,

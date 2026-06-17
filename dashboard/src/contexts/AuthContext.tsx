@@ -143,7 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok && !cancelled.value) {
-          const data = (await res.json()) as { username: string; roles: string[]; authMode: AuthUser['authMode'] };
+          const data = (await res.json()) as {
+            username: string;
+            roles: string[];
+            authMode: AuthUser['authMode'];
+          };
           setUser({ username: data.username, roles: data.roles, authMode: data.authMode });
           scheduleAutoLogout(token);
           return true;

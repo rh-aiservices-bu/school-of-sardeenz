@@ -14,9 +14,12 @@ export function useClusterStatus() {
   });
 
   useEffect(() => {
-    const isFallback = (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
+    const isFallback =
+      (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
     reportFallback('cluster-status', isFallback);
-    return () => { reportFallback('cluster-status', false); };
+    return () => {
+      reportFallback('cluster-status', false);
+    };
   }, [query.data, reportFallback]);
 
   return query;
@@ -32,9 +35,12 @@ export function useClusterMemory() {
   });
 
   useEffect(() => {
-    const isFallback = (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
+    const isFallback =
+      (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
     reportFallback('cluster-memory', isFallback);
-    return () => { reportFallback('cluster-memory', false); };
+    return () => {
+      reportFallback('cluster-memory', false);
+    };
   }, [query.data, reportFallback]);
 
   return query;

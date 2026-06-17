@@ -64,7 +64,11 @@ test.describe('Workers', () => {
       await expect(page.getByText(WORKER_OFFLINE.workerId)).toBeVisible();
     });
 
-    test('shows ONLINE status label for online workers', async ({ page, bffPort, mockControlPlane }) => {
+    test('shows ONLINE status label for online workers', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([WORKER_ONLINE]);
 
       await page.goto(bffUrl(bffPort, '/workers'));
@@ -72,7 +76,11 @@ test.describe('Workers', () => {
       await expect(page.getByText('Online')).toBeVisible();
     });
 
-    test('shows OFFLINE status label for offline workers', async ({ page, bffPort, mockControlPlane }) => {
+    test('shows OFFLINE status label for offline workers', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([WORKER_OFFLINE]);
 
       await page.goto(bffUrl(bffPort, '/workers'));
@@ -80,7 +88,11 @@ test.describe('Workers', () => {
       await expect(page.getByText('Offline')).toBeVisible();
     });
 
-    test('shows empty state when no workers registered', async ({ page, bffPort, mockControlPlane }) => {
+    test('shows empty state when no workers registered', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([]);
 
       await page.goto(bffUrl(bffPort, '/workers'));
@@ -88,18 +100,28 @@ test.describe('Workers', () => {
       await expect(page.getByText('No workers registered')).toBeVisible();
     });
 
-    test('clicking worker ID navigates to worker detail', async ({ page, bffPort, mockControlPlane }) => {
+    test('clicking worker ID navigates to worker detail', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([WORKER_ONLINE], { [WORKER_ONLINE.workerId]: WORKER_DETAIL });
 
       await page.goto(bffUrl(bffPort, '/workers'));
       await page.getByText(WORKER_ONLINE.workerId).click();
 
-      await expect(page).toHaveURL(new RegExp(`/workers/${encodeURIComponent(WORKER_ONLINE.workerId)}`));
+      await expect(page).toHaveURL(
+        new RegExp(`/workers/${encodeURIComponent(WORKER_ONLINE.workerId)}`),
+      );
     });
   });
 
   test.describe('Worker Detail', () => {
-    test('worker detail page shows worker ID as heading', async ({ page, bffPort, mockControlPlane }) => {
+    test('worker detail page shows worker ID as heading', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([WORKER_ONLINE], { [WORKER_ONLINE.workerId]: WORKER_DETAIL });
 
       const encodedId = encodeURIComponent(WORKER_ONLINE.workerId);
@@ -108,7 +130,11 @@ test.describe('Workers', () => {
       await expect(page.getByRole('heading', { name: WORKER_ONLINE.workerId })).toBeVisible();
     });
 
-    test('worker detail page shows device memory card', async ({ page, bffPort, mockControlPlane }) => {
+    test('worker detail page shows device memory card', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([WORKER_ONLINE], { [WORKER_ONLINE.workerId]: WORKER_DETAIL });
 
       const encodedId = encodeURIComponent(WORKER_ONLINE.workerId);
@@ -119,7 +145,11 @@ test.describe('Workers', () => {
       await expect(page.getByText('GPU 0')).toBeVisible();
     });
 
-    test('worker detail page shows running models section', async ({ page, bffPort, mockControlPlane }) => {
+    test('worker detail page shows running models section', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([WORKER_ONLINE], { [WORKER_ONLINE.workerId]: WORKER_DETAIL });
 
       const encodedId = encodeURIComponent(WORKER_ONLINE.workerId);
@@ -129,13 +159,17 @@ test.describe('Workers', () => {
       await expect(page.getByText('meta-llama/Llama-3.1-8B-Instruct')).toBeVisible();
     });
 
-    test('worker detail shows not found message for missing worker', async ({ page, bffPort, mockControlPlane }) => {
+    test('worker detail shows not found message for missing worker', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
       mockControlPlane.setWorkers([]);
 
       await page.goto(bffUrl(bffPort, '/workers/nonexistent-worker-id'));
 
       await expect(
-        page.getByText('Worker not found').or(page.getByText('Failed to load worker'))
+        page.getByText('Worker not found').or(page.getByText('Failed to load worker')),
       ).toBeVisible();
     });
   });
