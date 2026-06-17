@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "vite",
     "dev:logged": "mkdir -p ../logs && vite 2>&1 | tee ../logs/dashboard.log",
-    "dev:server": "node --import tsx server/index.ts",
-    "dev:server:logged": "mkdir -p ../logs && node --import tsx server/index.ts 2>&1 | tee ../logs/dashboard-server.log",
+    "dev:server": "node --watch --import tsx server/index.ts",
+    "dev:server:logged": "mkdir -p ../logs && node --watch --import tsx server/index.ts 2>&1 | tee ../logs/dashboard-server.log",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
@@ -37,7 +37,8 @@
     "react-dom": "^18.3.1",
     "react-i18next": "^17.0.8",
     "react-router-dom": "^6.28.0",
-    "undici": "^7.10.0"
+    "undici": "^7.10.0",
+    "victory": "^37.3.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",

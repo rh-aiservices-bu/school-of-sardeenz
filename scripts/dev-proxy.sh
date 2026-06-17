@@ -8,6 +8,11 @@ if ! command -v cargo &>/dev/null; then
   exit 0
 fi
 
+if ! cargo watch --version &>/dev/null 2>&1; then
+  echo "⚠ cargo-watch not installed — skipping proxy (install with: cargo install cargo-watch)"
+  exit 0
+fi
+
 cd "$(dirname "$0")/../proxy"
 
 if [ "$LOGGED" = "--logged" ]; then

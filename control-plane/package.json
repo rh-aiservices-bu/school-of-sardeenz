@@ -6,8 +6,8 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc --build",
-    "dev": "node --import tsx src/index.ts",
-    "dev:logged": "mkdir -p ../logs && node --import tsx src/index.ts 2>&1 | tee ../logs/control-plane.log",
+    "dev": "node --watch --import tsx src/index.ts",
+    "dev:logged": "mkdir -p ../logs && node --watch --import tsx src/index.ts 2>&1 | tee ../logs/control-plane.log",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `victory` peer dependency for `@patternfly/react-charts` chart rendering.
 - Dev server logging infrastructure: `dev:logged` scripts pipe component output
   to `logs/` via `tee` (proxy, control-plane, dashboard, BFF server).
   Convenience scripts for tailing (`logs:proxy`, `logs:cp`, `logs:dashboard`,
@@ -45,6 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Dev scripts for control-plane and dashboard BFF use `node --watch` for
+  automatic reload on file changes.
+- Default database URL includes dev credentials (`sardeenz:sardeenz`).
 - Dynamic runner options in the deploy form de-scoped to Phase 4 (#67):
   requires adding `runnerCapabilities` to the `WorkerInfo` list endpoint and
   a corresponding backend change. The dropdown remains hardcoded for now.
