@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Redis-backed E2E test harness with three core resilience scenarios (#57):
+  degraded mode with Redis fallback, SSE-driven model state transitions via
+  Redis pub/sub, and multi-GPU VRAM visualization with known proportions.
+  Tests require compose Redis (`podman compose up -d redis`).
 - Custom date/time range picker for MetricsDashboard (closes #62): operators
   can select arbitrary historical time windows in addition to the existing
   preset ranges (15m, 1h, 6h, 24h, 7d). Auto-refresh is disabled while a

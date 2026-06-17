@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { MockControlPlane } from './mocks/control-plane.js';
 import { MockPrometheus } from './mocks/prometheus.js';
+import { RedisTestHelper, generateTestPrefix } from './helpers/redis.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..'); // dashboard/
@@ -26,6 +27,7 @@ const ROOT = join(__dirname, '..'); // dashboard/
 export interface MockFixtures {
   mockControlPlane: MockControlPlane;
   mockPrometheus: MockPrometheus;
+  testRedis: RedisTestHelper;
   bffPort: number;
 }
 
@@ -71,6 +73,7 @@ interface BffProcess {
 async function startBff(
   cpUrl: string,
   promUrl: string,
+  redisKeyPrefix: string,
 ): Promise<BffProcess> {
   const port = await findFreePort();
 
@@ -80,8 +83,9 @@ async function startBff(
     SARDEENZ_CONTROL_PLANE_URL: cpUrl,
     SARDEENZ_PROMETHEUS_URL: promUrl,
     SARDEENZ_REDIS_URL: 'redis://127.0.0.1:6379',
+    SARDEENZ_REDIS_KEY_PREFIX: redisKeyPrefix,
     AUTH_MODE: 'none',
-    SARDEENZ_LOG_LEVEL: 'error', // suppress noise in test output
+    SARDEENZ_LOG_LEVEL: 'error',
     NODE_ENV: 'test',
   };
 
@@ -138,9 +142,22 @@ export const test = base.extend<MockFixtures>({
     { scope: 'test' },
   ],
 
+  testRedis: [
+    async ({}, use) => {
+      const prefix = generateTestPrefix();
+      const redis = new RedisTestHelper(prefix);
+      await redis.connect();
+
+      await use(redis);
+
+      await redis.close();
+    },
+    { scope: 'test' },
+  ],
+
   bffPort: [
-    async ({ mockControlPlane, mockPrometheus }, use) => {
-      const bff = await startBff(mockControlPlane.url, mockPrometheus.url);
+    async ({ mockControlPlane, mockPrometheus, testRedis }, use) => {
+      const bff = await startBff(mockControlPlane.url, mockPrometheus.url, testRedis.keyPrefix);
 
       await use(bff.port);
 
@@ -171,4 +188,5 @@ export function bffUrl(port: number, path: string): string {
 // Re-export mock types for convenience
 // ---------------------------------------------------------------------------
 export type { MockControlPlane, MockPrometheus };
+export type { RedisTestHelper } from './helpers/redis.js';
 export type { MockModelInfo, MockWorkerInfo, MockWorkerDetail, MockSseEvent } from './mocks/control-plane.js';

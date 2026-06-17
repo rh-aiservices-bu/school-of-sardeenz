@@ -98,6 +98,7 @@ interface MockState {
   clusterStatus: MockClusterStatus;
   clusterMemory: MockClusterMemory;
   healthy: boolean;
+  apiError: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,7 @@ export class MockControlPlane {
       },
       clusterMemory: { workers: [] },
       healthy: true,
+      apiError: false,
     };
   }
 
@@ -142,6 +144,13 @@ export class MockControlPlane {
     app.get('/healthz', async (_req, reply) => {
       if (!this.state.healthy) return reply.code(503).send({ error: 'unhealthy' });
       return reply.send({ status: 'ok' });
+    });
+
+    // API error simulation — returns 503 on all /api/v1/* routes
+    app.addHook('onRequest', async (req, reply) => {
+      if (this.state.apiError && req.url.startsWith('/api/v1/')) {
+        return reply.code(503).send({ error: 'service unavailable' });
+      }
     });
 
     // Models
@@ -320,6 +329,11 @@ export class MockControlPlane {
   /** Mark the health endpoint as healthy or unhealthy. */
   setHealthy(healthy: boolean): void {
     this.state.healthy = healthy;
+  }
+
+  /** Make all /api/v1/* endpoints return 503 (simulates CP unavailability). */
+  setApiError(enabled: boolean): void {
+    this.state.apiError = enabled;
   }
 
   /** Push an SSE event to all connected clients. */

@@ -1,22 +1,16 @@
 /**
  * SSE & Real-time update tests.
  *
- * These tests verify that the UI responds to server-sent events pushed by
- * the control plane.  The mock CP exposes a `pushEvent()` helper that
- * injects events into connected SSE clients.
- *
- * Note: The BFF SSE route proxies from Redis pub/sub, not directly from the
- * CP's own event stream.  In E2E mode (AUTH_MODE=none) the SSE route still
- * requires a Redis subscription, which will fail gracefully when Redis is not
- * available — the route returns 502 and the frontend falls back to polling.
- * These tests therefore validate the degraded-mode (polling) path and the
- * connection status label.
+ * With Redis running (from compose.yaml), the BFF SSE route successfully
+ * subscribes to Redis pub/sub and the frontend connects over EventSource.
+ * These tests verify the connection status label, the empty-events state,
+ * and degraded-mode behavior when the control plane becomes unreachable.
  */
 
 import { test, expect, bffUrl } from './fixtures.js';
 
 test.describe('SSE & Real-time', () => {
-  test('Recent Events section shows connection status label', async ({ page, bffPort, mockControlPlane }) => {
+  test('Recent Events section shows Live connection status', async ({ page, bffPort, mockControlPlane }) => {
     mockControlPlane.setClusterStatus({
       workerCount: 0,
       workersOnline: 0,
@@ -26,9 +20,10 @@ test.describe('SSE & Real-time', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    // The connection label (Live / Reconnecting… / Degraded) should be visible
+    // With Redis available, SSE connects successfully — status should be Live
     const connectionLabel = page.locator('[aria-live="polite"]').first();
     await expect(connectionLabel).toBeVisible();
+    await expect(connectionLabel).toHaveText('Live', { timeout: 10_000 });
   });
 
   test('Recent Events section shows waiting message when no events', async ({ page, bffPort, mockControlPlane }) => {
@@ -46,22 +41,27 @@ test.describe('SSE & Real-time', () => {
     ).toBeVisible();
   });
 
-  test('degraded banner appears when control plane is unreachable for queries', async ({
+  test('degraded banner appears when control plane is unreachable', async ({
     page,
     bffPort,
     mockControlPlane,
+    testRedis,
   }) => {
-    // Make health check fail so BFF detects unhealthy CP
-    mockControlPlane.setHealthy(false);
+    // Seed Redis with minimal data so the fallback has something to return
+    await testRedis.seedWorkerDetail({
+      workerId: 'worker-test',
+      status: 'ONLINE',
+      devices: [],
+    });
 
-    // The cluster status endpoint will throw, BFF falls back to Redis (which also
-    // won't connect), so the query will error and the UI should show degraded state.
-    // We navigate to the metrics page to avoid the cluster status card that
-    // requires the overview to load.
-    await page.goto(bffUrl(bffPort, '/metrics'));
+    // Make all CP API endpoints return 503
+    mockControlPlane.setApiError(true);
 
-    // Just verify the page loads without crashing — degraded banner may or may
-    // not appear depending on Redis fallback timing
-    await expect(page.locator('nav')).toBeVisible();
+    await page.goto(bffUrl(bffPort, '/'));
+
+    // With Redis serving fallback data, the degraded banner should show
+    await expect(
+      page.getByText('Control plane unreachable — showing cached data'),
+    ).toBeVisible({ timeout: 15_000 });
   });
 });
