@@ -41,11 +41,6 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version     integer PRIMARY KEY,
-    applied_at  timestamptz NOT NULL DEFAULT now()
-);
-
 CREATE INDEX IF NOT EXISTS idx_models_runner_type ON models (runner_type);
 CREATE INDEX IF NOT EXISTS idx_memory_profiles_model ON memory_profiles (model_name, runner_type);
 CREATE INDEX IF NOT EXISTS idx_benchmarks_model ON benchmarks (model_name, runner_type);
