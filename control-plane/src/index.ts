@@ -18,6 +18,7 @@ import { SleepWakeService } from './services/sleep-wake.js';
 import { DeployOrchestrationService } from './services/deploy-orchestration.js';
 import { LeaderElectionService } from './services/leader-election.js';
 import { ReconciliationService } from './services/reconciliation.js';
+import { NotificationService } from './services/notification.js';
 import { WorkerClient } from './clients/worker.js';
 
 async function main(): Promise<void> {
@@ -63,6 +64,12 @@ async function main(): Promise<void> {
     config.wakeTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
   );
+  const notificationLogger = {
+    info: (obj: Record<string, unknown>, msg: string) => console.log(msg, obj),
+    warn: (obj: Record<string, unknown>, msg: string) => console.warn(msg, obj),
+    error: (obj: Record<string, unknown>, msg: string) => console.error(msg, obj),
+  };
+  const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
   const deployOrchestration = new DeployOrchestrationService(
     lifecycle,
     routingMap,
@@ -72,6 +79,7 @@ async function main(): Promise<void> {
     (host, port) => new RunnerClient({ host, port }),
     config.deployTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
+    notifications,
   );
   const leaderElection = new LeaderElectionService({
     leaseName: config.leaseName,
@@ -97,6 +105,7 @@ async function main(): Promise<void> {
       sleepWake,
       deployOrchestration,
       leaderElection,
+      notifications,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
     },
   });
@@ -115,6 +124,7 @@ async function main(): Promise<void> {
     app.log,
     redis,
     config.redisKeyPrefix,
+    notifications,
   );
 
   await leaderElection.start();

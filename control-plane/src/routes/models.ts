@@ -295,6 +295,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           ? deps.createRunnerClient(state.runnerHost, state.runnerPort)
           : null;
 
+      deps.notifications
+        .createNotification({
+          title: 'Model deleted',
+          description: `${modelName} removal initiated`,
+          variant: 'info',
+          source: { type: 'model', name: modelName },
+        })
+        .catch((err: unknown) => {
+          app.log.debug({ err, modelName }, 'Failed to create delete notification');
+        });
+
       deps.sleepWake.stopModel(modelName, runnerClient).then(
         async () => {
           await deps.lifecycle.removeModel(modelName);
@@ -343,6 +354,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       // Atomically claim ACTIVE → DRAINING before launching background work.
       await deps.lifecycle.transition(modelName, ModelLifecycleState.DRAINING);
+
+      deps.notifications
+        .createNotification({
+          title: 'Model sleep initiated',
+          description: `${modelName} is draining`,
+          variant: 'info',
+          source: { type: 'model', name: modelName },
+        })
+        .catch((err: unknown) => {
+          app.log.debug({ err, modelName }, 'Failed to create sleep notification');
+        });
 
       const runnerClient = deps.createRunnerClient(state.runnerHost, state.runnerPort);
 
@@ -397,6 +419,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       // Atomically claim SLEEPING → STARTING before launching background work.
       // Concurrent wake requests will fail this transition and get "already waking".
       await deps.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
+
+      deps.notifications
+        .createNotification({
+          title: 'Model wake initiated',
+          description: `${modelName} is waking up`,
+          variant: 'info',
+          source: { type: 'model', name: modelName },
+        })
+        .catch((err: unknown) => {
+          app.log.debug({ err, modelName }, 'Failed to create wake notification');
+        });
 
       const record = await deps.modelRepository.findByName(modelName);
       const requiredMemory = record?.requiredMemory ?? 0;

@@ -9,6 +9,7 @@ import type { EvictionEngine } from '../services/eviction.js';
 import type { SleepWakeService } from '../services/sleep-wake.js';
 import type { DeployOrchestrationService } from '../services/deploy-orchestration.js';
 import type { LeaderElectionService } from '../services/leader-election.js';
+import type { NotificationService } from '../services/notification.js';
 import type { RunnerClient } from '../clients/runner.js';
 
 export interface RouteDeps {
@@ -23,5 +24,6 @@ export interface RouteDeps {
   sleepWake: SleepWakeService;
   deployOrchestration: DeployOrchestrationService;
   leaderElection: LeaderElectionService;
+  notifications: NotificationService;
   createRunnerClient: (host: string, port: number) => RunnerClient;
 }

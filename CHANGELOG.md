@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Phase 3.5 — Admin UI finalization (header bar feature parity with v1 dashboard):
+  - **Notification backend**: `NotificationService` in control plane with Redis list
+    storage (capped at 200), read-state tracking via Redis set, and pub/sub push on
+    create; REST API for list, mark-read, mark-all-read, remove, and clear-all; BFF
+    proxy routes with auth gating (`admin-readonly` role)
+  - **Notification frontend**: `NotificationContext` provider with SSE push, history
+    fetch on mount, 500ms deduplication window, and unread count; `NotificationDrawer`
+    overlay with PatternFly `NotificationDrawer*` components, actions dropdown, and
+    empty state; `AlertToastGroup` for ephemeral toast alerts with auto-dismiss
+  - **Theme system**: `ThemeContext` with dark/light toggle, `localStorage` persistence,
+    `prefers-color-scheme` fallback, and `pf-v6-theme-dark` class management
+  - **Masthead overhaul**: SVG logo in `<Brand>`, hamburger sidebar toggle, Sun/Moon
+    theme `ToggleGroup`, notification badge button, user dropdown with username/role
+    and logout action
+  - **Lifecycle event notifications**: model deploy success/failure, sleep/wake/delete
+    initiation, worker join/leave, dead worker model failures, and stuck model recovery
+    all generate notifications via `NotificationService`
+  - **SSE notification channel**: BFF subscribes to `{prefix}:notifications` Redis
+    channel alongside `routing-updates` and `cluster-events`, forwarding notification
+    payloads as `NOTIFICATION` cluster events to connected SSE clients
+  - **Sidebar footer**: GitHub repository link with theme-aware icon (dark/light variants)
+  - **i18n keys**: theme toggle, notification drawer, user menu, and sidebar footer strings
+  - SVG assets: Sardeenz logo, GitHub/star/fork icons (light and dark variants)
+
 - `victory` peer dependency for `@patternfly/react-charts` chart rendering.
 - Dev server logging infrastructure: `dev:logged` scripts pipe component output
   to `logs/` via `tee` (proxy, control-plane, dashboard, BFF server).
@@ -32,6 +56,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Sort by state and memory in the model list (closes #62): the State and
   Memory columns are now sortable, using lifecycle-state ordering and numeric
   memory comparison respectively.
+- Notification SSE channel support in dashboard BFF: the `/api/events` endpoint
+  now subscribes to `notifications` Redis channel and forwards notification
+  messages as `NOTIFICATION` cluster events to connected SSE clients.
+- Notification proxy routes in dashboard BFF: `GET /api/notifications` (list),
+  `POST /api/notifications/:id/read` (mark as read), `POST /api/notifications/read-all`
+  (mark all as read), `DELETE /api/notifications/:id` (remove), and
+  `DELETE /api/notifications` (clear all) endpoints proxy to control plane API.
 
 ### Fixed
 

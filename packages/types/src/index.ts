@@ -19,4 +19,10 @@ export type {
   operations as ControlPlaneOperations,
   paths as ControlPlanePaths,
 } from './generated/control-plane.js';
-export { ModelLifecycleState, WorkerStatus, ClusterEventType } from './generated/control-plane.js';
+export {
+  ModelLifecycleState,
+  WorkerStatus,
+  ClusterEventType,
+  NotificationVariant,
+  NotificationSourceType,
+} from './generated/control-plane.js';

@@ -7,6 +7,7 @@ import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { WorkerPoolService } from './worker-pool.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService } from './routing-map.js';
+import type { NotificationService } from './notification.js';
 import {
   reconciliationTicksTotal,
   reconciliationStuckModelsTotal,
@@ -56,6 +57,7 @@ export class ReconciliationService {
     private readonly logger: ReconciliationLogger,
     private readonly redis: Redis,
     keyPrefix: string,
+    private readonly notifications?: NotificationService,
   ) {
     this.clusterEventsChannel = redisKey(keyPrefix, CLUSTER_EVENTS_CHANNEL);
   }
@@ -113,6 +115,14 @@ export class ReconciliationService {
               timestamp: new Date().toISOString(),
               message: `Worker ${w.workerId} joined the cluster`,
             });
+            this.notifications
+              ?.createNotification({
+                title: 'Worker joined',
+                description: `Worker ${w.workerId} joined the cluster`,
+                variant: 'info',
+                source: { type: 'worker', name: w.workerId },
+              })
+              .catch(() => {});
           }
         }
       });
@@ -179,6 +189,14 @@ export class ReconciliationService {
             { modelName: model.modelName, workerId: worker.workerId },
             'Transitioned model to ERROR due to dead worker',
           );
+          this.notifications
+            ?.createNotification({
+              title: 'Model failed — worker lost',
+              description: `${model.modelName} on ${worker.workerId}`,
+              variant: 'danger',
+              source: { type: 'model', name: model.modelName },
+            })
+            .catch(() => {});
         } catch (err) {
           this.logger.error(
             {
@@ -197,6 +215,14 @@ export class ReconciliationService {
         timestamp: new Date().toISOString(),
         message: `Worker ${worker.workerId} left the cluster (dead)`,
       });
+      this.notifications
+        ?.createNotification({
+          title: 'Worker lost',
+          description: `Worker ${worker.workerId} left the cluster`,
+          variant: 'warning',
+          source: { type: 'worker', name: worker.workerId },
+        })
+        .catch(() => {});
       this.workerPool.removeWorker(worker.workerId);
     }
   }
@@ -231,6 +257,14 @@ export class ReconciliationService {
           },
           'Recovered stuck model',
         );
+        this.notifications
+          ?.createNotification({
+            title: 'Model timed out',
+            description: `${model.modelName} stuck in ${model.state}`,
+            variant: 'danger',
+            source: { type: 'model', name: model.modelName },
+          })
+          .catch(() => {});
       } catch (err) {
         this.logger.error(
           {

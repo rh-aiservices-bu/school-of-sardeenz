@@ -99,6 +99,7 @@ function toDeps(mocks: Mocks): RouteDeps {
     sleepWake: mocks.sleepWake as unknown as RouteDeps['sleepWake'],
     deployOrchestration: {} as RouteDeps['deployOrchestration'],
     leaderElection: mocks.leaderElection as unknown as RouteDeps['leaderElection'],
+    notifications: {} as RouteDeps['notifications'],
     createRunnerClient: mocks.createRunnerClient,
   };
 }

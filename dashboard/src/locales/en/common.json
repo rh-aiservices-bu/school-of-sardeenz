@@ -41,5 +41,24 @@
   "degraded": {
     "controlPlaneUnreachable": "Control plane unreachable — showing cached data",
     "sseUnavailable": "Real-time updates unavailable — polling for changes"
+  },
+  "theme": {
+    "light": "Light theme",
+    "dark": "Dark theme",
+    "toggle": "Theme toggle"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all as read",
+    "clearAll": "Clear all",
+    "noNotifications": "No notifications",
+    "noNotificationsBody": "You have no notifications at this time.",
+    "actions": "Notification actions"
+  },
+  "userMenu": {
+    "logout": "Logout"
+  },
+  "sidebar": {
+    "sourceOnGitHub": "Source on GitHub"
   }
 }
