@@ -26,9 +26,9 @@ All four communicate through OpenAPI contracts (the single source of truth for c
 The project is delivered in five sequential phases. Each phase produces a usable increment and has clear entry/exit criteria.
 
 ```text
-Phase 0          Phase 1          Phase 2          Phase 3        Phase 4
-Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  Highlander
-(spec only)      (Rust)           (TypeScript)       (React)        (HPC runtime)
+Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 4
+Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Highlander
+(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (HPC runtime)
 ```
 
 Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while Highlander integration starts), but the critical path runs through Phases 0 → 1 → 2.
@@ -257,6 +257,37 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 | PatternFly 6 is newer and community examples are fewer | Slower UI development, unexpected component gaps | Use official PatternFly.org docs as sole reference; avoid Context7 for PF components (may return outdated versions) |
 | Real-time updates create excessive Redis load          | Dashboard polling degrades proxy performance     | Use pub/sub for state changes, not polling; rate-limit dashboard subscriptions                                      |
 | v1 component porting takes longer than expected        | UI delivery slows                                | Time-box porting to 2 days per component; rebuild only if porting costs more than building new                      |
+
+---
+
+### Phase 3.5: Admin UI Finalization
+
+**Objective:** Bring the v2 Admin Dashboard to feature parity with the v1 dashboard header bar — SVG logo, dark/light theme toggle, full notification system (backend + frontend), user dropdown menu, and sidebar footer with GitHub link.
+
+#### Deliverables
+
+| #   | Deliverable                | Description                                                                |
+| --- | -------------------------- | -------------------------------------------------------------------------- |
+| 3.5.1 | Notification backend     | `NotificationService` in control plane with Redis storage + pub/sub push  |
+| 3.5.2 | Notification API         | REST endpoints for list, mark-read, remove, clear; BFF proxy layer       |
+| 3.5.3 | Notification frontend    | Context provider, drawer overlay, toast alerts, SSE integration           |
+| 3.5.4 | Theme system             | Dark/light toggle with localStorage persistence, PF6 `pf-v6-theme-dark`  |
+| 3.5.5 | Masthead overhaul        | SVG logo, sidebar toggle, theme toggle, notification badge, user dropdown |
+
+#### Scope
+
+- SVG logo with sidebar toggle (hamburger button)
+- Dark/light theme switching (Sun/Moon icons, `prefers-color-scheme` on first visit)
+- Notification backend: `NotificationService` stores history in Redis list (capped at 200), publishes via pub/sub, REST CRUD endpoints
+- Notification frontend: `NotificationContext`, `NotificationDrawer`, `AlertToastGroup`, deduplication (500ms window)
+- Lifecycle event integration: model deploy/fail/sleep/wake/delete, worker join/leave, stuck model recovery all generate notifications
+- User dropdown with username, role, and logout action
+- Sidebar footer with GitHub link and theme-aware icons
+- i18n keys for all new UI strings
+
+#### Dependencies
+
+- Phase 3 (complete) — AppLayout, AuthContext, useEventStream, BFF SSE proxy all exist
 
 ---
 

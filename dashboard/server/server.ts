@@ -16,6 +16,7 @@ import { registerWorkerRoutes } from './routes/workers.js';
 import { registerClusterRoutes } from './routes/cluster.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerEventRoutes } from './routes/events.js';
+import { registerNotificationRoutes } from './routes/notifications.js';
 
 export interface ServerDeps {
   config: Config;
@@ -59,6 +60,7 @@ export async function buildServer(deps: ServerDeps) {
   registerClusterRoutes(app, deps.routes);
   registerMetricsRoutes(app, deps.routes);
   registerEventRoutes(app, deps.routes);
+  registerNotificationRoutes(app, deps.routes);
 
   // In production, serve the frontend SPA from dist/client/
   const serverDir = dirname(fileURLToPath(import.meta.url));

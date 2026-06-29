@@ -110,6 +110,11 @@ export function useEventStreamConnection(): EventStreamState {
             }
             break;
           }
+          case ClusterEventType.NOTIFICATION:
+            // Notification events are handled by NotificationContext
+            // Fire a custom event that NotificationContext listens for
+            window.dispatchEvent(new CustomEvent('sardeenz:notification', { detail: data.data }));
+            break;
         }
       } catch {
         // Ignore parse errors (e.g., ping comments)

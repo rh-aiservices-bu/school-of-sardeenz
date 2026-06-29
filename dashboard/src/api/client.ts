@@ -8,6 +8,7 @@ type ClusterMemory = ControlPlaneComponents['schemas']['ClusterMemory'];
 type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
 type WorkerDetail = ControlPlaneComponents['schemas']['WorkerDetail'];
 type ErrorResponse = ControlPlaneComponents['schemas']['ErrorResponse'];
+type Notification = ControlPlaneComponents['schemas']['Notification'];
 
 export {
   type ModelInfo,
@@ -17,6 +18,7 @@ export {
   type ClusterMemory,
   type WorkerInfo,
   type WorkerDetail,
+  type Notification,
 };
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
@@ -151,5 +153,22 @@ export const api = {
       request<unknown>(`/metrics/memory-history?${formatMetricsParams(params)}`, { signal }),
     getOperations: (params: MetricsParams, signal?: AbortSignal) =>
       request<unknown>(`/metrics/operations?${formatMetricsParams(params)}`, { signal }),
+  },
+  notifications: {
+    list: (limit?: number, offset?: number, signal?: AbortSignal) => {
+      const params = new URLSearchParams();
+      if (limit !== undefined) params.set('limit', String(limit));
+      if (offset !== undefined) params.set('offset', String(offset));
+      const qs = params.toString();
+      return request<{ notifications: Notification[] }>(`/notifications${qs ? `?${qs}` : ''}`, { signal });
+    },
+    markRead: (id: string) =>
+      request<void>(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+    markAllRead: () =>
+      request<void>('/notifications/read-all', { method: 'POST' }),
+    remove: (id: string) =>
+      request<void>(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    clearAll: () =>
+      request<void>('/notifications', { method: 'DELETE' }),
   },
 };

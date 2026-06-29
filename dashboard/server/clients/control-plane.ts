@@ -96,4 +96,28 @@ export class ControlPlaneClient {
       return false;
     }
   }
+
+  async listNotifications(limit?: number, offset?: number): Promise<ProxyResult> {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set('limit', String(limit));
+    if (offset !== undefined) params.set('offset', String(offset));
+    const qs = params.toString();
+    return this.request('GET', `/api/v1/notifications${qs ? `?${qs}` : ''}`);
+  }
+
+  async markNotificationRead(id: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/notifications/${encodeURIComponent(id)}/read`);
+  }
+
+  async markAllNotificationsRead(): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/notifications/read-all');
+  }
+
+  async removeNotification(id: string): Promise<ProxyResult> {
+    return this.request('DELETE', `/api/v1/notifications/${encodeURIComponent(id)}`);
+  }
+
+  async clearAllNotifications(): Promise<ProxyResult> {
+    return this.request('DELETE', '/api/v1/notifications');
+  }
 }

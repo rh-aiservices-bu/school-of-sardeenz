@@ -12,6 +12,7 @@ import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 import type { WorkerPoolService } from './worker-pool.js';
+import type { NotificationService } from './notification.js';
 
 export interface DeployModelParams {
   modelName: string;
@@ -35,6 +36,7 @@ export class DeployOrchestrationService {
     private readonly createRunnerClient: (host: string, port: number) => RunnerClient,
     private readonly deployTimeoutMs: number,
     private readonly healthCheckIntervalMs: number,
+    private readonly notifications?: NotificationService,
   ) {}
 
   async deployModel(params: DeployModelParams): Promise<void> {
@@ -87,6 +89,15 @@ export class DeployOrchestrationService {
         runnerId: runnerInfo.runnerId,
       });
       await this.routingMap.setModelState(params.modelName, ModelState.ACTIVE);
+
+      this.notifications
+        ?.createNotification({
+          title: 'Model deployed',
+          description: `${params.modelName} is now active`,
+          variant: 'success',
+          source: { type: 'model', name: params.modelName },
+        })
+        .catch(() => {});
 
       deployDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
@@ -150,6 +161,14 @@ export class DeployOrchestrationService {
     try {
       await this.lifecycle.transition(modelName, ModelLifecycleState.ERROR, { errorMessage });
       await this.routingMap.setModelState(modelName, ModelState.ERROR);
+      this.notifications
+        ?.createNotification({
+          title: 'Model deployment failed',
+          description: `${modelName}: ${errorMessage}`,
+          variant: 'danger',
+          source: { type: 'model', name: modelName },
+        })
+        .catch(() => {});
     } catch {
       // Intentionally swallowed — do not mask the original error.
     }
