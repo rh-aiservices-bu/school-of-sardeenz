@@ -1,19 +1,7 @@
-export interface StartRunnerRequest {
-  modelName: string;
-  runnerType: string;
-  modelPath: string;
-  requiredMemory: number;
-  deviceType?: string;
-  tensorParallel: number;
-  engineConfig?: Record<string, unknown>;
-  devices: { deviceIndex: number; deviceType: string }[];
-}
+import type { WorkerAgentComponents } from '@sardeenz/types';
 
-export interface StartRunnerResponse {
-  runnerId: string;
-  host: string;
-  port: number;
-}
+export type StartRunnerRequest = WorkerAgentComponents['schemas']['StartRunnerRequest'];
+export type StartRunnerResponse = WorkerAgentComponents['schemas']['StartRunnerResponse'];
 
 export interface WorkerClientOptions {
   baseUrl: string;

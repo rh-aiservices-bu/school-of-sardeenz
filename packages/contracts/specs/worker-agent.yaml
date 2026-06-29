@@ -1,0 +1,352 @@
+openapi: 3.1.0
+info:
+  title: Sardeenz Worker Agent API
+  version: 0.1.0
+  description: |
+    Management API exposed by each worker agent (dev or production). The control
+    plane calls these endpoints to start and stop runner processes on a worker.
+
+    This contract formalizes the implicit API previously defined only by the
+    `WorkerClient` class in the control plane. It also documents the Redis
+    self-registration data shapes that workers write for discovery.
+
+    ## Interface Areas
+
+    1. **Runner management** — start and stop runner processes
+    2. **Self-registration** — Redis key schemas for worker discovery (documented
+       here as schemas, not as HTTP endpoints)
+
+tags:
+  - name: Runners
+    description: Start and stop inference engine runner processes on this worker.
+
+paths:
+  /runners:
+    post:
+      operationId: startRunner
+      summary: Start a runner process
+      description: |
+        Instructs the worker to spawn a new runner process for the given model.
+        The worker allocates a port, starts the runner, waits for the runner's
+        health endpoint to respond, and returns the runner's endpoint.
+
+        Returns `409` if a runner for the same model name is already running
+        on this worker. Returns `503` if the worker has no capacity to start
+        another runner.
+      tags:
+        - Runners
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRunnerRequest"
+      responses:
+        "201":
+          description: Runner started successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartRunnerResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A runner for this model is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker has no capacity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal worker error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /runners/{runnerId}:
+    delete:
+      operationId: stopRunner
+      summary: Stop a runner process
+      description: |
+        Stops the runner process identified by `runnerId`. The worker sends
+        SIGTERM to the runner process, waits for it to exit (with a timeout
+        followed by SIGKILL), and frees the associated resources.
+      tags:
+        - Runners
+      parameters:
+        - name: runnerId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique identifier of the runner to stop.
+      responses:
+        "204":
+          description: Runner stopped successfully
+        "404":
+          description: Runner not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal worker error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    # -------------------------------------------------------------------------
+    # Runner management
+    # -------------------------------------------------------------------------
+
+    StartRunnerRequest:
+      type: object
+      description: |
+        Request to start a runner process for a model. The fields mirror the
+        placement decision made by the control plane.
+      required:
+        - modelName
+        - runnerType
+        - modelPath
+        - requiredMemory
+        - tensorParallel
+        - devices
+      properties:
+        modelName:
+          type: string
+          description: Name of the model to serve.
+        runnerType:
+          type: string
+          description: |
+            Runner type identifier (e.g., "vllm", "triton"). Determines which
+            engine binary to launch.
+        modelPath:
+          type: string
+          description: |
+            Path to the model weights. In production this is typically a shared
+            filesystem path (CephFS). In dev mode, this is informational only.
+        requiredMemory:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Total device memory required by this model in bytes. Used by the
+            worker to validate capacity and update memory reports.
+        deviceType:
+          type: string
+          description: |
+            Preferred device type (e.g., "CUDA", "ROCM", "CPU"). Optional —
+            the placement pipeline has already selected a compatible worker.
+        tensorParallel:
+          type: integer
+          minimum: 1
+          description: |
+            Number of devices to use for tensor parallelism. Must not exceed
+            the number of entries in `devices`.
+        engineConfig:
+          type: object
+          description: |
+            Engine-specific configuration passed through to the runner process.
+            The worker does not interpret this — it forwards it as-is.
+          additionalProperties: true
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceAssignment"
+          minItems: 1
+          description: |
+            Devices assigned to this runner by the placement pipeline. Each
+            entry specifies a device index and type on this worker.
+
+    DeviceAssignment:
+      type: object
+      description: A device assigned to a runner.
+      required:
+        - deviceIndex
+        - deviceType
+      properties:
+        deviceIndex:
+          type: integer
+          minimum: 0
+          description: Zero-based device index on this worker.
+        deviceType:
+          type: string
+          description: Device type (e.g., "CUDA", "ROCM", "CPU").
+
+    StartRunnerResponse:
+      type: object
+      description: Response after a runner has been started successfully.
+      required:
+        - runnerId
+        - host
+        - port
+      properties:
+        runnerId:
+          type: string
+          description: Unique identifier for the started runner.
+        host:
+          type: string
+          description: Hostname or IP where the runner is listening.
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Port where the runner is listening.
+
+    # -------------------------------------------------------------------------
+    # Self-registration schemas (Redis data, not HTTP payloads)
+    # -------------------------------------------------------------------------
+
+    WorkerInfo:
+      type: object
+      description: |
+        Worker registration data pushed to Redis at
+        `{prefix}:workers:{workerId}:info`. The control plane discovers
+        workers by scanning for these keys.
+      required:
+        - capabilities
+        - devices
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerCapability"
+          description: Runner capabilities available on this worker.
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerDeviceInfo"
+          description: Compute devices available on this worker.
+        managementUrl:
+          type: string
+          format: uri
+          description: |
+            HTTP URL where the worker's management API is listening
+            (e.g., "http://localhost:9100"). The control plane uses this to
+            send start/stop runner commands.
+
+    WorkerCapability:
+      type: object
+      description: Capability of a runner type available on this worker.
+      required:
+        - runnerType
+        - engineName
+        - supportedModelTypes
+        - supportedDeviceTypes
+        - supportedSleepLevels
+      properties:
+        runnerType:
+          type: string
+          description: Runner type identifier (e.g., "vllm", "triton").
+        engineName:
+          type: string
+          description: Human-readable engine name.
+        supportedModelTypes:
+          type: array
+          items:
+            type: string
+          description: Workload types this runner supports.
+        supportedDeviceTypes:
+          type: array
+          items:
+            type: string
+          description: Device types this runner supports.
+        supportedSleepLevels:
+          type: array
+          items:
+            type: string
+          description: Sleep levels this runner supports.
+
+    WorkerDeviceInfo:
+      type: object
+      description: A compute device on the worker.
+      required:
+        - deviceIndex
+        - deviceType
+        - memoryTotalBytes
+      properties:
+        deviceIndex:
+          type: integer
+          minimum: 0
+          description: Zero-based device index.
+        deviceType:
+          type: string
+          description: Device type (e.g., "CUDA", "ROCM", "CPU").
+        memoryTotalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total device memory in bytes.
+
+    WorkerMemoryReport:
+      type: object
+      description: |
+        Per-device memory usage pushed to Redis at
+        `{prefix}:workers:{workerId}:memory`. Updated whenever runners
+        start, stop, sleep, or wake.
+      required:
+        - devices
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerDeviceMemory"
+
+    WorkerDeviceMemory:
+      type: object
+      description: Memory usage for a single device on the worker.
+      required:
+        - deviceIndex
+        - deviceType
+        - memoryUsedBytes
+        - memoryTotalBytes
+      properties:
+        deviceIndex:
+          type: integer
+          minimum: 0
+        deviceType:
+          type: string
+        memoryUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total bytes used across all runners on this device.
+        memoryTotalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total device capacity in bytes.
+
+    # -------------------------------------------------------------------------
+    # Common
+    # -------------------------------------------------------------------------
+
+    ErrorResponse:
+      type: object
+      description: Error response returned on failure.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+        code:
+          type: string
+          description: Machine-readable error code.
+        details:
+          type: object
+          description: Additional error context.
+          additionalProperties: true

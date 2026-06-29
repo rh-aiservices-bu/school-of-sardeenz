@@ -4,6 +4,7 @@
     { "path": "packages/types" },
     { "path": "packages/utils" },
     { "path": "control-plane" },
-    { "path": "dashboard" }
+    { "path": "dashboard" },
+    { "path": "runners/dev-worker" }
   ]
 }

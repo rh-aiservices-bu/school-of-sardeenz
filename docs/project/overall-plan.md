@@ -26,9 +26,9 @@ All four communicate through OpenAPI contracts (the single source of truth for c
 The project is delivered in five sequential phases. Each phase produces a usable increment and has clear entry/exit criteria.
 
 ```text
-Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 4
-Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Highlander
-(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (HPC runtime)
+Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 3.6        Phase 4
+Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  Highlander
+(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (HPC runtime)
 ```
 
 Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while Highlander integration starts), but the critical path runs through Phases 0 → 1 → 2.

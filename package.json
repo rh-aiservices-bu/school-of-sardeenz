@@ -9,7 +9,8 @@
   "workspaces": [
     "control-plane",
     "dashboard",
-    "packages/*"
+    "packages/*",
+    "runners/dev-worker"
   ],
   "scripts": {
     "dev": "concurrently --names \"proxy,cp,dashboard,bff\" --prefix-colors \"yellow,magenta,green,cyan\" \"./scripts/dev-proxy.sh\" \"npm run dev -w @sardeenz/control-plane\" \"npm run dev -w @sardeenz/dashboard\" \"npm run dev:server -w @sardeenz/dashboard\"",
