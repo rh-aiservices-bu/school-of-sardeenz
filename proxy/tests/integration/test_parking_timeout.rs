@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::{MockControlPlaneBuilder, TestProxy, insert_sleeping_model};
 use crate::common::proxy_builder::TestProxyConfig;
+use crate::common::{insert_sleeping_model, MockControlPlaneBuilder, TestProxy};
 
 #[tokio::test]
 async fn test_parking_timeout_503() {
@@ -47,15 +47,8 @@ async fn test_parking_timeout_503() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::SERVICE_UNAVAILABLE,
-        "parking timeout should return 503"
-    );
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "parking timeout should return 503");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
-    assert_eq!(
-        body["error"]["type"], "parking_timeout",
-        "error type should be parking_timeout"
-    );
+    assert_eq!(body["error"]["type"], "parking_timeout", "error type should be parking_timeout");
 }

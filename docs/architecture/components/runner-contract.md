@@ -39,13 +39,13 @@ stateDiagram-v2
 
 ### State Definitions
 
-| State | Accepts inference? | Description |
-| --- | --- | --- |
-| `STARTING` | No | Runner is initializing — loading weights, allocating device memory, capturing CUDA graphs. Progress available via `GET /progress`. |
-| `READY` | Yes | Runner is ready and has capacity for new requests. |
-| `BUSY` | No (at capacity) | Runner is healthy but saturated. Existing requests continue; new requests should be routed elsewhere. The runner self-reports this transition. |
-| `SLEEPING` | No | Runner has offloaded device memory (weights to host RAM). Device memory is freed. Wake with `POST /wake` to return to `READY`. |
-| `ERROR` | No | Unrecoverable error. The runner should be stopped and restarted. Error details in the `message` field of `GET /health`. |
+| State      | Accepts inference? | Description                                                                                                                                    |
+| ---------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STARTING` | No                 | Runner is initializing — loading weights, allocating device memory, capturing CUDA graphs. Progress available via `GET /progress`.             |
+| `READY`    | Yes                | Runner is ready and has capacity for new requests.                                                                                             |
+| `BUSY`     | No (at capacity)   | Runner is healthy but saturated. Existing requests continue; new requests should be routed elsewhere. The runner self-reports this transition. |
+| `SLEEPING` | No                 | Runner has offloaded device memory (weights to host RAM). Device memory is freed. Wake with `POST /wake` to return to `READY`.                 |
+| `ERROR`    | No                 | Unrecoverable error. The runner should be stopped and restarted. Error details in the `message` field of `GET /health`.                        |
 
 ### Key Transitions
 
@@ -76,13 +76,13 @@ If all endpoints for a model reach `weight: 0`, the proxy has no routable endpoi
 
 #### Full mapping table
 
-| RunnerState | ModelState | Endpoint healthy | Endpoint weight | Proxy behavior |
-| --- | --- | --- | --- | --- |
-| `STARTING` | `STARTING` | N/A (no endpoint yet) | N/A | Park connections, no wake trigger |
-| `READY` | `ACTIVE` | `true` | configured weight | Forward requests (round-robin) |
-| `BUSY` | `ACTIVE` | `true` | `0` | Skip this endpoint in round-robin |
-| `SLEEPING` | `SLEEPING` | N/A (no endpoint) | N/A | Park connections, fire wake trigger |
-| `ERROR` | `ERROR` | N/A (no endpoint) | N/A | Return 503 |
+| RunnerState | ModelState | Endpoint healthy      | Endpoint weight   | Proxy behavior                      |
+| ----------- | ---------- | --------------------- | ----------------- | ----------------------------------- |
+| `STARTING`  | `STARTING` | N/A (no endpoint yet) | N/A               | Park connections, no wake trigger   |
+| `READY`     | `ACTIVE`   | `true`                | configured weight | Forward requests (round-robin)      |
+| `BUSY`      | `ACTIVE`   | `true`                | `0`               | Skip this endpoint in round-robin   |
+| `SLEEPING`  | `SLEEPING` | N/A (no endpoint)     | N/A               | Park connections, fire wake trigger |
+| `ERROR`     | `ERROR`    | N/A (no endpoint)     | N/A               | Return 503                          |
 
 The `DRAINING` model state is set explicitly by the control plane before sleep or shutdown — it is not derived from a runner state. During draining, endpoints remain with their current weight but the proxy stops routing new requests; in-flight requests complete normally.
 
@@ -130,8 +130,8 @@ Sleep support is **optional** — a runner declares which sleep levels it suppor
 
 #### Sleep Levels
 
-| Level | Name | Behavior | Wake time |
-| --- | --- | --- | --- |
+| Level         | Name             | Behavior                                                                                        | Wake time                         |
+| ------------- | ---------------- | ----------------------------------------------------------------------------------------------- | --------------------------------- |
 | `L1_HOST_RAM` | Host RAM offload | Model weights copied from device memory to host RAM. Device memory freed; host memory consumed. | Fast (memory copy back to device) |
 
 Only `L1_HOST_RAM` is defined in v0.1 of the contract. Future levels (e.g., L2 for disk offload) will be added to the `SleepLevel` enum. Each runner declares which levels it supports.
@@ -154,14 +154,14 @@ Returns a `LoadingProgress` with the current loading phase, overall completion p
 
 Phases progress in order. Not all runners pass through every phase — engines with different loading pipelines skip phases that don't apply.
 
-| Phase | Typical % range | Description |
-| --- | --- | --- |
-| `INITIALIZING` | 0–10 | Process started, preparing to load |
-| `LOADING_WEIGHTS` | 10–50 | Reading model weights from storage |
-| `ALLOCATING_MEMORY` | 50–70 | Allocating KV cache, device buffers |
-| `CAPTURING_GRAPHS` | 70–85 | Capturing CUDA graphs or equivalent |
-| `WARMING_UP` | 85–99 | Running warm-up inference |
-| `READY` | 100 | Loading complete |
+| Phase               | Typical % range | Description                         |
+| ------------------- | --------------- | ----------------------------------- |
+| `INITIALIZING`      | 0–10            | Process started, preparing to load  |
+| `LOADING_WEIGHTS`   | 10–50           | Reading model weights from storage  |
+| `ALLOCATING_MEMORY` | 50–70           | Allocating KV cache, device buffers |
+| `CAPTURING_GRAPHS`  | 70–85           | Capturing CUDA graphs or equivalent |
+| `WARMING_UP`        | 85–99           | Running warm-up inference           |
+| `READY`             | 100             | Loading complete                    |
 
 The percentage ranges are approximate guidance. Runners that don't track granular progress may report only phase transitions, causing `percentComplete` to jump between phase boundaries. The `READY` phase with 100% is authoritative — loading is complete.
 
@@ -175,28 +175,28 @@ Returns a `RunnerCapabilities` object that the control plane calls **once** afte
 
 #### Fields
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `runnerType` | Yes | Machine identifier (e.g., `"vllm"`, `"triton"`, `"mlserver"`) |
-| `engineName` | Yes | Human-readable name (e.g., `"vLLM"`, `"Triton Inference Server"`) |
-| `engineVersion` | Yes | Engine version string |
-| `supportedModelTypes` | Yes | Workload types: `LLM`, `DIFFUSION`, `PREDICTIVE`, `EMBEDDING`, `OTHER` |
-| `supportedDeviceTypes` | Yes | Hardware: `CUDA`, `ROCM`, `CPU`, `OTHER` |
-| `supportedSleepLevels` | No | Sleep levels supported. Empty/absent = no sleep support |
-| `maxTensorParallelism` | No | Max devices for tensor parallelism (default: 1) |
-| `features` | No | Engine-specific feature flags (freeform key-value) |
+| Field                  | Required | Description                                                            |
+| ---------------------- | -------- | ---------------------------------------------------------------------- |
+| `runnerType`           | Yes      | Machine identifier (e.g., `"vllm"`, `"triton"`, `"mlserver"`)          |
+| `engineName`           | Yes      | Human-readable name (e.g., `"vLLM"`, `"Triton Inference Server"`)      |
+| `engineVersion`        | Yes      | Engine version string                                                  |
+| `supportedModelTypes`  | Yes      | Workload types: `LLM`, `DIFFUSION`, `PREDICTIVE`, `EMBEDDING`, `OTHER` |
+| `supportedDeviceTypes` | Yes      | Hardware: `CUDA`, `ROCM`, `CPU`, `OTHER`                               |
+| `supportedSleepLevels` | No       | Sleep levels supported. Empty/absent = no sleep support                |
+| `maxTensorParallelism` | No       | Max devices for tensor parallelism (default: 1)                        |
+| `features`             | No       | Engine-specific feature flags (freeform key-value)                     |
 
 #### Well-Known Feature Flags
 
 Runners should use these keys when applicable:
 
-| Key | Type | Meaning |
-| --- | --- | --- |
-| `kvCacheOffload` | boolean | Supports KV cache offload to host memory |
-| `prefixCaching` | boolean | Supports prefix caching |
-| `streamingInference` | boolean | Supports SSE streaming responses |
-| `chatTemplate` | boolean | Supports chat template formatting |
-| `toolUse` | boolean | Supports function/tool calling |
+| Key                  | Type    | Meaning                                  |
+| -------------------- | ------- | ---------------------------------------- |
+| `kvCacheOffload`     | boolean | Supports KV cache offload to host memory |
+| `prefixCaching`      | boolean | Supports prefix caching                  |
+| `streamingInference` | boolean | Supports SSE streaming responses         |
+| `chatTemplate`       | boolean | Supports chat template formatting        |
+| `toolUse`            | boolean | Supports function/tool calling           |
 
 The `features` map is intentionally open-ended. Engine-specific keys beyond the well-known set are allowed. The control plane may use them for fine-grained placement or to enable engine-specific optimizations.
 
@@ -227,12 +227,12 @@ All endpoints return an `ErrorResponse` on failure:
 
 HTTP status codes follow standard semantics:
 
-| Code | Meaning |
-| --- | --- |
-| 400 | Bad request (malformed payload, invalid parameters) |
-| 409 | Conflict (wrong state for the requested operation) |
-| 500 | Internal runner error |
-| 503 | Runner not yet initialized (health endpoint only) |
+| Code | Meaning                                             |
+| ---- | --------------------------------------------------- |
+| 400  | Bad request (malformed payload, invalid parameters) |
+| 409  | Conflict (wrong state for the requested operation)  |
+| 500  | Internal runner error                               |
+| 503  | Runner not yet initialized (health endpoint only)   |
 
 ## Scenario Validation
 
@@ -243,6 +243,7 @@ The contract is validated against three representative runner scenarios to ensur
 A vLLM runner serving an LLM on one or more NVIDIA GPUs. This is the reference implementation and exercises the full contract surface.
 
 **Capabilities:**
+
 ```json
 {
   "runnerType": "vllm",
@@ -275,6 +276,7 @@ A vLLM runner serving an LLM on one or more NVIDIA GPUs. This is the reference i
 A Triton Inference Server runner serving non-LLM workloads (diffusion, embedding) on GPU. Exercises partial contract support — no sleep, different model types.
 
 **Capabilities:**
+
 ```json
 {
   "runnerType": "triton",
@@ -302,6 +304,7 @@ A Triton Inference Server runner serving non-LLM workloads (diffusion, embedding
 An MLServer runner serving predictive models on CPU. Exercises the CPU-only path — no GPU, no sleep, minimal memory reporting.
 
 **Capabilities:**
+
 ```json
 {
   "runnerType": "mlserver",
@@ -324,15 +327,15 @@ An MLServer runner serving predictive models on CPU. Exercises the CPU-only path
 
 ### Validation Summary
 
-| Aspect | vLLM (GPU) | Triton (GPU) | MLServer (CPU) |
-| --- | --- | --- | --- |
-| All 5 states reachable | Yes | 4/5 (no SLEEPING) | 4/5 (no SLEEPING) |
-| Health meaningful | Yes | Yes | Yes |
-| Memory reporting useful | Full (per-device + breakdown) | Per-device only | CPU memory only |
-| Sleep/wake | L1_HOST_RAM | N/A (409) | N/A (409) |
-| Progress granular | All 6 phases | 3 phases | 2 phases |
-| Capabilities distinguish | Yes | Yes | Yes |
-| Placement pipeline works | Full | Hardware filter excludes CPU workers | Hardware filter excludes GPU workers |
+| Aspect                   | vLLM (GPU)                    | Triton (GPU)                         | MLServer (CPU)                       |
+| ------------------------ | ----------------------------- | ------------------------------------ | ------------------------------------ |
+| All 5 states reachable   | Yes                           | 4/5 (no SLEEPING)                    | 4/5 (no SLEEPING)                    |
+| Health meaningful        | Yes                           | Yes                                  | Yes                                  |
+| Memory reporting useful  | Full (per-device + breakdown) | Per-device only                      | CPU memory only                      |
+| Sleep/wake               | L1_HOST_RAM                   | N/A (409)                            | N/A (409)                            |
+| Progress granular        | All 6 phases                  | 3 phases                             | 2 phases                             |
+| Capabilities distinguish | Yes                           | Yes                                  | Yes                                  |
+| Placement pipeline works | Full                          | Hardware filter excludes CPU workers | Hardware filter excludes GPU workers |
 
 The contract accommodates all three scenarios. Optional interfaces (sleep, breakdown, feature flags) degrade cleanly — absent capabilities result in 409 responses or simpler behavior, not contract violations.
 

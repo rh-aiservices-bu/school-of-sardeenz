@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::{
-    MockControlPlaneBuilder, MockRunner, TestProxy, insert_sleeping_model,
-};
+use crate::common::{insert_sleeping_model, MockControlPlaneBuilder, MockRunner, TestProxy};
 
 #[tokio::test]
 async fn test_sleeping_model_wakes() {
@@ -70,21 +68,13 @@ async fn test_sleeping_model_wakes() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::OK,
-        "proxy should park, wait for wake, then forward"
-    );
+    assert_eq!(resp.status(), StatusCode::OK, "proxy should park, wait for wake, then forward");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(body["object"], "chat.completion");
 
     // The control plane must have received exactly one wake trigger.
-    assert_eq!(
-        cp.wake_count_for(model).await,
-        1,
-        "expected exactly one wake trigger"
-    );
+    assert_eq!(cp.wake_count_for(model).await, 1, "expected exactly one wake trigger");
 
     // The runner must have served exactly one request.
     assert_eq!(runner.request_count(), 1);

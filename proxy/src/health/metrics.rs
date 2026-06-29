@@ -2,9 +2,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 
 pub fn setup_metrics() -> metrics_exporter_prometheus::PrometheusHandle {
     let builder = PrometheusBuilder::new();
-    builder
-        .install_recorder()
-        .expect("failed to install Prometheus recorder")
+    builder.install_recorder().expect("failed to install Prometheus recorder")
 }
 
 pub fn describe_metrics() {
@@ -20,10 +18,7 @@ pub fn describe_metrics() {
         "sardeenz_proxy_request_duration_seconds",
         "Request latency (excluding parking wait time)"
     );
-    describe_gauge!(
-        "sardeenz_proxy_active_connections",
-        "Currently active forwarded connections"
-    );
+    describe_gauge!("sardeenz_proxy_active_connections", "Currently active forwarded connections");
     describe_gauge!(
         "sardeenz_proxy_parked_connections",
         "Currently parked connections, labeled by model"

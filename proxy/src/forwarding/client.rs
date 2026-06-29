@@ -54,20 +54,13 @@ impl ForwardingClient {
     ) -> Result<Response<Body>, anyhow::Error> {
         let url = format!("http://{}:{}{}", endpoint.host, endpoint.port, path);
 
-        let mut req_builder = self
-            .client
-            .request(method, &url)
-            .timeout(self.timeout)
-            .body(body);
+        let mut req_builder = self.client.request(method, &url).timeout(self.timeout).body(body);
 
         for (key, value) in headers {
             if key == "host" {
                 continue;
             }
-            if HOP_BY_HOP_HEADERS
-                .iter()
-                .any(|h| key.as_str().eq_ignore_ascii_case(h))
-            {
+            if HOP_BY_HOP_HEADERS.iter().any(|h| key.as_str().eq_ignore_ascii_case(h)) {
                 continue;
             }
             req_builder = req_builder.header(key, value);
@@ -81,10 +74,7 @@ impl ForwardingClient {
 
         let mut builder = Response::builder().status(status);
         for (key, value) in &resp_headers {
-            if HOP_BY_HOP_HEADERS
-                .iter()
-                .any(|h| key.as_str().eq_ignore_ascii_case(h))
-            {
+            if HOP_BY_HOP_HEADERS.iter().any(|h| key.as_str().eq_ignore_ascii_case(h)) {
                 continue;
             }
             builder = builder.header(key, value);

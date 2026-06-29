@@ -112,11 +112,41 @@ The default connection URLs match the compose defaults with no extra configurati
 
 Dev servers running on the host write their output to the `logs/` directory in the project root (gitignored). Since the project folder is bind-mounted into the ccbox container, Claude Code can read these logs directly to debug runtime issues without needing output pasted into the conversation.
 
-Each component pipes its output to a separate log file:
+### Starting dev servers with logging
 
 ```bash
-# Example: start the control plane and capture logs
-npm run dev -w @sardeenz/control-plane > logs/control-plane.log 2>&1 &
+# All components (proxy + control plane + dashboard + BFF) with file logging
+npm run dev:logged
+
+# All components without file logging (terminal only)
+npm run dev
+
+# Individual components with file logging
+npm run dev:logged -w @sardeenz/control-plane
+npm run dev:logged -w @sardeenz/dashboard
+npm run dev:server:logged -w @sardeenz/dashboard
+```
+
+Each logged variant uses `tee` to write to both the terminal and a log file:
+
+| Component     | Log file                    |
+| ------------- | --------------------------- |
+| Proxy         | `logs/proxy.log`            |
+| Control plane | `logs/control-plane.log`    |
+| Dashboard     | `logs/dashboard.log`        |
+| BFF server    | `logs/dashboard-server.log` |
+
+The proxy requires Rust/cargo — if not installed, it prints a warning and is skipped (the TypeScript components still start).
+
+### Reading and clearing logs
+
+```bash
+npm run logs:proxy       # tail -f proxy logs
+npm run logs:cp          # tail -f control-plane logs
+npm run logs:dashboard   # tail -f dashboard logs
+npm run logs:bff         # tail -f BFF server logs
+npm run logs:all         # tail -f all log files
+npm run logs:clear       # remove all log files
 ```
 
 ## Branching Strategy

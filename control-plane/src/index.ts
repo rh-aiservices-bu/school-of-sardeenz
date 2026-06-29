@@ -113,6 +113,8 @@ async function main(): Promise<void> {
       sleepTimeoutSecs: config.sleepTimeoutSecs,
     },
     app.log,
+    redis,
+    config.redisKeyPrefix,
   );
 
   await leaderElection.start();

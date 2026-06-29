@@ -13,10 +13,10 @@
 
 use std::time::Duration;
 
-use axum::Router;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum::Router;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
 
@@ -70,10 +70,7 @@ impl TestProxy {
     /// Spawn with a pre-existing RoutingMapCache (shared with mock control
     /// plane so that wake triggers update the same in-memory map the proxy
     /// reads).
-    pub async fn spawn_with_shared_cache(
-        control_plane_url: &str,
-        cache: RoutingMapCache,
-    ) -> Self {
+    pub async fn spawn_with_shared_cache(control_plane_url: &str, cache: RoutingMapCache) -> Self {
         Self::spawn_inner(
             TestProxyConfig {
                 control_plane_url: control_plane_url.to_string(),
@@ -182,11 +179,7 @@ impl TestProxy {
             axum::serve(admin_listener, admin_app).await.unwrap();
         });
 
-        TestProxy {
-            proxy_addr,
-            admin_addr,
-            routing_cache,
-        }
+        TestProxy { proxy_addr, admin_addr, routing_cache }
     }
 
     pub fn proxy_url(&self) -> String {

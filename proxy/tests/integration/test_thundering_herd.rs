@@ -7,9 +7,7 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::{
-    MockControlPlaneBuilder, MockRunner, TestProxy, insert_sleeping_model,
-};
+use crate::common::{insert_sleeping_model, MockControlPlaneBuilder, MockRunner, TestProxy};
 
 #[tokio::test]
 async fn test_thundering_herd() {
@@ -23,12 +21,7 @@ async fn test_thundering_herd() {
     // The control plane waits a bit before activating the model — long enough
     // that all concurrent requests will be parked before the wake completes.
     let cp = MockControlPlaneBuilder::new()
-        .on_wake_activate(
-            model,
-            runner.addr,
-            shared_cache.clone(),
-            Duration::from_millis(200),
-        )
+        .on_wake_activate(model, runner.addr, shared_cache.clone(), Duration::from_millis(200))
         .spawn()
         .await;
 

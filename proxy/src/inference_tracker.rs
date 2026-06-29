@@ -75,8 +75,7 @@ impl InferenceTracker {
         };
 
         let key = format!("{}:inference:last:{}", self.key_prefix, model_name);
-        let timestamp =
-            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         if let Err(e) = conn.set::<_, _, ()>(&key, &timestamp).await {
             tracing::warn!(key = %key, error = %e, "failed to write inference timestamp");
@@ -90,10 +89,8 @@ mod tests {
 
     #[tokio::test]
     async fn debounce_skips_rapid_writes() {
-        let tracker = InferenceTracker::new(
-            "redis://not-connected:0".to_string(),
-            "test".to_string(),
-        );
+        let tracker =
+            InferenceTracker::new("redis://not-connected:0".to_string(), "test".to_string());
 
         // First call should update the cache
         {
@@ -129,10 +126,8 @@ mod tests {
 
     #[tokio::test]
     async fn different_models_tracked_independently() {
-        let tracker = InferenceTracker::new(
-            "redis://not-connected:0".to_string(),
-            "test".to_string(),
-        );
+        let tracker =
+            InferenceTracker::new("redis://not-connected:0".to_string(), "test".to_string());
 
         tracker.record("model-a").await;
         tracker.record("model-b").await;

@@ -9,10 +9,7 @@ use crate::generated::proxy_control_plane::ModelState;
 use crate::routing::resolver::Resolution;
 use crate::state::AppState;
 
-pub async fn handle_inference(
-    State(state): State<AppState>,
-    request: Request<Body>,
-) -> Response {
+pub async fn handle_inference(State(state): State<AppState>, request: Request<Body>) -> Response {
     let start = std::time::Instant::now();
     gauge!("sardeenz_proxy_active_connections").increment(1);
 
@@ -90,11 +87,7 @@ async fn handle_inference_inner(
         .clone();
 
     // Preserve query string via path_and_query
-    let path = parts
-        .uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or(parts.uri.path());
+    let path = parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(parts.uri.path());
 
     let ep_key = format!("{}:{}", endpoint.host, endpoint.port);
 
@@ -131,10 +124,7 @@ pub async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse 
     let body = state.metrics_handle.render();
     (
         StatusCode::OK,
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "text/plain; version=0.0.4; charset=utf-8",
-        )],
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
         body,
     )
 }

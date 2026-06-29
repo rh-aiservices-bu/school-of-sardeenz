@@ -17,28 +17,21 @@ impl Default for WeightedRoundRobin {
 
 impl WeightedRoundRobin {
     pub fn new() -> Self {
-        Self {
-            counter: AtomicUsize::new(0),
-        }
+        Self { counter: AtomicUsize::new(0) }
     }
 
     /// Select the next endpoint from a list using weighted round-robin.
     /// Endpoints with weight 0 or unhealthy are skipped.
     /// Uses cumulative weight selection: O(n) in endpoints, zero heap allocation.
     pub fn pick<'a>(&self, endpoints: &'a [RunnerEndpoint]) -> Option<&'a RunnerEndpoint> {
-        let healthy: Vec<&RunnerEndpoint> = endpoints
-            .iter()
-            .filter(|ep| ep.healthy && ep.weight > 0)
-            .collect();
+        let healthy: Vec<&RunnerEndpoint> =
+            endpoints.iter().filter(|ep| ep.healthy && ep.weight > 0).collect();
 
         if healthy.is_empty() {
             return None;
         }
 
-        let total_weight: u32 = healthy
-            .iter()
-            .map(|ep| ep.weight.min(MAX_WEIGHT))
-            .sum();
+        let total_weight: u32 = healthy.iter().map(|ep| ep.weight.min(MAX_WEIGHT)).sum();
 
         if total_weight == 0 {
             return None;
@@ -62,27 +55,17 @@ mod tests {
     use super::*;
 
     fn endpoint(host: &str, weight: u32, healthy: bool) -> RunnerEndpoint {
-        RunnerEndpoint {
-            host: host.to_string(),
-            port: 8000,
-            weight,
-            healthy,
-            runner_id: None,
-        }
+        RunnerEndpoint { host: host.to_string(), port: 8000, weight, healthy, runner_id: None }
     }
 
     #[test]
     fn picks_healthy_endpoints() {
         let balancer = WeightedRoundRobin::new();
-        let endpoints = vec![
-            endpoint("a", 1, true),
-            endpoint("b", 1, false),
-            endpoint("c", 1, true),
-        ];
+        let endpoints =
+            vec![endpoint("a", 1, true), endpoint("b", 1, false), endpoint("c", 1, true)];
 
-        let picked: Vec<_> = (0..4)
-            .map(|_| balancer.pick(&endpoints).unwrap().host.clone())
-            .collect();
+        let picked: Vec<_> =
+            (0..4).map(|_| balancer.pick(&endpoints).unwrap().host.clone()).collect();
         assert!(picked.iter().all(|h| h == "a" || h == "c"));
     }
 

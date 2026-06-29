@@ -428,6 +428,11 @@ export type components = {
             pinned?: boolean;
             /** @description Assigned worker identifier. */
             workerId?: string;
+            /**
+             * @description Zero-based indices of the devices this model is placed on.
+             *     Populated when the model has an active placement.
+             */
+            deviceIndices?: number[];
             /** @description Runner endpoint details (host, port). */
             runnerEndpoint?: {
                 /** @description Runner hostname or IP. */
@@ -547,6 +552,12 @@ export type components = {
              * @description Device memory consumed by this model.
              */
             memoryUsedBytes?: number;
+            /**
+             * @description Zero-based indices of the devices this model is placed on.
+             *     For tensor-parallel models, contains one entry per device.
+             *     Absent for models deployed before device-attribution tracking.
+             */
+            deviceIndices?: number[];
         };
         /** @description Runner type available on a worker. */
         WorkerRunnerCapability: {

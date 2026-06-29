@@ -4,7 +4,7 @@
 use futures_util::StreamExt;
 use reqwest::StatusCode;
 
-use crate::common::{MockRunner, TestProxy, insert_active_model};
+use crate::common::{insert_active_model, MockRunner, TestProxy};
 
 #[tokio::test]
 async fn test_active_model_streaming() {
@@ -28,11 +28,8 @@ async fn test_active_model_streaming() {
 
     assert_eq!(resp.status(), StatusCode::OK, "expected 200 OK");
 
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let content_type =
+        resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
     assert!(
         content_type.contains("text/event-stream"),
         "expected SSE content-type, got: {content_type}"
@@ -48,18 +45,9 @@ async fn test_active_model_streaming() {
     let body_str = String::from_utf8(collected).expect("non-UTF8 SSE body");
 
     // The mock runner sends two data chunks and a [DONE] sentinel.
-    assert!(
-        body_str.contains("data:"),
-        "SSE body should contain data lines"
-    );
-    assert!(
-        body_str.contains("[DONE]"),
-        "SSE body should end with [DONE]"
-    );
-    assert!(
-        body_str.contains("Hello"),
-        "SSE body should contain first chunk content"
-    );
+    assert!(body_str.contains("data:"), "SSE body should contain data lines");
+    assert!(body_str.contains("[DONE]"), "SSE body should end with [DONE]");
+    assert!(body_str.contains("Hello"), "SSE body should contain first chunk content");
 
     assert_eq!(runner.request_count(), 1);
 }

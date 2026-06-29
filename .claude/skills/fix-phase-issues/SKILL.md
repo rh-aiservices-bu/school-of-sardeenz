@@ -21,6 +21,7 @@ gh issue list --label "phase/phase$ARGUMENTS" --state open --json number,title,b
 ```
 
 Parse the JSON output. For each issue, extract:
+
 - Issue number, title, full body
 - Priority label (P0-critical, P1-high, P2-medium, P3-low)
 - File paths mentioned in the body (look for backtick-quoted paths matching `*.ts`, `*.tsx`, `*.rs`, `*.yaml`, `*.json`, `Dockerfile`)
@@ -33,21 +34,27 @@ If no open issues are found, report "No open issues for phase $ARGUMENTS" and st
 Analyze dependencies between issues using three signals:
 
 ### Signal 1 — Explicit references
+
 Scan each issue body for references to other open issues in this set. Build directed dependency edges.
 
 ### Signal 2 — File overlap
+
 Compare file paths extracted from each issue. If two issues mention the same file, they have potential overlap and must be serialized. When file overlap is detected, read the file to understand whether the changes target disjoint sections — but default to serializing when uncertain.
 
 ### Signal 3 — Service/module coupling
+
 If two issues modify the same service class (e.g., both touch methods in `MemoryBudgetService` or both modify `placement.ts`), serialize them even if they reference different methods. Semantic interaction risk is too high.
 
 ### Design decision detection
+
 Flag an issue as "requires design decision" if its body:
+
 - Explicitly presents multiple options without recommending one
 - Contains phrases like "design question", "decision needed", "options:", "which approach"
 - Asks a question that requires architectural judgment not answerable from the issue alone
 
 ### Tier assignment
+
 - **Tier 0**: Issues with no dependencies on other open issues AND no file/service overlap with other tier-0 issues
 - **Tier 1+**: Issues that depend on lower-tier issues, or that were bumped due to overlap
 - **Skipped — design decision**: Issues requiring architectural choices
@@ -69,6 +76,7 @@ Skipped — depends on all fixes: #NN (title)
 Process tiers in order (tier 0 first, then tier 1, etc.).
 
 Within a tier:
+
 - **Parallelize** issues with completely disjoint file sets AND disjoint services — spawn their fix-verify cycles concurrently using multiple Agent calls in a single message
 - **Serialize** issues that share any file or service — process them one at a time
 
@@ -125,29 +133,35 @@ After the fix subagent completes, spawn a **separate** verification subagent. Al
 The verification subagent checks five dimensions:
 
 ### 1. Correctness
+
 - Read the diff: `git diff main..HEAD` (or diff against the parent branch)
 - Does the code change match what the issue asks for?
 - Are edge cases handled?
 - Could this fix introduce new bugs or regressions?
 
 ### 2. Honesty
+
 - Are the tests testing actual behavior, or are they tautological?
 - Does the implementation do real work, or does it just satisfy test assertions?
 - If mocks are used, do they mock at the right boundary (external dependencies, not the code under test)?
 - Are there placeholder implementations or TODOs?
 
 ### 3. Test coverage
+
 - Is there at least one regression test that would have failed before the fix?
 - Do tests cover the specific scenario described in the issue?
 - Are error/edge cases tested?
 
 ### 4. Code quality
+
 - Does the code follow existing patterns in the codebase?
 - Are there type safety issues?
 - Is error handling complete?
 
 ### 5. Build verification
+
 Run and report results:
+
 ```bash
 npx tsc --build
 npm run lint
@@ -155,6 +169,7 @@ npm test -w @sardeenz/control-plane
 ```
 
 The verification subagent must return a structured verdict:
+
 - **PASS**: Fix is correct, honest, well-tested, and builds cleanly
 - **FAIL**: List each issue with severity and specific, actionable feedback
 
@@ -178,11 +193,13 @@ If verification returns **PASS**: proceed to Step 8.
 After a verified fix:
 
 1. **Switch to the original branch:**
+
    ```bash
    git checkout <original-branch>
    ```
 
 2. **Merge the fix branch:**
+
    ```bash
    git merge fix/issue-<NUMBER>-<slug> --no-ff -m "fix: <description> (closes #<NUMBER>)"
    ```
@@ -199,11 +216,13 @@ After a verified fix:
    - Complete the merge commit
 
 4. **Clean up the worktree:**
+
    ```bash
    git worktree remove .claude/worktrees/fix-issue-<NUMBER>
    ```
 
 5. **Close the issue:**
+
    ```bash
    gh issue close <NUMBER> --comment "Fixed in $(git rev-parse --short HEAD) on branch $(git branch --show-current)."
    ```
@@ -221,6 +240,7 @@ npm test -w @sardeenz/control-plane
 ```
 
 If any check fails:
+
 1. Identify which merged fix caused the failure from the error output
 2. Create a corrective worktree and run through Steps 5-8 for the correction
 3. The corrective commit message should reference the original fix: `fix: correct regression from #<NUMBER> fix`
@@ -245,34 +265,41 @@ Produce a structured summary report:
 ## Phase <N> Issue Resolution Summary
 
 ### Fixed
+
 | Issue | Title | Commit | Tests Added |
 | ----- | ----- | ------ | ----------- |
 | #NN   | ...   | abc123 | N           |
 
 ### Skipped — Design Decision Required
+
 | Issue | Title | Decision Needed |
 | ----- | ----- | --------------- |
 | #NN   | ...   | ...             |
 
 ### Skipped — Verification Failed (after retries)
-| Issue | Title | Failure Reason |
-| ----- | ----- | -------------- |
-| (list or "none") | | |
+
+| Issue            | Title | Failure Reason |
+| ---------------- | ----- | -------------- |
+| (list or "none") |       |                |
 
 ### Skipped — Depends on Other Work
+
 | Issue | Title | Blocked By |
 | ----- | ----- | ---------- |
 | #NN   | ...   | ...        |
 
 ### Verification
+
 - TypeScript compilation: PASS/FAIL
 - Lint: PASS/FAIL
 - Tests: PASS/FAIL (X passed, Y failed)
 
 ### Commits Created
+
 (list all commits in merge order)
 
 ### Issues Closed
+
 (list all closed issue numbers)
 ```
 

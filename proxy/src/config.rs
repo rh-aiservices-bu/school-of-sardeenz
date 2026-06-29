@@ -69,8 +69,7 @@ where
     T::Err: std::fmt::Display,
 {
     let val = std::env::var(key).unwrap_or_else(|_| default.to_string());
-    val.parse::<T>()
-        .map_err(|e| anyhow::anyhow!("invalid value for {key}: {e}"))
+    val.parse::<T>().map_err(|e| anyhow::anyhow!("invalid value for {key}: {e}"))
 }
 
 #[cfg(test)]

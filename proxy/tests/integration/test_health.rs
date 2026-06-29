@@ -11,11 +11,8 @@ async fn test_healthz_always_200() {
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{}/healthz", proxy.admin_url()))
-        .send()
-        .await
-        .expect("request failed");
+    let resp =
+        client.get(format!("{}/healthz", proxy.admin_url())).send().await.expect("request failed");
 
     assert_eq!(resp.status(), StatusCode::OK, "/healthz should return 200");
 
@@ -30,11 +27,8 @@ async fn test_readyz_when_fully_ready() {
     let proxy = TestProxy::spawn_with_shared_cache("http://127.0.0.1:1", cache).await;
 
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{}/readyz", proxy.admin_url()))
-        .send()
-        .await
-        .expect("request failed");
+    let resp =
+        client.get(format!("{}/readyz", proxy.admin_url())).send().await.expect("request failed");
 
     assert_eq!(
         resp.status(),
@@ -51,11 +45,8 @@ async fn test_readyz_when_redis_disconnected() {
     let proxy = TestProxy::spawn_with_redis_disconnected("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{}/readyz", proxy.admin_url()))
-        .send()
-        .await
-        .expect("request failed");
+    let resp =
+        client.get(format!("{}/readyz", proxy.admin_url())).send().await.expect("request failed");
 
     assert_eq!(
         resp.status(),
@@ -70,11 +61,8 @@ async fn test_readyz_before_routing_map_loaded() {
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{}/readyz", proxy.admin_url()))
-        .send()
-        .await
-        .expect("request failed");
+    let resp =
+        client.get(format!("{}/readyz", proxy.admin_url())).send().await.expect("request failed");
 
     assert_eq!(
         resp.status(),
@@ -89,19 +77,13 @@ async fn test_metrics_endpoint_reachable() {
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{}/metrics", proxy.admin_url()))
-        .send()
-        .await
-        .expect("request failed");
+    let resp =
+        client.get(format!("{}/metrics", proxy.admin_url())).send().await.expect("request failed");
 
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let content_type =
+        resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
 
     assert!(
         content_type.contains("text/plain"),

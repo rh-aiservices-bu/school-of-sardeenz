@@ -275,12 +275,12 @@ Worker agent (long-lived, manages everything)
 
 ### Communication Channels
 
-| Channel                          | Direction                | Purpose                                                                      |
-| -------------------------------- | ------------------------ | ---------------------------------------------------------------------------- |
-| Control plane → Worker agent     | Process management       | `POST /runners` to start a runner, `DELETE /runners/{id}` to stop one        |
-| Control plane → Runner           | Lifecycle management     | `/health`, `/sleep`, `/wake` — the runner contract                           |
-| Proxy → Runner                   | Inference traffic        | Direct request forwarding, no control plane involvement on the hot path      |
-| Worker agent → Redis / Valkey    | Self-registration        | Capabilities, devices, heartbeat, management URL                             |
+| Channel                       | Direction            | Purpose                                                                 |
+| ----------------------------- | -------------------- | ----------------------------------------------------------------------- |
+| Control plane → Worker agent  | Process management   | `POST /runners` to start a runner, `DELETE /runners/{id}` to stop one   |
+| Control plane → Runner        | Lifecycle management | `/health`, `/sleep`, `/wake` — the runner contract                      |
+| Proxy → Runner                | Inference traffic    | Direct request forwarding, no control plane involvement on the hot path |
+| Worker agent → Redis / Valkey | Self-registration    | Capabilities, devices, heartbeat, management URL                        |
 
 ### Why Runners Are Separate Processes
 

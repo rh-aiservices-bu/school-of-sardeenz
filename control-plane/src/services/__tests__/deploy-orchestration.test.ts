@@ -124,7 +124,10 @@ describe('DeployOrchestrationService', () => {
     it('transitions model to ACTIVE with runner details', async () => {
       await service.deployModel(makeParams());
 
-      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith('test-model', ModelState.STARTING);
+      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+        'test-model',
+        ModelState.STARTING,
+      );
       expect(mocks.workerClient.startRunner).toHaveBeenCalledOnce();
       expect(mocks.runnerClient.getHealth).toHaveBeenCalledOnce();
       expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
@@ -180,7 +183,9 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: expect.stringContaining('Worker not found') as string }),
+        expect.objectContaining({
+          errorMessage: expect.stringContaining('Worker not found') as string,
+        }),
       );
     });
 
@@ -192,7 +197,9 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: expect.stringContaining('no management URL') as string }),
+        expect.objectContaining({
+          errorMessage: expect.stringContaining('no management URL') as string,
+        }),
       );
     });
 

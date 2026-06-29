@@ -53,7 +53,7 @@ export function loadConfig(): Config {
     listenPort: parseInt(portStr ?? '3000', 10),
     logLevel: optionalEnv('SARDEENZ_LOG_LEVEL', 'info'),
     redisUrl: optionalEnv('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
-    databaseUrl: optionalEnv('SARDEENZ_DATABASE_URL', 'postgresql://localhost:5432/sardeenz'),
+    databaseUrl: optionalEnv('SARDEENZ_DATABASE_URL', 'postgresql://sardeenz:sardeenz@localhost:5432/sardeenz'),
     redisKeyPrefix: optionalEnv('SARDEENZ_REDIS_KEY_PREFIX', 'sardeenz'),
     leaseName: optionalEnv('SARDEENZ_LEASE_NAME', 'sardeenz-control-plane'),
     leaseNamespace: optionalEnv('SARDEENZ_LEASE_NAMESPACE', 'default'),

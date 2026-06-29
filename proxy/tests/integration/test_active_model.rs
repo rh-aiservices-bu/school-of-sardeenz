@@ -3,7 +3,7 @@
 
 use reqwest::StatusCode;
 
-use crate::common::{MockRunner, TestProxy, insert_active_model};
+use crate::common::{insert_active_model, MockRunner, TestProxy};
 
 #[tokio::test]
 async fn test_active_model_request() {

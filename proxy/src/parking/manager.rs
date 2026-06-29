@@ -60,11 +60,7 @@ impl ParkingManager {
     /// the first request, then waits for the model to become active.
     ///
     /// Returns Ok(()) when the model is active and the caller can forward.
-    pub async fn park(
-        &self,
-        model_name: &str,
-        fire_wake: bool,
-    ) -> Result<(), ProxyError> {
+    pub async fn park(&self, model_name: &str, fire_wake: bool) -> Result<(), ProxyError> {
         self.reserve_slot(model_name).await?;
 
         let park_start = std::time::Instant::now();

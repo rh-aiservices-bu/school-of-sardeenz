@@ -9,16 +9,16 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{
-    Arc,
     atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 use std::time::Duration;
 
-use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
+use axum::Router;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -41,12 +41,7 @@ pub struct MockCpShared {
 
 impl MockCpShared {
     pub async fn wake_count_for(&self, model: &str) -> usize {
-        self.wake_counts
-            .lock()
-            .await
-            .get(model)
-            .copied()
-            .unwrap_or(0)
+        self.wake_counts.lock().await.get(model).copied().unwrap_or(0)
     }
 
     #[allow(dead_code)]
@@ -103,10 +98,7 @@ pub struct MockControlPlaneBuilder {
 
 impl MockControlPlaneBuilder {
     pub fn new() -> Self {
-        Self {
-            fail_wakes: false,
-            wake_actions: Vec::new(),
-        }
+        Self { fail_wakes: false, wake_actions: Vec::new() }
     }
 
     /// When a wake for `model_name` arrives, update `cache` to Active (after
@@ -149,9 +141,7 @@ impl MockControlPlaneBuilder {
             fail_wakes: self.fail_wakes,
         };
 
-        let app = Router::new()
-            .route("/api/v1/wake", post(handle_wake))
-            .with_state(state);
+        let app = Router::new().route("/api/v1/wake", post(handle_wake)).with_state(state);
 
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();

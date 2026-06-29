@@ -8,6 +8,445 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `victory` peer dependency for `@patternfly/react-charts` chart rendering.
+- Dev server logging infrastructure: `dev:logged` scripts pipe component output
+  to `logs/` via `tee` (proxy, control-plane, dashboard, BFF server).
+  Convenience scripts for tailing (`logs:proxy`, `logs:cp`, `logs:dashboard`,
+  `logs:bff`, `logs:all`) and clearing (`logs:clear`). Root `dev` and
+  `dev:logged` scripts run all four components concurrently with colored,
+  prefixed output. The proxy gracefully skips if Rust is not installed.
+- Redis-backed E2E test harness with three core resilience scenarios (#57):
+  degraded mode with Redis fallback, SSE-driven model state transitions via
+  Redis pub/sub, and multi-GPU VRAM visualization with known proportions.
+  Tests require compose Redis (`podman compose up -d redis`).
+- Custom date/time range picker for MetricsDashboard (closes #62): operators
+  can select arbitrary historical time windows in addition to the existing
+  preset ranges (15m, 1h, 6h, 24h, 7d). Auto-refresh is disabled while a
+  custom range is active.
+- Clickable model-state breakdown in ClusterOverview (closes #62): clicking a
+  state row navigates to the model list pre-filtered by that state.
+- Optimistic updates for model mutations (closes #62): deploy, sleep, wake,
+  and delete actions immediately reflect transitional states (PENDING,
+  DRAINING, STARTING, STOPPING) in the UI before server confirmation, with
+  automatic rollback on error.
+- Sort by state and memory in the model list (closes #62): the State and
+  Memory columns are now sortable, using lifecycle-state ordering and numeric
+  memory comparison respectively.
+
+### Fixed
+
+- SSE auth now uses HttpOnly cookies instead of query-string tokens, preventing
+  JWT leakage in browser history, access logs, and referrer headers (#66).
+- Frontend validates cached JWT tokens server-side via `/api/auth/me` on boot,
+  instead of trusting client-side decoded claims (#66).
+- OAuth callback routing aligned: server redirects to `/oauth/callback#token=…`
+  matching the frontend route, and the callback page waits for auth state instead
+  of using a blind 100ms timeout (#66).
+- Added `POST /api/auth/logout` endpoint to clear the SSE auth cookie (#66).
+
+### Changed
+
+- Dev scripts for control-plane and dashboard BFF use `node --watch` for
+  automatic reload on file changes.
+- Default database URL includes dev credentials (`sardeenz:sardeenz`).
+- Dynamic runner options in the deploy form de-scoped to Phase 4 (#67):
+  requires adding `runnerCapabilities` to the `WorkerInfo` list endpoint and
+  a corresponding backend change. The dropdown remains hardcoded for now.
+
+- Per-device model attribution for multi-GPU workers (closes #60): the
+  control plane now persists device placement indices in Redis `ModelState`
+  during model deployment. The `WorkerModelInfo` and `ModelDetail` contracts
+  include an optional `deviceIndices` array. The dashboard renders per-device
+  model breakdowns on each GPU card for multi-GPU workers (previously only
+  shown for single-GPU workers) and adds a "Devices" column to the running
+  models table. Models deployed before this change gracefully fall back to
+  the previous behavior (no per-device attribution).
+- VRAM visualization enhancements (closes #59): added GiB/percent display
+  toggle to the MemoryVisualization card header, click-through navigation
+  from worker IDs to worker detail pages, and worker-level model name
+  labels showing running models and their states below each worker header.
+  For single-GPU workers, model names also appear in the device bar tooltip.
+- Real-time worker and memory SSE events (closes #56): the control plane's
+  reconciliation loop now publishes `WORKER_JOINED`, `WORKER_LEFT`, and
+  `WORKER_MEMORY_UPDATED` events on a new `{prefix}:cluster-events` Redis
+  pub/sub channel. The BFF SSE relay subscribes to both `routing-updates`
+  (model/endpoint events) and `cluster-events` (worker/memory events),
+  forwarding all as `ClusterEvent` objects to the frontend. The frontend
+  `useEventStream` hook now receives and processes these events with
+  leading+trailing edge throttle (1 event/second) on memory update
+  invalidation to prevent re-render flickering.
+
+### Fixed
+
+- Converted stale planning language in phase 3 docs to explicit decisions (closes #64):
+  `docs/project/phase3.md` "Open Questions" section renamed to "Decisions" with all
+  "leaning toward" items replaced by their actual implemented choices (TanStack Query,
+  BFF in `dashboard/server/`, PF react-charts, light-theme-only as future work, PF6
+  porting moot since v1 already used PF6); masthead description updated to reflect
+  auth integration as implemented. `docs/project/v1-component-mapping.md` updated to
+  reflect that auth is implemented (JWT-based, three modes: `none`/`simple`/`oauth`)
+  rather than deferred.
+
+- Updated SSE architecture docs to reflect actual per-client subscriber design (closes #58):
+  the Risks table in `docs/project/phase3.md` previously implied a shared fan-out model;
+  corrected to describe the real per-client Redis subscriber approach with explicit trade-off
+  note (per-client is correct at admin-dashboard scale of tens of connections; shared fan-out
+  would be needed for hundreds+). Expanded the SSE relay section in
+  `docs/architecture/components/dashboard.md` with the same trade-off explanation. Added a
+  brief design comment to `dashboard/server/routes/events.ts`.
+
+- Readiness probe (`/readyz`) no longer reports not-ready when only one data source is
+  unavailable (closes #55). The dashboard stays ready in degraded read-only mode as long
+  as at least one of the control plane or Redis is healthy. Status is reported as
+  `degraded` when one source is down, `ready` when both are up, and `not_ready` only
+  when both are down.
+- Tone down WCAG 2.1 AA claim in `docs/development/accessibility-audit.md` to match actual
+  evidence: automated axe-core scanning covers primary views but a full manual audit is pending;
+  checked items in the manual checklist are now annotated with rationale (closes #63)
+- Expand accessibility E2E coverage in `dashboard/e2e/accessibility.spec.ts` to include model
+  detail, worker detail, empty states (no models / no workers), deploy form, and the delete
+  confirmation modal — previously only list pages and metrics were scanned
+- Aligned dashboard Redis fallback schema with control-plane's actual Redis layout (closes #54):
+  - Model reader now reads single JSON blobs at `{prefix}:models:{name}` instead of the
+    incorrect multi-key schema (`models:state:*`, `models:worker:*`, `models:memory:*`, etc.)
+  - Worker lister now scans `{prefix}:worker:*:detail` snapshots (preferred) or falls back to
+    `{prefix}:workers:*:info` keys with heartbeat-based status derivation, instead of scanning
+    `{prefix}:workers:*` and requiring `workerId` in the JSON payload
+  - Cluster status memory summation now defaults missing `memoryUsedBytes`/`memoryAvailableBytes`
+    to 0 to avoid NaN sums from worker records that only carry `memoryTotalBytes`
+  - Added 22 integration-style tests seeding Redis with control-plane-compatible data to verify
+    the fallback behavior end to end
+- Dashboard BFF now enforces secure auth defaults at startup (closes #53):
+  - `AUTH_MODE=none` is rejected in production (`NODE_ENV=production`) — the server
+    will not start without explicit authentication configured
+  - `AUTH_MODE=simple` requires `ADMIN_PASSWORD` to be explicitly set and non-empty,
+    regardless of environment — prevents unauthenticated admin access on misconfigured
+    deployments
+  - Development mode logs a prominent warning when running with `AUTH_MODE=none`
+  - Updated `docs/usage/deployment-security.md` with required environment variables
+    per auth mode and example production configuration
+- UI-level authorization for read-only users (closes #61): `AuthContext` now exposes an
+  `isAdmin` boolean derived from the user's `admin` role. Mutating controls — Deploy button,
+  bulk-action toolbar, per-row action menu (sleep/wake/delete), and the `/models/deploy` route
+  — are hidden or redirect when `isAdmin` is false (i.e. for `admin-readonly` users). A new
+  `AdminRoute` wrapper in `App.tsx` redirects read-only users navigating directly to
+  `/models/deploy` back to `/models`. 28 new unit tests cover the `isAdmin` derivation,
+  `AdminRoute` guard logic, and every visibility guard condition.
+
+### Changed
+
+- Moved 14 `.v1.tsx` / `.v1.ts` reference files from `dashboard/src/` to `dashboard/reference/v1/`
+  (preserving subdirectory structure) to reduce search noise in the active source tree; removed
+  now-redundant exclude patterns from `dashboard/tsconfig.app.json` (closes #65)
+
+- Reconciled `docs/project/phase3.md` and `docs/architecture/components/dashboard.md` with the
+  actual Phase 3 implementation (closes #52):
+  - Checked all Definition of Done items and marked 11/12 complete; flagged redocly lint
+    failures as a separate known issue
+  - Corrected "Out of scope" auth statement — auth IS implemented (JWT, three modes)
+  - Updated `MemoryBar` → `MemoryVisualization` throughout; added `DegradedBanner` to
+    shared-components tables
+  - Updated SSE relay description: BFF subscribes to `{prefix}:routing-updates` Redis
+    channel per client (not the control plane SSE endpoint)
+  - Updated SSE connection-status enum: `connected | reconnecting | degraded`
+    (was `connected | connecting | disconnected`); documented degraded-mode behavior
+  - Updated pagination options: 10/20/50 per page (was 25/50/100)
+  - Updated BFF config tables to include all auth env vars
+  - Updated Prometheus integration table to reflect all 10 metric routes; added `7d → 3600s`
+    time-range mapping
+  - Updated accessibility section to reflect `@axe-core/playwright` E2E approach
+  - Added new `Authentication`, `i18n`, and `Degraded Mode` sections to dashboard.md
+  - Updated E2E testing strategy to document MockControlPlane / MockPrometheus harness
+
+### Added
+
+- UX enhancements to operator views across the admin dashboard (closes #51):
+  - **ModelList**: client-side pagination (PatternFly `Pagination`, default 20 items/page,
+    shown above and below the table); runner-type filter toolbar chip alongside the existing
+    state filter; bulk-action toolbar with "Sleep selected" and "Delete selected" with
+    confirmation modals; memory column replaced with an inline `Progress` bar (sm, green/yellow/red
+    threshold at 80%/95%) plus text below
+  - **ModelDetail**: state-history timeline section showing the deployed timestamp and the
+    most recent state-change timestamp (uses `createdAt` and `stateChangedAt`); faster polling
+    in `useModel` — interval drops from 5 s to 2 s when the model is in `STARTING` or `PENDING`
+    state so loading-progress bars update promptly
+  - **WorkerDetail**: per-device model breakdown inside each `DeviceCard` — shows model names
+    and memory used for single-GPU workers; falls back to the flat running-models table for
+    multi-GPU workers (API does not expose per-device placement for multi-GPU models)
+  - **MemoryVisualization**: each device bar now has PatternFly `Tooltip` on the whole bar
+    (and on individual segments) showing exact bytes + percentage; clicking a bar expands an
+    inline detail panel with used/reserved/available breakdown
+  - New i18n keys added to `models.json` (pagination, bulk actions, runner filter, timeline),
+    `workers.json` (deviceModels), `cluster.json` (clickToExpand), `common.json` (selectAll)
+
+- Accessibility audit and i18n infrastructure for the dashboard (closes #48):
+  - Installed `@axe-core/playwright` devDependency for automated WCAG 2.1 AA scanning
+  - Created `dashboard/e2e/accessibility.spec.ts`: axe-core scans on all key pages
+    (Cluster Overview, Model List, Model Deploy, Worker List, Metrics Dashboard)
+    using the existing E2E mock harness; pages are pre-populated with mock data
+  - Created `docs/development/accessibility-audit.md`: manual audit checklist covering
+    keyboard navigation, screen reader, colour/contrast, chart accessibility, and forms
+  - Installed `react-i18next`, `i18next`, and `i18next-browser-languagedetector`
+  - Created `dashboard/src/i18n.ts`: i18next configuration with browser language
+    detection, namespace-per-page pattern, English as default locale
+  - Created English locale files (`dashboard/src/locales/en/`):
+    `common.json`, `cluster.json`, `models.json`, `workers.json`, `metrics.json`, `auth.json`
+  - Wired `./i18n` side-effect import into `dashboard/src/main.tsx`
+  - Migrated all user-facing strings across 13 component/page files to `t()` calls:
+    `AppLayout`, `DegradedBanner`, `MemoryVisualization`, `Login`, `OAuthCallback`,
+    `ClusterOverview`, `ModelList`, `ModelDeploy`, `ModelDetail`,
+    `WorkerList`, `WorkerDetail`, `MetricsDashboard`
+  - Created `docs/development/i18n.md`: developer guide covering namespace conventions,
+    usage patterns, interpolation, adding new strings, and adding new languages
+
+- E2E test framework with mock service harness for the dashboard (closes #47):
+  - `MockControlPlane` (`dashboard/e2e/mocks/control-plane.ts`): lightweight Fastify server
+    on a random port serving all BFF-facing CP endpoints (`/api/v1/models`, `/api/v1/workers`,
+    `/api/v1/cluster/status`, `/api/v1/cluster/memory`, `/healthz`) with configurable canned
+    responses and an SSE endpoint that can push events on demand via `pushEvent()`; also
+    supports stateful scenarios (model deploy, delete, sleep, wake)
+  - `MockPrometheus` (`dashboard/e2e/mocks/prometheus.ts`): lightweight Fastify server
+    serving `/api/v1/query_range` and `/api/v1/query` with pluggable response factories;
+    includes helpers `latencyRangeFactory()` and `memoryInstantFactory()` for common scenarios
+  - `Playwright fixtures` (`dashboard/e2e/fixtures.ts`): per-test fixture that starts
+    MockControlPlane + MockPrometheus on random ports, spawns the BFF (via `tsx`) pointed at
+    those mocks with `AUTH_MODE=none`, waits for readiness, and tears down cleanly; exports
+    typed helpers `bffUrl()`, `MockControlPlane`, `MockPrometheus`
+  - Updated `playwright.config.ts`: removed dev-server dependency, configured
+    trace-on-retry and screenshot-on-failure, set sequential test execution to prevent
+    port exhaustion
+  - Fixed `navigation.spec.ts`: corrected h1→h2 element mismatch (the component renders
+    `h2` not `h1`); added sidebar visibility, active nav-item highlighting for all pages,
+    and 404 catch-all coverage
+  - New `cluster-overview.spec.ts`: summary card presence and count verification from
+    mock data, VRAM Usage / Model State Breakdown / Recent Events sections, All online /
+    All clear label logic
+  - New `models.spec.ts`: model table renders, empty state, deploy form field presence and
+    validation, full deploy flow (form fill → submit → redirect), delete confirmation modal,
+    cancel keeps model, model detail page
+  - New `workers.spec.ts`: worker table, status labels (Online/Offline), empty state, worker
+    detail page with device memory cards and running models, not-found handling
+  - New `metrics.spec.ts`: page structure (heading, all 5 time-range buttons), default
+    selection (1h), range switching, auto-refresh toggle, empty state with no data, chart
+    section rendering with mock Prometheus data, error state when Prometheus is unreachable
+  - New `sse.spec.ts`: Recent Events connection status label, waiting message, degraded
+    mode resilience
+  - New `auth.spec.ts`: none-mode (no login redirect), auth config endpoint, API
+    accessibility without token, public health endpoints
+  - Fixed pre-existing TypeScript compilation error: `import.meta.env` not recognised
+    in worktrees without their own `node_modules` — `vite-env.d.ts` now includes an
+    explicit `ImportMeta` / `ImportMetaEnv` augmentation as a fallback; also removed four
+    now-redundant `as string | undefined` type assertions flagged by the linter
+
+### Fixed
+
+- SSE connection state machine with degraded polling fallback (closes #50):
+  - `ConnectionStatus` type extended from `'connected' | 'connecting' | 'disconnected'` to
+    `'connected' | 'reconnecting' | 'degraded'`
+  - `useEventStreamConnection` now tracks consecutive failure count via `failureCountRef`; after 5
+    failures (~25 s) the hook transitions to `'degraded'` state and slows reconnect attempts from
+    5 s to 30 s to reduce noise
+  - Successful reconnect from any state resets the failure count and restores `'connected'`
+  - `EVICTION_TRIGGERED` event now also invalidates the `['metrics']` query key (was missing)
+  - `PLACEMENT_COMPLETED` event invalidates `['models']`, `['workers']`, and `['cluster']`
+    (previously also invalidated workers — now explicit)
+  - `useModels`, `useModel`, `useWorkers`, `useWorker`, `useClusterStatus`, `useClusterMemory`
+    all switch to a 2 s `refetchInterval` when SSE is `'degraded'` (vs. 5–10 s normally)
+  - `MetricsDashboard` switches to 5 s `refetchInterval` when SSE is `'degraded'` and
+    auto-refresh is on (vs. 30 s normally)
+  - `DegradedBanner` now also shows "Real-time updates unavailable — polling for changes" when
+    SSE is degraded; the Redis-fallback message ("Control plane unreachable — showing cached
+    data") takes precedence as the more severe condition
+  - `ClusterOverview` event feed label updated: `'Connecting…'` → `'Reconnecting…'`,
+    `'Disconnected'` → `'Degraded'` to match new status values
+  - 13 new unit tests covering the state machine transitions and threshold constants
+
+- BFF resilience extended to cover all read routes with Redis fallback (closes #45):
+  - `GET /api/cluster/memory` now falls back to Redis when the control plane is
+    unreachable; returns 502 only when no cached snapshot is available
+  - `GET /api/workers/:id` now falls back to Redis; returns 404 when no cached
+    worker detail is available (matching the control plane's own 404 behaviour)
+  - Control plane `MemoryBudgetService.refreshAll()` writes a per-device memory
+    snapshot to `{prefix}:cluster:memory` (TTL 300s) after each budget refresh
+  - Control plane `WorkerPoolService.checkHeartbeats()` writes each worker's full
+    record to `{prefix}:worker:{workerId}:detail` (TTL 120s) after each heartbeat
+    check, so dead workers expire quickly
+  - BFF `RedisReader` gains `getClusterMemory()` and `getWorkerDetail(id)` methods
+    to read the new control-plane-written snapshots
+  - New `DegradedBanner` component (PatternFly 6 `Alert`, `variant="warning"`,
+    `isInline`) shows "Control plane unreachable — showing cached data" when any
+    active query returns `source: "redis-fallback"`; auto-dismisses on resume
+  - New `DegradedContext` / `DegradedProvider` tracks which query keys are serving
+    stale data; mounted in `App.tsx` wrapping the authenticated route subtree
+  - All data hooks (`useModels`, `useModel`, `useWorkers`, `useWorker`,
+    `useClusterStatus`, `useClusterMemory`) report fallback status to
+    `DegradedContext` via `useEffect`
+  - Dashboard architecture doc updated with full fallback coverage table
+
+### Added
+
+- Expanded metrics dashboard to a four-row layout with full metric coverage (closes #49):
+  - **Row 1 — Request Traffic:** latency chart now shows p50/p95/p99 quantile lines (was p95
+    only); throughput chart unchanged
+  - **Row 2 — Connections & Parking:** active connections line chart, parked connections line
+    chart (broken down by model label when available), and parking duration p50/p95 chart
+  - **Row 3 — Model Lifecycle:** wake triggers rate chart, state transitions rate chart (broken
+    down by `from→to` label pairs), and evictions rate chart (broken down by reason)
+  - **Row 4 — Memory & Operations:** memory over time area chart, operation duration p95 chart
+    (deploy/sleep/wake/eviction/placement), and existing device memory table (current instant values)
+  - Time range selector extended with `7d` option (step: `3600s`)
+  - Auto-refresh toggle (PatternFly `Switch`) — when off disables all `refetchInterval` timers;
+    when on uses 30 s default
+  - Seven new BFF routes in `dashboard/server/routes/metrics.ts`:
+    `GET /api/metrics/connections`, `GET /api/metrics/parking-duration`,
+    `GET /api/metrics/wake-triggers`, `GET /api/metrics/state-transitions`,
+    `GET /api/metrics/evictions`, `GET /api/metrics/memory-history`,
+    `GET /api/metrics/operations` — all accept `start`/`end`/`step` query params with
+    same auth preHandlers as existing routes
+  - Updated `GET /api/metrics/latency` to query p50/p95/p99 in parallel and return
+    `{ p50, p95, p99 }` combined object (backward-incompatible response shape change)
+  - Seven new API client methods in `api.metrics`, seven new hooks in `useMetrics.ts`,
+    all accepting `refetchInterval` param for auto-refresh control
+  - 24 new BFF route tests covering correct metric names, param forwarding, and 502 handling
+    for each new endpoint
+
+- Dashboard BFF auth system with three modes: `none`, `simple`, and `oauth`
+  (`AUTH_MODE` env var, defaults to `none` for backward compatibility) (#43):
+  - **Simple mode**: username/password login with timing-safe credential
+    comparison, in-memory rate limiting, and JWT issuance
+  - **OAuth mode**: OpenShift OAuth2 flow with CSRF state tokens, code exchange,
+    user info fetching, and Kubernetes RBAC role resolution
+  - JWT-based route protection with `authenticate` and `requireRole` decorators;
+    admin role implies admin-readonly access
+  - SSE query-parameter token fallback (`?token=...`) for EventSource clients
+    that cannot send custom headers
+  - Frontend `AuthContext` with auto-logout timer, sessionStorage token
+    management, and `auth:unauthorized` event handling
+  - Login page with conditional rendering: username/password form (simple) or
+    SSO redirect button (oauth), built with PatternFly 6 `LoginPage` component
+  - OAuth callback page for extracting token from URL fragment
+  - Protected routing: unauthenticated users redirected to `/login`;
+    `authMode=none` bypasses all auth checks
+  - API client attaches `Authorization: Bearer` header automatically and
+    dispatches logout event on 401 responses
+  - Auth test suite covering login, credential rejection, JWT verification,
+    role-based access control, query-parameter token fallback, and `none` mode
+
+### Fixed
+
+- SSE integration aligned with control plane event channel and payload shape (#44):
+  - BFF now subscribes to `routing-updates` Redis channel (matching the control plane)
+    instead of the non-existent `events` channel
+  - BFF transforms `RoutingMapUpdate` payloads into `ClusterEvent` shape before relaying
+    to the frontend, mapping `RoutingMapUpdateType` values to `ClusterEventType`
+  - `useEventStream()` moved from `ClusterOverview` to app scope via React context so all
+    pages benefit from real-time SSE updates and query invalidation
+- BFF memory metrics endpoint now queries `sardeenz_control_plane_device_memory_bytes`
+  (was `sardeenz_device_memory_bytes`, which the control plane does not export); verified
+  proxy metric names `sardeenz_proxy_request_duration_seconds_bucket` and
+  `sardeenz_proxy_requests_total` match Rust proxy exports; added BFF metrics route
+  tests to prevent metric name regressions (closes #46)
+- Cross-model review fixes for Phase 3 dashboard:
+  - SSE event stream now handles `EVICTION_TRIGGERED` and `PLACEMENT_COMPLETED` events
+    (previously caused stale UI until next poll cycle)
+  - Metrics time range no longer goes stale — `buildFreshParams` computes timestamps at
+    fetch time instead of memoizing them once
+  - SSE route writes 200 headers only after Redis subscribe succeeds, returns 502 on failure;
+    cleanup guard prevents double invocation; `reply.hijack()` called before raw writes
+  - `formatBytes` guards against negative values and clamps unit index to prevent overflow
+  - `JSON.parse` result in deploy form validated as object (rejects primitives/arrays)
+  - Added 404 catch-all route and React `ErrorBoundary` to prevent blank/white screens
+  - SPA fallback no longer serves `index.html` for mistyped `/api/*` paths (returns JSON 404)
+  - Zero-worker cluster shows grey "No workers" instead of red "0 offline"
+  - `Content-Type: application/json` only set on requests with a body (not GET/DELETE)
+  - `res.json()` in BFF control plane client wrapped in try/catch for non-JSON responses
+  - Redis fallback catch blocks only catch `BffError` (upstream errors), not programming errors
+  - Health probe checks run in parallel via `Promise.all` instead of sequentially
+  - Deduplicated `BASE_URL` — `useEventStream` imports from `api/client` instead of
+    re-deriving from `import.meta.env`
+
+### Added
+
+- Accessibility audit (Task 3.12) — WCAG 2.1 AA compliance fixes: event feed uses semantic
+  `<ul>/<li>` list with `aria-live="polite"` for screen reader announcements; SSE connection
+  status wrapped in `aria-live="polite"` region; form error messages linked to inputs via
+  `aria-describedby` with unique IDs on HelperTextItem components; table headers in metrics
+  dashboard use `scope="col"` for assistive technology; event timestamps include full ISO
+  date-time in `title` attribute; redundant `aria-label` removed from Switch component;
+  Vitest config excludes `e2e/` directory to avoid Playwright/Vitest test runner conflicts
+- Playwright E2E test infrastructure for the admin dashboard — `playwright.config.ts` with Vite
+  dev server integration (reuse existing server, 30s test timeout, HTML reporter, trace/screenshot
+  on failure); 5 spec files under `dashboard/e2e/` covering navigation, cluster overview, model
+  management, workers, and metrics; `tsconfig.e2e.json` for the e2e include path;
+  `test:e2e` script in `dashboard/package.json`; `dashboard/e2e/` and
+  `dashboard/playwright.config.ts` added to ESLint ignores so they run cleanly from the host
+- `MemoryVisualization` component — reusable card at `dashboard/src/components/MemoryVisualization.tsx`
+  showing per-worker, per-device GPU memory as proportionally accurate stacked horizontal bars
+  (Used in blue, Reserved in orange, Available in light gray), with inline Used/Total byte labels,
+  native `title` hover tooltips per segment, color-coded legend, loading spinner, and empty state;
+  integrated into Cluster Overview below the aggregate VRAM donut chart as a per-worker breakdown
+- Model Detail view (Task 3.8) — full detail page at `/models/:modelName` with breadcrumb
+  navigation, DescriptionList of all model fields, conditional action buttons (sleep/wake/delete),
+  PF6 Progress bar for STARTING state with phase/message display, danger Alert for ERROR state
+  with retry action, expandable engine config CodeBlock, and confirmation modals
+- Worker pages (Task 3.9) — worker list at `/workers` with PF6 Table (ID, status, devices,
+  memory, models, heartbeat); worker detail at `/workers/:workerId` with breadcrumb, status
+  header, device memory cards (Gallery with Progress bars per GPU), running models table,
+  and expandable runner capabilities section
+- Model Management pages (Task 3.7) — model list at `/models` with PF6 Table, sortable columns,
+  multi-select state filter, kebab dropdown actions (sleep/wake/delete with confirmation modals),
+  empty state with deploy button; deploy form at `/models/deploy` with all fields (model name,
+  runner type, model path, required memory in GiB, device type, tensor parallelism, pinned switch,
+  engine config JSON), inline validation, GiB→bytes conversion, and navigation on success/cancel
+- Cluster Overview page (Task 3.6) — full implementation of `/` landing page with four summary
+  cards (Workers online/total with green/red status label, Models with active/sleeping counts,
+  GPU Memory with PF6 `Progress` bar and available bytes, Alerts with error model + offline worker
+  counts); `ChartDonut` from `@patternfly/react-charts/victory` for VRAM used/available donut
+  with inline legend; model state breakdown card listing all `ModelLifecycleState` values with
+  colored `StateLabel` and counts; live recent-events feed (last 20) from `useEventStream()` with
+  formatted relative timestamps, colored event-type `Label`, and SSE connection status indicator;
+  loading spinner and error `Alert` states; PF6 semantic design tokens throughout
+- Metrics Dashboard page (Task 3.11) — full implementation of `/metrics` with PF6 `ToggleGroup`
+  time range selector (15m/1h/6h/24h, default 1h), `@patternfly/react-charts` line charts for
+  request latency (p95) and throughput, device memory summary table, and proper loading/empty
+  states; Prometheus range/instant response parsing with TypeScript type guards; step size
+  auto-selected per time range; `ChartVoronoiContainer` hover tooltips; `formatBytes` for memory
+- Dashboard container image (Task 3.14) — multi-stage Dockerfile at `containers/dashboard/`
+  building frontend (Vite) and BFF (TypeScript) into a single image; `@fastify/static` serves
+  the SPA from `dist/client/` in production with SPA fallback routing; HEALTHCHECK on `/healthz`
+- Dashboard design document (Task 3.13) — architecture narrative at
+  `docs/architecture/components/dashboard.md` covering BFF pattern, data flow, Redis fallback,
+  SSE relay, state management, configuration, and testing strategy
+- Dashboard BFF data aggregation layer (Task 3.4) — fleshed out `ControlPlaneClient` with typed
+  methods (`listModels`, `getModel`, `deployModel`, `deleteModel`, `sleepModel`, `wakeModel`,
+  `listWorkers`, `getWorker`, `getClusterStatus`, `getClusterMemory`) that wrap `proxyRequest`
+  and throw `BffError.upstreamError()` on network failures; `RedisReader` with SCAN-based model
+  enumeration, worker reconstruction from JSON hash, and `getClusterStatus()` aggregation for
+  resilience fallback; `PrometheusClient` with `queryRange` and `queryInstant` methods; route
+  handlers for `GET /api/models`, `GET /api/models/:name`, `GET /api/workers`, and
+  `GET /api/cluster/status` now fall back to Redis direct reads when the control plane is
+  unreachable; `GET /api/events` SSE relay subscribes to `{prefix}:events` Redis pub/sub channel
+  and forwards events to frontend clients with 30-second keepalive pings; `GET /api/metrics/*`
+  routes issue range and instant Prometheus queries; 17 new unit tests (10 client, 7 route)
+- Dashboard frontend data fetching layer (Task 3.5) — typed API client (`src/api/client.ts`)
+  with `ApiError`, TanStack Query hooks for cluster, models, workers, and metrics, SSE event
+  stream hook with automatic reconnect and query invalidation (`useEventStream`), formatting
+  utilities (`formatBytes`, `formatRelativeTime`, `formatDateTime`, `formatPercentage`),
+  state-color mapping for PF6 Label, `StateLabel` shared component, and `vite-env.d.ts` for
+  `import.meta.env` typing; 59 unit tests across 4 test files all passing
+- Dashboard frontend scaffold — Vite + React 18 + PatternFly 6 + React Router + TanStack Query
+  with app shell (masthead, sidebar nav, page routing), placeholder pages for all 7 views
+  (cluster overview, models, workers, metrics), Vitest config, and TypeScript strict mode
+- Dashboard backend-for-frontend (BFF) scaffold — Fastify service with control plane API proxy
+  routes, Redis/Prometheus client stubs, health probes (`/healthz`, `/readyz`), structured
+  logging, error handling, and graceful shutdown; follows control plane patterns
+- v1 component inventory and mapping document (`docs/project/v1-component-mapping.md`) — catalogs
+  all reusable components from the v1 dashboard with port verdicts, data model mapping
+  (v1 types → v2 `@sardeenz/types`), and state color mapping
+- Phase 3 project plan (`docs/project/phase3.md`) — 15-task breakdown for the admin
+  dashboard with v1 component reuse-first approach: inventory and port v1 UI components,
+  frontend (React + PatternFly 6 + Vite), backend-for-frontend (Fastify BFF), device memory
+  visualization, metrics dashboard, Playwright E2E tests, and container images
 - Proxy writes per-model inference timestamps to Redis (`SET {prefix}:inference:last:{model}`)
   on each routed request, with a 5-second local debounce to minimize overhead. Gives the
   control plane's LRU eviction engine a real recency signal (ADR-014, #39)

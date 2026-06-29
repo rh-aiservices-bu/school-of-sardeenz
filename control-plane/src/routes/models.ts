@@ -92,9 +92,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
         }
         const allRecords = await deps.modelRepository.findAll();
-        const pinnedModels = new Set(
-          allRecords.filter((r) => r.pinned).map((r) => r.name),
-        );
+        const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
         const memoryByModel = new Map(
           allRecords
             .filter((r) => r.requiredMemory !== null)
@@ -148,6 +146,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
         workerId: result.workerId,
+        deviceIndices: result.devices.map((d) => d.deviceIndex),
       });
 
       deps.deployOrchestration
@@ -163,7 +162,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           devices: result.devices,
         })
         .catch((err: unknown) => {
-          app.log.error({ err, modelName: body.modelName }, 'Background deploy orchestration failed');
+          app.log.error(
+            { err, modelName: body.modelName },
+            'Background deploy orchestration failed',
+          );
         });
 
       return reply.code(202).send({
@@ -251,6 +253,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         engineConfig: record?.engineConfig ?? undefined,
         pinned: record?.pinned ?? false,
         workerId: state?.workerId ?? undefined,
+        deviceIndices: state?.deviceIndices ?? undefined,
         runnerEndpoint:
           state?.runnerHost && state?.runnerPort
             ? { host: state.runnerHost, port: state.runnerPort }
@@ -413,9 +416,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
           }
           const allRecords = await deps.modelRepository.findAll();
-          const pinnedModels = new Set(
-            allRecords.filter((r) => r.pinned).map((r) => r.name),
-          );
+          const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
           pinnedModels.add(modelName);
           const memoryByModel = new Map(
             allRecords

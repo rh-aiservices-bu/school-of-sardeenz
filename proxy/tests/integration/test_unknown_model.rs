@@ -21,22 +21,12 @@ async fn test_unknown_model_404() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::NOT_FOUND,
-        "unknown model should return 404"
-    );
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "unknown model should return 404");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
-    assert_eq!(
-        body["error"]["type"], "model_not_found",
-        "error type should be model_not_found"
-    );
+    assert_eq!(body["error"]["type"], "model_not_found", "error type should be model_not_found");
     assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("does-not-exist/unknown-7B"),
+        body["error"]["message"].as_str().unwrap_or("").contains("does-not-exist/unknown-7B"),
         "error message should contain the model name"
     );
 }
@@ -55,11 +45,7 @@ async fn test_missing_model_field_400() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::BAD_REQUEST,
-        "missing model field should return 400"
-    );
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "missing model field should return 400");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(
@@ -81,11 +67,7 @@ async fn test_invalid_json_body_400() {
         .await
         .expect("request failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::BAD_REQUEST,
-        "invalid JSON should return 400"
-    );
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "invalid JSON should return 400");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(

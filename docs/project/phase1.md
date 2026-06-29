@@ -44,20 +44,20 @@ The proxy covers six functional areas for a **stateless** request routing proces
 
 ## Tasks
 
-| #    | Task                                     | Status      | Output                                                     |
-| ---- | ---------------------------------------- | ----------- | ---------------------------------------------------------- |
-| 1.1  | Study v1 proxy patterns                  | Done        | Reference notes (internal)                                 |
-| 1.2  | Write proxy ↔ control plane OpenAPI spec | Done        | `packages/contracts/specs/proxy-control-plane.yaml`        |
-| 1.3  | Set up Rust codegen from OpenAPI specs   | Done        | Hand-written Rust types in `proxy/src/generated/`          |
-| 1.4  | Scaffold proxy crate                     | Done        | Compilable binary with config + logging                    |
-| 1.5  | Implement routing core                   | Done        | Request routing with Redis integration                     |
-| 1.6  | Implement connection parking             | Done        | Parking subsystem with wake triggers                       |
-| 1.7  | Implement cluster forwarding             | Done        | Load balancing + circuit breaking                          |
-| 1.8  | Implement health and metrics             | Done        | `/metrics`, `/healthz`, `/readyz`                          |
-| 1.9  | Structured output compatibility          | Done        | `docs/architecture/components/structured-output-*.md`      |
-| 1.10 | Write proxy design document              | Done        | `docs/architecture/components/proxy.md`                    |
-| 1.11 | Build container image                    | Done        | `proxy/Dockerfile`                                         |
-| 1.12 | Integration test suite                   | Done        | `proxy/tests/integration/`                                 |
+| #    | Task                                     | Status | Output                                                |
+| ---- | ---------------------------------------- | ------ | ----------------------------------------------------- |
+| 1.1  | Study v1 proxy patterns                  | Done   | Reference notes (internal)                            |
+| 1.2  | Write proxy ↔ control plane OpenAPI spec | Done   | `packages/contracts/specs/proxy-control-plane.yaml`   |
+| 1.3  | Set up Rust codegen from OpenAPI specs   | Done   | Hand-written Rust types in `proxy/src/generated/`     |
+| 1.4  | Scaffold proxy crate                     | Done   | Compilable binary with config + logging               |
+| 1.5  | Implement routing core                   | Done   | Request routing with Redis integration                |
+| 1.6  | Implement connection parking             | Done   | Parking subsystem with wake triggers                  |
+| 1.7  | Implement cluster forwarding             | Done   | Load balancing + circuit breaking                     |
+| 1.8  | Implement health and metrics             | Done   | `/metrics`, `/healthz`, `/readyz`                     |
+| 1.9  | Structured output compatibility          | Done   | `docs/architecture/components/structured-output-*.md` |
+| 1.10 | Write proxy design document              | Done   | `docs/architecture/components/proxy.md`               |
+| 1.11 | Build container image                    | Done   | `proxy/Dockerfile`                                    |
+| 1.12 | Integration test suite                   | Done   | `proxy/tests/integration/`                            |
 
 ## Task Details
 
@@ -390,12 +390,12 @@ Integration tests that validate all four request flow scenarios from the [archit
 
 Tests that exercise the real Redis/Valkey sync path are in `proxy/tests/integration/test_redis.rs`, gated by the `redis-integration` Cargo feature flag so that `cargo test` works without a running Redis instance. Each test uses a UUID-scoped key prefix for isolation, enabling parallel execution.
 
-| #   | Scenario                | What it validates                                                               |
-| --- | ----------------------- | ------------------------------------------------------------------------------- |
-| 9   | Redis bootstrap         | Proxy loads routing map from Redis on startup and forwards requests             |
-| 10  | Pub/sub refresh         | Proxy picks up new routes published to Redis after startup                      |
-| 11  | Malformed entry         | Valid entries route correctly; malformed JSON entries are silently skipped       |
-| 12  | Readiness lifecycle     | `/readyz` transitions from 503 → 200 as Redis connects and routing map loads   |
+| #   | Scenario            | What it validates                                                            |
+| --- | ------------------- | ---------------------------------------------------------------------------- |
+| 9   | Redis bootstrap     | Proxy loads routing map from Redis on startup and forwards requests          |
+| 10  | Pub/sub refresh     | Proxy picks up new routes published to Redis after startup                   |
+| 11  | Malformed entry     | Valid entries route correctly; malformed JSON entries are silently skipped   |
+| 12  | Readiness lifecycle | `/readyz` transitions from 503 → 200 as Redis connects and routing map loads |
 
 Run with: `cargo test --features redis-integration test_redis`
 

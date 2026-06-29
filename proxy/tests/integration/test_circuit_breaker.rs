@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::TestProxy;
 use crate::common::proxy_builder::TestProxyConfig;
+use crate::common::TestProxy;
 use sardeenz_proxy::generated::proxy_control_plane::RunnerEndpoint;
 
 /// Returns a port that is not listening (connection will be refused).
@@ -52,10 +52,7 @@ async fn test_circuit_breaker_trips() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy
-            .routing_cache
-            .update_entry(model.to_string(), entry)
-            .await;
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
     }
 
     let client = reqwest::Client::new();
@@ -86,11 +83,7 @@ async fn test_circuit_breaker_trips() {
         .await
         .expect("request to proxy failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::SERVICE_UNAVAILABLE,
-        "open circuit should return 503"
-    );
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "open circuit should return 503");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(
@@ -194,10 +187,7 @@ async fn test_circuit_breaker_recovers() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy
-            .routing_cache
-            .update_entry(model.to_string(), entry)
-            .await;
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
     }
 
     let client = reqwest::Client::new();
@@ -231,10 +221,7 @@ async fn test_circuit_breaker_recovers() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy
-            .routing_cache
-            .update_entry(model.to_string(), entry)
-            .await;
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
     }
 
     // Wait for recovery_timeout → circuit goes HalfOpen.
@@ -262,9 +249,5 @@ async fn test_circuit_breaker_recovers() {
         .await
         .expect("request to proxy failed");
 
-    assert_eq!(
-        resp2.status(),
-        StatusCode::OK,
-        "circuit should be Closed after recovery"
-    );
+    assert_eq!(resp2.status(), StatusCode::OK, "circuit should be Closed after recovery");
 }

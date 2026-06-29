@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::{MockControlPlaneBuilder, TestProxy, insert_sleeping_model};
 use crate::common::proxy_builder::TestProxyConfig;
+use crate::common::{insert_sleeping_model, MockControlPlaneBuilder, TestProxy};
 
 #[tokio::test]
 async fn test_wake_trigger_failure_returns_503() {
@@ -28,10 +28,7 @@ async fn test_wake_trigger_failure_returns_503() {
     )
     .await;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().unwrap();
 
     let resp = client
         .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
