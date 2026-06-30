@@ -82,17 +82,18 @@ dev-worker: ## Start a single dev worker (dev-worker-0 on port 9100)
 	node --import tsx runners/dev-worker/src/index.ts
 
 dev-worker-2: ## Start two dev workers
-	concurrently --names "w0,w1" --prefix-colors "blue,red" \
+	npx concurrently --names "w0,w1" --prefix-colors "blue,red" \
 		"SARDEENZ_WORKER_ID=dev-worker-0 SARDEENZ_WORKER_PORT=9100 SARDEENZ_RUNNER_PORT_START=9101 node --import tsx runners/dev-worker/src/index.ts" \
 		"SARDEENZ_WORKER_ID=dev-worker-1 SARDEENZ_WORKER_PORT=9200 SARDEENZ_RUNNER_PORT_START=9201 node --import tsx runners/dev-worker/src/index.ts"
 
-dev-full: services ## Start full dev stack: Redis, PostgreSQL, control plane, proxy, dashboard, and one dev worker
-	concurrently --names "proxy,cp,dashboard,bff,worker" --prefix-colors "yellow,magenta,green,cyan,blue" \
+dev-full: ## Start full dev stack: control plane, proxy, dashboard, BFF, and two dev workers (start Redis and PostgreSQL manually)
+	npx concurrently --names "proxy,cp,dashboard,bff,w0,w1" --prefix-colors "yellow,magenta,green,cyan,blue,red" \
 		"./scripts/dev-proxy.sh" \
 		"npm run dev -w @sardeenz/control-plane" \
 		"npm run dev -w @sardeenz/dashboard" \
 		"npm run dev:server -w @sardeenz/dashboard" \
-		"node --import tsx runners/dev-worker/src/index.ts"
+		"SARDEENZ_WORKER_ID=dev-worker-0 SARDEENZ_WORKER_PORT=9100 SARDEENZ_RUNNER_PORT_START=9101 node --import tsx runners/dev-worker/src/index.ts" \
+		"SARDEENZ_WORKER_ID=dev-worker-1 SARDEENZ_WORKER_PORT=9200 SARDEENZ_RUNNER_PORT_START=9201 node --import tsx runners/dev-worker/src/index.ts"
 
 dev-worker-stop: ## Stop all running dev workers
 	@pkill -f "runners/dev-worker/src/index.ts" 2>/dev/null || echo "No dev workers running"
