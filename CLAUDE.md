@@ -33,6 +33,7 @@ sardeenz/
 │   ├── types/              # Generated TypeScript types from OpenAPI
 │   └── utils/              # Shared TypeScript utilities
 ├── runners/
+│   ├── dev-worker/          # Dev worker agent with runner stubs (local dev)
 │   └── vllm/               # First engine runner (reference implementation)
 ├── easyconfigs/            # EasyBuild configs for Highlander runtime modules
 ├── containers/
@@ -68,7 +69,7 @@ Details in [`docs/project/`](docs/project/).
 
 ## Project Status
 
-The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phases 0–3.5 are complete. Phase 0 (engine runner contract), Phase 1 (Rust proxy with connection parking), Phase 2 (control plane sleep/wake orchestration), Phase 3 (admin dashboard), and Phase 3.5 (admin UI finalization — notification system, theme toggle, masthead overhaul) are done. Next phase: **Phase 4** (Highlander runtime integration). Task breakdown: [`docs/project/phase3.5.md`](docs/project/phase3.5.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
+The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phases 0–3.6 are complete. Phase 0 (engine runner contract), Phase 1 (Rust proxy with connection parking), Phase 2 (control plane sleep/wake orchestration), Phase 3 (admin dashboard), Phase 3.5 (admin UI finalization — notification system, theme toggle, masthead overhaul), and Phase 3.6 (dev worker agent — local-process worker with runner stubs for containerless dev) are done. Next phase: **Phase 4** (Highlander runtime integration). Task breakdown: [`docs/project/phase3.6.md`](docs/project/phase3.6.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
 ## Workflow Rules
 

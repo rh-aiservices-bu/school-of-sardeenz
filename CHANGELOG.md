@@ -8,6 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Phase 3.6 — Dev Worker Agent: local-process worker agent enabling full Sardeenz
+  stack development without containers, GPUs, or real inference engines
+  - **Worker agent OpenAPI spec** (`packages/contracts/specs/worker-agent.yaml`):
+    formalized the worker management API (`POST /runners`, `DELETE /runners/{runnerId}`)
+    with `StartRunnerRequest`/`StartRunnerResponse`/`WorkerInfo`/`WorkerMemoryReport`
+    schemas; generated TypeScript types via `openapi-typescript`
+  - **Dev worker agent** (`runners/dev-worker/`): TypeScript Fastify process that
+    self-registers in Redis (capabilities, devices, heartbeat, memory report),
+    exposes the worker agent management API, and spawns in-process runner stubs
+    on sequential ports; configurable via `SARDEENZ_*` environment variables
+  - **Runner stubs**: lightweight Fastify servers implementing the full engine runner
+    contract (`/health`, `/memory-report`, `/sleep`, `/wake`, `/sleep-status`,
+    `/progress`, `/capabilities`) with configurable simulated startup phases,
+    sleep/wake delays, and per-device memory tracking; state machine models the
+    full runner lifecycle (STARTING → READY ↔ BUSY, READY ↔ SLEEPING, any → ERROR)
+  - **Simulated inference**: OpenAI-compatible `/v1/chat/completions` endpoint with
+    non-streaming (canned ChatCompletion response) and streaming (SSE token-by-token)
+    modes; returns 503 when runner is not READY; includes correct model name in responses
+  - **Control plane alignment**: `WorkerClient` now imports `StartRunnerRequest`
+    and `StartRunnerResponse` types from `@sardeenz/types` generated spec
+  - **Makefile targets**: `dev-worker` (single worker), `dev-worker-2` (two workers),
+    `dev-full` (full dev stack with worker), `dev-worker-stop` (cleanup)
+  - **Test suite**: 76 tests across 6 test files — registration (10), runner-manager (8),
+    state machine (35), contract endpoints (13), inference (7), e2e integration (3)
+
 - Phase 3.5 — Admin UI finalization (header bar feature parity with v1 dashboard):
   - **Notification backend**: `NotificationService` in control plane with Redis list
     storage (capped at 200), read-state tracking via Redis set, and pub/sub push on

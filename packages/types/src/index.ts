@@ -26,3 +26,9 @@ export {
   NotificationVariant,
   NotificationSourceType,
 } from './generated/control-plane.js';
+
+export type {
+  components as WorkerAgentComponents,
+  operations as WorkerAgentOperations,
+  paths as WorkerAgentPaths,
+} from './generated/worker-agent.js';
