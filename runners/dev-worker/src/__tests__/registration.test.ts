@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
+import type { WorkerInfo, WorkerMemoryReport } from './response-types.js';
 
 function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
   return {
@@ -40,7 +41,7 @@ function makeMockRedis() {
       pipelineCalls.push({ method: 'del', args });
       return pipeline;
     },
-    exec: vi.fn(async () => {
+    exec: vi.fn(() => {
       return pipelineCalls.map(() => [null, 'OK']);
     }),
   };
@@ -50,7 +51,7 @@ function makeMockRedis() {
       pipelineCalls.length = 0;
       return pipeline;
     }),
-    set: vi.fn(async (key: string, value: string) => {
+    set: vi.fn((key: string, value: string) => {
       setHistory.push({ key, value });
       return 'OK';
     }),
@@ -96,7 +97,7 @@ describe('WorkerRegistration', () => {
       const infoCall = mockRedis._pipelineCalls.find(
         (c) => c.method === 'set' && (c.args[0] as string).endsWith(':info'),
       );
-      const info = JSON.parse(infoCall!.args[1] as string);
+      const info = JSON.parse(infoCall!.args[1] as string) as WorkerInfo;
 
       expect(info.capabilities).toHaveLength(1);
       expect(info.capabilities[0].runnerType).toBe('vllm');
@@ -114,7 +115,7 @@ describe('WorkerRegistration', () => {
       const memoryCall = mockRedis._pipelineCalls.find(
         (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
       );
-      const report = JSON.parse(memoryCall!.args[1] as string);
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
 
       expect(report.devices).toHaveLength(2);
       for (const dev of report.devices) {

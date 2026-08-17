@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { FastifyInstance } from 'fastify';
 import { createRunnerStub, type RunnerStub } from '../../runner-stub/server.js';
+import type {
+  HealthResponse,
+  MemoryReportResponse,
+  CapabilitiesResponse,
+  ProgressResponse,
+  SleepStatusResponse,
+  SleepResponse,
+  WakeResponse,
+  ErrorResponse,
+} from '../response-types.js';
 
 describe('Runner Stub Contract Endpoints', () => {
   let stub: RunnerStub;
@@ -29,7 +40,8 @@ describe('Runner Stub Contract Endpoints', () => {
     await stub.start();
 
     // Get the assigned port from the server
-    const addresses = stub.server.addresses();
+    const server = stub.server as FastifyInstance;
+    const addresses = server.addresses();
     const port = (addresses[0] as { port: number }).port;
     baseUrl = `http://127.0.0.1:${port}`;
 
@@ -46,7 +58,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/health`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as HealthResponse;
       expect(data).toHaveProperty('state');
       expect(data).toHaveProperty('activeRequests');
       expect(data.state).toBe('READY');
@@ -59,7 +71,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/memory-report`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as MemoryReportResponse;
       expect(data).toHaveProperty('devices');
       expect(Array.isArray(data.devices)).toBe(true);
       expect(data.devices).toHaveLength(2);
@@ -82,7 +94,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/capabilities`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as CapabilitiesResponse;
       expect(data.runnerType).toBe('vllm');
       expect(data.engineName).toBe('Dev Stub (vllm)');
       expect(data.engineVersion).toBe('0.0.1-dev');
@@ -99,7 +111,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/progress`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as ProgressResponse;
       expect(data).toHaveProperty('phase');
       expect(data).toHaveProperty('percentComplete');
       expect(data).toHaveProperty('message');
@@ -114,7 +126,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/sleep-status`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as SleepStatusResponse;
       expect(data.isSleeping).toBe(false);
     });
 
@@ -127,7 +139,7 @@ describe('Runner Stub Contract Endpoints', () => {
 
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as SleepResponse;
       expect(data.state).toBe('SLEEPING');
       expect(data.level).toBe('L1_HOST_RAM');
       expect(data).toHaveProperty('deviceMemoryFreedBytes');
@@ -138,7 +150,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/sleep-status`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as SleepStatusResponse;
       expect(data.isSleeping).toBe(true);
       expect(data.level).toBe('L1_HOST_RAM');
     });
@@ -147,7 +159,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/memory-report`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as MemoryReportResponse;
       expect(data.devices[0].memoryUsedBytes).toBe(0);
       expect(data.devices[1].memoryUsedBytes).toBe(0);
     });
@@ -159,7 +171,7 @@ describe('Runner Stub Contract Endpoints', () => {
 
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as WakeResponse;
       // State might be STARTING initially during wake
       expect(['STARTING', 'READY']).toContain(data.state);
 
@@ -168,7 +180,7 @@ describe('Runner Stub Contract Endpoints', () => {
 
       // Verify it's fully READY
       const healthResponse = await fetch(`${baseUrl}/health`);
-      const healthData = await healthResponse.json();
+      const healthData = (await healthResponse.json()) as HealthResponse;
       expect(healthData.state).toBe('READY');
     });
 
@@ -176,7 +188,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/sleep-status`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as SleepStatusResponse;
       expect(data.isSleeping).toBe(false);
     });
 
@@ -184,7 +196,7 @@ describe('Runner Stub Contract Endpoints', () => {
       const response = await fetch(`${baseUrl}/memory-report`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = (await response.json()) as MemoryReportResponse;
       expect(data.devices[0].memoryUsedBytes).toBeGreaterThan(0);
       expect(data.devices[1].memoryUsedBytes).toBeGreaterThan(0);
     });
@@ -200,7 +212,7 @@ describe('Runner Stub Contract Endpoints', () => {
 
       expect(response.status).toBe(400);
 
-      const data = await response.json();
+      const data = (await response.json()) as ErrorResponse;
       expect(data.error).toBe('Missing sleep level');
       expect(data.code).toBe('BAD_REQUEST');
     });
@@ -208,7 +220,7 @@ describe('Runner Stub Contract Endpoints', () => {
     it('should return 409 for POST /wake when not sleeping', async () => {
       // Ensure we're in READY state
       const healthResponse = await fetch(`${baseUrl}/health`);
-      const healthData = await healthResponse.json();
+      const healthData = (await healthResponse.json()) as HealthResponse;
       expect(healthData.state).toBe('READY');
 
       // Try to wake when not sleeping
@@ -218,9 +230,9 @@ describe('Runner Stub Contract Endpoints', () => {
 
       expect(response.status).toBe(409);
 
-      const data = await response.json();
+      const data = (await response.json()) as ErrorResponse;
       expect(data.code).toBe('INVALID_STATE');
-      expect(data.details.currentState).toBe('READY');
+      expect(data.details!.currentState).toBe('READY');
     });
   });
 });
@@ -234,7 +246,7 @@ async function waitForReady(baseUrl: string, timeoutMs = 5000): Promise<void> {
     try {
       const response = await fetch(`${baseUrl}/health`);
       if (response.ok) {
-        const data = await response.json();
+        const data = (await response.json()) as HealthResponse;
         if (data.state === 'READY') {
           return;
         }

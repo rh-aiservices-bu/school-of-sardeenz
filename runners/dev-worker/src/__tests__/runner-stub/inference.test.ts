@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRunnerStub, type RunnerStub } from '../../runner-stub/server.js';
+import type {
+  ChatCompletionResponse,
+  ChatCompletionErrorResponse,
+  ModelsListResponse,
+  ChatCompletionChunk,
+} from '../response-types.js';
 
 describe('Runner Stub - Inference Routes', () => {
   let stub: RunnerStub;
@@ -45,7 +51,7 @@ describe('Runner Stub - Inference Routes', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as ChatCompletionResponse;
 
       expect(data).toHaveProperty('id');
       expect(data.id).toMatch(/^chatcmpl-/);
@@ -82,7 +88,7 @@ describe('Runner Stub - Inference Routes', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as ChatCompletionResponse;
 
       expect(data.model).toBe(modelName);
       expect(data.choices[0].message.content).toContain(modelName);
@@ -119,7 +125,7 @@ describe('Runner Stub - Inference Routes', () => {
         });
 
         expect(response.status).toBe(503);
-        const data = await response.json();
+        const data = (await response.json()) as ChatCompletionErrorResponse;
 
         expect(data).toHaveProperty('error');
         expect(data.error).toHaveProperty('message');
@@ -138,7 +144,7 @@ describe('Runner Stub - Inference Routes', () => {
       const response = await fetch(`${baseUrl}/v1/models`);
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as ModelsListResponse;
 
       expect(data).toHaveProperty('object', 'list');
       expect(data).toHaveProperty('data');
@@ -189,7 +195,7 @@ describe('Runner Stub - Inference Routes', () => {
       // Parse and validate a chunk (not [DONE])
       const firstChunk = dataLines[0];
       expect(firstChunk).toMatch(/^data: \{/);
-      const chunkData = JSON.parse(firstChunk.replace('data: ', ''));
+      const chunkData = JSON.parse(firstChunk.replace('data: ', '')) as ChatCompletionChunk;
 
       expect(chunkData).toHaveProperty('id');
       expect(chunkData.id).toMatch(/^chatcmpl-/);
@@ -223,7 +229,7 @@ describe('Runner Stub - Inference Routes', () => {
       // Collect all delta content
       let fullContent = '';
       for (const line of dataLines) {
-        const chunkData = JSON.parse(line.replace('data: ', ''));
+        const chunkData = JSON.parse(line.replace('data: ', '')) as ChatCompletionChunk;
         if (chunkData.choices[0].delta?.content) {
           fullContent += chunkData.choices[0].delta.content;
         }
@@ -255,7 +261,9 @@ describe('Runner Stub - Inference Routes', () => {
         .filter((line) => !line.includes('[DONE]'));
 
       // Find the finish chunk (second to last before [DONE])
-      const finishChunk = JSON.parse(dataLines[dataLines.length - 1].replace('data: ', ''));
+      const finishChunk = JSON.parse(
+        dataLines[dataLines.length - 1].replace('data: ', ''),
+      ) as ChatCompletionChunk;
 
       expect(finishChunk.choices[0].finish_reason).toBe('stop');
       expect(finishChunk.choices[0].delta).toEqual({});

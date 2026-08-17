@@ -44,7 +44,7 @@ describe('Dev Worker E2E', () => {
 
   beforeAll(async () => {
     registerRunnerRoutes(server, manager);
-    server.get('/healthz', async () => ({ status: 'ok' }));
+    server.get('/healthz', () => ({ status: 'ok' }));
     const address = await server.listen({ port: 0, host: '127.0.0.1' });
     baseUrl = address;
   });
