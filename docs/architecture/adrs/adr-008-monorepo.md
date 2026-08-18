@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The platform spans multiple languages (Rust, TypeScript) and components (proxy, control plane, dashboard, plugins, easyconfigs, worker container). These components share contracts (OpenAPI specs), types, and utilities, and cross-cutting changes (e.g., a new field in the routing map schema) touch multiple components simultaneously.
+The platform spans multiple languages (Rust, TypeScript) and components (proxy, control plane, dashboard, runners, container image definitions, worker container). These components share contracts (OpenAPI specs), types, and utilities, and cross-cutting changes (e.g., a new field in the routing map schema) touch multiple components simultaneously.
 
 Two main organizational approaches exist:
 
@@ -34,5 +34,5 @@ TypeScript components (`control-plane/`, `dashboard/`, `packages/`) are managed 
 
 - **Single clone, single CI pipeline.** Lower operational overhead for development and continuous integration.
 - **Shared tooling configuration.** Linting, formatting, and commit conventions can be defined once at the root.
-- **Repository size grows over time.** Rust build artifacts, node_modules, and easyconfigs all live under one tree. Mitigated by `.gitignore` and build output directories outside of source control.
+- **Repository size grows over time.** Rust build artifacts, node_modules, and container/SIF build outputs all live under one tree. Mitigated by `.gitignore` and build output directories outside of source control.
 - **Mixed toolchains.** Contributors need both the Rust and Node.js toolchains available. Mitigated by component-scoped development — most work touches only one language at a time.

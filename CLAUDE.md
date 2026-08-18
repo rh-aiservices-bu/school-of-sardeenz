@@ -19,7 +19,7 @@ Four strictly decoupled components:
 
 **Cross-language contracts:** OpenAPI specs in `packages/contracts/` are the single source of truth. TypeScript types are generated via `openapi-typescript`; Rust types are hand-maintained (see ADR-005).
 
-**Highlander integration:** HPC-style Lmod/EasyBuild modules on CephFS replace container image pulls. Easyconfigs and the base worker/runner container image live in this repo — Sardeenz is fully self-contained. See [ODH Highlander](https://odh-highlander.github.io/) for the upstream module management system.
+**Runtime delivery (Apptainer SIF):** engine runtimes are packaged as **Apptainer SIF** files on a shared RWX volume and executed in place with `apptainer exec` — no per-host image copy, hot-swappable versions, no engine baked into the worker image. This supersedes the original Highlander/EasyBuild-Lmod plan (see [ADR-015](docs/architecture/adrs/adr-015-sif-runtime-packaging.md), validated by the [Phase 4 spike](docs/project/phase4-apptainer-spike.md)). Runner `Containerfile`s and the base worker image live in `containers/`; Sardeenz builds+signs the images and converts them to SIFs (ADR-017). `easyconfigs/` is dropped.
 
 ## Repository Structure
 
@@ -35,9 +35,9 @@ sardeenz/
 ├── runners/
 │   ├── dev-worker/          # Dev worker agent with runner stubs (local dev)
 │   └── vllm/               # First engine runner (reference implementation)
-├── easyconfigs/            # EasyBuild configs for Highlander runtime modules
-├── containers/
-│   └── worker-base/        # Base container image for workers/runners
+├── containers/             # Container image definitions (see containers/README.md)
+│   ├── worker-base/        # Slim worker host image: UBI + Apptainer + FUSE (execs SIFs)
+│   └── runner-<engine>/    # Runner images that become SIFs (e.g. runner-vllm/ = vLLM + kvcached)
 ├── deployment/             # K8s manifests
 ├── docs/                   # Project documentation
 └── Makefile                # Build, dev, test across all components
@@ -49,7 +49,7 @@ sardeenz/
 - **Phase 1:** Rust proxy with connection parking
 - **Phase 2:** Control plane sleep/wake orchestration
 - **Phase 3:** Admin dashboard (fresh build)
-- **Phase 4:** Highlander runtime integration
+- **Phase 4:** SIF runner runtime (Apptainer)
 
 Details in [`docs/project/`](docs/project/).
 
@@ -69,7 +69,7 @@ Details in [`docs/project/`](docs/project/).
 
 ## Project Status
 
-The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phases 0–3.6 are complete. Phase 0 (engine runner contract), Phase 1 (Rust proxy with connection parking), Phase 2 (control plane sleep/wake orchestration), Phase 3 (admin dashboard), Phase 3.5 (admin UI finalization — notification system, theme toggle, masthead overhaul), and Phase 3.6 (dev worker agent — local-process worker with runner stubs for containerless dev) are done. Next phase: **Phase 4** (Highlander runtime integration). Task breakdown: [`docs/project/phase3.6.md`](docs/project/phase3.6.md). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
+The project is in early development. Architecture docs, ADRs, and tooling scaffolding are complete. Phases 0–3.6 are complete. Phase 0 (engine runner contract), Phase 1 (Rust proxy with connection parking), Phase 2 (control plane sleep/wake orchestration), Phase 3 (admin dashboard), Phase 3.5 (admin UI finalization — notification system, theme toggle, masthead overhaul), and Phase 3.6 (dev worker agent — local-process worker with runner stubs for containerless dev) are done. Next phase: **Phase 4** (SIF runner runtime — Apptainer). The feasibility spike is complete (verdict: GO — [`docs/project/phase4-apptainer-spike.md`](docs/project/phase4-apptainer-spike.md)) and the implementation task breakdown is [`docs/project/phase4.md`](docs/project/phase4.md). Decisions: [ADR-015/016/017](docs/architecture/adrs/). Full plan: [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
 ## Workflow Rules
 

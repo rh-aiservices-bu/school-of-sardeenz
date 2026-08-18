@@ -2,7 +2,17 @@
 
 ## Status
 
-Accepted
+**Superseded by [ADR-015](adr-015-sif-runtime-packaging.md).**
+
+The *goals* of this ADR still hold (deliver runtimes without baking them into worker images;
+fast version switching, side-by-side versions, slim workers, no per-host copy). The *mechanism*
+— EasyBuild/Lmod modules on shared storage — is replaced by **Apptainer SIF files on a shared
+RWX volume**, which keeps every benefit here while removing the from-source authoring burden and
+the metadata-storm risk (a SIF is the "flattened single-file module" this ADR's Consequences
+already pointed to). See [ADR-015](adr-015-sif-runtime-packaging.md),
+[ADR-016](adr-016-sif-worker-security-posture.md), and
+[ADR-017](adr-017-runner-image-pipeline.md). The `easyconfigs/` deliverable is dropped in favor
+of `containers/`. Retained below for historical rationale.
 
 ## Context
 

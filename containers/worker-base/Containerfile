@@ -1,0 +1,42 @@
+# Sardeenz worker-base — the slim image a worker Pod runs.
+#
+# It provides Apptainer (rootless) + FUSE helpers so the worker agent can `apptainer exec`
+# engine SIFs from the shared module volume. No engine is baked in.
+#
+# See docs/architecture/adrs/adr-015-sif-runtime-packaging.md (SIF delivery),
+#     docs/architecture/adrs/adr-016-sif-worker-security-posture.md (SCC / userns / /dev/fuse),
+#     docs/project/phase4-apptainer-spike.md §4 (the validated image).
+
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+# EPEL provides apptainer + fuse helpers on UBI9.
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y \
+      apptainer \
+      fuse-overlayfs \
+      squashfuse \
+      fuse3 \
+      shadow-utils \
+      procps-ng \
+      iproute \
+      jq \
+      tzdata \
+      ca-certificates && \
+    ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+    dnf clean all
+
+# NOTES:
+# - We install "apptainer" (rootless), NOT "apptainer-suid": the worker runs unprivileged under a
+#   mild custom SCC (seccomp Unconfined, no privileged/caps) and Apptainer creates its own user
+#   namespace inside the container. See ADR-016.
+# - tzdata + the /etc/localtime symlink are REQUIRED: Apptainer bind-mounts /etc/localtime (and
+#   /etc/hosts) into every container by default; the stock UBI9 base ships neither, so
+#   `apptainer exec` fails with "mount source /etc/localtime doesn't exist" without this.
+# - The worker Pod must run with: seccompProfile: Unconfined, the annotation
+#   io.kubernetes.cri-o.Devices="/dev/fuse", NO hostUsers:false, and crun as the runtime.
+#
+# TODO (Phase 4, Task 4): if the production worker agent is TypeScript (reusing runners/dev-worker
+# via a RunnerLauncher/ApptainerLauncher), install Node.js here and add the agent. Until then this
+# image is the Apptainer host validated by the spike.
+
+CMD ["sleep", "infinity"]
