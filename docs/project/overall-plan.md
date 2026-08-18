@@ -27,11 +27,11 @@ The project is delivered in five sequential phases. Each phase produces a usable
 
 ```text
 Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 3.6        Phase 4
-Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  Highlander
-(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (HPC runtime)
+Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners
+(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)
 ```
 
-Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while Highlander integration starts), but the critical path runs through Phases 0 → 1 → 2.
+Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while the runtime work starts), but the critical path runs through Phases 0 → 1 → 2.
 
 ---
 
@@ -291,62 +291,92 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 ---
 
-### Phase 4: Highlander Runtime Integration
+### Phase 4: SIF Runner Runtime (Apptainer)
 
-**Objective:** Replace traditional container image pulls with HPC-style module loading — workers load engine runtimes (vLLM, Triton) from shared network storage in seconds instead of minutes, enabling fast version switching, zero-downtime upgrades, and canary deployments.
+**Objective:** Deliver engine runtimes (vLLM, Triton, …) as **Apptainer SIF files** on a shared
+RWX volume, executed in place by the worker — enabling fast version switching, hot-add of new
+versions without recycling workers, side-by-side versions, and no per-host image copy, with GPU
+access and kvcached co-tenancy intact.
 
-**Why "Highlander":** Named after the [ODH Highlander](https://odh-highlander.github.io/) project that provides the upstream Lmod/EasyBuild module management system.
+**Why SIF (not EasyBuild/Lmod):** the original Highlander/EasyBuild plan ([ADR-004](../architecture/adrs/adr-004-highlander-runtime.md))
+was superseded after the Phase 4 feasibility spike. A SIF is a single squashfs file = a whole
+OCI image, built with the normal container toolchain (no from-source easyconfigs) and mounted
+in place (no metadata storm). See [ADR-015](../architecture/adrs/adr-015-sif-runtime-packaging.md),
+[ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md), and
+[ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md).
+
+**Spike outcome:** validated GO on a live OKD 4.21 cluster (all gates green, including two vLLM
+runners sharing one GPU via kvcached). Detailed runbook, findings, and the exact security posture
+are in [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md). The implementation task
+breakdown is in [`phase4.md`](phase4.md).
 
 #### Deliverables
 
-| #   | Deliverable                 | Description                                                               |
-| --- | --------------------------- | ------------------------------------------------------------------------- |
-| 4.1 | Base worker container image | `containers/worker-base/` — slim image with OS, accelerator drivers, Lmod |
-| 4.2 | EasyBuild configurations    | `easyconfigs/` — build recipes for vLLM and initial engine set            |
-| 4.3 | Module load/unload IPC      | Control plane → worker communication for `module load`/`unload`           |
-| 4.4 | CephFS mount architecture   | Storage layout documentation and K8s volume configuration                 |
-| 4.5 | Squashfs/erofs packaging    | Packaged modules to mitigate CephFS metadata storms                       |
-| 4.6 | Integration test suite      | Tests for module load, runner start, version switch, canary deployment    |
+| #   | Deliverable                 | Description                                                                        |
+| --- | --------------------------- | --------------------------------------------------------------------------------- |
+| 4.1 | Base worker image           | `containers/worker-base/` — slim UBI + Apptainer + FUSE helpers + `/etc/localtime` |
+| 4.2 | Runner image(s)             | `containers/runner-vllm/` (base vLLM + kvcached) — the image that becomes a SIF     |
+| 4.3 | SIF librarian build job     | CI/Job that builds+signs images and converts image→SIF onto the module PVC          |
+| 4.4 | Worker security profile     | Custom seccomp SCC + `/dev/fuse` annotation + Deployment/Pod shape (ADR-016)        |
+| 4.5 | Worker agent SIF launch     | Runner start = `apptainer exec` of the engine SIF (replaces the dev-worker stub path) |
+| 4.6 | Integration test suite      | Runner start, version switch/hot-add, GPU `--nv`, kvcached co-tenancy, clean drain  |
 
 #### Scope
 
-- **Worker container image** — minimal base with OS, accelerator drivers (CUDA/ROCm), and Lmod; no engine runtimes baked in
-- **EasyBuild recipes** — self-contained easyconfigs that build engine runtimes as Lmod modules
-- **CephFS storage layout** — separate mount points for application modules (read-only) and model weights (read-write)
-- **Module load/unload protocol** — control plane instructs workers to load specific engine versions before spawning runners
-- **Metadata storm mitigation** — squashfs or erofs packaging for module directories to reduce CephFS metadata operations at scale
-- **Version management** — support multiple engine versions simultaneously on the same worker (e.g., vLLM 0.19.1 and 0.20.0 serving side-by-side)
+- **Base worker image** — minimal UBI + accelerator driver access + Apptainer (rootless) + FUSE
+  helpers; no engine baked in ([ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md))
+- **Runner images** — one `containers/runner-<engine>/Containerfile` per engine; vLLM+kvcached
+  is the reference
+- **SIF build/sign/convert pipeline** — CI builds+scans+signs the OCI image; a librarian Job
+  converts it to a signed SIF (node-local scratch) and writes it to the module PVC with versioned
+  filenames
+- **Worker security posture** — the mild custom SCC (seccomp `Unconfined`, no privileged/caps),
+  `/dev/fuse` via `io.kubernetes.cri-o.Devices`, in-container userns (not `hostUsers: false`)
+- **Worker agent SIF launch** — the production worker agent starts a runner by `apptainer exec`
+  of the model's engine SIF (with `--nv`, bind-mounted weights, writable scratch); clean SIGTERM
+  drain
+- **Version management** — multiple engine versions coexist on one worker; hot-add a new SIF with
+  no Pod restart
 
 #### Out of Scope
 
-- Automated EasyBuild CI pipeline (manual builds initially)
-- Non-CephFS shared storage backends
-- GPU driver management (assumes drivers are pre-installed on worker nodes)
+- Autoscaling workers (manual provisioning initially)
+- Non-RWX / block storage backends for the module store
+- GPU driver management (assumes the NVIDIA GPU Operator / drivers on worker nodes)
+- Replacing the dev-worker stub path (Phase 3.6) — it stays for containerless local dev
 
 #### Definition of Done
 
-- [ ] Worker container image starts and loads an Lmod module within 10 seconds (measured from `module load` to module available)
-- [ ] Control plane can instruct a worker to load a specific engine version and start a runner using that version
-- [ ] Two versions of the same engine can run simultaneously on one worker (canary scenario)
-- [ ] Zero-downtime version upgrade: new version starts → proxy shifts traffic → old version drains → old version stops, with no client errors
-- [ ] Squashfs-packaged modules reduce CephFS metadata operations by at least 90% compared to unpacked directories (measured with `strace` metadata syscall count)
-- [ ] Base worker image size is under 2 GB (excluding mounted modules and weights)
-- [ ] EasyBuild recipes for vLLM build successfully and produce a working Lmod module
+- [ ] `containers/worker-base` and `containers/runner-vllm` build in CI; the vLLM+kvcached image
+      converts to a signed SIF via the librarian job
+- [ ] A worker Pod admits under the custom SCC with `/dev/fuse` present and runs `apptainer exec`
+      unprivileged (spike Gates 0–3)
+- [ ] The worker agent starts a real vLLM runner from a SIF on the module PVC, reads weights via
+      `--bind`, serves OpenAI traffic, and drains cleanly on SIGTERM (spike Gates 4–5)
+- [ ] Two engine versions run side-by-side and a new SIF hot-adds with no Pod restart (Gate 6)
+- [ ] GPU is visible inside the SIF via `--nv`, and **two runners share one GPU via kvcached**
+      (Gates 7–9)
+- [ ] SIFs are signed by the librarian and verified at exec; the module PVC is RBAC-restricted to
+      the librarian for writes
+- [ ] Runtime perf is characterized on the target RWX backend (EFS proven in the spike; CephFS
+      re-run recorded)
 
 #### Dependencies
 
-- Phase 1 (proxy) — proxy must support traffic shifting for zero-downtime upgrades
-- Phase 2 (control plane) — control plane issues module load commands to workers
-- CephFS cluster — shared storage infrastructure
-- EasyBuild/Lmod — installed in worker containers and on the build host
+- Phase 1 (proxy) — traffic shifting for zero-downtime upgrades
+- Phase 2 (control plane) — issues runner start/stop to the worker agent
+- Phase 3.6 (dev worker) — the worker-agent management API and runner contract the production
+  worker agent reuses
+- OpenShift/OKD 4.15+ with `crun`, a shared RWX StorageClass, and GPU nodes (GPU Operator)
 
 #### Risks
 
-| Risk                                                          | Impact                                      | Mitigation                                                                                                          |
-| ------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| CephFS metadata storms at scale                               | Slow module loads, worker timeouts          | Squashfs/erofs packaging (deliverable 4.5); benchmark at target scale early                                         |
-| EasyBuild recipe complexity for GPU-accelerated Python stacks | Slow initial builds, hard-to-debug failures | Start with vLLM only; leverage existing Highlander community recipes where available                                |
-| Lmod/EasyBuild unfamiliarity on the team                      | Slower delivery, integration surprises      | Time-box a spike at phase start to validate the full load/unload cycle before committing to the implementation plan |
+| Risk                                                     | Impact                                | Mitigation                                                                                          |
+| -------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Custom SCC (seccomp `Unconfined`) fails security review  | Blocks the product default            | Productionize as a scoped seccomp profile via the Security Profiles Operator (ADR-016)              |
+| Perf on the target backend (CephFS) differs from EFS     | Cold-start economics weaker than spiked | Re-run the spike's Gate 10 on CephFS/ODF; the spike numbers are a conservative (NFS-grade) floor    |
+| kvcached image drift (pinned commit vs. vLLM version)    | Elastic sharing breaks on upgrade     | Pin the kvcached commit per vLLM version in `containers/runner-vllm/`; test Gate 9 on every bump    |
+| SIF supply-chain (RWX bypasses image admission)          | Code-injection path into workers      | Sign at build, verify at exec, RBAC-lock the module PVC to the librarian (ADR-017)                  |
 
 ---
 

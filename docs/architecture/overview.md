@@ -51,9 +51,9 @@ graph TB
         PR[(Prometheus<br/>Metrics)]
     end
 
-    subgraph "Shared Storage (CephFS)"
+    subgraph "Shared Storage (RWX)"
         MW[Model Weights<br/>RWX]
-        AM[Application Modules<br/>ROX]
+        AM[Runner SIF Modules<br/>RWX]
     end
 
     C1 & C2 -->|inference| P1 & P2
@@ -70,7 +70,7 @@ graph TB
     CP -->|lifecycle| R1A & R1B & R2A & RNA
     R1A & R1B & R2A & RNA -->|device memory usage| RD
     R1A & R1B & R2A & RNA -->|weights| MW
-    R1A & R1B & R2A & RNA -->|engine modules| AM
+    R1A & R1B & R2A & RNA -->|exec SIF| AM
 ```
 
 The platform comprises four main components, three data stores, and a shared storage fabric. Each component has a strict responsibility boundary and communicates through well-defined interfaces.
@@ -148,13 +148,15 @@ Each worker runs a three-layer process architecture:
 1. **Worker agent** — a long-lived management process inside the worker Pod. It self-registers to Redis/Valkey (capabilities, devices, heartbeat), receives commands from the control plane to start and stop runners, and exposes an HTTP management API (`POST /runners`, `DELETE /runners/{runnerId}`).
 
 2. **Runner** — a separate process spawned by the worker agent, one per model. Each runner is a thin engine-specific shim that:
-   - Runs `module load <engine>/<version>` to set up its isolated Lmod environment
-   - Spawns the actual engine process as a child
+   - Executes its engine **SIF** in place — `apptainer exec --nv /modules/<engine>-<version>.sif <serve cmd>` — from the shared RWX module store (no per-host copy)
+   - Runs the actual engine as the exec'd process
    - Exposes the runner contract HTTP API (`/health`, `/sleep`, `/wake`, `/memory-report`) on its own port
 
-3. **Engine** (vLLM, Triton, etc.) — the unmodified inference engine, started and managed by its parent runner. The engine has no knowledge of Sardeenz.
+3. **Engine** (vLLM, Triton, etc.) — the unmodified inference engine, packaged in the SIF and run by `apptainer exec`. The engine has no knowledge of Sardeenz.
 
-The runner is the isolation boundary — each runner has its own Lmod environment, allowing different engine types and versions to coexist on the same worker. See [Why runners are separate processes](#why-runners-are-separate-processes) for the rationale.
+The runner is the isolation boundary — each runner exec's its own self-contained SIF (its own filesystem and userland), allowing different engine types and versions to coexist on the same worker. See [Why runners are separate processes](#why-runners-are-separate-processes) for the rationale.
+
+> See [ADR-015](adrs/adr-015-sif-runtime-packaging.md) for the SIF runtime-delivery decision.
 
 **The runner contract** defines the HTTP endpoints each runner exposes:
 
@@ -264,13 +266,13 @@ graph TB
 
 ### Process Tree
 
-Each worker Pod runs a worker agent that spawns and supervises runners. Each runner loads its own Lmod environment and spawns its engine as a child process:
+Each worker Pod runs a worker agent that spawns and supervises runners. Each runner exec's its own engine SIF from the shared module store:
 
 ```text
 Worker agent (long-lived, manages everything)
-├── Runner A: module load vllm/0.19.1 → spawn vLLM → serve model X on :5001
-├── Runner B: module load vllm/0.20.0 → spawn vLLM → serve model Y on :5002
-└── Runner C: module load triton/2.40 → spawn Triton → serve model Z on :5003
+├── Runner A: apptainer exec --nv vllm-0.19.1.sif → serve model X on :5001
+├── Runner B: apptainer exec --nv vllm-0.20.0.sif → serve model Y on :5002
+└── Runner C: apptainer exec --nv triton-2.40.sif → serve model Z on :5003
 ```
 
 ### Communication Channels
@@ -284,9 +286,9 @@ Worker agent (long-lived, manages everything)
 
 ### Why Runners Are Separate Processes
 
-The key constraint is **Lmod environment isolation**. Lmod works by modifying `PATH`, `LD_LIBRARY_PATH`, `PYTHONPATH`, and other environment variables in the shell environment. Running multiple engines or engine versions on the same worker requires each to have its own isolated environment. A separate process per runner provides this naturally — each runner does its own `module load` and inherits the resulting environment. Trying to manage per-model environments within a single worker agent process would be fragile and fight against how Lmod is designed.
+The key constraint is **runtime isolation**. Running multiple engines or engine versions on the same worker requires each to have its own filesystem, libraries, and Python environment. A separate process per runner provides this naturally — each runner `apptainer exec`s its own **SIF**, a single self-contained squashfs image with the full engine userland, mounted read-only in the runner's own mount namespace. Different engine types and versions coexist with zero cross-contamination, and none of it is baked into the worker image.
 
-> See [ADR-004](adrs/adr-004-highlander-runtime.md) for the Highlander integration rationale and [ADR-010](adrs/adr-010-engine-runners.md) for the runner abstraction design.
+> See [ADR-015](adrs/adr-015-sif-runtime-packaging.md) for the SIF runtime-delivery decision and [ADR-010](adrs/adr-010-engine-runners.md) for the runner abstraction design.
 
 ### Workload Placement
 
@@ -382,7 +384,7 @@ sequenceDiagram
     Note over CP: Placement pipeline:<br/>1. Select runner type<br/>2. Filter by hardware<br/>3. Filter by capacity<br/>4. Apply strategy
 
     CP->>Worker: Start vLLM runner<br/>for "llama-3"
-    Worker->>Runner: module load vllm/0.19.1<br/>→ spawn process
+    Worker->>Runner: apptainer exec vllm-0.19.1.sif<br/>→ serve process
 
     Runner-->>CP: Health: ready
     CP->>Redis: Update routing map<br/>+ model state: ACTIVE
@@ -415,55 +417,68 @@ sequenceDiagram
     CP->>Redis: Update routing map<br/>+ Runner A state: ACTIVE
 ```
 
-## Highlander Runtime
+## Runtime Delivery — Apptainer SIF
 
-Engine runtimes are not baked into container images. Instead, workers use the Highlander model: runtimes are packaged as Lmod environment modules via EasyBuild and stored on shared network storage.
+Engine runtimes are not baked into worker container images, nor loaded as Lmod modules
+(the original Highlander/EasyBuild plan — see [ADR-004](adrs/adr-004-highlander-runtime.md),
+superseded). Instead, each runtime is packaged as an **Apptainer SIF** — a single squashfs file
+containing a whole OCI image — stored on a shared RWX volume and executed in place with
+`apptainer exec`. A "runner module" is one `.sif` file.
 
 ```mermaid
 graph LR
-    subgraph "Build Time"
-        EC[easyconfigs/]
-        EB[EasyBuild]
-        EC -->|build| EB
+    subgraph "Build Time (CI + librarian job)"
+        CF[containers/runner-vllm/<br/>Containerfile]
+        IMG[OCI image<br/>build + scan + sign]
+        SIF[apptainer build/pull<br/>+ apptainer sign]
+        CF -->|CI build| IMG
+        IMG -->|convert| SIF
     end
 
-    subgraph "CephFS (Shared Storage)"
-        subgraph "App Modules (ROX)"
-            V1[vllm/0.19.1/]
-            V2[vllm/0.20.0/]
-            TR[triton/2.3/]
-            KC[kvcached/0.1.5/]
+    subgraph "Shared Storage (RWX)"
+        subgraph "SIF Module Store"
+            V1[vllm-0.19.1.sif]
+            V2[vllm-0.20.0.sif]
+            TR[triton-2.3.sif]
         end
-        subgraph "Model Weights (RWX)"
+        subgraph "Model Weights"
             MW1[llama-3-8b/]
             MW2[mistral-7b/]
         end
     end
 
-    EB -->|deploy| V1 & V2 & TR & KC
+    SIF -->|write signed SIF| V1 & V2 & TR
 
-    subgraph "Worker (slim container)"
-        OS[Base OS + accelerator drivers]
-        LMOD[Lmod]
+    subgraph "Worker (slim container + Apptainer)"
+        OS[Base OS + accelerator drivers + Apptainer]
         PROC[Runner process]
-        LMOD -->|"module load vllm/0.19.1"| PROC
+        OS -->|"apptainer exec --nv vllm-0.20.0.sif"| PROC
     end
 
-    V1 -.->|mount| LMOD
-    MW1 -.->|mount| PROC
+    V2 -.->|squashfuse mount, read-only| PROC
+    MW1 -.->|bind mount| PROC
 ```
 
-Worker container images are slim — just a base OS and accelerator drivers. When the control plane instructs a worker to start a runner, the worker invokes `module load <engine>/<version>` to compose the runtime environment, then spawns the engine process.
+Worker container images are slim — base OS, accelerator drivers, and Apptainer
+(`containers/worker-base/`). When the control plane instructs a worker to start a runner, the
+worker `apptainer exec`s the engine SIF straight off the shared volume; `squashfuse` mounts it
+read-only and pages it in lazily (no per-host copy, no metadata storm).
 
 This enables:
 
-- **Fast engine iteration** — switch versions in seconds, not container rebuild cycles
-- **Zero-downtime upgrades** — new version spawns as a parallel process, proxy shifts traffic, old process drains
+- **Fast engine iteration** — drop a new `.sif` on the volume; no container rebuild cycle
+- **Hot-add without recycling workers** — a new SIF is runnable immediately, no Pod restart
+- **Zero-downtime upgrades** — new version execs as a parallel process, proxy shifts traffic, old process drains
 - **Canary / A/B testing** — two engine versions serve traffic side-by-side from the same worker
 
-Easyconfigs and the base worker container image live in this repository, making Sardeenz fully self-contained.
+Runner `Containerfile`s and the base worker image live in this repository under `containers/`,
+making Sardeenz fully self-contained. The SIFs are built, signed, and published by Sardeenz's
+own pipeline; workers verify signatures at exec.
 
-> See [ADR-004](adrs/adr-004-highlander-runtime.md) for the full Highlander integration rationale.
+> See [ADR-015](adrs/adr-015-sif-runtime-packaging.md) (SIF delivery),
+> [ADR-016](adrs/adr-016-sif-worker-security-posture.md) (the mild SCC + `/dev/fuse` posture),
+> and [ADR-017](adrs/adr-017-runner-image-pipeline.md) (build/sign/convert pipeline). The Phase 4
+> feasibility spike that validated this is [`docs/project/phase4-apptainer-spike.md`](../project/phase4-apptainer-spike.md).
 
 ## Scaling and Redundancy
 
@@ -538,7 +553,7 @@ The workflow: edit the OpenAPI spec → run code generation → TypeScript types
 | [ADR-001](adrs/adr-001-l7-vram-scheduling.md)                | Software-defined device memory scheduling at Layer 7           |
 | [ADR-002](adrs/adr-002-four-component-split.md)              | Four-component architecture split                              |
 | [ADR-003](adrs/adr-003-rust-proxy.md)                        | Rust for the routing proxy                                     |
-| [ADR-004](adrs/adr-004-highlander-runtime.md)                | Highlander runtime integration with self-contained easyconfigs |
+| [ADR-004](adrs/adr-004-highlander-runtime.md)                | Highlander runtime integration with self-contained easyconfigs *(superseded by ADR-015)* |
 | [ADR-005](adrs/adr-005-openapi-contracts.md)                 | OpenAPI as cross-language contract                             |
 | [ADR-006](adrs/adr-006-new-platform.md)                      | New platform vs. v1 refactor                                   |
 | [ADR-007](adrs/adr-007-redundancy-and-scaling.md)            | Redundancy and scaling strategy                                |
@@ -547,6 +562,11 @@ The workflow: edit the OpenAPI spec → run code generation → TypeScript types
 | [ADR-010](adrs/adr-010-engine-runners.md)                    | Engine runners                                                 |
 | [ADR-011](adrs/adr-011-worker-capabilities-and-placement.md) | Worker capabilities and workload placement                     |
 | [ADR-012](adrs/adr-012-typescript-stack.md)                  | TypeScript stack for control plane and dashboard               |
+| [ADR-013](adrs/adr-013-secrets-management.md)                | Secrets management policy                                       |
+| [ADR-014](adrs/adr-014-inference-recency-tracking.md)        | Inference recency tracking for LRU eviction                    |
+| [ADR-015](adrs/adr-015-sif-runtime-packaging.md)             | Engine runtime delivery via Apptainer SIF on shared RWX storage |
+| [ADR-016](adrs/adr-016-sif-worker-security-posture.md)       | Worker security posture for SIF execution                      |
+| [ADR-017](adrs/adr-017-runner-image-pipeline.md)             | Runner image build and supply chain                            |
 
 ---
 

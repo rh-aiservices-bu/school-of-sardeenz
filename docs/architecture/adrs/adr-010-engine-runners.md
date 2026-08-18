@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. **Amended by [ADR-015](adr-015-sif-runtime-packaging.md):** the runner/worker
+hierarchy and the runner contract below are unchanged, but the mechanism by which a runner
+composes its runtime is now `apptainer exec` of an engine **SIF** rather than `module load` of
+an Lmod module. Runtime isolation between concurrent runners comes from each runner exec-ing its
+own self-contained SIF.
 
 ## Context
 

@@ -8,6 +8,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Phase 4 architecture + plan: adopted **Apptainer SIF on shared RWX** as the engine runtime
+  delivery mechanism, replacing the Highlander/EasyBuild-Lmod approach. New ADRs
+  [ADR-015](docs/architecture/adrs/adr-015-sif-runtime-packaging.md) (SIF delivery, supersedes
+  ADR-004), [ADR-016](docs/architecture/adrs/adr-016-sif-worker-security-posture.md) (mild custom
+  seccomp SCC + `/dev/fuse` + in-container userns), and
+  [ADR-017](docs/architecture/adrs/adr-017-runner-image-pipeline.md) (build/sign/convert pipeline
+  + `containers/` layout). Added the implementation task breakdown
+  [`docs/project/phase4.md`](docs/project/phase4.md) and the `containers/` runner-image
+  definitions (`containers/README.md`, `containers/worker-base/`, `containers/runner-vllm/` =
+  base vLLM + kvcached). Reconciled the architecture overview (Runtime Delivery section, ADR
+  index), `overall-plan.md` Phase 4, and `CLAUDE.md` to the SIF model; marked ADR-004 superseded
+  and ADR-010 amended; `easyconfigs/` dropped.
+
+- Phase 4 spike — `docs/project/phase4-apptainer-spike.md`: fail-fast OpenShift feasibility runbook
+  for running engine runtimes as Apptainer/SIF modules from a shared RWX volume
+  (user-namespace, FUSE, no-local-copy, GPU `--nv`, parallel-versions/hot-add gates). Goal
+  is RWX-agnostic (run on any RWX volume); this run used **AWS EFS (NFSv4)** as a
+  first-class proof point, with CephFS a priority follow-up on another cluster. Deploys onto
+  the network-FS-compatible path — a custom mild SCC (seccomp `Unconfined` only) +
+  `/dev/fuse` via the `io.kubernetes.cri-o.Devices` annotation (no device plugin), with
+  Apptainer creating its own user namespace inside the container. Field findings baked into
+  the runbook: pod-level user namespaces (`hostUsers: false` / the shipped
+  `nested-container` SCC) are unusable with a network RWX PVC (they need idmapped volume
+  mounts NFS/EFS can't provide, nor CephFS on current RHCOS kernels); OCI→SIF conversion
+  scratch must be node-local (a network-FS `APPTAINER_TMPDIR` fails the hardlink-heavy
+  unpack with `unpriv.link … too many links`), so the Deployments mount a node-local
+  `emptyDir` at `/scratch`; and the `worker-base` image needs `tzdata` + an `/etc/localtime`
+  symlink (Apptainer bind-mounts `/etc/localtime` by default, absent from stock UBI9).
+  Workload is a `Deployment` (scale 0/1 to stop/start). All six CPU gates (0–6) pass on a
+  live OKD 4.21 cluster — including the core "no local copy" claim (SIF runs in place via
+  squashfuse off the shared RWX volume), reading model weights via `--bind` from a real
+  interpreter in the SIF, a long-lived HTTP runner whose inner process dies cleanly on
+  SIGTERM to the launcher (no orphan, no zombies), and parallel versions + hot-add of a new
+  module without a Pod restart + concurrent readers of the same SIF. GPU Gate 7 also passes:
+  the GPU is visible inside the SIF via `apptainer --nv` (NVIDIA L4, no ldconfig /
+  nvidia-container-cli tweak needed), and Gate 8 confirms the SIF shares the pod's
+  ipc/pid/net namespaces (the kvcached precondition). Gate 9c passes too: two SIF-launched
+  vLLM engines serve `opt-125m` on one L4 with a static memory split (staggered start to
+  avoid a concurrent-cold-start host-RAM OOM). **Gate 9d passes** — the make-or-break result:
+  with a kvcached-built image (base vLLM + a compiled kvcached wheel +
+  `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`, and cache dirs redirected off the read-only SIF),
+  two SIF-launched vLLM engines load kvcached and share GPU memory elastically on one L4. That
+  custom-image requirement holds for SIF or plain container alike, so it's SIF-neutral. Gate 10
+  (economics): cold spawn from the shared SIF ~19s (fresh Pod), warm import ~10.2s; the SIF is
+  materialized once for the whole fleet with no per-node pull / no local copy (the one-time
+  conversion is amortized), so it's not a decision driver. **All gates 0–10 pass → VERDICT: GO**
+  on the network-FS-compatible path with a mild custom SCC (EFS-proven). Named follow-ups
+  (non-blocking): re-characterize perf on CephFS; productionize the SCC as a scoped seccomp
+  profile via the Security Profiles Operator; enforce SIF signing/verification + PVC RBAC.
+  Method correction: the squashfuse mount is namespaced (root is a RO overlay over the session
+  rootfs), invisible in both the parent and container `/proc/mounts`; Gate 3 now checks the
+  `squashfuse_ll` process + zero scratch growth. Also documents the decided Phase 4 provisioning
+  model: Sardeenz publishes a Containerfile per runner, builds/signs the images in CI, converts
+  image→SIF in a librarian job, and workers only `apptainer exec` the signed SIF (closing the
+  supply-chain gap). Investigative only — no platform code yet.
+
 - Phase 3.6 — Dev Worker Agent: local-process worker agent enabling full Sardeenz
   stack development without containers, GPUs, or real inference engines
   - **Worker agent OpenAPI spec** (`packages/contracts/specs/worker-agent.yaml`):

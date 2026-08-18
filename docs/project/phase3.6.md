@@ -21,7 +21,7 @@ Four functional areas:
 
 - **Real inference engines** — no vLLM, Triton, or MLServer; runner stubs simulate their behavior
 - **GPU/accelerator interaction** — device memory values are simulated; no CUDA/ROCm calls
-- **Highlander/Lmod integration** — module loading is a Phase 4 concern; dev workers don't use Lmod
+- **SIF/Apptainer integration** — running engine SIFs via `apptainer exec` is a Phase 4 concern; dev workers don't exec SIFs (they fork runner stubs)
 - **Container images** — the dev worker runs as a local process only; no Dockerfile
 - **Production worker agent** — the real worker agent that runs in K8s Pods is future work; this phase builds the dev simulation layer, though the worker agent management API spec (Task 1) will be reused
 - **Multi-node dev setup** — dev workers run on `localhost` only; no distributed dev environment
