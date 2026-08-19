@@ -13,6 +13,7 @@ import { registerClusterRoutes } from './routes/cluster.js';
 import { registerInternalRoutes } from './routes/internal.js';
 import { registerEventRoutes } from './routes/events.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
+import { registerCatalogRoutes } from './routes/catalog.js';
 
 export interface ServerDeps {
   config: Config;
@@ -60,6 +61,7 @@ export async function buildServer(deps: ServerDeps) {
   registerInternalRoutes(app, deps.routes);
   registerEventRoutes(app, deps.subscriber, deps.config.redisKeyPrefix);
   registerNotificationRoutes(app, deps.routes);
+  registerCatalogRoutes(app, deps.routes);
 
   return app;
 }

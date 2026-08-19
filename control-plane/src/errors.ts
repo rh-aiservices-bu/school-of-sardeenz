@@ -11,6 +11,9 @@ export type ErrorCode =
   | 'REDIS_ERROR'
   | 'DATABASE_ERROR'
   | 'INVALID_REQUEST'
+  | 'CATALOG_NOT_FOUND'
+  | 'CATALOG_FETCH_FAILED'
+  | 'MODULE_IN_USE'
   | 'INTERNAL_ERROR';
 
 export interface ErrorDetail {
@@ -95,5 +98,28 @@ export class ControlPlaneError extends Error {
 
   static invalidRequest(message: string): ControlPlaneError {
     return new ControlPlaneError(400, 'INVALID_REQUEST', message);
+  }
+
+  static catalogEntryNotFound(id: string): ControlPlaneError {
+    return new ControlPlaneError(404, 'CATALOG_NOT_FOUND', `Catalog entry not found: ${id}`, {
+      id,
+    });
+  }
+
+  static catalogFetchFailed(message: string): ControlPlaneError {
+    return new ControlPlaneError(
+      502,
+      'CATALOG_FETCH_FAILED',
+      `Failed to fetch catalog: ${message}`,
+    );
+  }
+
+  static moduleInUse(id: string): ControlPlaneError {
+    return new ControlPlaneError(
+      409,
+      'MODULE_IN_USE',
+      `Module for ${id} is in use by a running runner; stop dependent models first`,
+      { id },
+    );
   }
 }

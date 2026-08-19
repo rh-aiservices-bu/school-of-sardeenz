@@ -100,6 +100,8 @@ function toDeps(mocks: Mocks): RouteDeps {
     deployOrchestration: {} as RouteDeps['deployOrchestration'],
     leaderElection: mocks.leaderElection as unknown as RouteDeps['leaderElection'],
     notifications: {} as RouteDeps['notifications'],
+    catalogService: {} as RouteDeps['catalogService'],
+    moduleStore: {} as RouteDeps['moduleStore'],
     createRunnerClient: mocks.createRunnerClient,
   };
 }

@@ -25,6 +25,7 @@ export {
   ClusterEventType,
   NotificationVariant,
   NotificationSourceType,
+  CatalogItemState,
 } from './generated/control-plane.js';
 
 export type {

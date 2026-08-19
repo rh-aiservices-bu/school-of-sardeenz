@@ -1,0 +1,93 @@
+import type { FastifyInstance } from 'fastify';
+import { ModelLifecycleState } from '@sardeenz/types';
+
+import type { RouteDeps } from './deps.js';
+import { ControlPlaneError } from '../errors.js';
+import {
+  buildCatalogView,
+  isModuleInUse,
+  type ActiveRunnerInfo,
+} from '../services/catalog-view.js';
+import type { CatalogSnapshot } from '../services/catalog-service.js';
+
+export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  async function view(snapshot: CatalogSnapshot) {
+    const importedStems = await deps.moduleStore.listImportedStems();
+    return buildCatalogView(snapshot, importedStems, deps.moduleStore.getAllTransient());
+  }
+
+  app.get('/api/v1/catalog', async (_request, reply) => {
+    let snapshot: CatalogSnapshot;
+    try {
+      snapshot = await deps.catalogService.load();
+    } catch (err) {
+      throw ControlPlaneError.catalogFetchFailed(err instanceof Error ? err.message : String(err));
+    }
+    return reply.code(200).send(await view(snapshot));
+  });
+
+  app.post('/api/v1/catalog/refresh', async (_request, reply) => {
+    let snapshot: CatalogSnapshot;
+    try {
+      snapshot = await deps.catalogService.refresh();
+    } catch (err) {
+      throw ControlPlaneError.catalogFetchFailed(err instanceof Error ? err.message : String(err));
+    }
+    return reply.code(200).send(await view(snapshot));
+  });
+
+  app.post<{ Params: { id: string } }>('/api/v1/catalog/:id/import', async (request, reply) => {
+    if (!deps.leaderElection.isLeader) throw ControlPlaneError.notLeader();
+
+    const snapshot = await deps.catalogService.load();
+    const entry = snapshot.entries.find((e) => e.id === request.params.id);
+    if (!entry) throw ControlPlaneError.catalogEntryNotFound(request.params.id);
+
+    const status = deps.moduleStore.startImport(entry);
+    return reply.code(202).send(status);
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/v1/catalog/:id', async (request, reply) => {
+    if (!deps.leaderElection.isLeader) throw ControlPlaneError.notLeader();
+
+    const snapshot = await deps.catalogService.load();
+    const entry = snapshot.entries.find((e) => e.id === request.params.id);
+    if (!entry) throw ControlPlaneError.catalogEntryNotFound(request.params.id);
+
+    if (await isEntryInUse(deps, entry.runnerType, entry.sifName)) {
+      throw ControlPlaneError.moduleInUse(entry.id);
+    }
+
+    const removed = await deps.moduleStore.uninstall(entry);
+    if (!removed) throw ControlPlaneError.catalogEntryNotFound(entry.id);
+    return reply.code(204).send();
+  });
+}
+
+// A module is in use if a non-STOPPED model resolves to it. Model lifecycle state carries the
+// runner endpoint but not the module, so we cross-reference the model repository for runnerType +
+// engineConfig.version (see isModuleInUse for the conservative matching rule).
+async function isEntryInUse(
+  deps: RouteDeps,
+  runnerType: string,
+  sifName: string,
+): Promise<boolean> {
+  const states = await deps.lifecycle.getAllStates();
+  const activeNames = new Set(
+    states.filter((s) => s.state !== ModelLifecycleState.STOPPED).map((s) => s.modelName),
+  );
+  if (activeNames.size === 0) return false;
+
+  const records = await deps.modelRepository.findAll();
+  const active: ActiveRunnerInfo[] = records
+    .filter((r) => activeNames.has(r.name))
+    .map((r) => {
+      const version = r.engineConfig?.version;
+      return {
+        runnerType: r.runnerType,
+        version: typeof version === 'string' ? version : undefined,
+      };
+    });
+
+  return isModuleInUse({ runnerType, sifName }, active);
+}
