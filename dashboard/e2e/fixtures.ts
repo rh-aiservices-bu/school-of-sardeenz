@@ -82,7 +82,7 @@ async function startBff(
     SARDEENZ_BFF_LISTEN_ADDR: `127.0.0.1:${port}`,
     SARDEENZ_CONTROL_PLANE_URL: cpUrl,
     SARDEENZ_PROMETHEUS_URL: promUrl,
-    SARDEENZ_REDIS_URL: 'redis://127.0.0.1:6379',
+    SARDEENZ_REDIS_URL: process.env['SARDEENZ_REDIS_URL'] ?? 'redis://127.0.0.1:6379',
     SARDEENZ_REDIS_KEY_PREFIX: redisKeyPrefix,
     AUTH_MODE: 'none',
     SARDEENZ_LOG_LEVEL: 'error',

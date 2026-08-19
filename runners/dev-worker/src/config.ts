@@ -83,6 +83,12 @@ function resolveMode(argv: string[] = process.argv.slice(2)): WorkerMode {
 const GIB = 1024 * 1024 * 1024;
 
 export function loadConfig(): DevWorkerConfig {
+  // The apptainer bind mounts, cache dir, and HOME all live under the weights/scratch dirs, so
+  // derive their defaults from these rather than hard-coding /weights,/scratch. That way overriding
+  // just the dirs (e.g. for local dev) also moves the binds + HOME; prod (/weights, /scratch) is
+  // unchanged. SARDEENZ_APPTAINER_BINDS / SARDEENZ_APPTAINER_HOME still override explicitly.
+  const weightsDir = envStr('SARDEENZ_WEIGHTS_DIR', '/weights');
+  const scratchDir = envStr('SARDEENZ_SCRATCH_DIR', '/scratch');
   return {
     mode: resolveMode(),
     redisUrl: envStr('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
@@ -102,15 +108,15 @@ export function loadConfig(): DevWorkerConfig {
     apptainer: {
       apptainerBin: envStr('SARDEENZ_APPTAINER_BIN', 'apptainer'),
       modulesDir: envStr('SARDEENZ_MODULES_DIR', '/modules'),
-      weightsDir: envStr('SARDEENZ_WEIGHTS_DIR', '/weights'),
-      scratchDir: envStr('SARDEENZ_SCRATCH_DIR', '/scratch'),
-      binds: envList('SARDEENZ_APPTAINER_BINDS', ['/weights', '/scratch']),
+      weightsDir,
+      scratchDir,
+      binds: envList('SARDEENZ_APPTAINER_BINDS', [weightsDir, scratchDir]),
       runnerEntrypoint: envList('SARDEENZ_RUNNER_ENTRYPOINT', [
         'python3',
         '-m',
         'sardeenz_vllm_runner',
       ]),
-      home: envStr('SARDEENZ_APPTAINER_HOME', '/scratch/home'),
+      home: envStr('SARDEENZ_APPTAINER_HOME', `${scratchDir}/home`),
       verifySif: envBool('SARDEENZ_VERIFY_SIF', true),
       healthTimeoutMs: envInt('SARDEENZ_HEALTH_TIMEOUT_MS', 300000),
       healthIntervalMs: envInt('SARDEENZ_HEALTH_INTERVAL_MS', 1000),

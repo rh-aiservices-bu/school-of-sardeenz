@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadRootEnv } from './load-env.js';
 import { loadConfig, redactUrl } from './config.js';
 import { createRedisClient, redisKey } from './clients/redis.js';
 import { createDatabasePool } from './clients/database.js';
@@ -26,6 +27,7 @@ import { WorkerClient } from './clients/worker.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
 
 async function main(): Promise<void> {
+  loadRootEnv();
   const config = loadConfig();
 
   const redis = createRedisClient(config);

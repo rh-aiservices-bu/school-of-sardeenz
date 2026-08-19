@@ -1,3 +1,4 @@
+import { loadRootEnv } from './load-env.js';
 import { loadConfig, validateAuthConfig, redactUrl } from './config.js';
 import { buildServer } from './server.js';
 import { ControlPlaneClient } from './clients/control-plane.js';
@@ -5,6 +6,7 @@ import { RedisReader } from './clients/redis.js';
 import { PrometheusClient } from './clients/prometheus.js';
 
 async function main(): Promise<void> {
+  loadRootEnv();
   const config = loadConfig();
   validateAuthConfig(config);
 

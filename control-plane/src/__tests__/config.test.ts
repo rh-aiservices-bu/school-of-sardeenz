@@ -5,6 +5,7 @@ import { loadConfig, redactUrl } from '../config.js';
 describe('loadConfig', () => {
   const savedEnv: Record<string, string | undefined> = {};
   const envKeys = [
+    'SARDEENZ_CONTROL_PLANE_LISTEN_ADDR',
     'SARDEENZ_LISTEN_ADDR',
     'SARDEENZ_LOG_LEVEL',
     'SARDEENZ_REDIS_URL',
@@ -38,6 +39,26 @@ describe('loadConfig', () => {
     expect(config.logLevel).toBe('info');
     expect(config.redisKeyPrefix).toBe('sardeenz');
     expect(config.evictionMaxPerCycle).toBe(3);
+  });
+
+  it('reads SARDEENZ_CONTROL_PLANE_LISTEN_ADDR from env', () => {
+    process.env['SARDEENZ_CONTROL_PLANE_LISTEN_ADDR'] = '127.0.0.1:3100';
+    const config = loadConfig();
+    expect(config.listenAddr).toBe('127.0.0.1');
+    expect(config.listenPort).toBe(3100);
+  });
+
+  it('falls back to the legacy SARDEENZ_LISTEN_ADDR', () => {
+    process.env['SARDEENZ_LISTEN_ADDR'] = '127.0.0.1:3200';
+    const config = loadConfig();
+    expect(config.listenPort).toBe(3200);
+  });
+
+  it('prefers SARDEENZ_CONTROL_PLANE_LISTEN_ADDR over the legacy name', () => {
+    process.env['SARDEENZ_CONTROL_PLANE_LISTEN_ADDR'] = '127.0.0.1:3100';
+    process.env['SARDEENZ_LISTEN_ADDR'] = '127.0.0.1:3200';
+    const config = loadConfig();
+    expect(config.listenPort).toBe(3100);
   });
 
   it('reads SARDEENZ_LOG_LEVEL from env', () => {

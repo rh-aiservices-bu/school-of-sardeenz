@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { loadRootEnv } from './load-env.js';
 import { loadConfig } from './config.js';
 import { WorkerRegistration } from './registration.js';
 import { RunnerManager } from './runner-manager.js';
@@ -8,6 +9,7 @@ import type { RunnerLauncher } from './launcher.js';
 import { createServer } from './server.js';
 import { Redis } from 'ioredis';
 
+loadRootEnv();
 const config = loadConfig();
 
 function createLauncher(): RunnerLauncher {

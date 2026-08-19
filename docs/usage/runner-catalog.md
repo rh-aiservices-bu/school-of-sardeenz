@@ -23,12 +23,12 @@ The runner catalog lets operators browse a curated list of engine runners and **
 
 ## Configuration
 
-| Var | Purpose | Default |
-|---|---|---|
-| `SARDEENZ_RUNNER_CATALOG_URL` | Catalog source — http(s) URL, local path, or `file://` | official `school-of-sardeenz` raw URL |
-| `SARDEENZ_MODULES_DIR` | Shared module store path | `/modules` |
-| `SARDEENZ_SIF_IMPORTER` | `oras` (real `apptainer pull`) or `stub` (dev placeholder) | `stub` |
-| `SARDEENZ_VERIFY_SIF` | `apptainer verify` pulled SIFs before publishing | `true` |
+| Var                           | Purpose                                                                                                                                     | Default                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `SARDEENZ_RUNNER_CATALOG_URL` | Catalog source — http(s) URL, local path, or `file://`                                                                                      | official `school-of-sardeenz` raw URL |
+| `SARDEENZ_MODULES_DIR`        | Shared module store path                                                                                                                    | `/modules`                            |
+| `SARDEENZ_SIF_IMPORTER`       | `oras` (real `apptainer pull`) or `stub` (dev placeholder)                                                                                  | `stub`                                |
+| `SARDEENZ_VERIFY_SIF`         | `apptainer verify` SIFs — at catalog import (control plane) and at exec (worker). Set `false` for unsigned experimentation only (see below) | `true`                                |
 
 Deployment requirements (RW module mount, `sardeenz-control-plane` SA, apptainer in the image,
 signing public key) are in [`deployment/control-plane/`](../../deployment/control-plane/).
@@ -43,6 +43,35 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
    execs).
 4. Sign SIFs with the key whose **public** half is distributed to workers and the control plane, so
    `apptainer verify` trusts them at import and exec.
+
+## Unsigned SIFs (experimentation only)
+
+Signing/verification is defense-in-depth for a shared cluster, not a prerequisite for getting
+runners working. During early experimentation — no CI, no librarian, no signing key yet — you can
+skip it entirely and turn it back on later (it is a runtime toggle; nothing built now is wasted).
+
+1. Build and push **without** `apptainer sign`, and **do not** use `scripts/build-sif.sh` (it
+   refuses to publish unsigned):
+
+   ```bash
+   export APPTAINER_TMPDIR=/scratch APPTAINER_CACHEDIR=/scratch/cache
+   apptainer build vllm-0.21.sif docker://quay.io/<ns>/sardeenz-runner-vllm:0.21
+   apptainer push  vllm-0.21.sif oras://quay.io/<ns>/sardeenz-runners/vllm:0.21
+   ```
+
+2. Set `SARDEENZ_VERIFY_SIF=false` on **both** the control plane (skips verify after the ORAS pull)
+   and the workers (skips verify before exec). Locally that is one line in `.env`, which drives both;
+   on a cluster set the env var on the control-plane and worker Deployments.
+
+Anyone with registry/store write access can then build and publish — no keys, no coordination.
+
+> **Security trade-off.** Access control answers _who may write_; the signature answers _is this SIF
+> byte-for-byte what was built_. With verification off, anything that gains write access (leaked
+> credentials, a bad job, a half-written file) can run code on your GPUs unquestioned. SIFs on an RWX
+> volume / ORAS artifacts also bypass the cluster's normal image-admission checks. Keep an unsigned
+> instance inside a trusted sandbox, and re-enable `SARDEENZ_VERIFY_SIF` with a **shared signing key**
+> (private half in CI/librarian, public half distributed to workers + the control plane — see
+> [`deployment/librarian/`](../../deployment/librarian/)) before exposing or sharing the deployment.
 
 ## Authoring your own catalog
 

@@ -31,7 +31,13 @@ pub struct CircuitBreakerConfig {
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         Ok(Self {
-            listen_addr: parse_env("SARDEENZ_LISTEN_ADDR", "0.0.0.0:8080")?,
+            // Renamed from SARDEENZ_LISTEN_ADDR (which the control plane also reads) so a single
+            // shared .env can set both ports independently; legacy name still honored as fallback.
+            listen_addr: parse_env_with_legacy(
+                "SARDEENZ_PROXY_LISTEN_ADDR",
+                "SARDEENZ_LISTEN_ADDR",
+                "0.0.0.0:8080",
+            )?,
             admin_addr: parse_env("SARDEENZ_ADMIN_ADDR", "0.0.0.0:9099")?,
             redis_url: std::env::var("SARDEENZ_REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
@@ -72,6 +78,21 @@ where
     val.parse::<T>().map_err(|e| anyhow::anyhow!("invalid value for {key}: {e}"))
 }
 
+/// Like [`parse_env`], but reads `legacy_key` when `key` is unset before falling back to `default`.
+fn parse_env_with_legacy<T: std::str::FromStr>(
+    key: &str,
+    legacy_key: &str,
+    default: &str,
+) -> anyhow::Result<T>
+where
+    T::Err: std::fmt::Display,
+{
+    let val = std::env::var(key)
+        .or_else(|_| std::env::var(legacy_key))
+        .unwrap_or_else(|_| default.to_string());
+    val.parse::<T>().map_err(|e| anyhow::anyhow!("invalid value for {key}: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +101,7 @@ mod tests {
     fn default_config_parses() {
         // Clear any env vars that might interfere
         for key in [
+            "SARDEENZ_PROXY_LISTEN_ADDR",
             "SARDEENZ_LISTEN_ADDR",
             "SARDEENZ_ADMIN_ADDR",
             "SARDEENZ_REDIS_URL",

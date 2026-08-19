@@ -9,8 +9,10 @@
  */
 
 import { Redis } from 'ioredis';
+import { loadRootEnv } from '../../server/load-env.js';
 
-const REDIS_URL = 'redis://127.0.0.1:6379';
+loadRootEnv();
+const REDIS_URL = process.env['SARDEENZ_REDIS_URL'] ?? 'redis://127.0.0.1:6379';
 
 // ---------------------------------------------------------------------------
 // Seed data shapes (match what the control plane writes to Redis)

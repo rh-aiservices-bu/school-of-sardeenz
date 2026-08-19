@@ -20,7 +20,10 @@ direnv allow
 # .npmrc enforces engine-strict — npm will refuse to install on Node < 22
 npm install
 
-# Start dev services (Redis/Valkey — see "Dev Services" below)
+# Create your local config (git-ignored) — see "Local configuration" below
+cp .env.example .env
+
+# Start dev services (Redis/Valkey, PostgreSQL — see "Dev Services" below)
 podman compose up -d
 
 # Verify the setup
@@ -28,6 +31,36 @@ make all        # Type-check + lint (includes OpenAPI spec validation)
 make test       # Run test suites (Vitest)
 make format-check  # Prettier + rustfmt (if Rust available)
 ```
+
+## Local Configuration (`.env`)
+
+All configurable ports and connection URLs live in a single git-ignored `.env` file at
+the repo root. Copy [`.env.example`](../../.env.example) to `.env` and change only what you
+need — every value has a built-in default, so an empty (or absent) `.env` reproduces the
+stock ports. This is the place to resolve port clashes with other projects on your machine.
+
+The file drives everything from one source:
+
+- **`compose.yaml`** reads it automatically for the container **host-port mappings**
+  (`SARDEENZ_REDIS_HOST_PORT`, `SARDEENZ_POSTGRES_HOST_PORT`) and Postgres credentials. Only
+  the host side of a mapping changes; the in-container port stays fixed.
+- **Application services** load it at startup: the Rust proxy via `dotenvy`, the Node
+  services (control plane, dashboard BFF, dev worker) via a small per-service `loadRootEnv()`
+  helper (built on `dotenv`), and the Vite dev server via `loadEnv()`.
+
+Values already set in the real environment always take precedence over the file, so
+per-process overrides still work (e.g. `SARDEENZ_WORKER_PORT=9200 make dev-worker`), and the
+loaders are no-ops in production. Integration and E2E suites load the same `.env`, so they
+connect to whatever host ports you configured.
+
+> **Two knobs per backing service.** When you move Redis/Postgres to a non-default host
+> port, update **both** the compose host-port mapping **and** the matching connection URL
+> (`SARDEENZ_REDIS_URL` / `SARDEENZ_DATABASE_URL`) so the apps dial the new port.
+
+> **Note on `SARDEENZ_LISTEN_ADDR`.** The proxy and control plane historically shared this
+> name. They now read `SARDEENZ_PROXY_LISTEN_ADDR` and `SARDEENZ_CONTROL_PLANE_LISTEN_ADDR`
+> respectively (each still falling back to the legacy `SARDEENZ_LISTEN_ADDR`), so a single
+> `.env` can set both independently.
 
 ## Project Structure
 
@@ -46,11 +79,26 @@ sardeenz/
 
 ## Running Components
 
+Run `make` (or `make help`) to see all targets. Common combos (start `make services` first):
+
 ```bash
-make dev-cp         # Control plane (Fastify dev server)
-make dev-dashboard  # Dashboard (Vite dev server)
+make dev-full       # whole stack + ONE worker (proxy, cp, dashboard, BFF, worker)
+make dev            # stack only (proxy, cp, dashboard, BFF) — same as `npm run dev`; pair with your own worker
+make dev-worker     # a single worker on its own (mode/ports from .env)
+```
+
+Or start pieces individually:
+
+```bash
+make dev-cp         # Control plane (Fastify dev server, :3000)
+make dev-bff        # Dashboard BFF server (:4000) — the dashboard's /api backend
+make dev-dashboard  # Dashboard Vite client (:5173) — needs the BFF too (dev-bff / dev)
 make dev-proxy      # Proxy (cargo watch, requires Rust)
 ```
+
+> The dashboard is two processes: the Vite client **and** the BFF. `make dev-dashboard` starts only
+> the client (it proxies `/api` to the BFF), so run `make dev-bff` alongside it — or just use
+> `make dev` / `make dev-full`, which start both.
 
 ## Dev Services
 
@@ -77,24 +125,30 @@ Docker Compose works identically — replace `podman` with `docker`.
 
 ### Services
 
-| Service | Image             | Default port | Used by                                                       |
-| ------- | ----------------- | ------------ | ------------------------------------------------------------- |
-| `redis` | `valkey/valkey:8` | 6379         | Proxy (routing map), control plane (state), integration tests |
+Host ports are the defaults; override them in `.env` (see "Local configuration").
 
-Additional services (PostgreSQL, Prometheus) will be added in later phases.
+| Service    | Image             | Default host port | Host-port var                 | Used by                                                       |
+| ---------- | ----------------- | ----------------- | ----------------------------- | ------------------------------------------------------------- |
+| `redis`    | `valkey/valkey:8` | 6379              | `SARDEENZ_REDIS_HOST_PORT`    | Proxy (routing map), control plane (state), integration tests |
+| `postgres` | `postgres:16`     | 5432              | `SARDEENZ_POSTGRES_HOST_PORT` | Control plane (model + budget state)                          |
+
+Prometheus will be added in a later phase.
 
 ### Connecting from code
 
-The default connection URLs match the compose defaults with no extra configuration:
+The default connection URLs match the compose defaults with no extra configuration; change
+them in `.env` if you remap the host ports above:
 
-| Service      | Default URL              |
-| ------------ | ------------------------ |
-| Redis/Valkey | `redis://localhost:6379` |
+| Service      | Default URL                                              | Var                     |
+| ------------ | -------------------------------------------------------- | ----------------------- |
+| Redis/Valkey | `redis://localhost:6379`                                 | `SARDEENZ_REDIS_URL`    |
+| PostgreSQL   | `postgresql://sardeenz:sardeenz@localhost:5432/sardeenz` | `SARDEENZ_DATABASE_URL` |
 
 ## Common Commands
 
 | Command              | Description                               |
 | -------------------- | ----------------------------------------- |
+| `make` / `make help` | List all targets with descriptions        |
 | `make all`           | Type-check and lint everything            |
 | `make lint`          | ESLint + clippy + OpenAPI spec validation |
 | `make lint-specs`    | Validate OpenAPI specs only (Redocly)     |
@@ -104,7 +158,7 @@ The default connection URLs match the compose defaults with no extra configurati
 | `make test`          | Run all test suites (Vitest + cargo test) |
 | `make test-coverage` | Run tests with V8 coverage                |
 | `make codegen`       | Regenerate types from OpenAPI specs       |
-| `make services`      | Start dev services (Redis/Valkey)         |
+| `make services`      | Start dev services (Redis + Postgres)     |
 | `make services-stop` | Stop dev services                         |
 | `make clean`         | Remove all build artifacts                |
 
