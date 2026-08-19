@@ -33,6 +33,19 @@ FROM base AS runtime
 
 ENV NODE_ENV=production
 
+# Apptainer CLI for the runner-catalog import path (SARDEENZ_SIF_IMPORTER=oras runs
+# `apptainer pull oras://…` + `apptainer verify`). Pull/verify are download-only and need no
+# setuid/fuse/userns, so the unprivileged package suffices. Skip this layer if you only ever run
+# the 'stub' importer. Pinned; bump deliberately. For stronger supply-chain guarantees, also pin
+# and verify the .deb sha256 (fetch the release checksums) before installing.
+ARG APPTAINER_VERSION=1.3.6
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates wget && \
+    wget -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb" -O /tmp/apptainer.deb && \
+    apt-get install -y --no-install-recommends /tmp/apptainer.deb && \
+    rm -f /tmp/apptainer.deb && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system --gid 1001 sardeenz && \
     adduser --system --uid 1001 --ingroup sardeenz sardeenz
 

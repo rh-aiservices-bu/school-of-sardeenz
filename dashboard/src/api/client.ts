@@ -9,6 +9,9 @@ type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
 type WorkerDetail = ControlPlaneComponents['schemas']['WorkerDetail'];
 type ErrorResponse = ControlPlaneComponents['schemas']['ErrorResponse'];
 type Notification = ControlPlaneComponents['schemas']['Notification'];
+type RunnerCatalogView = ControlPlaneComponents['schemas']['RunnerCatalogView'];
+type CatalogItem = ControlPlaneComponents['schemas']['CatalogItem'];
+type CatalogItemStatus = ControlPlaneComponents['schemas']['CatalogItemStatus'];
 
 export {
   type ModelInfo,
@@ -19,6 +22,9 @@ export {
   type WorkerInfo,
   type WorkerDetail,
   type Notification,
+  type RunnerCatalogView,
+  type CatalogItem,
+  type CatalogItemStatus,
 };
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
@@ -154,21 +160,29 @@ export const api = {
     getOperations: (params: MetricsParams, signal?: AbortSignal) =>
       request<unknown>(`/metrics/operations?${formatMetricsParams(params)}`, { signal }),
   },
+  catalog: {
+    list: (signal?: AbortSignal) => request<RunnerCatalogView>('/catalog', { signal }),
+    refresh: () => request<RunnerCatalogView>('/catalog/refresh', { method: 'POST' }),
+    import: (id: string) =>
+      request<CatalogItemStatus>(`/catalog/${encodeURIComponent(id)}/import`, { method: 'POST' }),
+    uninstall: (id: string) =>
+      request<void>(`/catalog/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
   notifications: {
     list: (limit?: number, offset?: number, signal?: AbortSignal) => {
       const params = new URLSearchParams();
       if (limit !== undefined) params.set('limit', String(limit));
       if (offset !== undefined) params.set('offset', String(offset));
       const qs = params.toString();
-      return request<{ notifications: Notification[] }>(`/notifications${qs ? `?${qs}` : ''}`, { signal });
+      return request<{ notifications: Notification[] }>(`/notifications${qs ? `?${qs}` : ''}`, {
+        signal,
+      });
     },
     markRead: (id: string) =>
       request<void>(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
-    markAllRead: () =>
-      request<void>('/notifications/read-all', { method: 'POST' }),
+    markAllRead: () => request<void>('/notifications/read-all', { method: 'POST' }),
     remove: (id: string) =>
       request<void>(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    clearAll: () =>
-      request<void>('/notifications', { method: 'DELETE' }),
+    clearAll: () => request<void>('/notifications', { method: 'DELETE' }),
   },
 };

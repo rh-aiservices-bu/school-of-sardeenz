@@ -37,11 +37,7 @@ describe('NotificationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRedis.pipeline.mockReturnValue(createMockPipeline());
-    service = new NotificationService(
-      mockRedis as unknown as Redis,
-      'test',
-      mockLogger,
-    );
+    service = new NotificationService(mockRedis as unknown as Redis, 'test', mockLogger);
   });
 
   describe('createNotification', () => {
@@ -72,10 +68,7 @@ describe('NotificationService', () => {
       const pipelineMock = createMockPipeline();
       mockRedis.pipeline.mockReturnValue(pipelineMock);
       expect(mockRedis.pipeline).toHaveBeenCalled();
-      expect(mockRedis.publish).toHaveBeenCalledWith(
-        'test:notifications',
-        JSON.stringify(result),
-      );
+      expect(mockRedis.publish).toHaveBeenCalledWith('test:notifications', JSON.stringify(result));
 
       vi.restoreAllMocks();
     });
@@ -101,9 +94,9 @@ describe('NotificationService', () => {
       failingPipeline.exec = vi.fn().mockRejectedValue(testError);
       mockRedis.pipeline.mockReturnValue(failingPipeline);
 
-      await expect(
-        service.createNotification({ title: 'Test', variant: 'info' }),
-      ).rejects.toThrow('Redis connection lost');
+      await expect(service.createNotification({ title: 'Test', variant: 'info' })).rejects.toThrow(
+        'Redis connection lost',
+      );
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mockLogger.error).toHaveBeenCalledWith(
@@ -208,7 +201,12 @@ describe('NotificationService', () => {
 
     it('handles notification not found gracefully (no lrem call)', async () => {
       mockRedis.lrange.mockResolvedValue([
-        JSON.stringify({ id: 'other-id', title: 'Other', variant: 'info', timestamp: '2026-06-29T10:00:00.000Z' }),
+        JSON.stringify({
+          id: 'other-id',
+          title: 'Other',
+          variant: 'info',
+          timestamp: '2026-06-29T10:00:00.000Z',
+        }),
       ]);
 
       await service.removeNotification('nonexistent-id');

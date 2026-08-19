@@ -7,4 +7,13 @@ import starLogoWhite from './images/star-white.svg';
 import forkLogo from './images/fork.svg';
 import forkLogoWhite from './images/fork-white.svg';
 
-export { sardeenzIcon, sardeenzLogo, githubLogo, githubLogoWhite, starLogo, starLogoWhite, forkLogo, forkLogoWhite };
+export {
+  sardeenzIcon,
+  sardeenzLogo,
+  githubLogo,
+  githubLogoWhite,
+  starLogo,
+  starLogoWhite,
+  forkLogo,
+  forkLogoWhite,
+};

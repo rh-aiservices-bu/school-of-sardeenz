@@ -467,6 +467,152 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # ---------------------------------------------------------------------------
+  # Runner catalog
+  # ---------------------------------------------------------------------------
+
+  /api/v1/catalog:
+    get:
+      operationId: listCatalog
+      summary: List the runner catalog (merged with import state)
+      description: |
+        Returns the runner catalog loaded from `SARDEENZ_RUNNER_CATALOG_URL`
+        (or a local file in dev), merged with the current contents of the
+        shared module store so each entry carries its import state and whether
+        a newer version is available. Also lists module-store SIFs that are not
+        in the catalog (`unmanagedModules`).
+
+        The control plane caches the catalog; use `POST /api/v1/catalog/refresh`
+        to force a re-fetch.
+      tags:
+        - Catalog
+      responses:
+        "200":
+          description: Catalog retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerCatalogView"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/catalog/refresh:
+    post:
+      operationId: refreshCatalog
+      summary: Re-fetch the runner catalog from its source
+      description: |
+        Forces the control plane to re-fetch the catalog from its configured
+        source and re-merge it against the module store. Returns the refreshed
+        view.
+      tags:
+        - Catalog
+      responses:
+        "200":
+          description: Catalog refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerCatalogView"
+        "502":
+          description: Catalog source could not be fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/catalog/{id}/import:
+    post:
+      operationId: importRunner
+      summary: Import a catalog runner (pull its SIF onto the module store)
+      description: |
+        Starts an asynchronous import of the catalog entry `id`: the control
+        plane pulls the entry's SIF (`apptainer pull <sifName>.sif oras://…`)
+        onto the shared module store, verifies its signature, and publishes it
+        atomically. Progress is reported on the SSE event stream
+        (`CATALOG_IMPORT_*` events). Returns immediately with the item's
+        current status.
+
+        Idempotent while an import is in flight (returns the in-progress
+        status). Re-importing an already-imported entry re-pulls it (used to
+        apply an available update).
+      tags:
+        - Catalog
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Catalog entry id.
+      responses:
+        "202":
+          description: Import accepted and started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogItemStatus"
+        "404":
+          description: No catalog entry with that id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/catalog/{id}:
+    delete:
+      operationId: uninstallRunner
+      summary: Uninstall an imported runner (delete its SIF)
+      description: |
+        Removes the imported SIF for catalog entry `id` from the module store.
+        Rejected with `409` if a runner started from that module is currently
+        running (in use).
+      tags:
+        - Catalog
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Catalog entry id.
+      responses:
+        "204":
+          description: SIF removed successfully
+        "404":
+          description: No such catalog entry or the SIF is not imported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The module is in use by a running runner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
   # Notifications
   # ---------------------------------------------------------------------------
 
@@ -726,6 +872,12 @@ components:
         - EVICTION_TRIGGERED
         - PLACEMENT_COMPLETED
         - NOTIFICATION
+        - CATALOG_REFRESHED
+        - CATALOG_IMPORT_STARTED
+        - CATALOG_IMPORT_PROGRESS
+        - CATALOG_IMPORT_COMPLETED
+        - CATALOG_IMPORT_FAILED
+        - CATALOG_MODULE_REMOVED
 
     NotificationVariant:
       type: string
@@ -1309,6 +1461,152 @@ components:
                 description: Models consuming memory on this worker.
         summary:
           $ref: "#/components/schemas/ClusterMemorySummary"
+
+    # -------------------------------------------------------------------------
+    # Runner catalog
+    # -------------------------------------------------------------------------
+
+    CatalogItemState:
+      type: string
+      description: |
+        Import state of a catalog entry relative to the shared module store.
+
+        - `NOT_IMPORTED` — the SIF is not on the module store
+        - `IMPORTING` — an import (`apptainer pull`) is in flight
+        - `IMPORTED` — the SIF is present and usable
+        - `FAILED` — the last import attempt failed (see `error`)
+      enum:
+        - NOT_IMPORTED
+        - IMPORTING
+        - IMPORTED
+        - FAILED
+
+    CatalogEntry:
+      type: object
+      description: |
+        A single runner published in the catalog. Mirrors the `runners.yaml`
+        schema (see the repo-root sample).
+      required:
+        - id
+        - title
+        - description
+        - runnerType
+        - version
+        - image
+        - sifName
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9_.-]+$"
+          description: Stable unique id for the entry.
+        title:
+          type: string
+          description: Human-readable name shown in the catalog.
+        description:
+          type: string
+          description: One-paragraph summary.
+        engine:
+          type: string
+          description: Engine family (e.g. "vLLM", "Triton").
+        runnerType:
+          type: string
+          description: Runner type identifier (matches the runner contract).
+        version:
+          type: string
+          description: Engine/build version string.
+        image:
+          type: string
+          description: ORAS reference to pull (e.g. "oras://quay.io/ns/repo:tag").
+        sifName:
+          type: string
+          pattern: "^[A-Za-z0-9_.-]+$"
+          description: |
+            Module filename stem → `/modules/<sifName>.sif`; equals the
+            `runtimeModule` the worker agent execs.
+        tags:
+          type: array
+          items:
+            type: string
+          description: Optional free-form labels for filtering.
+        minVRAMGiB:
+          type: integer
+          minimum: 0
+          description: Optional minimum device memory hint (GiB).
+        license:
+          type: string
+          description: Optional SPDX license id.
+        icon:
+          type: string
+          description: Optional URL to an icon.
+
+    CatalogItemStatus:
+      type: object
+      description: The import state of one catalog entry.
+      required:
+        - id
+        - state
+      properties:
+        id:
+          type: string
+          description: Catalog entry id.
+        state:
+          $ref: "#/components/schemas/CatalogItemState"
+        percentComplete:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Import progress (only while `IMPORTING`, best-effort).
+        error:
+          type: string
+          description: Failure detail when `state` is `FAILED`.
+
+    CatalogItem:
+      type: object
+      description: |
+        A catalog entry merged with its current import state. `updateAvailable`
+        is true when the entry is imported but the catalog advertises a
+        different image/version than what is on the store.
+      required:
+        - entry
+        - status
+        - updateAvailable
+      properties:
+        entry:
+          $ref: "#/components/schemas/CatalogEntry"
+        status:
+          $ref: "#/components/schemas/CatalogItemStatus"
+        updateAvailable:
+          type: boolean
+          description: True when an imported entry has a newer catalog version.
+
+    RunnerCatalogView:
+      type: object
+      description: |
+        The catalog merged against the module store: catalog entries with their
+        import state, plus any module-store SIFs not present in the catalog.
+      required:
+        - runners
+        - unmanagedModules
+      properties:
+        source:
+          type: string
+          description: The catalog source (URL or local file path) that was loaded.
+        fetchedAt:
+          type: string
+          format: date-time
+          description: When the catalog was last fetched.
+        runners:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogItem"
+          description: Catalog entries merged with import state.
+        unmanagedModules:
+          type: array
+          items:
+            type: string
+          description: |
+            SIF filename stems present on the module store but not in the
+            catalog (e.g. locally built or manually placed modules).
 
     # -------------------------------------------------------------------------
     # Events

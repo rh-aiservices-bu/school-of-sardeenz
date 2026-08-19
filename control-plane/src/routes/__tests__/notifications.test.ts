@@ -38,6 +38,8 @@ function toDeps(mockNotifications: MockNotifications): RouteDeps {
     deployOrchestration: {} as RouteDeps['deployOrchestration'],
     leaderElection: {} as RouteDeps['leaderElection'],
     notifications: mockNotifications as unknown as RouteDeps['notifications'],
+    catalogService: {} as RouteDeps['catalogService'],
+    moduleStore: {} as RouteDeps['moduleStore'],
     createRunnerClient: vi.fn(),
   };
 }

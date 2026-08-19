@@ -10,6 +10,8 @@ import type { SleepWakeService } from '../services/sleep-wake.js';
 import type { DeployOrchestrationService } from '../services/deploy-orchestration.js';
 import type { LeaderElectionService } from '../services/leader-election.js';
 import type { NotificationService } from '../services/notification.js';
+import type { CatalogService } from '../services/catalog-service.js';
+import type { ModuleStoreService } from '../services/module-store.js';
 import type { RunnerClient } from '../clients/runner.js';
 
 export interface RouteDeps {
@@ -25,5 +27,7 @@ export interface RouteDeps {
   deployOrchestration: DeployOrchestrationService;
   leaderElection: LeaderElectionService;
   notifications: NotificationService;
+  catalogService: CatalogService;
+  moduleStore: ModuleStoreService;
   createRunnerClient: (host: string, port: number) => RunnerClient;
 }

@@ -110,6 +110,14 @@ export function useEventStreamConnection(): EventStreamState {
             }
             break;
           }
+          case ClusterEventType.CATALOG_REFRESHED:
+          case ClusterEventType.CATALOG_IMPORT_STARTED:
+          case ClusterEventType.CATALOG_IMPORT_PROGRESS:
+          case ClusterEventType.CATALOG_IMPORT_COMPLETED:
+          case ClusterEventType.CATALOG_IMPORT_FAILED:
+          case ClusterEventType.CATALOG_MODULE_REMOVED:
+            void queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            break;
           case ClusterEventType.NOTIFICATION:
             // Notification events are handled by NotificationContext
             // Fire a custom event that NotificationContext listens for

@@ -32,6 +32,15 @@ containers/runner-<engine>/Containerfile
    Runner process serving the engine-runner contract + the engine
 ```
 
+## Distributing ready-made SIFs (ORAS + catalog)
+
+Rather than have every operator build SIFs, **official** runners are pushed to an OCI registry as
+**ORAS** artifacts (`apptainer push <engine>-<version>.sif oras://quay.io/<ns>/<repo>:<tag>`) and
+listed in a [`runners.yaml`](../runners.yaml) catalog. Operators **Import** them from the dashboard,
+which has the control plane `apptainer pull oras://…` the SIF onto the module store (verifying the
+signature). See [`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md). The librarian
+build/sign flow below remains for building your own SIFs.
+
 Key rules:
 
 - **Conversion is a librarian/CI step, never a serving worker.** It needs node-local scratch

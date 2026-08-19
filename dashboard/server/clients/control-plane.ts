@@ -97,6 +97,22 @@ export class ControlPlaneClient {
     }
   }
 
+  async listCatalog(): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/catalog');
+  }
+
+  async refreshCatalog(): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/catalog/refresh');
+  }
+
+  async importRunner(id: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/catalog/${encodeURIComponent(id)}/import`);
+  }
+
+  async uninstallRunner(id: string): Promise<ProxyResult> {
+    return this.request('DELETE', `/api/v1/catalog/${encodeURIComponent(id)}`);
+  }
+
   async listNotifications(limit?: number, offset?: number): Promise<ProxyResult> {
     const params = new URLSearchParams();
     if (limit !== undefined) params.set('limit', String(limit));

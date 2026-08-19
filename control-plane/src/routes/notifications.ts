@@ -18,28 +18,22 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: RouteDeps
     return reply.code(200).send({ notifications });
   });
 
-  app.post<{ Params: { id: string } }>(
-    '/api/v1/notifications/:id/read',
-    async (request, reply) => {
-      const { id } = request.params;
-      await deps.notifications.markAsRead(id);
-      return reply.code(204).send();
-    },
-  );
+  app.post<{ Params: { id: string } }>('/api/v1/notifications/:id/read', async (request, reply) => {
+    const { id } = request.params;
+    await deps.notifications.markAsRead(id);
+    return reply.code(204).send();
+  });
 
   app.post('/api/v1/notifications/read-all', async (_request, reply) => {
     await deps.notifications.markAllAsRead();
     return reply.code(204).send();
   });
 
-  app.delete<{ Params: { id: string } }>(
-    '/api/v1/notifications/:id',
-    async (request, reply) => {
-      const { id } = request.params;
-      await deps.notifications.removeNotification(id);
-      return reply.code(204).send();
-    },
-  );
+  app.delete<{ Params: { id: string } }>('/api/v1/notifications/:id', async (request, reply) => {
+    const { id } = request.params;
+    await deps.notifications.removeNotification(id);
+    return reply.code(204).send();
+  });
 
   app.delete('/api/v1/notifications', async (_request, reply) => {
     await deps.notifications.clearAll();

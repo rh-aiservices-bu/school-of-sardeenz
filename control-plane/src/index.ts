@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, redactUrl } from './config.js';
-import { createRedisClient } from './clients/redis.js';
+import { createRedisClient, redisKey } from './clients/redis.js';
 import { createDatabasePool } from './clients/database.js';
 import { runMigrations } from './clients/migrations.js';
 import { RunnerClient } from './clients/runner.js';
@@ -19,7 +19,11 @@ import { DeployOrchestrationService } from './services/deploy-orchestration.js';
 import { LeaderElectionService } from './services/leader-election.js';
 import { ReconciliationService } from './services/reconciliation.js';
 import { NotificationService } from './services/notification.js';
+import { CatalogService } from './services/catalog-service.js';
+import { ModuleStoreService } from './services/module-store.js';
+import { StubImporter, OrasImporter, type SifImporter } from './services/sif-importer.js';
 import { WorkerClient } from './clients/worker.js';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -70,6 +74,26 @@ async function main(): Promise<void> {
     error: (obj: Record<string, unknown>, msg: string) => console.error(msg, obj),
   };
   const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
+
+  // Runner catalog + SIF import. The importer is pluggable so the control plane stays
+  // runtime-agnostic: 'oras' runs `apptainer pull oras://…` (real), 'stub' writes a placeholder
+  // (dev/CI, no apptainer). Import progress is published on the shared cluster-events channel.
+  const catalogService = new CatalogService(config.runnerCatalogUrl, notificationLogger);
+  const sifImporter: SifImporter =
+    config.sifImporter === 'oras'
+      ? new OrasImporter({ apptainerBin: config.apptainerBin, verifySif: config.verifySif })
+      : new StubImporter();
+  const catalogEventsChannel = redisKey(config.redisKeyPrefix, 'cluster-events');
+  const emitCatalogEvent = (event: ControlPlaneComponents['schemas']['ClusterEvent']): void => {
+    void redis.publish(catalogEventsChannel, JSON.stringify(event)).catch(() => {});
+  };
+  const moduleStore = new ModuleStoreService(
+    config.modulesDir,
+    sifImporter,
+    emitCatalogEvent,
+    notificationLogger,
+    notifications,
+  );
   const deployOrchestration = new DeployOrchestrationService(
     lifecycle,
     routingMap,
@@ -106,6 +130,8 @@ async function main(): Promise<void> {
       deployOrchestration,
       leaderElection,
       notifications,
+      catalogService,
+      moduleStore,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
     },
   });
@@ -128,6 +154,12 @@ async function main(): Promise<void> {
   );
 
   await leaderElection.start();
+  // Only the leader imports (the import route is leader-gated), so only the leader creates temp
+  // files — and only the leader should sweep them. A non-leader sweeping the shared RWX module
+  // store could unlink the leader's in-flight import temp file mid-download.
+  if (leaderElection.isLeader) {
+    await moduleStore.sweepTempFiles();
+  }
   await workerPool.discoverWorkers();
   await memoryBudget.refreshAll();
   reconciliation.start();

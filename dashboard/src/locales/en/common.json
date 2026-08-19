@@ -3,6 +3,7 @@
     "clusterOverview": "Cluster Overview",
     "models": "Models",
     "workers": "Workers",
+    "catalog": "Runner Catalog",
     "metrics": "Metrics"
   },
   "brand": "Sardeenz",

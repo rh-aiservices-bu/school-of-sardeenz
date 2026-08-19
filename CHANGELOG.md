@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Runner catalog (ORAS distribution + in-app import).** Official runner SIFs are published to an
+  OCI registry via ORAS and listed in a `runners.yaml` catalog (repo root is the dev source;
+  `SARDEENZ_RUNNER_CATALOG_URL` defaults to the official `school-of-sardeenz` raw URL). The control
+  plane loads/caches the catalog, merges it against the shared module store (imported state +
+  `updateAvailable` + `unmanagedModules`), and imports on demand via a **pluggable `SifImporter`**
+  — `OrasImporter` (`apptainer pull oras://…` + verify, atomic publish) for real deployments
+  (Kubernetes *or* Podman/VM — the control plane mounts the module store read-write and pulls
+  directly, no K8s Job), and `StubImporter` for local dev/CI (no apptainer). New control-plane
+  endpoints `GET /catalog`, `POST /catalog/refresh`, `POST /catalog/{id}/import` (async, progress
+  on the SSE stream via `CATALOG_*` events), `DELETE /catalog/{id}` (uninstall, guarded against
+  in-use modules). New dashboard **Runner Catalog** page (gallery with imported badges, live import
+  progress, re-import, uninstall confirm, manual refresh) behind a new nav item + BFF proxy.
+  Adds the `sardeenz-control-plane` SA as a second module-store writer (VAP exemption) and installs
+  the unprivileged apptainer CLI in the control-plane image. The librarian build pipeline remains
+  for those who build their own SIFs.
+
 - Phase 4 implementation — SIF runner runtime (in progress):
   - **Cross-model review fixes:** the vLLM shim now keeps a liveness monitor running after READY
     (a post-startup engine crash flips state to `ERROR` instead of reporting healthy forever) and

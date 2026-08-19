@@ -33,7 +33,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('theme', isDarkTheme ? 'dark' : 'light');
   }, [isDarkTheme]);
 
-  const toggleTheme = useCallback(() => setIsDarkTheme(prev => !prev), []);
+  const toggleTheme = useCallback(() => setIsDarkTheme((prev) => !prev), []);
   const setDarkTheme = useCallback((dark: boolean) => setIsDarkTheme(dark), []);
 
   return (
