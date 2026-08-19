@@ -1,0 +1,52 @@
+# Sardeenz runner catalog — the list of available, ready-to-import runner SIFs.
+#
+# Sardeenz's control plane loads this file (from SARDEENZ_RUNNER_CATALOG_URL, default the official
+# school-of-sardeenz catalog; this in-repo copy is the dev/reference source) and presents it in the
+# dashboard. Each entry is a signed SIF published to an OCI registry via ORAS; "Import" runs
+# `apptainer pull <sifName>.sif oras://<image>` onto the shared module store.
+#
+# Schema:
+#   apiVersion: sardeenz.io/v1
+#   kind: RunnerCatalog
+#   runners:
+#     - id:          stable unique id, [A-Za-z0-9_.-]+ (usually == sifName)
+#       title:       human-readable name shown in the catalog
+#       description: one-paragraph summary
+#       engine:      engine family (e.g. "vLLM", "Triton")
+#       runnerType:  runner type identifier (e.g. "vllm") — matches the runner contract
+#       version:     engine/build version string
+#       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>)
+#       sifName:     module filename stem, [A-Za-z0-9_.-]+ → /modules/<sifName>.sif == runtimeModule
+#       tags:        optional list of free-form labels for filtering
+#       minVRAMGiB:  optional minimum device memory hint (GiB)
+#       license:     optional SPDX license id
+#       icon:        optional URL to an icon
+apiVersion: sardeenz.io/v1
+kind: RunnerCatalog
+runners:
+  - id: vllm-0.21
+    title: vLLM 0.21 (+ kvcached)
+    description: >-
+      vLLM 0.21 inference engine with kvcached enabled for elastic, reclaimable KV-cache sharing
+      across co-located runners on one GPU. OpenAI-compatible; supports sleep/wake.
+    engine: vLLM
+    runnerType: vllm
+    version: "0.21"
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
+    sifName: vllm-0.21
+    tags: [llm, cuda, kvcached, openai]
+    minVRAMGiB: 16
+    license: Apache-2.0
+  - id: vllm-0.20
+    title: vLLM 0.20 (+ kvcached)
+    description: >-
+      Previous vLLM line (0.20) with kvcached, kept for models pinned to that engine version.
+      Runs side by side with newer versions — hot-add without recycling workers.
+    engine: vLLM
+    runnerType: vllm
+    version: "0.20"
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20
+    sifName: vllm-0.20
+    tags: [llm, cuda, kvcached, openai]
+    minVRAMGiB: 16
+    license: Apache-2.0

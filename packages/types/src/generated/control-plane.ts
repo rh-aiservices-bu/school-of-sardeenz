@@ -210,6 +210,106 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the runner catalog (merged with import state)
+         * @description Returns the runner catalog loaded from `SARDEENZ_RUNNER_CATALOG_URL`
+         *     (or a local file in dev), merged with the current contents of the
+         *     shared module store so each entry carries its import state and whether
+         *     a newer version is available. Also lists module-store SIFs that are not
+         *     in the catalog (`unmanagedModules`).
+         *
+         *     The control plane caches the catalog; use `POST /api/v1/catalog/refresh`
+         *     to force a re-fetch.
+         */
+        get: operations["listCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-fetch the runner catalog from its source
+         * @description Forces the control plane to re-fetch the catalog from its configured
+         *     source and re-merge it against the module store. Returns the refreshed
+         *     view.
+         */
+        post: operations["refreshCatalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/{id}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a catalog runner (pull its SIF onto the module store)
+         * @description Starts an asynchronous import of the catalog entry `id`: the control
+         *     plane pulls the entry's SIF (`apptainer pull <sifName>.sif oras://…`)
+         *     onto the shared module store, verifies its signature, and publishes it
+         *     atomically. Progress is reported on the SSE event stream
+         *     (`CATALOG_IMPORT_*` events). Returns immediately with the item's
+         *     current status.
+         *
+         *     Idempotent while an import is in flight (returns the in-progress
+         *     status). Re-importing an already-imported entry re-pulls it (used to
+         *     apply an available update).
+         */
+        post: operations["importRunner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Uninstall an imported runner (delete its SIF)
+         * @description Removes the imported SIF for catalog entry `id` from the module store.
+         *     Rejected with `409` if a runner started from that module is currently
+         *     running (in use).
+         */
+        delete: operations["uninstallRunner"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -720,6 +820,90 @@ export type components = {
                 models?: components["schemas"]["WorkerModelInfo"][];
             }[];
             summary: components["schemas"]["ClusterMemorySummary"];
+        };
+        /**
+         * @description Import state of a catalog entry relative to the shared module store.
+         *
+         *     - `NOT_IMPORTED` — the SIF is not on the module store
+         *     - `IMPORTING` — an import (`apptainer pull`) is in flight
+         *     - `IMPORTED` — the SIF is present and usable
+         *     - `FAILED` — the last import attempt failed (see `error`)
+         * @enum {string}
+         */
+        CatalogItemState: CatalogItemState;
+        /**
+         * @description A single runner published in the catalog. Mirrors the `runners.yaml`
+         *     schema (see the repo-root sample).
+         */
+        CatalogEntry: {
+            /** @description Stable unique id for the entry. */
+            id: string;
+            /** @description Human-readable name shown in the catalog. */
+            title: string;
+            /** @description One-paragraph summary. */
+            description: string;
+            /** @description Engine family (e.g. "vLLM", "Triton"). */
+            engine?: string;
+            /** @description Runner type identifier (matches the runner contract). */
+            runnerType: string;
+            /** @description Engine/build version string. */
+            version: string;
+            /** @description ORAS reference to pull (e.g. "oras://quay.io/ns/repo:tag"). */
+            image: string;
+            /**
+             * @description Module filename stem → `/modules/<sifName>.sif`; equals the
+             *     `runtimeModule` the worker agent execs.
+             */
+            sifName: string;
+            /** @description Optional free-form labels for filtering. */
+            tags?: string[];
+            /** @description Optional minimum device memory hint (GiB). */
+            minVRAMGiB?: number;
+            /** @description Optional SPDX license id. */
+            license?: string;
+            /** @description Optional URL to an icon. */
+            icon?: string;
+        };
+        /** @description The import state of one catalog entry. */
+        CatalogItemStatus: {
+            /** @description Catalog entry id. */
+            id: string;
+            state: components["schemas"]["CatalogItemState"];
+            /** @description Import progress (only while `IMPORTING`, best-effort). */
+            percentComplete?: number;
+            /** @description Failure detail when `state` is `FAILED`. */
+            error?: string;
+        };
+        /**
+         * @description A catalog entry merged with its current import state. `updateAvailable`
+         *     is true when the entry is imported but the catalog advertises a
+         *     different image/version than what is on the store.
+         */
+        CatalogItem: {
+            entry: components["schemas"]["CatalogEntry"];
+            status: components["schemas"]["CatalogItemStatus"];
+            /** @description True when an imported entry has a newer catalog version. */
+            updateAvailable: boolean;
+        };
+        /**
+         * @description The catalog merged against the module store: catalog entries with their
+         *     import state, plus any module-store SIFs not present in the catalog.
+         */
+        RunnerCatalogView: {
+            /** @description The catalog source (URL or local file path) that was loaded. */
+            source?: string;
+            /**
+             * Format: date-time
+             * @description When the catalog was last fetched.
+             */
+            fetchedAt?: string;
+            /** @description Catalog entries merged with import state. */
+            runners: components["schemas"]["CatalogItem"][];
+            /**
+             * @description SIF filename stems present on the module store but not in the
+             *     catalog (e.g. locally built or manually placed modules).
+             */
+            unmanagedModules: string[];
         };
         /**
          * @description An event emitted on the SSE stream. The `type` field determines
@@ -1256,6 +1440,162 @@ export interface operations {
             };
         };
     };
+    listCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Catalog retrieved successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerCatalogView"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    refreshCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Catalog refreshed successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerCatalogView"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Catalog source could not be fetched */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    importRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Catalog entry id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import accepted and started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogItemStatus"];
+                };
+            };
+            /** @description No catalog entry with that id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    uninstallRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Catalog entry id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SIF removed successfully */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such catalog entry or the SIF is not imported */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The module is in use by a running runner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listNotifications: {
         parameters: {
             query?: {
@@ -1512,7 +1852,13 @@ export enum ClusterEventType {
     WORKER_MEMORY_UPDATED = "WORKER_MEMORY_UPDATED",
     EVICTION_TRIGGERED = "EVICTION_TRIGGERED",
     PLACEMENT_COMPLETED = "PLACEMENT_COMPLETED",
-    NOTIFICATION = "NOTIFICATION"
+    NOTIFICATION = "NOTIFICATION",
+    CATALOG_REFRESHED = "CATALOG_REFRESHED",
+    CATALOG_IMPORT_STARTED = "CATALOG_IMPORT_STARTED",
+    CATALOG_IMPORT_PROGRESS = "CATALOG_IMPORT_PROGRESS",
+    CATALOG_IMPORT_COMPLETED = "CATALOG_IMPORT_COMPLETED",
+    CATALOG_IMPORT_FAILED = "CATALOG_IMPORT_FAILED",
+    CATALOG_MODULE_REMOVED = "CATALOG_MODULE_REMOVED"
 }
 export enum NotificationVariant {
     success = "success",
@@ -1524,4 +1870,10 @@ export enum NotificationSourceType {
     model = "model",
     worker = "worker",
     system = "system"
+}
+export enum CatalogItemState {
+    NOT_IMPORTED = "NOT_IMPORTED",
+    IMPORTING = "IMPORTING",
+    IMPORTED = "IMPORTED",
+    FAILED = "FAILED"
 }
