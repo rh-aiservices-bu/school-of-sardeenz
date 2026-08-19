@@ -119,11 +119,11 @@ describe('catalog routes', () => {
     expect(moduleStore.uninstall).not.toHaveBeenCalled();
   });
 
-  it('DELETE allows uninstall when the running model is a different version', async () => {
+  it('DELETE allows uninstall when only a different runnerType is running', async () => {
     const { app: a, moduleStore } = buildApp({
       importedStems: new Set(['vllm-0.21']),
       activeStates: [{ modelName: 'm1', state: ModelLifecycleState.ACTIVE }],
-      modelRecords: [{ name: 'm1', runnerType: 'vllm', engineConfig: { version: '0.20' } }],
+      modelRecords: [{ name: 'm1', runnerType: 'triton', engineConfig: null }],
     });
     const res = await a.inject({ method: 'DELETE', url: '/api/v1/catalog/vllm-0.21' });
     expect(res.statusCode).toBe(204);

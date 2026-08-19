@@ -33,6 +33,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     } catch (err) {
       throw ControlPlaneError.catalogFetchFailed(err instanceof Error ? err.message : String(err));
     }
+    deps.moduleStore.notifyCatalogRefreshed();
     return reply.code(200).send(await view(snapshot));
   });
 
@@ -54,7 +55,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     const entry = snapshot.entries.find((e) => e.id === request.params.id);
     if (!entry) throw ControlPlaneError.catalogEntryNotFound(request.params.id);
 
-    if (await isEntryInUse(deps, entry.runnerType, entry.sifName)) {
+    if (await isEntryInUse(deps, entry.runnerType)) {
       throw ControlPlaneError.moduleInUse(entry.id);
     }
 
@@ -67,11 +68,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
 // A module is in use if a non-STOPPED model resolves to it. Model lifecycle state carries the
 // runner endpoint but not the module, so we cross-reference the model repository for runnerType +
 // engineConfig.version (see isModuleInUse for the conservative matching rule).
-async function isEntryInUse(
-  deps: RouteDeps,
-  runnerType: string,
-  sifName: string,
-): Promise<boolean> {
+async function isEntryInUse(deps: RouteDeps, runnerType: string): Promise<boolean> {
   const states = await deps.lifecycle.getAllStates();
   const activeNames = new Set(
     states.filter((s) => s.state !== ModelLifecycleState.STOPPED).map((s) => s.modelName),
@@ -81,13 +78,7 @@ async function isEntryInUse(
   const records = await deps.modelRepository.findAll();
   const active: ActiveRunnerInfo[] = records
     .filter((r) => activeNames.has(r.name))
-    .map((r) => {
-      const version = r.engineConfig?.version;
-      return {
-        runnerType: r.runnerType,
-        version: typeof version === 'string' ? version : undefined,
-      };
-    });
+    .map((r) => ({ runnerType: r.runnerType }));
 
-  return isModuleInUse({ runnerType, sifName }, active);
+  return isModuleInUse({ runnerType }, active);
 }

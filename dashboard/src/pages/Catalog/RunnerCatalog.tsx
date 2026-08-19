@@ -89,7 +89,7 @@ function RunnerCard({
   isUninstallPending: boolean;
 }) {
   const { t } = useTranslation('catalog');
-  const { entry, status, updateAvailable } = item;
+  const { entry, status } = item;
   const imported = status.state === CatalogItemState.IMPORTED;
   const importing = status.state === CatalogItemState.IMPORTING;
 
@@ -118,13 +118,6 @@ function RunnerCard({
               ))}
             </LabelGroup>
           </StackItem>
-          {updateAvailable && (
-            <StackItem>
-              <Label color="orange" isCompact>
-                {t('state.updateAvailable')}
-              </Label>
-            </StackItem>
-          )}
           {importing && (
             <StackItem>
               <Progress
@@ -158,15 +151,16 @@ function RunnerCard({
                 </Button>
               </FlexItem>
             )}
-            {imported && updateAvailable && (
+            {imported && (
               <FlexItem>
                 <Button
                   variant="secondary"
                   icon={<SyncAltIcon />}
                   isDisabled={isImportPending}
+                  isLoading={isImportPending}
                   onClick={() => onImport(entry.id)}
                 >
-                  {t('actions.update')}
+                  {t('actions.reimport')}
                 </Button>
               </FlexItem>
             )}
@@ -261,13 +255,24 @@ export function RunnerCatalog() {
 
         {refresh.isError && (
           <StackItem>
-            <Alert
-              variant="warning"
-              isInline
-              title={t('errors.refreshFailed')}
-              actionClose={undefined}
-            >
+            <Alert variant="warning" isInline title={t('errors.refreshFailed')}>
               {refresh.error instanceof Error ? refresh.error.message : ''}
+            </Alert>
+          </StackItem>
+        )}
+
+        {importRunner.isError && (
+          <StackItem>
+            <Alert variant="danger" isInline title={t('errors.importFailed')}>
+              {importRunner.error instanceof Error ? importRunner.error.message : ''}
+            </Alert>
+          </StackItem>
+        )}
+
+        {uninstallRunner.isError && (
+          <StackItem>
+            <Alert variant="danger" isInline title={t('errors.uninstallFailed')}>
+              {uninstallRunner.error instanceof Error ? uninstallRunner.error.message : ''}
             </Alert>
           </StackItem>
         )}
@@ -286,8 +291,12 @@ export function RunnerCatalog() {
                   isAdmin={isAdmin}
                   onImport={(id) => importRunner.mutate(id)}
                   onUninstall={setConfirmUninstall}
-                  isImportPending={importRunner.isPending}
-                  isUninstallPending={uninstallRunner.isPending}
+                  isImportPending={
+                    importRunner.isPending && importRunner.variables === item.entry.id
+                  }
+                  isUninstallPending={
+                    uninstallRunner.isPending && uninstallRunner.variables === item.entry.id
+                  }
                 />
               ))}
             </Gallery>

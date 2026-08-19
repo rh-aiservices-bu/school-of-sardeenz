@@ -79,15 +79,26 @@ export class CatalogService {
     }
 
     const entries: CatalogEntry[] = [];
-    const seen = new Set<string>();
+    const seenIds = new Set<string>();
+    const seenSifNames = new Set<string>();
     for (const raw of runners) {
       const entry = this.validateEntry(raw);
       if (!entry) continue;
-      if (seen.has(entry.id)) {
+      if (seenIds.has(entry.id)) {
         this.logger.warn({ id: entry.id }, 'Duplicate catalog entry id — skipping');
         continue;
       }
-      seen.add(entry.id);
+      // Two entries sharing a sifName would alias the same module file (import/uninstall of one
+      // would flip the other's state, and concurrent imports would race the same path).
+      if (seenSifNames.has(entry.sifName)) {
+        this.logger.warn(
+          { id: entry.id, sifName: entry.sifName },
+          'Duplicate catalog sifName — skipping',
+        );
+        continue;
+      }
+      seenIds.add(entry.id);
+      seenSifNames.add(entry.sifName);
       entries.push(entry);
     }
     return entries;

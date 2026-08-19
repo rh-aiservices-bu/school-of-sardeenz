@@ -153,6 +153,7 @@ async function main(): Promise<void> {
     notifications,
   );
 
+  await moduleStore.sweepTempFiles();
   await leaderElection.start();
   await workerPool.discoverWorkers();
   await memoryBudget.refreshAll();

@@ -1,12 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { CatalogItemState } from '@sardeenz/types';
-import {
-  buildCatalogView,
-  compareVersions,
-  isModuleInUse,
-  type ActiveRunnerInfo,
-} from '../catalog-view.js';
+import { buildCatalogView, isModuleInUse, type ActiveRunnerInfo } from '../catalog-view.js';
 import type { CatalogEntry, CatalogSnapshot } from '../catalog-service.js';
 
 function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -25,16 +20,6 @@ function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
 function snapshot(entries: CatalogEntry[]): CatalogSnapshot {
   return { source: 'test', fetchedAt: '2026-01-01T00:00:00Z', entries };
 }
-
-describe('compareVersions', () => {
-  it('orders numeric versions', () => {
-    expect(compareVersions('0.21', '0.20')).toBe(1);
-    expect(compareVersions('0.20', '0.21')).toBe(-1);
-    expect(compareVersions('0.21', '0.21')).toBe(0);
-    expect(compareVersions('0.9', '0.10')).toBe(-1); // numeric, not lexical
-    expect(compareVersions('1.0', '0.99')).toBe(1);
-  });
-});
 
 describe('buildCatalogView', () => {
   it('marks entries imported when the SIF stem is present', () => {
@@ -57,7 +42,7 @@ describe('buildCatalogView', () => {
     expect(view.runners[0].status.percentComplete).toBe(42);
   });
 
-  it('flags updateAvailable on an imported older version when a newer one is in the catalog', () => {
+  it('does not flag updateAvailable for coexisting versions (distinct immutable modules)', () => {
     const entries = [
       entry({ id: 'vllm-0.20', version: '0.20', sifName: 'vllm-0.20' }),
       entry({ id: 'vllm-0.21', version: '0.21', sifName: 'vllm-0.21' }),
@@ -65,7 +50,7 @@ describe('buildCatalogView', () => {
     const view = buildCatalogView(snapshot(entries), new Set(['vllm-0.20']), new Map());
     const older = view.runners.find((r) => r.entry.id === 'vllm-0.20');
     expect(older?.status.state).toBe(CatalogItemState.IMPORTED);
-    expect(older?.updateAvailable).toBe(true);
+    expect(older?.updateAvailable).toBe(false);
   });
 
   it('lists module-store SIFs not in the catalog as unmanagedModules', () => {
@@ -79,22 +64,18 @@ describe('buildCatalogView', () => {
 });
 
 describe('isModuleInUse', () => {
-  const e = { runnerType: 'vllm', sifName: 'vllm-0.20' };
+  const e = { runnerType: 'vllm' };
 
   it('is false when no active runner shares the runnerType', () => {
-    const active: ActiveRunnerInfo[] = [{ runnerType: 'triton', version: '2.42' }];
+    const active: ActiveRunnerInfo[] = [{ runnerType: 'triton' }];
     expect(isModuleInUse(e, active)).toBe(false);
   });
 
-  it('is true when an active runner resolves to the exact module', () => {
-    expect(isModuleInUse(e, [{ runnerType: 'vllm', version: '0.20' }])).toBe(true);
+  it('is false when there are no active runners', () => {
+    expect(isModuleInUse(e, [])).toBe(false);
   });
 
-  it('allows uninstalling a different version of the same runnerType', () => {
-    expect(isModuleInUse(e, [{ runnerType: 'vllm', version: '0.21' }])).toBe(false);
-  });
-
-  it('conservatively blocks when the active version is unknown', () => {
+  it('conservatively blocks whenever a running model uses the same runnerType', () => {
     expect(isModuleInUse(e, [{ runnerType: 'vllm' }])).toBe(true);
   });
 });

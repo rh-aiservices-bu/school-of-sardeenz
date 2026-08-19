@@ -81,6 +81,17 @@ runners:
     expect(snap.entries).toHaveLength(1);
   });
 
+  it('deduplicates entries by sifName (aliasing the same module file)', async () => {
+    const yaml = `
+runners:
+  - { id: a, title: A, description: d, runnerType: vllm, version: "1", image: oras://x:1, sifName: shared }
+  - { id: b, title: B, description: d, runnerType: vllm, version: "2", image: oras://x:2, sifName: shared }
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries.map((e) => e.id)).toEqual(['a']);
+  });
+
   it('throws when the runners array is missing', async () => {
     const svc = new CatalogService('/c.yaml', logger, {
       readFile: () => Promise.resolve('apiVersion: x'),

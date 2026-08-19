@@ -3,7 +3,7 @@
   "source": "Source: {{source}}",
   "actions": {
     "import": "Import",
-    "update": "Update",
+    "reimport": "Re-import",
     "uninstall": "Uninstall",
     "refresh": "Refresh"
   },
@@ -11,8 +11,7 @@
     "imported": "Imported",
     "importing": "Importing",
     "notImported": "Not imported",
-    "failed": "Failed",
-    "updateAvailable": "Update available"
+    "failed": "Failed"
   },
   "card": {
     "minVram": "{{gib}} GiB VRAM"
@@ -31,6 +30,8 @@
   },
   "errors": {
     "failedToLoad": "Failed to load the runner catalog",
-    "refreshFailed": "Failed to refresh the catalog"
+    "refreshFailed": "Failed to refresh the catalog",
+    "importFailed": "Failed to import the runner",
+    "uninstallFailed": "Failed to uninstall the runner"
   }
 }

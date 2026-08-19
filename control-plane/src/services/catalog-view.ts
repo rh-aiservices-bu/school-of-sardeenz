@@ -1,39 +1,9 @@
 import { CatalogItemState, type ControlPlaneComponents } from '@sardeenz/types';
-import type { CatalogEntry, CatalogSnapshot } from './catalog-service.js';
+import type { CatalogSnapshot } from './catalog-service.js';
 
 type RunnerCatalogView = ControlPlaneComponents['schemas']['RunnerCatalogView'];
 type CatalogItem = ControlPlaneComponents['schemas']['CatalogItem'];
 type CatalogItemStatus = ControlPlaneComponents['schemas']['CatalogItemStatus'];
-
-// Numeric-aware version compare: "0.21" > "0.20" > "0.9". Falls back to string compare per token.
-export function compareVersions(a: string, b: string): number {
-  const ta = a.split(/[^0-9A-Za-z]+/);
-  const tb = b.split(/[^0-9A-Za-z]+/);
-  const len = Math.max(ta.length, tb.length);
-  for (let i = 0; i < len; i++) {
-    const sa = ta[i] ?? '';
-    const sb = tb[i] ?? '';
-    const na = Number(sa);
-    const nb = Number(sb);
-    const bothNum = sa !== '' && sb !== '' && !Number.isNaN(na) && !Number.isNaN(nb);
-    if (bothNum) {
-      if (na !== nb) return na < nb ? -1 : 1;
-    } else if (sa !== sb) {
-      return sa < sb ? -1 : 1;
-    }
-  }
-  return 0;
-}
-
-// True when the catalog offers a newer version of the same runnerType than this (imported) entry.
-function hasNewerSibling(entry: CatalogEntry, entries: CatalogEntry[]): boolean {
-  return entries.some(
-    (other) =>
-      other.id !== entry.id &&
-      other.runnerType === entry.runnerType &&
-      compareVersions(other.version, entry.version) > 0,
-  );
-}
 
 // Merge the catalog snapshot with module-store contents + transient import states into the API view.
 export function buildCatalogView(
@@ -53,9 +23,10 @@ export function buildCatalogView(
           ? CatalogItemState.IMPORTED
           : CatalogItemState.NOT_IMPORTED,
       } satisfies CatalogItemStatus);
-    const updateAvailable =
-      status.state === CatalogItemState.IMPORTED && hasNewerSibling(entry, snapshot.entries);
-    return { entry, status, updateAvailable };
+    // updateAvailable is reserved for future registry-digest staleness detection. Versions are
+    // published as distinct, immutable SIF modules that coexist side by side (a newer version is a
+    // separate catalog entry, not an in-place update), so there is no sibling-version "update".
+    return { entry, status, updateAvailable: false };
   });
 
   const unmanagedModules = [...importedStems].filter((stem) => !catalogStems.has(stem)).sort();
@@ -71,20 +42,16 @@ export function buildCatalogView(
 // --- uninstall in-use guard --------------------------------------------------------------------
 export interface ActiveRunnerInfo {
   runnerType: string;
-  version?: string;
 }
 
-// Conservative: block uninstall if a running model uses the same runnerType and either resolves to
-// this exact module or its version is unknown (can't prove it's a different version). Precise
-// per-module tracking would require recording runtimeModule on the model (a future enhancement).
-export function isModuleInUse(
-  entry: { runnerType: string; sifName: string },
-  active: ActiveRunnerInfo[],
-): boolean {
-  for (const a of active) {
-    if (a.runnerType !== entry.runnerType) continue;
-    if (a.version === undefined) return true;
-    if (`${a.runnerType}-${a.version}` === entry.sifName) return true;
-  }
-  return false;
+// Conservative and SOUND: block uninstall if any running model uses the entry's runnerType.
+//
+// We cannot precisely map a running model to a specific SIF module today — a deploy records
+// runnerType (and a free-form engineConfig) but not the resolved runtimeModule/sifName, and the
+// sifName↔version relationship is a naming convention nothing enforces. Matching on runnerType
+// alone therefore over-blocks (you must stop dependent models before uninstalling any version of
+// that engine) but never deletes a SIF backing a live runner. Precise per-module guarding needs
+// the resolved runtimeModule recorded on the model at deploy time (a future enhancement).
+export function isModuleInUse(entry: { runnerType: string }, active: ActiveRunnerInfo[]): boolean {
+  return active.some((a) => a.runnerType === entry.runnerType);
 }

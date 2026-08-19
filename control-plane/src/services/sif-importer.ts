@@ -41,25 +41,49 @@ export class StubImporter implements SifImporter {
 // a finished squashfs file (no hardlink-heavy OCI unpack), so it can write straight to the module
 // store's temp path — unlike the librarian build path, no node-local scratch is required. ---------
 export type RunResult = { code: number; stderr: string };
-export type RunFn = (command: string, args: string[]) => Promise<RunResult>;
+export type RunFn = (command: string, args: string[], timeoutMs?: number) => Promise<RunResult>;
 
-const defaultRun: RunFn = (command, args) =>
+// Default pull/verify timeout. Generous — a cold pull of a multi-GB SIF over a shared FS can take a
+// while — but bounded so a stalled/hung apptainer never wedges an import at IMPORTING forever.
+const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
+
+const defaultRun: RunFn = (command, args, timeoutMs = DEFAULT_RUN_TIMEOUT_MS) =>
   new Promise((resolve) => {
     const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
+    let settled = false;
+    const finish = (result: RunResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      // Kill the hung process (SIGKILL shortly after) so the import fails rather than hangs.
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 5_000).unref();
+      finish({ code: -1, stderr: `${stderr}\ntimed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    timer.unref();
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
       if (stderr.length > 8192) stderr = stderr.slice(-8192);
     });
-    child.once('error', (err) => resolve({ code: -1, stderr: err.message }));
-    child.once('exit', (code) => resolve({ code: code ?? -1, stderr }));
+    child.once('error', (err) => finish({ code: -1, stderr: err.message }));
+    child.once('exit', (code) => finish({ code: code ?? -1, stderr }));
   });
+
+export interface OrasImporterConfig {
+  apptainerBin: string;
+  verifySif: boolean;
+  pullTimeoutMs?: number;
+}
 
 export class OrasImporter implements SifImporter {
   readonly kind = 'oras';
 
   constructor(
-    private readonly config: { apptainerBin: string; verifySif: boolean },
+    private readonly config: OrasImporterConfig,
     private readonly run: RunFn = defaultRun,
   ) {}
 
@@ -68,19 +92,22 @@ export class OrasImporter implements SifImporter {
       throw new Error(`Catalog image is not an ORAS reference: ${entry.image}`);
     }
     opts.onProgress(5);
-    const pull = await this.run(this.config.apptainerBin, [
-      'pull',
-      '--force',
-      opts.tmpPath,
-      entry.image,
-    ]);
+    const pull = await this.run(
+      this.config.apptainerBin,
+      ['pull', '--force', opts.tmpPath, entry.image],
+      this.config.pullTimeoutMs,
+    );
     if (pull.code !== 0) {
       throw new Error(`apptainer pull failed (exit ${pull.code}): ${pull.stderr.trim()}`);
     }
     opts.onProgress(80);
 
     if (this.config.verifySif) {
-      const verify = await this.run(this.config.apptainerBin, ['verify', opts.tmpPath]);
+      const verify = await this.run(
+        this.config.apptainerBin,
+        ['verify', opts.tmpPath],
+        this.config.pullTimeoutMs,
+      );
       if (verify.code !== 0) {
         throw new Error(
           `SIF signature verification failed (exit ${verify.code}): ${verify.stderr.trim()}`,

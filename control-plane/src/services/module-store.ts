@@ -57,6 +57,29 @@ export class ModuleStoreService {
     }
   }
 
+  // Remove leftover import temp files (e.g. from a crash mid-import). Best-effort; call at startup.
+  async sweepTempFiles(): Promise<void> {
+    try {
+      const files = await readdir(this.modulesDir);
+      await Promise.all(
+        files
+          .filter((f) => f.startsWith('.') && f.includes('.sif.tmp.'))
+          .map((f) => unlink(join(this.modulesDir, f)).catch(() => {})),
+      );
+    } catch {
+      // Missing dir or unreadable — nothing to sweep.
+    }
+  }
+
+  // Emit a catalog-refreshed event so other dashboard sessions re-fetch the merged view.
+  notifyCatalogRefreshed(): void {
+    this.emit({
+      type: ClusterEventType.CATALOG_REFRESHED,
+      timestamp: new Date().toISOString(),
+      message: 'Runner catalog refreshed',
+    });
+  }
+
   // Transient status for an id, if an import is in flight or last failed.
   getTransientStatus(id: string): CatalogItemStatus | undefined {
     return this.transient.get(id);
