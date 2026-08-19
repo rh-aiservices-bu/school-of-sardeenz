@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoints `GET /catalog`, `POST /catalog/refresh`, `POST /catalog/{id}/import` (async, progress
   on the SSE stream via `CATALOG_*` events), `DELETE /catalog/{id}` (uninstall, guarded against
   in-use modules). New dashboard **Runner Catalog** page (gallery with imported badges, live import
-  progress, update-available, uninstall confirm, manual refresh) behind a new nav item + BFF proxy.
+  progress, re-import, uninstall confirm, manual refresh) behind a new nav item + BFF proxy.
   Adds the `sardeenz-control-plane` SA as a second module-store writer (VAP exemption) and installs
   the unprivileged apptainer CLI in the control-plane image. The librarian build pipeline remains
   for those who build their own SIFs.
