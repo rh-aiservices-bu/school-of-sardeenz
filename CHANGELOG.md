@@ -22,7 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   progress, re-import, uninstall confirm, manual refresh) behind a new nav item + BFF proxy.
   Adds the `sardeenz-control-plane` SA as a second module-store writer (VAP exemption) and installs
   the unprivileged apptainer CLI in the control-plane image. The librarian build pipeline remains
-  for those who build their own SIFs.
+  for those who build their own SIFs. Decision recorded in
+  [ADR-018](docs/architecture/adrs/adr-018-runner-catalog-oras-distribution.md) (amends ADR-017).
 
 - Phase 4 implementation — SIF runner runtime (in progress):
   - **Cross-model review fixes:** the vLLM shim now keeps a liveness monitor running after READY
