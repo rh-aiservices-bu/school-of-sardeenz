@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Phase 4 implementation — SIF runner runtime (in progress):
+  - **Integration gate suite (Task 9):** `tests/gates/run-gates.sh` automates the spike gates as a
+    repeatable, cluster-runnable check. CPU gates 0–6 (userns/seccomp/`/dev/fuse` fingerprint,
+    build+exec, no-copy squashfuse, weights `--bind`, clean SIGTERM, parallel/hot-add) run on any
+    4.15+ Pod; GPU gates 7–9 (`--nv`, namespace sharing, two kvcached runners on one GPU via the
+    worker agent) + the Gate 10 spawn measurement are gated behind `--gpu`/GPU detection. Non-zero
+    exit on any failed gate.
   - **SIF librarian pipeline (Task 7):** `scripts/build-sif.sh` (build → sign → verify → publish,
     node-local temp then atomic rename to a world-readable `0644` versioned SIF) and
     `deployment/librarian/` (Job mounting the module PVC **read-write** + node-local scratch + ≥8Gi
