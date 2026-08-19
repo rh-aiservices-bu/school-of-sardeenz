@@ -17,6 +17,14 @@ target/
 # Rust
 /proxy/target/
 
+# SIF runner images (multi-GB; distributed via ORAS / module store, never committed)
+*.sif
+
+# Local dev SIF store / model weights / scratch (SARDEENZ_MODULES_DIR/WEIGHTS_DIR/SCRATCH_DIR)
+/modules/
+/scratch/
+/weights/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -23,6 +23,10 @@ use crate::state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load the repo-root .env for local dev (walks up from cwd). Never overrides real env vars,
+    // and is a no-op when no .env exists, so it is inert in container/k8s deployments.
+    let _ = dotenvy::dotenv();
+
     let config = Config::from_env()?;
 
     // Structured JSON logging

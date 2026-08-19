@@ -35,6 +35,11 @@ function optionalEnv(name: string, fallback: string): string {
   return process.env[name] ?? fallback;
 }
 
+/** Read `name`, falling back to a legacy env var name, then to a literal default. */
+function optionalEnvWithLegacy(name: string, legacyName: string, fallback: string): string {
+  return process.env[name] ?? process.env[legacyName] ?? fallback;
+}
+
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
@@ -55,7 +60,13 @@ const DEFAULT_CATALOG_URL =
   'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml';
 
 export function loadConfig(): Config {
-  const listenAddr = optionalEnv('SARDEENZ_LISTEN_ADDR', '0.0.0.0:3000');
+  // Renamed from SARDEENZ_LISTEN_ADDR (which the proxy also reads) so a single shared
+  // .env can set the proxy and control-plane ports independently; legacy name still honored.
+  const listenAddr = optionalEnvWithLegacy(
+    'SARDEENZ_CONTROL_PLANE_LISTEN_ADDR',
+    'SARDEENZ_LISTEN_ADDR',
+    '0.0.0.0:3000',
+  );
   const [host, portStr] = listenAddr.includes(':')
     ? [
         listenAddr.slice(0, listenAddr.lastIndexOf(':')),

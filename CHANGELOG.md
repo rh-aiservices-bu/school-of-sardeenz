@@ -8,13 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Single-file local dev configuration (`.env`).** All configurable ports and connection URLs
+  now come from one git-ignored `.env` file at the repo root (documented in a committed
+  `.env.example`), so port clashes with other local projects are resolved in one place. The
+  compose stack reads it automatically for the container **host-port mappings**
+  (`SARDEENZ_REDIS_HOST_PORT`, `SARDEENZ_POSTGRES_HOST_PORT`) and Postgres credentials; every
+  application service loads the same file at startup — the Rust proxy via `dotenvy`, the Node
+  services (control plane, dashboard BFF, dev worker) via a small per-service `loadRootEnv()`
+  helper (`dotenv`), and the Vite dev server via `loadEnv()` (its port and `/api` proxy target,
+  previously hard-coded, are now `SARDEENZ_DASHBOARD_PORT` / `SARDEENZ_BFF_PROXY_TARGET`). Loading
+  never overrides real environment variables and is a no-op in production, so per-process
+  overrides and container/k8s config are unaffected. Integration and E2E suites load the same
+  `.env` and honor the configured host ports. See `docs/development/setup.md`. The `.env.example`
+  also documents `SARDEENZ_RUNNER_CATALOG_URL` (local vs. remote catalog source) and the
+  `SARDEENZ_VERIFY_SIF` toggle, with an **unsigned-SIF experimentation workflow** (build+push with
+  plain `apptainer`, verification off) in `docs/usage/runner-catalog.md` — with a reminder to
+  re-enable signature verification with a shared key before exposing the deployment — plus the
+  worker apptainer-mode overrides (`SARDEENZ_WORKER_MODE`, `SARDEENZ_MODULES_DIR` /
+  `SARDEENZ_WEIGHTS_DIR` / `SARDEENZ_SCRATCH_DIR`) for running real engine SIFs locally. The
+  dev-worker apptainer bind mounts and `HOME` now **derive from** the weights/scratch dirs
+  (`binds` = `[WEIGHTS_DIR, SCRATCH_DIR]`, `HOME` = `<SCRATCH_DIR>/home`) instead of hard-coded
+  `/weights`,`/scratch` — so a local run only needs the dir overrides, not the bind/HOME vars
+  (prod `/weights`,`/scratch` defaults unchanged; `SARDEENZ_APPTAINER_BINDS`/`_HOME` still override).
+
 - **Runner catalog (ORAS distribution + in-app import).** Official runner SIFs are published to an
   OCI registry via ORAS and listed in a `runners.yaml` catalog (repo root is the dev source;
   `SARDEENZ_RUNNER_CATALOG_URL` defaults to the official `school-of-sardeenz` raw URL). The control
   plane loads/caches the catalog, merges it against the shared module store (imported state +
   `updateAvailable` + `unmanagedModules`), and imports on demand via a **pluggable `SifImporter`**
   — `OrasImporter` (`apptainer pull oras://…` + verify, atomic publish) for real deployments
-  (Kubernetes *or* Podman/VM — the control plane mounts the module store read-write and pulls
+  (Kubernetes _or_ Podman/VM — the control plane mounts the module store read-write and pulls
   directly, no K8s Job), and `StubImporter` for local dev/CI (no apptainer). New control-plane
   endpoints `GET /catalog`, `POST /catalog/refresh`, `POST /catalog/{id}/import` (async, progress
   on the SSE stream via `CATALOG_*` events), `DELETE /catalog/{id}` (uninstall, guarded against
@@ -92,12 +115,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ADR-004), [ADR-016](docs/architecture/adrs/adr-016-sif-worker-security-posture.md) (mild custom
   seccomp SCC + `/dev/fuse` + in-container userns), and
   [ADR-017](docs/architecture/adrs/adr-017-runner-image-pipeline.md) (build/sign/convert pipeline
-  + `containers/` layout). Added the implementation task breakdown
-  [`docs/project/phase4.md`](docs/project/phase4.md) and the `containers/` runner-image
-  definitions (`containers/README.md`, `containers/worker-base/`, `containers/runner-vllm/` =
-  base vLLM + kvcached). Reconciled the architecture overview (Runtime Delivery section, ADR
-  index), `overall-plan.md` Phase 4, and `CLAUDE.md` to the SIF model; marked ADR-004 superseded
-  and ADR-010 amended; `easyconfigs/` dropped.
+  - `containers/` layout). Added the implementation task breakdown
+    [`docs/project/phase4.md`](docs/project/phase4.md) and the `containers/` runner-image
+    definitions (`containers/README.md`, `containers/worker-base/`, `containers/runner-vllm/` =
+    base vLLM + kvcached). Reconciled the architecture overview (Runtime Delivery section, ADR
+    index), `overall-plan.md` Phase 4, and `CLAUDE.md` to the SIF model; marked ADR-004 superseded
+    and ADR-010 amended; `easyconfigs/` dropped.
 
 - Phase 4 spike — `docs/project/phase4-apptainer-spike.md`: fail-fast OpenShift feasibility runbook
   for running engine runtimes as Apptainer/SIF modules from a shared RWX volume
@@ -236,6 +259,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Makefile dev-target cleanup.** `make` (no target) now prints a grouped, self-documenting
+  `make help`. Added `make dev` (app stack without workers — same as `npm run dev`) and `make dev-bff`
+  (dashboard BFF only); `make dev-full` now starts the whole stack with **one** worker (two-worker
+  runs remain via `make dev-worker-2`). Target descriptions and `docs/development/setup.md` updated.
+- **Proxy and control-plane bind-address env vars renamed to avoid a collision.** Both used to
+  read `SARDEENZ_LISTEN_ADDR`; they now read `SARDEENZ_PROXY_LISTEN_ADDR` and
+  `SARDEENZ_CONTROL_PLANE_LISTEN_ADDR` respectively, each falling back to the legacy
+  `SARDEENZ_LISTEN_ADDR` when unset. Existing deployments keep working; a single shared `.env`
+  can now set both ports independently.
 - Dev scripts for control-plane and dashboard BFF use `node --watch` for
   automatic reload on file changes.
 - Default database URL includes dev credentials (`sardeenz:sardeenz`).

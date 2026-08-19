@@ -3,6 +3,8 @@ import pg from 'pg';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadRootEnv } from '../../../load-env.js';
+
 import { redisKey } from '../../../clients/redis.js';
 import { runMigrations } from '../../../clients/migrations.js';
 import { ModelRepository } from '../../../services/model-repository.js';
@@ -16,6 +18,9 @@ import { SleepWakeService } from '../../../services/sleep-wake.js';
 import { DeployOrchestrationService } from '../../../services/deploy-orchestration.js';
 import { RunnerClient } from '../../../clients/runner.js';
 import { WorkerClient } from '../../../clients/worker.js';
+
+// Pick up the repo-root .env so integration tests connect to the same host ports as the apps.
+loadRootEnv();
 
 const REDIS_URL = process.env['SARDEENZ_REDIS_URL'] ?? 'redis://localhost:6379/1';
 const DATABASE_URL =
