@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# build-sif.sh — convert a runner OCI image into a signed, world-readable SIF on the module store.
+#
+# Runs in the librarian Job (deployment/librarian), NEVER on a serving worker (ADR-017): the
+# OCI->SIF unpack is hardlink-heavy and needs node-local scratch + several GB of RAM (spike finding:
+# a network-FS APPTAINER_TMPDIR fails the unpack with "unpriv.link ... too many links").
+#
+# Usage:
+#   build-sif.sh --image <ref> --name <engine>-<version> [--modules-dir /modules] [--keyidx 0]
+#
+# Env:
+#   APPTAINER_TMPDIR / APPTAINER_CACHEDIR   node-local scratch (set by the Job to /scratch)
+#   SIF_SIGNING_KEY   path to the private signing key to import (mounted from a Secret)
+#   APPTAINER_PASSPHRASE  passphrase for the signing key (empty for a passphraseless key)
+set -euo pipefail
+
+IMAGE=""
+NAME=""
+MODULES_DIR="/modules"
+KEYIDX="0"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --image) IMAGE="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --modules-dir) MODULES_DIR="$2"; shift 2 ;;
+    --keyidx) KEYIDX="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$IMAGE" || -z "$NAME" ]]; then
+  echo "Usage: build-sif.sh --image <ref> --name <engine>-<version> [--modules-dir DIR] [--keyidx N]" >&2
+  exit 2
+fi
+
+# Reject an accidental "-latest" tag in the SIF name — modules are always versioned (ADR-017).
+if [[ "$NAME" == *latest* ]]; then
+  echo "SIF name must be versioned (<engine>-<version>), not '$NAME'" >&2
+  exit 2
+fi
+
+: "${APPTAINER_TMPDIR:?APPTAINER_TMPDIR must point at node-local scratch}"
+: "${APPTAINER_CACHEDIR:?APPTAINER_CACHEDIR must point at node-local scratch}"
+
+FINAL="${MODULES_DIR}/${NAME}.sif"
+TMP="${MODULES_DIR}/.${NAME}.sif.tmp.$$"
+cleanup() { rm -f "$TMP"; }
+trap cleanup EXIT
+
+echo "==> Importing signing key"
+if [[ -n "${SIF_SIGNING_KEY:-}" && -f "${SIF_SIGNING_KEY}" ]]; then
+  apptainer key import "${SIF_SIGNING_KEY}"
+else
+  echo "SIF_SIGNING_KEY not set or missing — refusing to publish an unsigned SIF" >&2
+  exit 1
+fi
+
+echo "==> Building SIF from ${IMAGE} (scratch: ${APPTAINER_TMPDIR})"
+# Build to a node-local temp first, then copy onto the module store: the build's hardlink-heavy
+# unpack must not touch the network FS.
+LOCAL_SIF="${APPTAINER_TMPDIR}/${NAME}.sif"
+apptainer build --force "${LOCAL_SIF}" "docker://${IMAGE}"
+
+echo "==> Signing SIF (keyidx ${KEYIDX})"
+# APPTAINER_PASSPHRASE (if set) is consumed non-interactively; use a passphraseless librarian key
+# for fully unattended CI.
+apptainer sign --keyidx "${KEYIDX}" "${LOCAL_SIF}"
+
+echo "==> Verifying signature before publish"
+apptainer verify "${LOCAL_SIF}"
+
+echo "==> Publishing to ${FINAL} (write-new-then-rename, chmod 644)"
+# World-readable: the librarian's write UID != the worker's arbitrary read UID (ADR-017).
+install -m 0644 "${LOCAL_SIF}" "$TMP"
+mv -f "$TMP" "$FINAL"   # atomic on the same filesystem
+chmod 0644 "$FINAL"
+
+echo "==> Done: ${FINAL}"
+apptainer verify "$FINAL"

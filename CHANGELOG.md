@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Phase 4 implementation — SIF runner runtime (in progress):
+  - **SIF librarian pipeline (Task 7):** `scripts/build-sif.sh` (build → sign → verify → publish,
+    node-local temp then atomic rename to a world-readable `0644` versioned SIF) and
+    `deployment/librarian/` (Job mounting the module PVC **read-write** + node-local scratch + ≥8Gi
+    RAM, the `sardeenz-librarian` SA — the sole module-store writer — with SCC-use RBAC, and a
+    private-signing-key Secret template). Documents SIF signing-key management (private key only in
+    the librarian Job; public key distributed to workers) and a rotation procedure.
   - **Worker security + Deployment manifests (Task 8):** the repo's first K8s manifests, as a
     Kustomize base under `deployment/sif-runner/` (format decision recorded in `deployment/README.md`
     — Kustomize + raw YAML, `sardeenz-` naming). Ships the `sardeenz-sif-runner` custom SCC
