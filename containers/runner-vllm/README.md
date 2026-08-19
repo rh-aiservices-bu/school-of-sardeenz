@@ -19,7 +19,12 @@ stripped to just the runtime (no Node/app):
    CUDA stubs). No GPU needed to build.
 3. **runtime** — `pip install`s the kvcached wheel and sets `ENABLE_KVCACHED=true` +
    `KVCACHED_AUTOPATCH=1`. kvcached autopatches vLLM at import; **vLLM itself is not statically
-   patched.**
+   patched.** Also `pip install`s the runner-contract shim from `runners/vllm/`
+   (`sardeenz-vllm-runner`), so the SIF serves the [engine-runner
+   contract](../../packages/contracts/specs/engine-runner.yaml) and drives vLLM.
+
+> **Build context is the repo root** (the shim lives at `runners/vllm/`, outside this directory):
+> `podman build -f containers/runner-vllm/Containerfile -t sardeenz-runner-vllm:0.21 .`
 
 ## Pins (keep in sync; re-test on any bump)
 
@@ -37,10 +42,12 @@ compatibility is version-sensitive.
 - **Writable caches:** the base image points `XDG_CACHE_HOME` / `HF_HOME` /
   `FLASHINFER_WORKSPACE_DIR` under `/opt/app-root/src`, which is **read-only inside a SIF**. The
   worker agent redirects them to node-local `/scratch` at exec (spike Gate 9d).
-- **Launch:** `apptainer exec --nv --bind /weights --env ENABLE_KVCACHED=true --env
-  KVCACHED_AUTOPATCH=1 --env XDG_CACHE_HOME=/scratch/cache … <sif> vllm serve /weights/<model>
-  --port <PORT>` (do **not** pass `--env HOME=…`; Apptainer rejects it). Stagger multi-engine
-  starts to avoid concurrent-cold-start host-RAM OOM (spike Gate 9c).
+- **Launch:** `apptainer exec --nv --bind /weights --bind /scratch --env ENABLE_KVCACHED=true
+  --env KVCACHED_AUTOPATCH=1 --env XDG_CACHE_HOME=/scratch/cache … <sif> python3 -m
+  sardeenz_vllm_runner --model /weights/<model> --port <PORT>` (do **not** pass `--env HOME=…`;
+  Apptainer rejects it — set `HOME=/scratch/home` as a process env). The shim launches
+  `vllm serve` internally with `--enable-sleep-mode`. Cold-starts are serialized by the worker
+  agent to avoid concurrent-cold-start host-RAM OOM (spike Gate 9c).
 - **Offline at runtime:** the image keeps `HF_HUB_OFFLINE=1`; weights are pre-staged on the
   weights volume. Only the model-staging step overrides it.
 

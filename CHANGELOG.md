@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Phase 4 implementation — SIF runner runtime (in progress):
+  - **vLLM runner shim (Task 5):** new `runners/vllm/` Python package (`sardeenz-vllm-runner`) that
+    runs inside the vLLM SIF, serves the engine-runner contract (`/health`, `/capabilities`,
+    `/memory-report`, `/sleep`↔`/wake`, `/sleep-status`, `/progress`), and drives `vllm serve`
+    (launched with `--enable-sleep-mode`; sleep/wake via vLLM dev endpoints). Declares
+    `kvCacheElasticSharing` in capabilities when kvcached is enabled; maps `L1_HOST_RAM` → vLLM
+    sleep level 1; propagates SIGTERM to the vLLM process group. The `runner-vllm` Containerfile
+    now installs the shim and defaults its entrypoint to it. Pure CLI/state logic is unit-tested
+    with pytest (no vLLM/torch needed).
   - **Worker agent — launcher abstraction (Task 4):** extracted a `RunnerLauncher` interface from
     the Phase 3.6 worker agent (`runners/dev-worker`). `StubLauncher` keeps the in-process stub
     behaviour (dev); the new `ApptainerLauncher` `apptainer exec`s an engine SIF (prod) — resolves
