@@ -135,10 +135,11 @@ export class RunnerManager {
   }
 
   async stopAll(): Promise<void> {
+    // Stop concurrently: cold-start serialization is a start-time constraint, not a stop-time one,
+    // and draining runners in series would let total teardown exceed the pod's grace period when a
+    // worker hosts several runners. Each stopRunner touches distinct map keys, so this is safe.
     const runnerIds = Array.from(this.runners.keys());
-    for (const runnerId of runnerIds) {
-      await this.stopRunner(runnerId);
-    }
+    await Promise.all(runnerIds.map((runnerId) => this.stopRunner(runnerId)));
   }
 
   getRunner(runnerId: string): RunnerRecord | undefined {

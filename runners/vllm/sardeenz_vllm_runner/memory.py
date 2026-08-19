@@ -2,8 +2,10 @@
 
 Precise per-runner attribution is impossible under kvcached co-tenancy (two runners share a
 device's pool elastically). We report this process's reserved CUDA memory as the used figure and
-the device's total capacity — enough for the control plane's utilization view. Falls back to an
-empty-but-valid report if CUDA/torch is unavailable, so /memory-report never 500s on CPU workers.
+the device's total capacity — enough for the control plane's utilization view. When CUDA/torch is
+unavailable (e.g. a CPU-only worker) this returns an empty ``devices`` list; the caller
+(``app.py``) treats that as "no device memory to report" and answers 409 rather than emitting a
+``MemoryReport`` with an empty ``devices`` array, which the contract forbids (``minItems: 1``).
 """
 
 from __future__ import annotations
