@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Phase 4 implementation — SIF runner runtime (in progress):
+  - **Worker security + Deployment manifests (Task 8):** the repo's first K8s manifests, as a
+    Kustomize base under `deployment/sif-runner/` (format decision recorded in `deployment/README.md`
+    — Kustomize + raw YAML, `sardeenz-` naming). Ships the `sardeenz-sif-runner` custom SCC
+    (restricted-v2 + seccomp `Unconfined`), worker SA + SCC-use RBAC, RWX module/weights PVCs, and
+    the worker `Deployment` (`/dev/fuse` annotation, no `hostUsers:false`, GPU limit, mem
+    req/limit, `fsGroup:0`, `HOME=/scratch/home`, module `readOnly`/weights/scratch/`/dev/shm`
+    mounts, runs the agent `--mode=apptainer` and imports the SIF signing public key for
+    `apptainer verify`). Module-PVC write protection uses a **ValidatingAdmissionPolicy** (chosen
+    mechanism; two-PVC and convention fallbacks documented). Opt-in `ContainerRuntimeConfig` forces
+    `crun` where needed. `worker-base` now installs Node.js for the TypeScript agent.
   - **vLLM runner shim (Task 5):** new `runners/vllm/` Python package (`sardeenz-vllm-runner`) that
     runs inside the vLLM SIF, serves the engine-runner contract (`/health`, `/capabilities`,
     `/memory-report`, `/sleep`↔`/wake`, `/sleep-status`, `/progress`), and drives `vllm serve`

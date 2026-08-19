@@ -1,0 +1,67 @@
+# Module-PVC write protection (Task 8 open question — mechanism CHOSEN: ValidatingAdmissionPolicy).
+#
+# Why this is needed: ServiceAccount RBAC does NOT gate PVC mount mode — any pod that can reference
+# the claim can request `readOnly: false`. Without a guard, a worker (or any pod) could mount the
+# module store read-write and tamper with signed SIFs, defeating the sign-at-build/verify-at-exec
+# supply chain (ADR-017).
+#
+# CHOSEN: a native ValidatingAdmissionPolicy (no extra operator; requires OCP 4.17+/k8s 1.30+,
+# satisfied by the 4.21 target) that DENIES any Pod mounting the `sardeenz-modules` PVC read-write,
+# except the librarian ServiceAccount (which builds/signs SIFs — Task 7).
+#
+# FALLBACK (if VAP is unavailable, e.g. older cluster or Kyverno-only shop): the two-PVC split —
+# a librarian-only build/staging PVC that only the librarian namespace/SA can bind, and a separate
+# module PVC that workers mount `readOnly`. Or, at minimum, the documented convention that Sardeenz
+# worker Deployments always set `readOnly: true` (this repo's manifests do). Pick per cluster.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sardeenz-modules-readonly
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchConditions:
+    # The librarian SA is the only writer of the module store.
+    - name: exclude-librarian
+      expression: >-
+        request.userInfo.username != 'system:serviceaccount:' + object.metadata.namespace + ':sardeenz-librarian'
+  variables:
+    - name: moduleVolumeNames
+      expression: >-
+        object.spec.volumes.filter(v,
+          has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'sardeenz-modules'
+        ).map(v, v.name)
+    - name: allContainers
+      expression: >-
+        object.spec.containers +
+        (has(object.spec.initContainers) ? object.spec.initContainers : []) +
+        (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+  validations:
+    # Every mount of a module volume must be readOnly: true.
+    - expression: >-
+        variables.allContainers.all(c,
+          !has(c.volumeMounts) ||
+          c.volumeMounts.all(m,
+            !(m.name in variables.moduleVolumeNames) || (has(m.readOnly) && m.readOnly == true)
+          )
+        )
+      message: "The sardeenz-modules PVC must be mounted readOnly (only the librarian SA may write it)."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sardeenz-modules-readonly-binding
+spec:
+  policyName: sardeenz-modules-readonly
+  validationActions: ["Deny"]
+  matchResources:
+    # Scope to namespaces labelled for Sardeenz; label the namespace with
+    # `sardeenz.io/module-guard: enforce` to activate.
+    namespaceSelector:
+      matchLabels:
+        sardeenz.io/module-guard: enforce

@@ -1,0 +1,38 @@
+# The mild custom SCC that unlocks in-container user namespaces (ADR-016, spike §5/§9.1).
+# It is restricted-v2 with the single change of permitting seccomp `Unconfined` — that removes the
+# RuntimeDefault seccomp filter that blocks Apptainer's userns creation. NO privilege, NO added
+# caps beyond NET_BIND_SERVICE, NO hostUsers:false. Grant only to the worker ServiceAccount.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: sardeenz-sif-runner
+  annotations:
+    kubernetes.io/description: >-
+      restricted-v2 plus seccomp Unconfined, for Sardeenz worker Pods that run Apptainer with an
+      in-container user namespace to exec engine SIFs. No privilege, no added capabilities.
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+allowedCapabilities: [NET_BIND_SERVICE]
+requiredDropCapabilities: [ALL]
+fsGroup: { type: MustRunAs }
+runAsUser: { type: MustRunAsRange }
+seLinuxContext: { type: MustRunAs }
+supplementalGroups: { type: RunAsAny }
+seccompProfiles: [runtime/default, unconfined]
+readOnlyRootFilesystem: false
+volumes:
+  - configMap
+  - csi
+  - downwardAPI
+  - emptyDir
+  - ephemeral
+  - persistentVolumeClaim
+  - projected
+  - secret
+users: []
+groups: []
