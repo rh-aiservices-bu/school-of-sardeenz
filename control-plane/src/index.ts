@@ -153,8 +153,13 @@ async function main(): Promise<void> {
     notifications,
   );
 
-  await moduleStore.sweepTempFiles();
   await leaderElection.start();
+  // Only the leader imports (the import route is leader-gated), so only the leader creates temp
+  // files — and only the leader should sweep them. A non-leader sweeping the shared RWX module
+  // store could unlink the leader's in-flight import temp file mid-download.
+  if (leaderElection.isLeader) {
+    await moduleStore.sweepTempFiles();
+  }
   await workerPool.discoverWorkers();
   await memoryBudget.refreshAll();
   reconciliation.start();
