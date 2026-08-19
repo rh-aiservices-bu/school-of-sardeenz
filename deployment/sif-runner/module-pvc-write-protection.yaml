@@ -32,8 +32,10 @@ spec:
         request.userInfo.username != 'system:serviceaccount:' + object.metadata.namespace + ':sardeenz-librarian'
   variables:
     - name: moduleVolumeNames
+      # Guard has(object.spec.volumes) — a volumeless Pod would otherwise error the expression and,
+      # with failurePolicy: Fail, be denied outright.
       expression: >-
-        object.spec.volumes.filter(v,
+        (has(object.spec.volumes) ? object.spec.volumes : []).filter(v,
           has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == 'sardeenz-modules'
         ).map(v, v.name)
     - name: allContainers

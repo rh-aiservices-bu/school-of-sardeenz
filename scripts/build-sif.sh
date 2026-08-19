@@ -40,12 +40,19 @@ if [[ "$NAME" == *latest* ]]; then
   exit 2
 fi
 
+# Restrict NAME to a safe filename segment (no path traversal / separators).
+if ! [[ "$NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "Invalid SIF name '$NAME' (allowed: A-Z a-z 0-9 . _ -)" >&2
+  exit 2
+fi
+
 : "${APPTAINER_TMPDIR:?APPTAINER_TMPDIR must point at node-local scratch}"
 : "${APPTAINER_CACHEDIR:?APPTAINER_CACHEDIR must point at node-local scratch}"
 
 FINAL="${MODULES_DIR}/${NAME}.sif"
 TMP="${MODULES_DIR}/.${NAME}.sif.tmp.$$"
-cleanup() { rm -f "$TMP"; }
+LOCAL_SIF="${APPTAINER_TMPDIR}/${NAME}.sif"
+cleanup() { rm -f "$TMP" "$LOCAL_SIF"; }
 trap cleanup EXIT
 
 echo "==> Importing signing key"
@@ -57,9 +64,8 @@ else
 fi
 
 echo "==> Building SIF from ${IMAGE} (scratch: ${APPTAINER_TMPDIR})"
-# Build to a node-local temp first, then copy onto the module store: the build's hardlink-heavy
-# unpack must not touch the network FS.
-LOCAL_SIF="${APPTAINER_TMPDIR}/${NAME}.sif"
+# Build to a node-local temp first (LOCAL_SIF, declared above), then copy onto the module store:
+# the build's hardlink-heavy unpack must not touch the network FS.
 apptainer build --force "${LOCAL_SIF}" "docker://${IMAGE}"
 
 echo "==> Signing SIF (keyidx ${KEYIDX})"

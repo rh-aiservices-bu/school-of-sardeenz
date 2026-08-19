@@ -32,20 +32,30 @@ def _kvcached_enabled() -> bool:
 
 
 async def _health_poller(app: FastAPI) -> None:
-    """Flip STARTING → READY once vLLM serves; flip → ERROR if the subprocess dies."""
+    """Flip STARTING → READY once vLLM serves, then keep watching: flip → ERROR if the subprocess
+    dies at any point (a post-startup crash must not leave the runner reporting READY forever)."""
     engine: VllmEngine = app.state.engine
     status: st.RunnerStatus = app.state.status
     client: httpx.AsyncClient = app.state.client
 
+    # Startup phase.
     status.set_progress(st.PHASE_LOADING_WEIGHTS, 10, "Starting vLLM engine")
-    while True:
-        if not engine.is_alive() and status.state == st.STARTING:
+    while status.state == st.STARTING:
+        if not engine.is_alive():
             status.mark_error("vLLM engine process exited during startup")
             return
         if await engine.poll_ready(client):
             status.mark_ready()
-            return
+            break
         await asyncio.sleep(1.0)
+
+    # Liveness phase — a crash while READY/BUSY/SLEEPING (process alive during sleep) must surface.
+    while True:
+        await asyncio.sleep(2.0)
+        if not engine.is_alive():
+            if status.state in (st.READY, st.BUSY, st.SLEEPING):
+                status.mark_error("vLLM engine process exited")
+            return
 
 
 def create_app(args: RunnerArgs) -> FastAPI:
@@ -89,7 +99,12 @@ def create_app(args: RunnerArgs) -> FastAPI:
     async def get_memory_report() -> JSONResponse:
         if status().state == st.STARTING:
             return _error(409, "MEMORY_UNAVAILABLE", "Runner is still starting")
-        return JSONResponse(memory_report(args.device_type))
+        report = memory_report(args.device_type)
+        # MemoryReport.devices is minItems:1 — if no device could be introspected, fail closed
+        # rather than emit a contract-invalid empty array.
+        if not report["devices"]:
+            return _error(409, "MEMORY_UNAVAILABLE", "No device memory could be introspected")
+        return JSONResponse(report)
 
     @app.get("/progress")
     async def get_progress() -> JSONResponse:

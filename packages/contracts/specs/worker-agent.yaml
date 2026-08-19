@@ -135,6 +135,7 @@ components:
             engine binary to launch.
         runtimeModule:
           type: string
+          pattern: "^[A-Za-z0-9_.-]+$"
           description: |
             Runtime module the worker must exec to serve this model, as
             `<engine>-<version>` (e.g., "vllm-0.21"). The production

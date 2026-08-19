@@ -114,7 +114,9 @@ export function loadConfig(): DevWorkerConfig {
       verifySif: envBool('SARDEENZ_VERIFY_SIF', true),
       healthTimeoutMs: envInt('SARDEENZ_HEALTH_TIMEOUT_MS', 300000),
       healthIntervalMs: envInt('SARDEENZ_HEALTH_INTERVAL_MS', 1000),
-      stopGraceMs: envInt('SARDEENZ_STOP_GRACE_MS', 15000),
+      // Larger than the in-SIF shim's own drain budget so the graceful stop (which reaps vLLM's
+      // separate session) completes before the SIGKILL backstop — see apptainer-launcher.ts.
+      stopGraceMs: envInt('SARDEENZ_STOP_GRACE_MS', 30000),
     },
   };
 }

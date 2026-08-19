@@ -24,6 +24,9 @@ spec:
         io.kubernetes.cri-o.Devices: '/dev/fuse'
     spec:
       serviceAccountName: sardeenz-worker
+      # Allow in-flight runners to drain on pod deletion (the agent SIGTERMs each runner, which
+      # drains vLLM). Must exceed the agent's per-runner stopGraceMs (30s).
+      terminationGracePeriodSeconds: 60
       # NO hostUsers: false — it forces idmapped volume mounts the RWX FS can't provide (spike §9.3).
       # Apptainer creates its own user namespace inside the container instead.
       securityContext:

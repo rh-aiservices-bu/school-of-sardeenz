@@ -62,6 +62,7 @@ describe('ApptainerLauncher.buildExecPlan', () => {
 
     const args = plan.args;
     expect(args[0]).toBe('exec');
+    expect(args).toContain('--cleanenv');
     expect(args).toContain('--nv');
     expect(args.join(' ')).toContain('--bind /weights');
     expect(args.join(' ')).toContain('--bind /scratch');
@@ -124,6 +125,16 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     const { launcher } = makeLauncher();
     expect(() => launcher.buildExecPlan(makeSpec({ runtimeModule: undefined }))).toThrow(
       /Cannot resolve a runtime module/,
+    );
+  });
+
+  it('rejects a runtimeModule with path-traversal characters', () => {
+    const { launcher } = makeLauncher();
+    expect(() => launcher.buildExecPlan(makeSpec({ runtimeModule: '../../etc/evil' }))).toThrow(
+      /Invalid runtime module/,
+    );
+    expect(() => launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm/0.21' }))).toThrow(
+      /Invalid runtime module/,
     );
   });
 });

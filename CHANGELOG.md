@@ -9,6 +9,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Phase 4 implementation — SIF runner runtime (in progress):
+  - **Cross-model review fixes:** the vLLM shim now keeps a liveness monitor running after READY
+    (a post-startup engine crash flips state to `ERROR` instead of reporting healthy forever) and
+    `/memory-report` fails closed (409) rather than emitting a contract-invalid empty `devices`
+    array. The `ApptainerLauncher` validates `runtimeModule` against `^[A-Za-z0-9_.-]+$` (path-
+    traversal guard; `pattern` also added to the contract), passes `--cleanenv` so the worker
+    agent's environment isn't leaked into the engine SIF, and raises its stop grace above the
+    in-SIF shim's drain budget so the graceful stop (which reaps vLLM's separate session)
+    completes before the SIGKILL backstop. The module-write-protection VAP guards `spec.volumes`
+    with `has()` (a volumeless Pod no longer errors the policy into a hard deny), the SCC uses
+    `fsGroup: RunAsAny` so `fsGroup: 0` is actually admitted, the worker Deployment sets
+    `terminationGracePeriodSeconds: 60`, and `build-sif.sh` validates `--name` and cleans up its
+    node-local build artifact.
   - **Integration gate suite (Task 9):** `tests/gates/run-gates.sh` automates the spike gates as a
     repeatable, cluster-runnable check. CPU gates 0–6 (userns/seccomp/`/dev/fuse` fingerprint,
     build+exec, no-copy squashfuse, weights `--bind`, clean SIGTERM, parallel/hot-add) run on any

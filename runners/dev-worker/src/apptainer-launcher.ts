@@ -40,8 +40,12 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
   home: '/scratch/home',
   verifySif: true,
   healthTimeoutMs: 300_000,
+  // Must exceed the in-SIF shim's own shutdown budget (uvicorn drain + its 15s vLLM process-group
+  // stop) so the graceful path — which is the only one that reaps vLLM's separate session — can
+  // finish before this SIGKILL backstop fires. The pod cgroup is the ultimate backstop if the
+  // shim itself wedges.
   healthIntervalMs: 1_000,
-  stopGraceMs: 15_000,
+  stopGraceMs: 30_000,
 };
 
 // Minimal child-process surface the launcher relies on — lets tests inject a fake.
@@ -128,15 +132,24 @@ export class ApptainerLauncher implements RunnerLauncher {
   }
 
   private resolveModule(spec: LaunchSpec): string {
-    if (spec.runtimeModule) return spec.runtimeModule;
-    const version = spec.engineConfig?.version;
-    if (typeof version === 'string' && version.length > 0) {
-      return `${spec.runnerType}-${version}`;
+    const module =
+      spec.runtimeModule ??
+      (typeof spec.engineConfig?.version === 'string' && spec.engineConfig.version.length > 0
+        ? `${spec.runnerType}-${spec.engineConfig.version}`
+        : undefined);
+    if (module === undefined) {
+      throw new Error(
+        `Cannot resolve a runtime module for runner ${spec.runnerId}: ` +
+          `set 'runtimeModule' (e.g. "vllm-0.21") or engineConfig.version`,
+      );
     }
-    throw new Error(
-      `Cannot resolve a runtime module for runner ${spec.runnerId}: ` +
-        `set 'runtimeModule' (e.g. "vllm-0.21") or engineConfig.version`,
-    );
+    // Guard against path traversal — the module becomes a filename segment under modulesDir.
+    if (!/^[A-Za-z0-9_.-]+$/.test(module)) {
+      throw new Error(
+        `Invalid runtime module '${module}' (allowed: A-Z a-z 0-9 . _ -); refusing to build a SIF path`,
+      );
+    }
+    return module;
   }
 
   // Pure command construction — no side effects, unit-tested directly.
@@ -144,7 +157,10 @@ export class ApptainerLauncher implements RunnerLauncher {
     const sifPath = this.resolveSifPath(spec);
     const cacheDir = `${this.config.scratchDir}/cache`;
 
-    const args: string[] = ['exec'];
+    // --cleanenv: do NOT leak the worker agent's environment (Redis URL, other config) into the
+    // engine, and avoid host PATH/PYTHONPATH/LD_LIBRARY_PATH bleeding into the guest. Everything
+    // the runner needs is passed explicitly via --env below (HOME is handled by Apptainer itself).
+    const args: string[] = ['exec', '--cleanenv'];
     const useNv = spec.deviceType?.toUpperCase() === 'CUDA';
     if (useNv) args.push('--nv');
 
