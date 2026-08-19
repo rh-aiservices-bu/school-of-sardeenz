@@ -1,0 +1,27 @@
+# Shared RWX claims. StorageClass is cluster-specific (CephFS/ODF is the target; EFS is proven).
+# The module store is written ONLY by the librarian job (Task 7) and mounted readOnly by workers.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sardeenz-modules
+  labels:
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  accessModes: ['ReadWriteMany']
+  resources:
+    requests:
+      storage: 200Gi
+  # storageClassName: ocs-storagecluster-cephfs   # set per cluster
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sardeenz-weights
+  labels:
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  accessModes: ['ReadWriteMany']
+  resources:
+    requests:
+      storage: 500Gi
+  # storageClassName: ocs-storagecluster-cephfs   # set per cluster

@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sardeenz
+
+resources:
+  - serviceaccount.yaml
+  - job.yaml
+
+# The build script is delivered to the Job as the `sardeenz-librarian-scripts` ConfigMap. It is
+# NOT generated here — kustomize forbids referencing files outside its root, and the canonical
+# script lives at scripts/build-sif.sh (single source of truth, also usable standalone). Create it
+# from the repo root before applying (see README):
+#   oc create configmap sardeenz-librarian-scripts \
+#     --from-file=build-sif.sh=scripts/build-sif.sh -n sardeenz
+
+# NOT included (create out-of-band; never commit a real key):
+#   - signing-key-secret.example.yaml   # template only — see README
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sardeenz
+    includeSelectors: false

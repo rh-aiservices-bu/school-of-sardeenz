@@ -1,0 +1,105 @@
+# Production worker Pod (ADR-016, spike §5). Runs the TypeScript worker agent in --mode=apptainer:
+# it self-registers to Redis, serves the worker-agent management API, and `apptainer exec`s engine
+# SIFs from the read-only module store. Provision manually (scale replicas); autoscaling is out of
+# scope for Phase 4.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sardeenz-worker
+  labels:
+    app.kubernetes.io/name: sardeenz-worker
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sardeenz-worker
+        app.kubernetes.io/part-of: sardeenz
+      annotations:
+        # 4.15+: exposes /dev/fuse to an unprivileged Pod, no device plugin (spike §1).
+        io.kubernetes.cri-o.Devices: '/dev/fuse'
+    spec:
+      serviceAccountName: sardeenz-worker
+      # Allow in-flight runners to drain on pod deletion (the agent SIGTERMs each runner, which
+      # drains vLLM). Must exceed the agent's per-runner stopGraceMs (30s).
+      terminationGracePeriodSeconds: 60
+      # NO hostUsers: false — it forces idmapped volume mounts the RWX FS can't provide (spike §9.3).
+      # Apptainer creates its own user namespace inside the container instead.
+      securityContext:
+        # gid 0 so the arbitrary OpenShift UID can write the /scratch emptyDir (HOME, caches).
+        fsGroup: 0
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: worker
+          # worker-base + the built TypeScript agent layered on top (see this dir's README).
+          image: sardeenz-worker:latest
+          workingDir: /opt/sardeenz/worker-agent
+          command: ['/bin/sh', '-c']
+          args:
+            - |
+              set -eu
+              # Import the SIF signing public key so `apptainer verify` trusts SIFs at exec.
+              if [ -f /etc/sardeenz/keys/sardeenz-sif-signing.pub ]; then
+                apptainer key import /etc/sardeenz/keys/sardeenz-sif-signing.pub || true
+              fi
+              exec node dist/index.js --mode=apptainer
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          env:
+            - { name: SARDEENZ_WORKER_MODE, value: apptainer }
+            # HOME must be writable and node-local (module PVC is readOnly) — spike finding.
+            - { name: HOME, value: /scratch/home }
+            - { name: SARDEENZ_APPTAINER_HOME, value: /scratch/home }
+            - { name: SARDEENZ_MODULES_DIR, value: /modules }
+            - { name: SARDEENZ_WEIGHTS_DIR, value: /weights }
+            - { name: SARDEENZ_SCRATCH_DIR, value: /scratch }
+            - { name: SARDEENZ_VERIFY_SIF, value: 'true' }
+            - name: SARDEENZ_REDIS_URL
+              value: redis://sardeenz-redis:6379
+            - name: SARDEENZ_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              # Cold-starts spike host RAM (torch + CUDA init + graph capture) — spike Gate 9c.
+              memory: 16Gi
+              cpu: '2'
+            limits:
+              memory: 32Gi
+              nvidia.com/gpu: '1'
+          volumeMounts:
+            - { name: modules, mountPath: /modules, readOnly: true }
+            - { name: weights, mountPath: /weights }
+            - { name: scratch, mountPath: /scratch }
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: signing-key, mountPath: /etc/sardeenz/keys, readOnly: true }
+      volumes:
+        - name: modules
+          persistentVolumeClaim:
+            claimName: sardeenz-modules
+            # Consumer workers mount the module store READ-ONLY (write protection: see
+            # module-pvc-write-protection.yaml).
+            readOnly: true
+        - name: weights
+          persistentVolumeClaim:
+            claimName: sardeenz-weights
+        - name: scratch
+          # Node-local scratch for HOME, caches, and Apptainer tmp. NOT medium: Memory (caches can
+          # be large). Sized for engine caches, not OCI unpack (that is the librarian's job).
+          emptyDir:
+            sizeLimit: 50Gi
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        - name: signing-key
+          configMap:
+            name: sardeenz-sif-signing-pubkey
+            optional: true

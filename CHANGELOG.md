@@ -8,6 +8,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Phase 4 implementation — SIF runner runtime (in progress):
+  - **Cross-model review fixes:** the vLLM shim now keeps a liveness monitor running after READY
+    (a post-startup engine crash flips state to `ERROR` instead of reporting healthy forever) and
+    `/memory-report` fails closed (409) rather than emitting a contract-invalid empty `devices`
+    array. The `ApptainerLauncher` validates `runtimeModule` against `^[A-Za-z0-9_.-]+$` (path-
+    traversal guard; `pattern` also added to the contract), passes `--cleanenv` so the worker
+    agent's environment isn't leaked into the engine SIF, and raises its stop grace above the
+    in-SIF shim's drain budget so the graceful stop (which reaps vLLM's separate session)
+    completes before the SIGKILL backstop. The module-write-protection VAP guards `spec.volumes`
+    with `has()` (a volumeless Pod no longer errors the policy into a hard deny), the SCC uses
+    `fsGroup: RunAsAny` so `fsGroup: 0` is actually admitted, the worker Deployment sets
+    `terminationGracePeriodSeconds: 60`, and `build-sif.sh` validates `--name` and cleans up its
+    node-local build artifact.
+  - **Integration gate suite (Task 9):** `tests/gates/run-gates.sh` automates the spike gates as a
+    repeatable, cluster-runnable check. CPU gates 0–6 (userns/seccomp/`/dev/fuse` fingerprint,
+    build+exec, no-copy squashfuse, weights `--bind`, clean SIGTERM, parallel/hot-add) run on any
+    4.15+ Pod; GPU gates 7–9 (`--nv`, namespace sharing, two kvcached runners on one GPU via the
+    worker agent) + the Gate 10 spawn measurement are gated behind `--gpu`/GPU detection. Non-zero
+    exit on any failed gate.
+  - **SIF librarian pipeline (Task 7):** `scripts/build-sif.sh` (build → sign → verify → publish,
+    node-local temp then atomic rename to a world-readable `0644` versioned SIF) and
+    `deployment/librarian/` (Job mounting the module PVC **read-write** + node-local scratch + ≥8Gi
+    RAM, the `sardeenz-librarian` SA — the sole module-store writer — with SCC-use RBAC, and a
+    private-signing-key Secret template). Documents SIF signing-key management (private key only in
+    the librarian Job; public key distributed to workers) and a rotation procedure.
+  - **Worker security + Deployment manifests (Task 8):** the repo's first K8s manifests, as a
+    Kustomize base under `deployment/sif-runner/` (format decision recorded in `deployment/README.md`
+    — Kustomize + raw YAML, `sardeenz-` naming). Ships the `sardeenz-sif-runner` custom SCC
+    (restricted-v2 + seccomp `Unconfined`), worker SA + SCC-use RBAC, RWX module/weights PVCs, and
+    the worker `Deployment` (`/dev/fuse` annotation, no `hostUsers:false`, GPU limit, mem
+    req/limit, `fsGroup:0`, `HOME=/scratch/home`, module `readOnly`/weights/scratch/`/dev/shm`
+    mounts, runs the agent `--mode=apptainer` and imports the SIF signing public key for
+    `apptainer verify`). Module-PVC write protection uses a **ValidatingAdmissionPolicy** (chosen
+    mechanism; two-PVC and convention fallbacks documented). Opt-in `ContainerRuntimeConfig` forces
+    `crun` where needed. `worker-base` now installs Node.js for the TypeScript agent.
+  - **vLLM runner shim (Task 5):** new `runners/vllm/` Python package (`sardeenz-vllm-runner`) that
+    runs inside the vLLM SIF, serves the engine-runner contract (`/health`, `/capabilities`,
+    `/memory-report`, `/sleep`↔`/wake`, `/sleep-status`, `/progress`), and drives `vllm serve`
+    (launched with `--enable-sleep-mode`; sleep/wake via vLLM dev endpoints). Declares
+    `kvCacheElasticSharing` in capabilities when kvcached is enabled; maps `L1_HOST_RAM` → vLLM
+    sleep level 1; propagates SIGTERM to the vLLM process group. The `runner-vllm` Containerfile
+    now installs the shim and defaults its entrypoint to it. Pure CLI/state logic is unit-tested
+    with pytest (no vLLM/torch needed).
+  - **Worker agent — launcher abstraction (Task 4):** extracted a `RunnerLauncher` interface from
+    the Phase 3.6 worker agent (`runners/dev-worker`). `StubLauncher` keeps the in-process stub
+    behaviour (dev); the new `ApptainerLauncher` `apptainer exec`s an engine SIF (prod) — resolves
+    `runtimeModule` → `/modules/<engine>-<version>.sif`, adds `--nv` + `CUDA_VISIBLE_DEVICES` for
+    CUDA, redirects caches to node-local `/scratch`, sets a writable `HOME=/scratch/home` as a
+    process env (never `--env HOME`, which Apptainer rejects), `apptainer verify`s the signature
+    before exec, waits for `/health` READY, and propagates SIGTERM→SIGKILL on stop (spike Gate 5).
+    The `RunnerManager` serializes cold-starts when the launcher requires it (concurrent engine
+    cold-starts OOM a peer — spike Gate 9c) and rolls back the model slot on launch failure. Mode
+    selected via `--mode=apptainer` / `SARDEENZ_WORKER_MODE`; all Phase 3.6 stub tests stay green.
+  - **Contracts:** added an optional `runtimeModule` selector (`<engine>-<version>`, e.g.
+    `vllm-0.21`) to `StartRunnerRequest` (`worker-agent.yaml`) so the production worker resolves
+    which signed SIF to `apptainer exec` (`/modules/<runtimeModule>.sif`); the dev-worker stub
+    ignores it (back-compat). Added the `kvCacheElasticSharing` well-known feature key to
+    `RunnerCapabilities.features` (`engine-runner.yaml`) — elastic, reclaimable device-memory
+    sharing across co-located runners (vLLM + kvcached), distinct from host-RAM `kvCacheOffload`;
+    a future oversubscription placement policy keys on it. Regenerated `@sardeenz/types`.
+
 - Phase 4 architecture + plan: adopted **Apptainer SIF on shared RWX** as the engine runtime
   delivery mechanism, replacing the Highlander/EasyBuild-Lmod approach. New ADRs
   [ADR-015](docs/architecture/adrs/adr-015-sif-runtime-packaging.md) (SIF delivery, supersedes

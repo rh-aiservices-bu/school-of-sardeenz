@@ -21,6 +21,20 @@ function makeConfig(): DevWorkerConfig {
     wakeDelayMs: 200,
     inferenceDelayMs: 50,
     heartbeatIntervalMs: 60000,
+    mode: 'stub',
+    apptainer: {
+      apptainerBin: 'apptainer',
+      modulesDir: '/modules',
+      weightsDir: '/weights',
+      scratchDir: '/scratch',
+      binds: ['/weights', '/scratch'],
+      runnerEntrypoint: ['python3', '-m', 'sardeenz_vllm_runner'],
+      home: '/scratch/home',
+      verifySif: true,
+      healthTimeoutMs: 300000,
+      healthIntervalMs: 1000,
+      stopGraceMs: 15000,
+    },
   };
 }
 

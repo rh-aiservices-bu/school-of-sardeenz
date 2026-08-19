@@ -9,8 +9,15 @@
 
 FROM registry.access.redhat.com/ubi9/ubi:latest
 
+# Node.js for the TypeScript worker agent (Phase 4 Task 4 decision: reuse the Phase 3.6 agent via
+# a RunnerLauncher; ApptainerLauncher runs in prod). The agent build output is layered on top of
+# this base (see deployment/sif-runner and containers/worker-base/README.md).
+ARG NODE_MAJOR=20
+
 # EPEL provides apptainer + fuse helpers on UBI9.
 RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf module reset -y nodejs && \
+    dnf module enable -y nodejs:${NODE_MAJOR} && \
     dnf install -y \
       apptainer \
       fuse-overlayfs \
@@ -21,7 +28,9 @@ RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.n
       iproute \
       jq \
       tzdata \
-      ca-certificates && \
+      ca-certificates \
+      nodejs \
+      npm && \
     ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
     dnf clean all
 
@@ -34,9 +43,8 @@ RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.n
 #   `apptainer exec` fails with "mount source /etc/localtime doesn't exist" without this.
 # - The worker Pod must run with: seccompProfile: Unconfined, the annotation
 #   io.kubernetes.cri-o.Devices="/dev/fuse", NO hostUsers:false, and crun as the runtime.
-#
-# TODO (Phase 4, Task 4): if the production worker agent is TypeScript (reusing runners/dev-worker
-# via a RunnerLauncher/ApptainerLauncher), install Node.js here and add the agent. Until then this
-# image is the Apptainer host validated by the spike.
+# - Node.js is installed for the TypeScript worker agent. The agent (runners/dev-worker, run with
+#   --mode=apptainer) is layered on top of this base — this image stays engine-agnostic and does
+#   not bake in any inference engine.
 
 CMD ["sleep", "infinity"]

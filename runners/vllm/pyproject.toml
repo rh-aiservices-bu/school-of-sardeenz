@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sardeenz-vllm-runner"
+version = "0.1.0"
+description = "Sardeenz vLLM runner shim — serves the engine-runner contract and drives vLLM + kvcached inside a SIF."
+requires-python = ">=3.10"
+# vLLM, torch, kvcached, fastapi, uvicorn and httpx are provided by the runner-vllm image (they
+# ship with vLLM). They are intentionally NOT pinned here — this package is installed on top of the
+# vLLM base image, not resolved standalone. Listed for documentation/dev installs only.
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+]
+
+[project.scripts]
+sardeenz-vllm-runner = "sardeenz_vllm_runner.__main__:main"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["sardeenz_vllm_runner*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,81 @@
+# SIF librarian build/sign/convert Job (ADR-017, Task 7). Edit IMAGE_REF + SIF_NAME, then apply.
+# Builds the runner OCI image into a signed, world-readable SIF on the module store using
+# node-local scratch and adequate memory (the OCI unpack OOMs on <8Gi and fails on a network-FS
+# tmpdir). NEVER scheduled on a serving worker.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sardeenz-librarian-build
+  labels:
+    app.kubernetes.io/name: sardeenz-librarian
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sardeenz-librarian
+      annotations:
+        # apptainer build needs /dev/fuse + userns, same as exec.
+        io.kubernetes.cri-o.Devices: '/dev/fuse'
+    spec:
+      serviceAccountName: sardeenz-librarian
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 0
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: build
+          # worker-base ships Apptainer + FUSE; no engine needed to convert.
+          image: sardeenz-worker-base:latest
+          command: ['/bin/sh', '-c']
+          args:
+            - |
+              set -eu
+              mkdir -p /scratch/home /scratch/cache
+              exec /opt/librarian/build-sif.sh --image "$IMAGE_REF" --name "$SIF_NAME"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          env:
+            # EDIT THESE per build:
+            - { name: IMAGE_REF, value: 'quay.io/REPLACE_ME/sardeenz-runner-vllm:0.21' }
+            - { name: SIF_NAME, value: 'vllm-0.21' }
+            # Scratch MUST be node-local (see build-sif.sh header).
+            - { name: APPTAINER_TMPDIR, value: /scratch }
+            - { name: APPTAINER_CACHEDIR, value: /scratch/cache }
+            - { name: HOME, value: /scratch/home }
+            - { name: SIF_SIGNING_KEY, value: /etc/sardeenz/signing/private.asc }
+            # Empty for a passphraseless librarian key; else source from the Secret.
+            - { name: APPTAINER_PASSPHRASE, value: '' }
+          resources:
+            requests:
+              memory: 8Gi
+              cpu: '2'
+              ephemeral-storage: 50Gi
+            limits:
+              memory: 16Gi
+              ephemeral-storage: 60Gi
+          volumeMounts:
+            - { name: modules, mountPath: /modules }
+            - { name: scratch, mountPath: /scratch }
+            - { name: script, mountPath: /opt/librarian }
+            - { name: signing-key, mountPath: /etc/sardeenz/signing, readOnly: true }
+      volumes:
+        - name: modules
+          persistentVolumeClaim:
+            # Librarian mounts the module store READ-WRITE (it is the only writer).
+            claimName: sardeenz-modules
+        - name: scratch
+          # Node-local, disk-backed. Sized to hold one uncompressed engine image (~50Gi).
+          emptyDir:
+            sizeLimit: 60Gi
+        - name: script
+          configMap:
+            name: sardeenz-librarian-scripts
+            defaultMode: 0755
+        - name: signing-key
+          secret:
+            secretName: sardeenz-sif-signing-key
