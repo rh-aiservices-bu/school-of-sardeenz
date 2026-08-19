@@ -23,7 +23,8 @@ import { useNotifications } from '../contexts/NotificationContext';
 
 export function NotificationDrawer() {
   const { t } = useTranslation('common');
-  const { notifications, markAsRead, markAllAsRead, removeNotification, clearAll } = useNotifications();
+  const { notifications, markAsRead, markAllAsRead, removeNotification, clearAll } =
+    useNotifications();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
@@ -121,7 +122,9 @@ export function NotificationDrawer() {
                     ×
                   </Button>
                 </NotificationDrawerListItemHeader>
-                <NotificationDrawerListItemBody timestamp={new Date(notification.timestamp).toLocaleString()}>
+                <NotificationDrawerListItemBody
+                  timestamp={new Date(notification.timestamp).toLocaleString()}
+                >
                   {notification.description && (
                     <div style={{ marginTop: '0.5rem' }}>
                       {getVariantIcon(notification.variant)} {notification.description}
@@ -144,5 +147,11 @@ interface NotificationBadgeButtonProps {
 
 export function NotificationBadgeButton({ onClick, unreadCount }: NotificationBadgeButtonProps) {
   const { t } = useTranslation('common');
-  return <NotificationBadge count={unreadCount} onClick={onClick} aria-label={t('notifications.title')} />;
+  return (
+    <NotificationBadge
+      count={unreadCount}
+      onClick={onClick}
+      aria-label={t('notifications.title')}
+    />
+  );
 }

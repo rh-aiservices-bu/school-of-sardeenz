@@ -62,7 +62,10 @@ describe('api.notifications.list', () => {
 
     await api.notifications.list(100, 50);
 
-    expect(mockFetch).toHaveBeenCalledWith('/api/notifications?limit=100&offset=50', expect.anything());
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/notifications?limit=100&offset=50',
+      expect.anything(),
+    );
   });
 
   it('passes AbortSignal to fetch', async () => {
@@ -81,7 +84,13 @@ describe('api.notifications.list', () => {
   it('returns notifications array', async () => {
     const payload = {
       notifications: [
-        { id: 'n1', title: 'Test', variant: 'info', timestamp: '2024-01-01T00:00:00Z', isRead: false },
+        {
+          id: 'n1',
+          title: 'Test',
+          variant: 'info',
+          timestamp: '2024-01-01T00:00:00Z',
+          isRead: false,
+        },
       ],
     };
     mockFetch.mockResolvedValueOnce(makeResponse(200, payload));

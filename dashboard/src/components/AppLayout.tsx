@@ -35,7 +35,16 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
-import { sardeenzIcon, sardeenzLogo, githubLogo, githubLogoWhite, starLogo, starLogoWhite, forkLogo, forkLogoWhite } from '../assets';
+import {
+  sardeenzIcon,
+  sardeenzLogo,
+  githubLogo,
+  githubLogoWhite,
+  starLogo,
+  starLogoWhite,
+  forkLogo,
+  forkLogoWhite,
+} from '../assets';
 import { NotificationDrawer, NotificationBadgeButton } from './NotificationDrawer';
 import { AlertToastGroup } from './AlertToastGroup';
 
@@ -176,7 +185,10 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const sidebar = (
     <PageSidebar isSidebarOpen={isSidebarOpen}>
-      <PageSidebarBody isFilled style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <PageSidebarBody
+        isFilled
+        style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+      >
         <Nav>
           <NavList>
             <NavItem itemId="/" isActive={location.pathname === '/'} onClick={() => navigate('/')}>
@@ -197,6 +209,13 @@ export function AppLayout({ children }: AppLayoutProps) {
               {t('nav.workers')}
             </NavItem>
             <NavItem
+              itemId="/catalog"
+              isActive={location.pathname.startsWith('/catalog')}
+              onClick={() => navigate('/catalog')}
+            >
+              {t('nav.catalog')}
+            </NavItem>
+            <NavItem
               itemId="/metrics"
               isActive={location.pathname.startsWith('/metrics')}
               onClick={() => navigate('/metrics')}
@@ -205,7 +224,10 @@ export function AppLayout({ children }: AppLayoutProps) {
             </NavItem>
           </NavList>
         </Nav>
-        <aside role="complementary" style={{ marginTop: 'auto', padding: '1rem', textAlign: 'center' }}>
+        <aside
+          role="complementary"
+          style={{ marginTop: 'auto', padding: '1rem', textAlign: 'center' }}
+        >
           <Content component={ContentVariants.small}>
             {'App by '}
             <a href="http://red.ht/cai-team" target="_blank" rel="noreferrer">

@@ -1,0 +1,36 @@
+{
+  "title": "Runner Catalog",
+  "source": "Source: {{source}}",
+  "actions": {
+    "import": "Import",
+    "update": "Update",
+    "uninstall": "Uninstall",
+    "refresh": "Refresh"
+  },
+  "state": {
+    "imported": "Imported",
+    "importing": "Importing",
+    "notImported": "Not imported",
+    "failed": "Failed",
+    "updateAvailable": "Update available"
+  },
+  "card": {
+    "minVram": "{{gib}} GiB VRAM"
+  },
+  "empty": {
+    "title": "No runners in the catalog",
+    "body": "The runner catalog is empty or could not be loaded. Check the catalog source, or refresh."
+  },
+  "unmanaged": {
+    "title": "Unmanaged modules",
+    "body": "SIFs on the module store that are not in the catalog (e.g. locally built or manually placed)."
+  },
+  "uninstall": {
+    "confirmTitle": "Uninstall runner?",
+    "confirmBody": "This deletes the imported SIF for \"{{title}}\" from the module store. Models using it must be stopped first."
+  },
+  "errors": {
+    "failedToLoad": "Failed to load the runner catalog",
+    "refreshFailed": "Failed to refresh the catalog"
+  }
+}

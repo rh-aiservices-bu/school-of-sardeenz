@@ -20,6 +20,7 @@ import modelsEn from './locales/en/models.json';
 import workersEn from './locales/en/workers.json';
 import metricsEn from './locales/en/metrics.json';
 import authEn from './locales/en/auth.json';
+import catalogEn from './locales/en/catalog.json';
 
 void i18n
   .use(LanguageDetector)
@@ -27,7 +28,7 @@ void i18n
   .init({
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'cluster', 'models', 'workers', 'metrics', 'auth'],
+    ns: ['common', 'cluster', 'models', 'workers', 'metrics', 'auth', 'catalog'],
     resources: {
       en: {
         common: commonEn,
@@ -36,6 +37,7 @@ void i18n
         workers: workersEn,
         metrics: metricsEn,
         auth: authEn,
+        catalog: catalogEn,
       },
     },
     interpolation: {

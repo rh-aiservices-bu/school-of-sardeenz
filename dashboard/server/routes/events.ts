@@ -130,7 +130,9 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
         if (cleanedUp) return;
         cleanedUp = true;
         clearInterval(pingTimer);
-        subscriber.unsubscribe(routingChannel, clusterChannel, notificationsChannel).catch(() => undefined);
+        subscriber
+          .unsubscribe(routingChannel, clusterChannel, notificationsChannel)
+          .catch(() => undefined);
         subscriber.disconnect();
         reply.raw.end();
         app.log.debug('SSE client disconnected — Redis subscriber cleaned up');

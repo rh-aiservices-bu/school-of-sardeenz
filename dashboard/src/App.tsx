@@ -12,6 +12,7 @@ import { ModelDeploy } from './pages/Models/ModelDeploy';
 import { ModelDetail } from './pages/Models/ModelDetail';
 import { WorkerList } from './pages/Workers/WorkerList';
 import { WorkerDetail } from './pages/Workers/WorkerDetail';
+import { RunnerCatalog } from './pages/Catalog/RunnerCatalog';
 import { MetricsDashboard } from './pages/Metrics/MetricsDashboard';
 import { Login } from './pages/Login/Login';
 import { OAuthCallback } from './pages/Login/OAuthCallback';
@@ -131,6 +132,7 @@ export function App() {
                       <Route path="/models/:modelName" element={<ModelDetail />} />
                       <Route path="/workers" element={<WorkerList />} />
                       <Route path="/workers/:workerId" element={<WorkerDetail />} />
+                      <Route path="/catalog" element={<RunnerCatalog />} />
                       <Route path="/metrics" element={<MetricsDashboard />} />
                       <Route path="*" element={<NotFoundPage />} />
                     </Routes>

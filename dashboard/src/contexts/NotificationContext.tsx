@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from 'react';
 import { api, type Notification } from '../api/client';
 
 export interface ToastNotification {
@@ -68,7 +76,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return; // Duplicate notification, skip
       }
     }
-    lastNotificationRef.current = { title: notification.title, description: notification.description, timestamp: now };
+    lastNotificationRef.current = {
+      title: notification.title,
+      description: notification.description,
+      timestamp: now,
+    };
 
     // Add to notifications list
     setNotifications((prev) => [notification, ...prev]);
