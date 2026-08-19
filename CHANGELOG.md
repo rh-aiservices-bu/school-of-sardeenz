@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Phase 4 implementation — SIF runner runtime (in progress):
+  - **Contracts:** added an optional `runtimeModule` selector (`<engine>-<version>`, e.g.
+    `vllm-0.21`) to `StartRunnerRequest` (`worker-agent.yaml`) so the production worker resolves
+    which signed SIF to `apptainer exec` (`/modules/<runtimeModule>.sif`); the dev-worker stub
+    ignores it (back-compat). Added the `kvCacheElasticSharing` well-known feature key to
+    `RunnerCapabilities.features` (`engine-runner.yaml`) — elastic, reclaimable device-memory
+    sharing across co-located runners (vLLM + kvcached), distinct from host-RAM `kvCacheOffload`;
+    a future oversubscription placement policy keys on it. Regenerated `@sardeenz/types`.
+
 - Phase 4 architecture + plan: adopted **Apptainer SIF on shared RWX** as the engine runtime
   delivery mechanism, replacing the Highlander/EasyBuild-Lmod approach. New ADRs
   [ADR-015](docs/architecture/adrs/adr-015-sif-runtime-packaging.md) (SIF delivery, supersedes

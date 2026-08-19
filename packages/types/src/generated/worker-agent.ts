@@ -69,6 +69,19 @@ export type components = {
              */
             runnerType: string;
             /**
+             * @description Runtime module the worker must exec to serve this model, as
+             *     `<engine>-<version>` (e.g., "vllm-0.21"). The production
+             *     (Apptainer) worker resolves it to `/modules/<runtimeModule>.sif`
+             *     by convention and `apptainer exec`s that signed SIF.
+             *
+             *     Optional and back-compat: the dev-worker stub launcher ignores it
+             *     (it forks an in-process stub regardless of module). When absent,
+             *     the Apptainer launcher falls back to
+             *     `<runnerType>-<engineConfig.version>` if available, otherwise
+             *     errors — a production start must be able to resolve a SIF.
+             */
+            runtimeModule?: string;
+            /**
              * @description Path to the model weights. In production this is typically a shared
              *     filesystem path (CephFS). In dev mode, this is informational only.
              */
