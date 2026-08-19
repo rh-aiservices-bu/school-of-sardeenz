@@ -3,6 +3,9 @@
 ## Status
 
 Accepted. Defines the build/provisioning half of [ADR-015](adr-015-sif-runtime-packaging.md).
+Amended by [ADR-018](adr-018-runner-catalog-oras-distribution.md), which distributes pre-built
+signed SIFs via ORAS and adds the **control plane** as a second module-store writer (importing via
+`apptainer pull`, not build) alongside the librarian.
 
 ## Context
 

@@ -117,6 +117,7 @@ Key responsibilities:
 - **Workload placement.** Matches model requirements → compatible runner type → capable worker → best candidate (see [Worker and Runner Model](#worker-and-runner-model)).
 - **Routing map management.** Writes the routing map to Redis/Valkey, which the proxy consumes.
 - **Worker pool management.** Detects workers joining or leaving the pool dynamically without requiring a restart.
+- **Runner catalog + SIF import.** Loads a catalog of available runner SIFs and imports them on demand by pulling signed SIFs from an OCI registry (ORAS) onto the shared module store — see [ADR-018](adrs/adr-018-runner-catalog-oras-distribution.md).
 
 ### Admin Dashboard
 
