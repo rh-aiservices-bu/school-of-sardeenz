@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Phase 4 implementation — SIF runner runtime (in progress):
+  - **Worker agent — launcher abstraction (Task 4):** extracted a `RunnerLauncher` interface from
+    the Phase 3.6 worker agent (`runners/dev-worker`). `StubLauncher` keeps the in-process stub
+    behaviour (dev); the new `ApptainerLauncher` `apptainer exec`s an engine SIF (prod) — resolves
+    `runtimeModule` → `/modules/<engine>-<version>.sif`, adds `--nv` + `CUDA_VISIBLE_DEVICES` for
+    CUDA, redirects caches to node-local `/scratch`, sets a writable `HOME=/scratch/home` as a
+    process env (never `--env HOME`, which Apptainer rejects), `apptainer verify`s the signature
+    before exec, waits for `/health` READY, and propagates SIGTERM→SIGKILL on stop (spike Gate 5).
+    The `RunnerManager` serializes cold-starts when the launcher requires it (concurrent engine
+    cold-starts OOM a peer — spike Gate 9c) and rolls back the model slot on launch failure. Mode
+    selected via `--mode=apptainer` / `SARDEENZ_WORKER_MODE`; all Phase 3.6 stub tests stay green.
   - **Contracts:** added an optional `runtimeModule` selector (`<engine>-<version>`, e.g.
     `vllm-0.21`) to `StartRunnerRequest` (`worker-agent.yaml`) so the production worker resolves
     which signed SIF to `apptainer exec` (`/modules/<runtimeModule>.sif`); the dev-worker stub

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RunnerManager, ConflictError, NotFoundError } from '../runner-manager.js';
 import type { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
+import type { LaunchHandle, LaunchSpec, RunnerLauncher } from '../launcher.js';
 
 function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
   return {
@@ -19,6 +20,20 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     wakeDelayMs: 50,
     inferenceDelayMs: 20,
     heartbeatIntervalMs: 5000,
+    mode: 'stub',
+    apptainer: {
+      apptainerBin: 'apptainer',
+      modulesDir: '/modules',
+      weightsDir: '/weights',
+      scratchDir: '/scratch',
+      binds: ['/weights', '/scratch'],
+      runnerEntrypoint: ['python3', '-m', 'sardeenz_vllm_runner'],
+      home: '/scratch/home',
+      verifySif: true,
+      healthTimeoutMs: 300000,
+      healthIntervalMs: 1000,
+      stopGraceMs: 15000,
+    },
     ...overrides,
   };
 }
@@ -164,6 +179,69 @@ describe('RunnerManager', () => {
 
     await manager.stopAll();
     expect(manager.getAllRunners()).toHaveLength(0);
+  });
+
+  it('rolls back the model slot when a launch fails so the model can be retried', async () => {
+    const failing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: () => Promise.reject(new Error('cold-start boom')),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), failing);
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'retry-me',
+        runnerType: 'vllm',
+        modelPath: '/models/retry',
+        requiredMemory: 1,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow('cold-start boom');
+
+    // A second attempt must not hit a stale ConflictError from the reserved slot.
+    await expect(
+      mgr.startRunner({
+        modelName: 'retry-me',
+        runnerType: 'vllm',
+        modelPath: '/models/retry',
+        requiredMemory: 1,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow('cold-start boom');
+  });
+
+  it('serializes cold-starts when the launcher requires it', async () => {
+    let active = 0;
+    let maxConcurrent = 0;
+    const gate: RunnerLauncher = {
+      serializeColdStarts: true,
+      start: async (spec: LaunchSpec): Promise<LaunchHandle> => {
+        active++;
+        maxConcurrent = Math.max(maxConcurrent, active);
+        await new Promise((r) => setTimeout(r, 20));
+        active--;
+        return { host: 'localhost', port: spec.port, stop: () => Promise.resolve() };
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), gate);
+
+    await Promise.all(
+      ['a', 'b', 'c'].map((name) =>
+        mgr.startRunner({
+          modelName: `model-${name}`,
+          runnerType: 'vllm',
+          modelPath: `/models/${name}`,
+          requiredMemory: 1,
+          tensorParallel: 1,
+          devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        }),
+      ),
+    );
+
+    expect(maxConcurrent).toBe(1);
+    expect(mgr.getAllRunners()).toHaveLength(3);
   });
 
   it('allows starting a model after it was stopped', async () => {

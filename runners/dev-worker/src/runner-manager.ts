@@ -1,6 +1,7 @@
 import type { DevWorkerConfig } from './config.js';
 import type { WorkerRegistration } from './registration.js';
-import { createRunnerStub, type RunnerStub } from './runner-stub/server.js';
+import type { LaunchHandle, RunnerLauncher } from './launcher.js';
+import { StubLauncher } from './stub-launcher.js';
 import { randomUUID } from 'node:crypto';
 
 export interface RunnerRecord {
@@ -10,7 +11,7 @@ export interface RunnerRecord {
   host: string;
   requiredMemory: number;
   devices: { deviceIndex: number; deviceType: string }[];
-  stub: RunnerStub;
+  handle: LaunchHandle;
 }
 
 export interface StartRunnerParams {
@@ -20,6 +21,7 @@ export interface StartRunnerParams {
   requiredMemory: number;
   deviceType?: string;
   tensorParallel: number;
+  runtimeModule?: string;
   engineConfig?: Record<string, unknown>;
   devices: { deviceIndex: number; deviceType: string }[];
 }
@@ -27,13 +29,19 @@ export interface StartRunnerParams {
 export class RunnerManager {
   private readonly runners = new Map<string, RunnerRecord>();
   private readonly modelToRunner = new Map<string, string>();
+  private readonly launcher: RunnerLauncher;
   private nextPort: number;
+  // Serializes cold-starts when the launcher requires it (real engine cold-starts spike host RAM
+  // and OOM a peer if run concurrently — spike Gate 9c). A promise chain acts as an async mutex.
+  private coldStartChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly config: DevWorkerConfig,
     private readonly registration: WorkerRegistration,
+    launcher?: RunnerLauncher,
   ) {
     this.nextPort = config.runnerPortStart;
+    this.launcher = launcher ?? new StubLauncher(config);
   }
 
   async startRunner(
@@ -46,44 +54,65 @@ export class RunnerManager {
     const runnerId = `runner-${randomUUID().slice(0, 8)}`;
     const port = this.allocatePort();
 
-    const stub = createRunnerStub({
-      port,
-      modelName: params.modelName,
-      workerId: this.config.workerId,
-      runnerType: params.runnerType || this.config.runnerType,
-      deviceType: params.deviceType || this.config.deviceType,
-      requiredMemory: params.requiredMemory,
-      devices: params.devices,
-      deviceMemoryTotalBytes: this.config.deviceMemoryBytes,
-      startupDelayMs: this.config.startupDelayMs,
-      sleepDelayMs: this.config.sleepDelayMs,
-      wakeDelayMs: this.config.wakeDelayMs,
-      inferenceDelayMs: this.config.inferenceDelayMs,
-    });
-
-    const record: RunnerRecord = {
-      runnerId,
-      modelName: params.modelName,
-      port,
-      host: 'localhost',
-      requiredMemory: params.requiredMemory,
-      devices: params.devices,
-      stub,
-    };
-
-    this.runners.set(runnerId, record);
+    // Reserve the model slot up-front so concurrent starts of the same model race to ConflictError
+    // rather than both proceeding.
     this.modelToRunner.set(params.modelName, runnerId);
 
-    await stub.start();
+    try {
+      const handle = await this.launch({
+        runnerId,
+        modelName: params.modelName,
+        modelPath: params.modelPath,
+        runnerType: params.runnerType || this.config.runnerType,
+        runtimeModule: params.runtimeModule,
+        deviceType: params.deviceType || this.config.deviceType,
+        requiredMemory: params.requiredMemory,
+        tensorParallel: params.tensorParallel,
+        engineConfig: params.engineConfig,
+        devices: params.devices,
+        port,
+      });
 
-    for (const device of params.devices) {
-      const perDeviceMemory = Math.floor(params.requiredMemory / params.devices.length);
-      this.registration.allocateMemory(device.deviceIndex, perDeviceMemory);
+      const record: RunnerRecord = {
+        runnerId,
+        modelName: params.modelName,
+        port,
+        host: handle.host,
+        requiredMemory: params.requiredMemory,
+        devices: params.devices,
+        handle,
+      };
+      this.runners.set(runnerId, record);
+
+      for (const device of params.devices) {
+        const perDeviceMemory = Math.floor(params.requiredMemory / params.devices.length);
+        this.registration.allocateMemory(device.deviceIndex, perDeviceMemory);
+      }
+
+      console.log(
+        `[worker] Started runner ${runnerId} for ${params.modelName} on ${handle.host}:${port}`,
+      );
+
+      return { runnerId, host: handle.host, port };
+    } catch (err) {
+      // Roll back the reserved model slot so a failed start doesn't permanently block the model.
+      this.modelToRunner.delete(params.modelName);
+      throw err;
     }
+  }
 
-    console.log(`[dev-worker] Started runner ${runnerId} for ${params.modelName} on :${port}`);
-
-    return { runnerId, host: 'localhost', port };
+  // Run the launcher, serializing cold-starts when the launcher requires it.
+  private launch(spec: Parameters<RunnerLauncher['start']>[0]): Promise<LaunchHandle> {
+    if (!this.launcher.serializeColdStarts) {
+      return this.launcher.start(spec);
+    }
+    const result = this.coldStartChain.then(() => this.launcher.start(spec));
+    // Keep the chain alive regardless of this start's success/failure.
+    this.coldStartChain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   async stopRunner(runnerId: string): Promise<void> {
@@ -92,7 +121,7 @@ export class RunnerManager {
       throw new NotFoundError(`Runner ${runnerId} not found`);
     }
 
-    await record.stub.stop();
+    await record.handle.stop();
 
     for (const device of record.devices) {
       const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
@@ -102,7 +131,7 @@ export class RunnerManager {
     this.runners.delete(runnerId);
     this.modelToRunner.delete(record.modelName);
 
-    console.log(`[dev-worker] Stopped runner ${runnerId} (${record.modelName})`);
+    console.log(`[worker] Stopped runner ${runnerId} (${record.modelName})`);
   }
 
   async stopAll(): Promise<void> {

@@ -1,14 +1,28 @@
+import { mkdirSync } from 'node:fs';
 import { loadConfig } from './config.js';
 import { WorkerRegistration } from './registration.js';
 import { RunnerManager } from './runner-manager.js';
+import { StubLauncher } from './stub-launcher.js';
+import { ApptainerLauncher } from './apptainer-launcher.js';
+import type { RunnerLauncher } from './launcher.js';
 import { createServer } from './server.js';
 import { Redis } from 'ioredis';
 
 const config = loadConfig();
 
+function createLauncher(): RunnerLauncher {
+  if (config.mode === 'apptainer') {
+    // Ensure a writable HOME on node-local scratch exists before the first exec (spike finding:
+    // the module PVC is read-only, so Apptainer's config/keys dir must live on /scratch).
+    mkdirSync(config.apptainer.home, { recursive: true });
+    return new ApptainerLauncher(config.apptainer);
+  }
+  return new StubLauncher(config);
+}
+
 const redis = new Redis(config.redisUrl);
 const registration = new WorkerRegistration(redis, config);
-const runnerManager = new RunnerManager(config, registration);
+const runnerManager = new RunnerManager(config, registration, createLauncher());
 
 const server = createServer(runnerManager);
 
@@ -18,7 +32,7 @@ async function start(): Promise<void> {
 
   await server.listen({ port: config.workerPort, host: '0.0.0.0' });
   console.log(
-    `[dev-worker] ${config.workerId} listening on :${config.workerPort} ` +
+    `[worker:${config.mode}] ${config.workerId} listening on :${config.workerPort} ` +
       `(${config.deviceCount}x ${config.deviceType} @ ${Math.round(config.deviceMemoryBytes / (1024 * 1024 * 1024))} GiB)`,
   );
 }

@@ -19,6 +19,20 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     wakeDelayMs: 1500,
     inferenceDelayMs: 200,
     heartbeatIntervalMs: 100,
+    mode: 'stub',
+    apptainer: {
+      apptainerBin: 'apptainer',
+      modulesDir: '/modules',
+      weightsDir: '/weights',
+      scratchDir: '/scratch',
+      binds: ['/weights', '/scratch'],
+      runnerEntrypoint: ['python3', '-m', 'sardeenz_vllm_runner'],
+      home: '/scratch/home',
+      verifySif: true,
+      healthTimeoutMs: 300000,
+      healthIntervalMs: 1000,
+      stopGraceMs: 15000,
+    },
     ...overrides,
   };
 }

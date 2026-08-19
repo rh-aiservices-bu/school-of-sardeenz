@@ -10,6 +10,7 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       requiredMemory: number;
       deviceType?: string;
       tensorParallel: number;
+      runtimeModule?: string;
       engineConfig?: Record<string, unknown>;
       devices: { deviceIndex: number; deviceType: string }[];
     };
@@ -30,6 +31,7 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
         requiredMemory: body.requiredMemory ?? 0,
         deviceType: body.deviceType,
         tensorParallel: body.tensorParallel ?? 1,
+        runtimeModule: body.runtimeModule,
         engineConfig: body.engineConfig,
         devices: body.devices,
       });
