@@ -10,6 +10,6 @@ spec:
   machineConfigPoolSelector:
     matchLabels:
       # Target the worker pool that runs Sardeenz worker Pods.
-      pools.operator.machineconfiguration.openshift.io/worker: ""
+      pools.operator.machineconfiguration.openshift.io/worker: ''
   containerRuntimeConfig:
     defaultRuntime: crun

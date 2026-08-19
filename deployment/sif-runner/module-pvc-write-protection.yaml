@@ -21,10 +21,10 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
-      - apiGroups: [""]
-        apiVersions: ["v1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["pods"]
+      - apiGroups: ['']
+        apiVersions: ['v1']
+        operations: ['CREATE', 'UPDATE']
+        resources: ['pods']
   matchConditions:
     # The librarian SA is the only writer of the module store.
     - name: exclude-librarian
@@ -50,7 +50,7 @@ spec:
             !(m.name in variables.moduleVolumeNames) || (has(m.readOnly) && m.readOnly == true)
           )
         )
-      message: "The sardeenz-modules PVC must be mounted readOnly (only the librarian SA may write it)."
+      message: 'The sardeenz-modules PVC must be mounted readOnly (only the librarian SA may write it).'
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -58,7 +58,7 @@ metadata:
   name: sardeenz-modules-readonly-binding
 spec:
   policyName: sardeenz-modules-readonly
-  validationActions: ["Deny"]
+  validationActions: ['Deny']
   matchResources:
     # Scope to namespaces labelled for Sardeenz; label the namespace with
     # `sardeenz.io/module-guard: enforce` to activate.

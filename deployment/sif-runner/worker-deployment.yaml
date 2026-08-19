@@ -21,7 +21,7 @@ spec:
         app.kubernetes.io/part-of: sardeenz
       annotations:
         # 4.15+: exposes /dev/fuse to an unprivileged Pod, no device plugin (spike §1).
-        io.kubernetes.cri-o.Devices: "/dev/fuse"
+        io.kubernetes.cri-o.Devices: '/dev/fuse'
     spec:
       serviceAccountName: sardeenz-worker
       # NO hostUsers: false — it forces idmapped volume mounts the RWX FS can't provide (spike §9.3).
@@ -36,7 +36,7 @@ spec:
           # worker-base + the built TypeScript agent layered on top (see this dir's README).
           image: sardeenz-worker:latest
           workingDir: /opt/sardeenz/worker-agent
-          command: ["/bin/sh", "-c"]
+          command: ['/bin/sh', '-c']
           args:
             - |
               set -eu
@@ -48,7 +48,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
-              drop: ["ALL"]
+              drop: ['ALL']
           env:
             - { name: SARDEENZ_WORKER_MODE, value: apptainer }
             # HOME must be writable and node-local (module PVC is readOnly) — spike finding.
@@ -57,7 +57,7 @@ spec:
             - { name: SARDEENZ_MODULES_DIR, value: /modules }
             - { name: SARDEENZ_WEIGHTS_DIR, value: /weights }
             - { name: SARDEENZ_SCRATCH_DIR, value: /scratch }
-            - { name: SARDEENZ_VERIFY_SIF, value: "true" }
+            - { name: SARDEENZ_VERIFY_SIF, value: 'true' }
             - name: SARDEENZ_REDIS_URL
               value: redis://sardeenz-redis:6379
             - name: SARDEENZ_WORKER_ID
@@ -68,10 +68,10 @@ spec:
             requests:
               # Cold-starts spike host RAM (torch + CUDA init + graph capture) — spike Gate 9c.
               memory: 16Gi
-              cpu: "2"
+              cpu: '2'
             limits:
               memory: 32Gi
-              nvidia.com/gpu: "1"
+              nvidia.com/gpu: '1'
           volumeMounts:
             - { name: modules, mountPath: /modules, readOnly: true }
             - { name: weights, mountPath: /weights }
