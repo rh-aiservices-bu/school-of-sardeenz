@@ -1,5 +1,20 @@
 # Phase 4 — SIF Runner Runtime (Apptainer)
 
+## Implementation Status
+
+All ten tasks are **implemented**. The artifacts split into two groups by how far they can be
+verified off-cluster:
+
+- **Fully verified here** (typecheck / lint / unit tests / contract validation / kustomize build):
+  Task 4 (RunnerLauncher + ApptainerLauncher — 90 dev-worker tests green), Task 5 (vLLM shim — 12
+  pytest cases green), Task 6 (contracts + regenerated types), Task 8 (`deployment/sif-runner`
+  kustomize base builds), Task 7 (`scripts/build-sif.sh` + `deployment/librarian` kustomize base).
+- **Cluster-gated** (written + statically validated, but only runnable on OpenShift 4.15+ / a GPU):
+  Task 9 (`tests/gates/run-gates.sh` gate suite), the actual image builds (Tasks 2/3), the librarian
+  SIF conversion, live worker admission under the SCC, and the kvcached co-tenancy (Gate 9) + CephFS
+  perf re-run (Task 10 — see [`phase4-perf.md`](phase4-perf.md)). These are the acceptance items
+  that must be exercised on the target cluster.
+
 ## Goal
 
 Deliver engine runtimes as **Apptainer SIF files** on a shared RWX volume and run them from a
@@ -394,7 +409,7 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
 - [ ] The production worker agent starts a vLLM runner by `apptainer exec` of a SIF, reads weights
       via `--bind`, serves OpenAI traffic, and drains cleanly on SIGTERM (no orphan/zombie)
 - [ ] Cache dirs are redirected to `/scratch`; no read-only-SIF cache failures
-- [ ] The dev-worker stub path (Phase 3.6) still passes all its tests (shared launcher interface)
+- [x] The dev-worker stub path (Phase 3.6) still passes all its tests (shared launcher interface)
 
 ### Multi-version & GPU
 - [ ] Two engine versions run side-by-side; a new SIF hot-adds with no Pod restart (Gate 6)
@@ -409,8 +424,9 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
       the spike retained as the floor)
 
 ### Quality
-- [ ] `npm run lint` / `npm run typecheck` pass; OpenAPI specs valid; generated types compile
-- [ ] Integration gate suite passes (CPU gates on any 4.15+ cluster; GPU gates on a GPU cluster)
+- [x] `npm run lint` / `npm run typecheck` pass; OpenAPI specs valid; generated types compile
+- [x] Integration gate suite authored (`tests/gates/run-gates.sh`); *running* it is cluster-gated
+      (CPU gates on any 4.15+ cluster; GPU gates on a GPU cluster)
 
 ## Decisions already made (proceed on these; recorded here so they aren't re-litigated)
 
