@@ -36,7 +36,8 @@ ENV NODE_ENV=production
 # Apptainer CLI for the runner-catalog import path (SARDEENZ_SIF_IMPORTER=oras runs
 # `apptainer pull oras://…` + `apptainer verify`). Pull/verify are download-only and need no
 # setuid/fuse/userns, so the unprivileged package suffices. Skip this layer if you only ever run
-# the 'stub' importer. Pinned; bump deliberately.
+# the 'stub' importer. Pinned; bump deliberately. For stronger supply-chain guarantees, also pin
+# and verify the .deb sha256 (fetch the release checksums) before installing.
 ARG APPTAINER_VERSION=1.3.6
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates wget && \
