@@ -9,6 +9,8 @@
       "requiredMemory": "Required Memory (GiB)",
       "deviceType": "Device Type",
       "tensorParallel": "Tensor Parallelism",
+      "runtimeModule": "Runtime Module",
+      "runtimeModulePlaceholder": "Select a runtime module",
       "pinned": "Pinned",
       "engineConfig": "Engine Config (JSON)"
     },
@@ -17,6 +19,8 @@
       "requiredMemory": "Estimated device memory in GiB. Used for placement.",
       "deviceType": "Required device type. Leave blank to accept any compatible device.",
       "tensorParallel": "Number of devices to split the model across on a single worker.",
+      "runtimeModule": "Installed SIF the worker execs (→ /modules/<name>.sif), filtered to the selected runner.",
+      "runtimeModuleNone": "No runtime modules for this runner are installed. Import one from the Runner Catalog to deploy.",
       "pinned": "Pinned models cannot be evicted by the LRU eviction engine.",
       "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided."
     },
@@ -27,8 +31,21 @@
       "modelPathStartsWithSlash": "Model path must start with /.",
       "requiredMemoryPositive": "Required memory must be a positive number.",
       "tensorParallelMin": "Tensor parallelism must be at least 1.",
+      "runtimeModuleRequired": "Runtime module is required. Import one from the Runner Catalog if the list is empty.",
+      "runtimeModulePattern": "Runtime module may only contain letters, digits, and . _ - (e.g. vllm-0.21).",
       "engineConfigObject": "Engine config must be a JSON object.",
       "engineConfigValidJson": "Engine config must be valid JSON."
+    },
+    "browse": {
+      "button": "Browse",
+      "title": "Select model folder",
+      "root": "Weights",
+      "select": "Select",
+      "selectCurrent": "Select current folder",
+      "modelLabel": "model",
+      "empty": "No subfolders",
+      "emptyBody": "This folder has no subfolders. Use \"Select current folder\" to choose it, or go back.",
+      "error": "Could not list the weights directory"
     },
     "errors": {
       "deploymentFailed": "Deployment failed"
@@ -108,6 +125,7 @@
       "currentMemory": "Current Memory",
       "deviceType": "Device Type",
       "tensorParallel": "Tensor Parallelism",
+      "runtimeModule": "Runtime Module",
       "pinned": "Pinned",
       "lastInference": "Last Inference",
       "stateChanged": "State Changed",
@@ -147,6 +165,21 @@
       "title": "State History",
       "deployed": "Deployed",
       "stateChanged": "State changed to"
+    },
+    "viewLogs": {
+      "button": "View logs"
     }
+  },
+  "logs": {
+    "modalTitle": "Model launch logs",
+    "title": "Runner logs",
+    "connected": "Connected",
+    "reconnecting": "Reconnecting…",
+    "waiting": "Waiting for logs…",
+    "startingProgress": "Starting model…",
+    "successTitle": "Model started successfully",
+    "successBody": "The model is now active. Closing this dialog…",
+    "failureTitle": "Model failed to start",
+    "failureBodyFallback": "The model entered an error state. Check the logs above for details."
   }
 }

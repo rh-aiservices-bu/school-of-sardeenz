@@ -12,7 +12,9 @@ import type { LeaderElectionService } from '../services/leader-election.js';
 import type { NotificationService } from '../services/notification.js';
 import type { CatalogService } from '../services/catalog-service.js';
 import type { ModuleStoreService } from '../services/module-store.js';
+import type { WeightsBrowserService } from '../services/weights-browser.js';
 import type { RunnerClient } from '../clients/runner.js';
+import type { WorkerClient } from '../clients/worker.js';
 
 export interface RouteDeps {
   config: Config;
@@ -29,5 +31,7 @@ export interface RouteDeps {
   notifications: NotificationService;
   catalogService: CatalogService;
   moduleStore: ModuleStoreService;
+  weightsBrowser: WeightsBrowserService;
   createRunnerClient: (host: string, port: number) => RunnerClient;
+  createWorkerClient: (baseUrl: string) => WorkerClient;
 }

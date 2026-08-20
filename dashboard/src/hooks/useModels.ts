@@ -63,6 +63,16 @@ export function useModel(name: string) {
 
 type Snapshot = [readonly unknown[], ModelListData | undefined][];
 
+// Apply an optimistic list update to one cached ['models', …] entry. The ['models'] prefix also
+// matches the ['models', name] detail queries, whose data is a single ModelDetail with no `.models`
+// array — spreading that undefined threw "models is not iterable", so leave non-list entries as-is.
+export function updateModelListData(
+  old: ModelListData | undefined,
+  updater: (models: ModelInfo[]) => ModelInfo[],
+): ModelListData | undefined {
+  return old && Array.isArray(old.models) ? { ...old, models: updater(old.models) } : old;
+}
+
 function createOptimisticMutation<TArg>(
   queryClient: QueryClient,
   mutationFn: (arg: TArg) => Promise<unknown>,
@@ -74,7 +84,7 @@ function createOptimisticMutation<TArg>(
       await queryClient.cancelQueries({ queryKey: ['models'] });
       const previous = queryClient.getQueriesData<ModelListData>({ queryKey: ['models'] });
       queryClient.setQueriesData<ModelListData>({ queryKey: ['models'] }, (old) =>
-        old ? { ...old, models: updater(old.models, arg) } : old,
+        updateModelListData(old, (models) => updater(models, arg)),
       );
       return { previous };
     },

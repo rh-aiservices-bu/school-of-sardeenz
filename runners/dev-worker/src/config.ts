@@ -118,7 +118,9 @@ export function loadConfig(): DevWorkerConfig {
       ]),
       home: envStr('SARDEENZ_APPTAINER_HOME', `${scratchDir}/home`),
       verifySif: envBool('SARDEENZ_VERIFY_SIF', true),
-      healthTimeoutMs: envInt('SARDEENZ_HEALTH_TIMEOUT_MS', 300000),
+      // 15 min by default — a large model's weight load + KV-cache alloc can take several minutes;
+      // the worker keeps polling the runner's /health until then before declaring the start failed.
+      healthTimeoutMs: envInt('SARDEENZ_HEALTH_TIMEOUT_MS', 900000),
       healthIntervalMs: envInt('SARDEENZ_HEALTH_INTERVAL_MS', 1000),
       // Larger than the in-SIF shim's own drain budget so the graceful stop (which reaps vLLM's
       // separate session) completes before the SIGKILL backstop — see apptainer-launcher.ts.

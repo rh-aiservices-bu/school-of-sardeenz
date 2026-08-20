@@ -16,7 +16,16 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
     };
   }>('/runners', async (req, reply) => {
     const body = req.body;
+    // Log receipt up front (Fastify runs with logger:false) so operators can confirm the start
+    // command actually reached this worker — the earliest guaranteed point, before any validation.
+    console.log(
+      `[worker] POST /runners received: model=${body?.modelName ?? '?'} ` +
+        `runner=${body?.runnerType ?? '?'} module=${body?.runtimeModule ?? '-'} ` +
+        `devices=${body?.devices?.length ?? 0}`,
+    );
+
     if (!body?.modelName || !body?.runnerType || !body?.modelPath || !body?.devices) {
+      console.warn('[worker] POST /runners rejected: missing required fields');
       return reply.status(400).send({
         error: 'Missing required fields: modelName, runnerType, modelPath, devices',
         code: 'BAD_REQUEST',
@@ -38,8 +47,12 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       return reply.status(201).send(result);
     } catch (err) {
       if (err instanceof ConflictError) {
+        console.warn(`[worker] POST /runners conflict for ${body.modelName}: ${err.message}`);
         return reply.status(409).send({ error: err.message, code: 'CONFLICT' });
       }
+      // Surface launcher failures (SIF missing, apptainer verify/exec error, health timeout, …) —
+      // otherwise they vanish into a 500 with no worker-side trace.
+      console.error(`[worker] Failed to start runner for ${body.modelName}:`, err);
       throw err;
     }
   });

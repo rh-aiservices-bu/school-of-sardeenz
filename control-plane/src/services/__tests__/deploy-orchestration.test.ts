@@ -49,6 +49,7 @@ interface MockDeps {
   lifecycle: {
     transition: ReturnType<typeof vi.fn>;
     getState: ReturnType<typeof vi.fn>;
+    setRunnerEndpoint: ReturnType<typeof vi.fn>;
   };
   routingMap: {
     setModelState: ReturnType<typeof vi.fn>;
@@ -74,6 +75,7 @@ function createMocks(): MockDeps {
     lifecycle: {
       transition: vi.fn().mockResolvedValue({}),
       getState: vi.fn(),
+      setRunnerEndpoint: vi.fn().mockResolvedValue(undefined),
     },
     routingMap: {
       setModelState: vi.fn().mockResolvedValue(undefined),
@@ -129,6 +131,11 @@ describe('DeployOrchestrationService', () => {
         ModelState.STARTING,
       );
       expect(mocks.workerClient.startRunner).toHaveBeenCalledOnce();
+      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', {
+        runnerId: 'runner-abc',
+        host: '10.0.0.1',
+        port: 5001,
+      });
       expect(mocks.runnerClient.getHealth).toHaveBeenCalledOnce();
       expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
         host: '10.0.0.1',
@@ -171,6 +178,32 @@ describe('DeployOrchestrationService', () => {
           { deviceIndex: 1, deviceType: 'CUDA' },
         ],
       });
+    });
+  });
+
+  describe('deployModel — runner placement persistence', () => {
+    it('persists the runner endpoint before waiting for readiness', async () => {
+      const order: string[] = [];
+      mocks.lifecycle.setRunnerEndpoint.mockImplementation(() => {
+        order.push('setRunnerEndpoint');
+        return Promise.resolve();
+      });
+      mocks.runnerClient.getHealth.mockImplementation(() => {
+        order.push('getHealth');
+        return Promise.resolve({ state: RunnerState.READY, activeRequests: 0 });
+      });
+
+      await service.deployModel(makeParams());
+
+      expect(order).toEqual(['setRunnerEndpoint', 'getHealth']);
+    });
+
+    it('does not persist the endpoint when startRunner fails', async () => {
+      mocks.workerClient.startRunner.mockRejectedValue(new Error('connection refused'));
+
+      await expect(service.deployModel(makeParams())).rejects.toThrow('connection refused');
+
+      expect(mocks.lifecycle.setRunnerEndpoint).not.toHaveBeenCalled();
     });
   });
 

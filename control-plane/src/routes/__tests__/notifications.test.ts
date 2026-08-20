@@ -40,7 +40,9 @@ function toDeps(mockNotifications: MockNotifications): RouteDeps {
     notifications: mockNotifications as unknown as RouteDeps['notifications'],
     catalogService: {} as RouteDeps['catalogService'],
     moduleStore: {} as RouteDeps['moduleStore'],
+    weightsBrowser: {} as RouteDeps['weightsBrowser'],
     createRunnerClient: vi.fn(),
+    createWorkerClient: vi.fn(),
   };
 }
 

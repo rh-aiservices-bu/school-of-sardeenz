@@ -12,6 +12,8 @@ type Notification = ControlPlaneComponents['schemas']['Notification'];
 type RunnerCatalogView = ControlPlaneComponents['schemas']['RunnerCatalogView'];
 type CatalogItem = ControlPlaneComponents['schemas']['CatalogItem'];
 type CatalogItemStatus = ControlPlaneComponents['schemas']['CatalogItemStatus'];
+type WeightsListing = ControlPlaneComponents['schemas']['WeightsListing'];
+type WeightsEntry = ControlPlaneComponents['schemas']['WeightsEntry'];
 
 export {
   type ModelInfo,
@@ -25,6 +27,8 @@ export {
   type RunnerCatalogView,
   type CatalogItem,
   type CatalogItemStatus,
+  type WeightsListing,
+  type WeightsEntry,
 };
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
@@ -159,6 +163,12 @@ export const api = {
       request<unknown>(`/metrics/memory-history?${formatMetricsParams(params)}`, { signal }),
     getOperations: (params: MetricsParams, signal?: AbortSignal) =>
       request<unknown>(`/metrics/operations?${formatMetricsParams(params)}`, { signal }),
+  },
+  weights: {
+    list: (path?: string, signal?: AbortSignal) => {
+      const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+      return request<WeightsListing>(`/weights${qs}`, { signal });
+    },
   },
   catalog: {
     list: (signal?: AbortSignal) => request<RunnerCatalogView>('/catalog', { signal }),

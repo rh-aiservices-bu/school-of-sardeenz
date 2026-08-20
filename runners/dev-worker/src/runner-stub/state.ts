@@ -1,3 +1,5 @@
+import type { LogSink } from '../launcher.js';
+
 export type RunnerState = 'STARTING' | 'READY' | 'BUSY' | 'SLEEPING' | 'ERROR';
 export type LoadingPhase = 'INITIALIZING' | 'LOADING_WEIGHTS' | 'ALLOCATING_MEMORY' | 'READY';
 
@@ -12,6 +14,23 @@ const LOADING_PHASES: { phase: LoadingPhase; pct: number; fraction: number }[] =
   { phase: 'LOADING_WEIGHTS', pct: 10, fraction: 0.5 },
   { phase: 'ALLOCATING_MEMORY', pct: 60, fraction: 0.3 },
   { phase: 'READY', pct: 100, fraction: 0.1 },
+];
+
+// Fabricated vLLM-style log lines emitted at fixed points during simulateStartup, so dev/stub
+// mode produces launch logs realistic enough to exercise the log-streaming UI. `atFraction` is
+// the point in `[0, 1]` of the total startupDelayMs at which the line fires; timestamps are
+// added by the RunnerLogBuffer, so these are plain log content like the real engine would print.
+const LOG_SCRIPT: { atFraction: number; content: string }[] = [
+  { atFraction: 0, content: 'INFO [engine.py] Starting vLLM engine ...' },
+  { atFraction: 0.02, content: 'INFO [platforms/__init__.py] Detected platform: cuda' },
+  { atFraction: 0.12, content: 'INFO [model_runner.py] Loading model weights ...' },
+  { atFraction: 0.55, content: 'INFO [model_runner.py] Loading weights took 4.87 seconds' },
+  { atFraction: 0.62, content: 'INFO [worker.py] Allocating KV cache ...' },
+  {
+    atFraction: 0.75,
+    content: 'INFO [worker.py] Capturing CUDA graphs (this may take a while) ...',
+  },
+  { atFraction: 0.97, content: 'INFO [api_server.py] Application startup complete.' },
 ];
 
 export class RunnerStateMachine {
@@ -50,7 +69,7 @@ export class RunnerStateMachine {
     this._activeRequests = Math.max(0, this._activeRequests - 1);
   }
 
-  simulateStartup(delayMs: number): Promise<void> {
+  simulateStartup(delayMs: number, onLog?: LogSink): Promise<void> {
     return new Promise<void>((resolve) => {
       this.startupResolve = resolve;
       this._state = 'STARTING';
@@ -62,6 +81,7 @@ export class RunnerStateMachine {
 
       let elapsed = 0;
       let phaseIdx = 0;
+      let logIdx = 0;
 
       const tick = (): void => {
         elapsed += 100;
@@ -77,6 +97,14 @@ export class RunnerStateMachine {
           } else {
             break;
           }
+        }
+
+        // Emit any script lines whose threshold this tick has reached, on the same 100ms cadence
+        // that drives phase/percent updates — deterministic (no Math.random) so tests can assert
+        // on ordering and final content.
+        while (logIdx < LOG_SCRIPT.length && fraction >= LOG_SCRIPT[logIdx].atFraction) {
+          onLog?.('stdout', LOG_SCRIPT[logIdx].content);
+          logIdx++;
         }
 
         const phase = LOADING_PHASES[phaseIdx];

@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import type { LaunchHandle, LaunchSpec, RunnerLauncher } from './launcher.js';
+import type { LaunchHandle, LaunchSpec, LogSink, RunnerLauncher } from './launcher.js';
 
 // Production launcher: `apptainer exec`s an engine SIF from the shared module volume.
 //
@@ -39,7 +39,8 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
   runnerEntrypoint: ['python3', '-m', 'sardeenz_vllm_runner'],
   home: '/scratch/home',
   verifySif: true,
-  healthTimeoutMs: 300_000,
+  // 15 min — large models can take several minutes to load; see config.ts SARDEENZ_HEALTH_TIMEOUT_MS.
+  healthTimeoutMs: 900_000,
   // Must exceed the in-SIF shim's own shutdown budget (uvicorn drain + its 15s vLLM process-group
   // stop) so the graceful path — which is the only one that reaps vLLM's separate session — can
   // finish before this SIGKILL backstop fires. The pod cgroup is the ultimate backstop if the
@@ -52,6 +53,10 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
 export interface ChildHandle {
   readonly pid?: number;
   readonly exitCode?: number | null;
+  /** Present when spawned with stdio piped (the default spawn); absent for injected fakes that
+   * don't need log capture. */
+  readonly stdout?: NodeJS.ReadableStream;
+  readonly stderr?: NodeJS.ReadableStream;
   kill(signal?: NodeJS.Signals): boolean;
   once(event: 'exit', listener: () => void): unknown;
   once(event: 'error', listener: (err: Error) => void): unknown;
@@ -63,8 +68,20 @@ export type SpawnFn = (
   options: { env: NodeJS.ProcessEnv },
 ) => ChildHandle;
 
+// stdout/stderr piped (not inherited) so the launcher can capture them into the RunnerLogBuffer;
+// stdin stays 'ignore' — the runner entrypoint never reads from it.
+const defaultSpawn: SpawnFn = (command, args, options) =>
+  nodeSpawn(command, args, { env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+
 export type RunOnceFn = (command: string, args: string[]) => Promise<number>;
-export type HealthCheckFn = (url: string) => Promise<boolean>;
+
+/** The runner's reported health, as returned by its `/health` endpoint. */
+export interface HealthProbe {
+  state: string;
+  message?: string;
+}
+/** Probe a runner's `/health`. Resolves the reported state, or null if unreachable/not-ok yet. */
+export type HealthCheckFn = (url: string) => Promise<HealthProbe | null>;
 export type SleepFn = (ms: number) => Promise<void>;
 export type NowFn = () => number;
 
@@ -94,11 +111,11 @@ const defaultRunOnce: RunOnceFn = (command, args) =>
 const defaultHealthCheck: HealthCheckFn = async (url) => {
   try {
     const res = await fetch(url);
-    if (!res.ok) return false;
-    const body = (await res.json()) as { state?: string };
-    return body.state === 'READY';
+    if (!res.ok) return null;
+    const body = (await res.json()) as { state?: string; message?: string };
+    return { state: body.state ?? 'UNKNOWN', message: body.message };
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -117,7 +134,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     private readonly config: ApptainerLauncherConfig,
     deps: ApptainerLauncherDeps = {},
   ) {
-    this.spawn = deps.spawn ?? nodeSpawn;
+    this.spawn = deps.spawn ?? defaultSpawn;
     this.runOnce = deps.runOnce ?? defaultRunOnce;
     this.healthCheck = deps.healthCheck ?? defaultHealthCheck;
     this.sleep = deps.sleep ?? defaultSleep;
@@ -196,8 +213,14 @@ export class ApptainerLauncher implements RunnerLauncher {
     return { command: this.config.apptainerBin, args, env, sifPath };
   }
 
-  async start(spec: LaunchSpec): Promise<LaunchHandle> {
+  async start(spec: LaunchSpec, onLog?: LogSink): Promise<LaunchHandle> {
     const plan = this.buildExecPlan(spec);
+
+    // Trace the resolved SIF + exec so a stuck/failed cold-start is diagnosable (the two most
+    // common failures — missing SIF and failed signature verify — both surface right here).
+    console.log(
+      `[worker] apptainer exec for ${spec.modelName}: ${plan.command} ${plan.args.join(' ')}`,
+    );
 
     if (this.config.verifySif) {
       const code = await this.runOnce(this.config.apptainerBin, ['verify', plan.sifPath]);
@@ -209,6 +232,12 @@ export class ApptainerLauncher implements RunnerLauncher {
     }
 
     const child = this.spawn(plan.command, plan.args, { env: plan.env });
+
+    // Fake launchers injected by tests may not expose stdout/stderr — guard rather than assume.
+    if (onLog) {
+      child.stdout?.on('data', (chunk: Buffer) => onLog('stdout', chunk.toString()));
+      child.stderr?.on('data', (chunk: Buffer) => onLog('stderr', chunk.toString()));
+    }
 
     // If the exec dies before becoming healthy, surface it instead of hanging on the health poll.
     let exited = false;
@@ -243,7 +272,18 @@ export class ApptainerLauncher implements RunnerLauncher {
       if (hasExited()) {
         throw new Error(`Runner on :${port} exited before becoming healthy`);
       }
-      if (await this.healthCheck(url)) return;
+      const probe = await this.healthCheck(url);
+      if (probe) {
+        if (probe.state === 'READY') return;
+        // Fail fast: the runner reached a terminal error state (e.g. vLLM failed to load the model)
+        // — don't keep polling until the health timeout when we already know it won't recover.
+        if (probe.state === 'ERROR') {
+          throw new Error(
+            `Runner on :${port} reported ERROR while starting` +
+              (probe.message ? `: ${probe.message}` : ''),
+          );
+        }
+      }
       await this.sleep(this.config.healthIntervalMs);
     }
     throw new Error(

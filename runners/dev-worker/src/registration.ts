@@ -1,15 +1,27 @@
 import type { Redis } from 'ioredis';
 import type { DevWorkerConfig } from './config.js';
+import type { DetectedDevice } from './gpu-detect.js';
 
 export class WorkerRegistration {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly deviceMemoryUsed: number[];
+  private readonly devices: DetectedDevice[];
 
   constructor(
     private readonly redis: Redis,
     private readonly config: DevWorkerConfig,
+    // The advertised fleet. Defaults to the configured (simulated) fleet when not supplied — real
+    // deployments pass GPUs resolved via resolveDevices() (nvidia-smi in apptainer mode).
+    devices?: DetectedDevice[],
   ) {
-    this.deviceMemoryUsed = new Array<number>(config.deviceCount).fill(0);
+    this.devices =
+      devices ??
+      Array.from({ length: config.deviceCount }, (_, i) => ({
+        deviceIndex: i,
+        deviceType: config.deviceType,
+        memoryTotalBytes: config.deviceMemoryBytes,
+      }));
+    this.deviceMemoryUsed = new Array<number>(this.devices.length).fill(0);
   }
 
   private key(...parts: string[]): string {
@@ -21,17 +33,16 @@ export class WorkerRegistration {
       capabilities: [
         {
           runnerType: this.config.runnerType,
-          engineName: `Dev Stub (${this.config.runnerType})`,
+          engineName:
+            this.config.mode === 'stub'
+              ? `Dev Stub (${this.config.runnerType})`
+              : `${this.config.runnerType} (apptainer)`,
           supportedModelTypes: ['LLM'],
-          supportedDeviceTypes: [this.config.deviceType],
+          supportedDeviceTypes: [...new Set(this.devices.map((d) => d.deviceType))],
           supportedSleepLevels: ['L1_HOST_RAM'],
         },
       ],
-      devices: Array.from({ length: this.config.deviceCount }, (_, i) => ({
-        deviceIndex: i,
-        deviceType: this.config.deviceType,
-        memoryTotalBytes: this.config.deviceMemoryBytes,
-      })),
+      devices: this.devices,
       managementUrl: `http://localhost:${this.config.workerPort}`,
     };
 
@@ -88,11 +99,11 @@ export class WorkerRegistration {
 
   private buildMemoryReport(): { devices: Array<Record<string, unknown>> } {
     return {
-      devices: Array.from({ length: this.config.deviceCount }, (_, i) => ({
-        deviceIndex: i,
-        deviceType: this.config.deviceType,
+      devices: this.devices.map((device, i) => ({
+        deviceIndex: device.deviceIndex,
+        deviceType: device.deviceType,
         memoryUsedBytes: this.deviceMemoryUsed[i],
-        memoryTotalBytes: this.config.deviceMemoryBytes,
+        memoryTotalBytes: device.memoryTotalBytes,
       })),
     };
   }

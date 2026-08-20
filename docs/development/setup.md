@@ -144,6 +144,22 @@ them in `.env` if you remap the host ports above:
 | Redis/Valkey | `redis://localhost:6379`                                 | `SARDEENZ_REDIS_URL`    |
 | PostgreSQL   | `postgresql://sardeenz:sardeenz@localhost:5432/sardeenz` | `SARDEENZ_DATABASE_URL` |
 
+### Integration tests and the database
+
+The control-plane integration tests **TRUNCATE tables**, so they never touch your dev database.
+They reach the same Postgres/Redis **server** as the apps (via `.env`) but on a **dedicated test
+database**, derived by suffixing the dev DB name with `_test` (e.g. `sardeenz` → `sardeenz_test`)
+and a separate Redis logical DB (`1`). The test database is **auto-created** on first run if you
+have `CREATE DATABASE` privileges (the local compose `sardeenz` superuser does); otherwise the
+integration suite skips. As a safety net, the harness **refuses to run against any database whose
+name doesn't end in `_test`**.
+
+| Purpose                              | Var                          | Default                                     |
+| ------------------------------------ | ---------------------------- | ------------------------------------------- |
+| Override test Postgres               | `SARDEENZ_TEST_DATABASE_URL` | `<SARDEENZ_DATABASE_URL>` with `_test` name |
+| Override test Redis                  | `SARDEENZ_TEST_REDIS_URL`    | `<SARDEENZ_REDIS_URL>` on logical DB `1`    |
+| Bypass the `_test` guard (dangerous) | `SARDEENZ_ALLOW_NON_TEST_DB` | unset (guard active)                        |
+
 ## Common Commands
 
 | Command              | Description                               |

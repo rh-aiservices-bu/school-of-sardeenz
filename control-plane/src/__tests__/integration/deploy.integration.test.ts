@@ -44,13 +44,16 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
       devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
     });
 
-    await harness.modelRepository.create({
+    const created = await harness.modelRepository.create({
       name: MODEL,
       runnerType: 'vllm',
       modelPath: '/models/llama-3',
       requiredMemory: MEM,
       deviceType: 'CUDA',
+      runtimeModule: 'vllm-0.21',
     });
+    // runtimeModule round-trips through Postgres (migration 002 column).
+    expect(created.runtimeModule).toBe('vllm-0.21');
 
     await harness.lifecycle.createModel(MODEL, WORKER_ID);
 
@@ -84,8 +87,13 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
       modelPath: '/models/llama-3',
       requiredMemory: MEM,
       tensorParallel: 1,
+      runtimeModule: 'vllm-0.21',
       devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     });
+
+    // The runtime module is forwarded to the worker's start-runner request (which the Apptainer
+    // launcher resolves to /modules/vllm-0.21.sif).
+    expect(worker.startRequests.at(-1)?.runtimeModule).toBe('vllm-0.21');
 
     const state = await harness.lifecycle.getState(MODEL);
     expect(state?.state).toBe(ModelLifecycleState.ACTIVE);

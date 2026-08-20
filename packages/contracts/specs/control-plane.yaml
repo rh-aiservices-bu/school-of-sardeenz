@@ -40,6 +40,10 @@ tags:
   - name: Events
     description: |
       Real-time event stream for live cluster monitoring.
+  - name: Weights
+    description: |
+      Browse the shared model-weights directory (`SARDEENZ_WEIGHTS_DIR`) to
+      pick a model path when deploying.
 
 paths:
   # ---------------------------------------------------------------------------
@@ -225,6 +229,56 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Model is already stopping or stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/logs:
+    get:
+      operationId: streamModelLogs
+      summary: Stream a model's runner logs
+      description: |
+        Server-Sent Events (SSE) endpoint that streams the captured
+        stdout/stderr of the runner serving this model. The control plane
+        resolves the model's worker and runner, then proxies the worker's
+        `GET /runners/{runnerId}/logs` stream through to the caller. The
+        dashboard uses this to show live model-startup logs (e.g. vLLM weight
+        loading) in the deploy modal.
+
+        Because deployment is asynchronous, the runner may not be placed yet
+        when the caller connects. In that case the control plane keeps the SSE
+        connection open (sending `: ping` keepalive comments) and begins
+        streaming once the runner is available, rather than returning an error
+        that a browser `EventSource` would treat as fatal.
+
+        Event frames:
+        - `log` — a single captured line; `data` is a `RunnerLogLine` JSON object.
+        - `end` — the runner process has exited; the stream will close.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE log stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/RunnerLogLine"
+        "404":
+          description: Model not found
           content:
             application/json:
               schema:
@@ -613,6 +667,54 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # ---------------------------------------------------------------------------
+  # Weights
+  # ---------------------------------------------------------------------------
+
+  /api/v1/weights:
+    get:
+      operationId: browseWeights
+      summary: Browse the shared model-weights directory
+      description: |
+        Lists the immediate subdirectories of the model-weights directory
+        (`SARDEENZ_WEIGHTS_DIR`) at the given relative `path`, so the dashboard
+        can offer a folder picker for the model path. Directories that look
+        like a model (they contain `config.json`, `*.safetensors`, `*.gguf`,
+        etc.) are flagged with `isModelDir` and are directly selectable. The
+        `path` query is resolved relative to the weights root and is rejected
+        (`400`) if it escapes it. A missing weights root yields an empty
+        listing rather than an error.
+      tags:
+        - Weights
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: |
+            Directory to list, relative to the weights root. Defaults to the
+            root. Must not escape the root (no absolute paths or `..` traversal).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Directory listing retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeightsListing"
+        "400":
+          description: The requested path escapes the weights root
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
   # Notifications
   # ---------------------------------------------------------------------------
 
@@ -965,6 +1067,19 @@ components:
             The control plane does not interpret this — it is stored in
             PostgreSQL and forwarded when starting the runner.
           additionalProperties: true
+        runtimeModule:
+          type: string
+          pattern: "^[A-Za-z0-9_.-]+$"
+          description: |
+            Runtime module the worker execs to serve this model, as
+            `<engine>-<version>` (e.g., "vllm-0.21"). The control plane
+            stores it and forwards it to the worker's `StartRunnerRequest`;
+            the production (Apptainer) worker resolves it to
+            `/modules/<runtimeModule>.sif`. Optional: when omitted the worker
+            falls back to `<runnerType>-<engineConfig.version>`. The stub
+            launcher ignores it.
+          examples:
+            - "vllm-0.21"
         pinned:
           type: boolean
           default: false
@@ -1105,6 +1220,12 @@ components:
           type: object
           description: Engine-specific configuration.
           additionalProperties: true
+        runtimeModule:
+          type: string
+          pattern: "^[A-Za-z0-9_.-]+$"
+          description: |
+            Runtime module the worker execs (`<engine>-<version>`, e.g.
+            "vllm-0.21"), resolved to `/modules/<runtimeModule>.sif`.
         pinned:
           type: boolean
           description: Whether the model is pinned (non-evictable).
@@ -1609,6 +1730,60 @@ components:
             catalog (e.g. locally built or manually placed modules).
 
     # -------------------------------------------------------------------------
+    # Weights
+    # -------------------------------------------------------------------------
+
+    WeightsEntry:
+      type: object
+      description: A subdirectory within the model-weights directory.
+      required:
+        - name
+        - path
+        - isModelDir
+      properties:
+        name:
+          type: string
+          description: The directory's own name (no path separators).
+        path:
+          type: string
+          description: |
+            Absolute path to the directory, usable directly as a model path
+            (the weights root joined with the entry's relative location).
+        isModelDir:
+          type: boolean
+          description: |
+            True if the directory looks like it holds model weights (contains
+            `config.json`, `*.safetensors`, `*.gguf`, `*.bin`, etc.).
+
+    WeightsListing:
+      type: object
+      description: |
+        A single-level listing of the model-weights directory, used by the
+        dashboard's model-path folder picker.
+      required:
+        - root
+        - path
+        - relativePath
+        - entries
+      properties:
+        root:
+          type: string
+          description: Absolute path of the weights root (`SARDEENZ_WEIGHTS_DIR`).
+        path:
+          type: string
+          description: Absolute path of the directory that was listed.
+        relativePath:
+          type: string
+          description: |
+            Path of the listed directory relative to the root (empty string at
+            the root). Use this as the `path` query when navigating.
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeightsEntry"
+          description: Immediate subdirectories, sorted by name.
+
+    # -------------------------------------------------------------------------
     # Events
     # -------------------------------------------------------------------------
 
@@ -1644,6 +1819,32 @@ components:
           type: object
           description: Event-specific data.
           additionalProperties: true
+
+    RunnerLogLine:
+      type: object
+      description: |
+        A single captured line of runner output, streamed as the `data` of a
+        `log` SSE frame from `GET /api/v1/models/{modelName}/logs`. Mirrors the
+        worker-agent `RunnerLogLine` schema (the control plane proxies these
+        frames through verbatim).
+      required:
+        - ts
+        - stream
+        - content
+      properties:
+        ts:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp of when the worker captured the line.
+        stream:
+          type: string
+          enum:
+            - stdout
+            - stderr
+          description: Which standard stream the line was captured from.
+        content:
+          type: string
+          description: The captured log line (newline stripped).
 
     # -------------------------------------------------------------------------
     # Notifications

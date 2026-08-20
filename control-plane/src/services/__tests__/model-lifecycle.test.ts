@@ -120,6 +120,58 @@ describe('ModelLifecycleService.transition with deviceIndices', () => {
   });
 });
 
+describe('ModelLifecycleService.setRunnerEndpoint', () => {
+  it('persists runnerId/host/port without changing state', async () => {
+    const existing: ModelState = {
+      modelName: 'my-model',
+      state: ModelLifecycleState.STARTING,
+      workerId: 'w1',
+      runnerHost: null,
+      runnerPort: null,
+      runnerId: null,
+      deviceIndices: [0],
+      lastInferenceAt: null,
+      stateChangedAt: '2026-01-01T00:00:00.000Z',
+      errorMessage: null,
+    };
+
+    const redis = {
+      get: vi.fn().mockResolvedValue(JSON.stringify(existing)),
+      set: vi.fn().mockResolvedValue('OK'),
+    } as unknown as Redis;
+
+    const service = new ModelLifecycleService(redis, 'test');
+    await service.setRunnerEndpoint('my-model', {
+      runnerId: 'runner-1',
+      host: '10.0.0.5',
+      port: 9000,
+    });
+
+    const setCalls = (redis.set as ReturnType<typeof vi.fn>).mock.calls;
+    expect(setCalls).toHaveLength(1);
+    const [key, storedJson] = setCalls[0] as [string, string];
+    expect(key).toContain('my-model');
+    const stored = JSON.parse(storedJson) as ModelState;
+    expect(stored.runnerId).toBe('runner-1');
+    expect(stored.runnerHost).toBe('10.0.0.5');
+    expect(stored.runnerPort).toBe(9000);
+    // State itself is untouched — no transition happened.
+    expect(stored.state).toBe(ModelLifecycleState.STARTING);
+    expect(stored.stateChangedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('throws modelNotFound when the model does not exist', async () => {
+    const redis = {
+      get: vi.fn().mockResolvedValue(null),
+    } as unknown as Redis;
+
+    const service = new ModelLifecycleService(redis, 'test');
+    await expect(
+      service.setRunnerEndpoint('missing-model', { runnerId: 'r1', host: 'h', port: 1 }),
+    ).rejects.toThrow('Model not found');
+  });
+});
+
 describe('ModelLifecycleService.getLastInferenceTimestamps', () => {
   function makeMockRedis(data: Record<string, string>): Redis {
     return {

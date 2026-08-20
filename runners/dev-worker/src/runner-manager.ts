@@ -1,7 +1,8 @@
 import type { DevWorkerConfig } from './config.js';
 import type { WorkerRegistration } from './registration.js';
-import type { LaunchHandle, RunnerLauncher } from './launcher.js';
+import type { LaunchHandle, LogSink, RunnerLauncher } from './launcher.js';
 import { StubLauncher } from './stub-launcher.js';
+import { RunnerLogBuffer } from './runner-log-buffer.js';
 import { randomUUID } from 'node:crypto';
 
 export interface RunnerRecord {
@@ -30,6 +31,7 @@ export class RunnerManager {
   private readonly runners = new Map<string, RunnerRecord>();
   private readonly modelToRunner = new Map<string, string>();
   private readonly launcher: RunnerLauncher;
+  private readonly logBuffer: RunnerLogBuffer;
   private nextPort: number;
   // Serializes cold-starts when the launcher requires it (real engine cold-starts spike host RAM
   // and OOM a peer if run concurrently — spike Gate 9c). A promise chain acts as an async mutex.
@@ -39,9 +41,15 @@ export class RunnerManager {
     private readonly config: DevWorkerConfig,
     private readonly registration: WorkerRegistration,
     launcher?: RunnerLauncher,
+    logBuffer?: RunnerLogBuffer,
   ) {
     this.nextPort = config.runnerPortStart;
     this.launcher = launcher ?? new StubLauncher(config);
+    this.logBuffer = logBuffer ?? new RunnerLogBuffer();
+  }
+
+  getLogBuffer(): RunnerLogBuffer {
+    return this.logBuffer;
   }
 
   async startRunner(
@@ -59,19 +67,22 @@ export class RunnerManager {
     this.modelToRunner.set(params.modelName, runnerId);
 
     try {
-      const handle = await this.launch({
-        runnerId,
-        modelName: params.modelName,
-        modelPath: params.modelPath,
-        runnerType: params.runnerType || this.config.runnerType,
-        runtimeModule: params.runtimeModule,
-        deviceType: params.deviceType || this.config.deviceType,
-        requiredMemory: params.requiredMemory,
-        tensorParallel: params.tensorParallel,
-        engineConfig: params.engineConfig,
-        devices: params.devices,
-        port,
-      });
+      const handle = await this.launch(
+        {
+          runnerId,
+          modelName: params.modelName,
+          modelPath: params.modelPath,
+          runnerType: params.runnerType || this.config.runnerType,
+          runtimeModule: params.runtimeModule,
+          deviceType: params.deviceType || this.config.deviceType,
+          requiredMemory: params.requiredMemory,
+          tensorParallel: params.tensorParallel,
+          engineConfig: params.engineConfig,
+          devices: params.devices,
+          port,
+        },
+        (stream, content) => this.logBuffer.append(runnerId, stream, content),
+      );
 
       const record: RunnerRecord = {
         runnerId,
@@ -102,11 +113,14 @@ export class RunnerManager {
   }
 
   // Run the launcher, serializing cold-starts when the launcher requires it.
-  private launch(spec: Parameters<RunnerLauncher['start']>[0]): Promise<LaunchHandle> {
+  private launch(
+    spec: Parameters<RunnerLauncher['start']>[0],
+    onLog?: LogSink,
+  ): Promise<LaunchHandle> {
     if (!this.launcher.serializeColdStarts) {
-      return this.launcher.start(spec);
+      return this.launcher.start(spec, onLog);
     }
-    const result = this.coldStartChain.then(() => this.launcher.start(spec));
+    const result = this.coldStartChain.then(() => this.launcher.start(spec, onLog));
     // Keep the chain alive regardless of this start's success/failure.
     this.coldStartChain = result.then(
       () => undefined,
@@ -131,6 +145,11 @@ export class RunnerManager {
     this.runners.delete(runnerId);
     this.modelToRunner.delete(record.modelName);
 
+    // Signal any connected SSE clients that the stream is over before dropping the buffer —
+    // otherwise a client's `end` frame would race a listener set already cleared by drop().
+    this.logBuffer.markEnded(runnerId);
+    this.logBuffer.drop(runnerId);
+
     console.log(`[worker] Stopped runner ${runnerId} (${record.modelName})`);
   }
 
@@ -144,6 +163,14 @@ export class RunnerManager {
 
   getRunner(runnerId: string): RunnerRecord | undefined {
     return this.runners.get(runnerId);
+  }
+
+  // Resolve the runnerId for a model. Unlike getRunner() (backed by the `runners` map, which is
+  // only populated once a cold-start is *healthy*), this reads `modelToRunner`, which is set the
+  // instant startRunner() is entered — so a runner's logs are addressable during cold-start, which
+  // is exactly the window the deploy modal wants to stream.
+  getRunnerIdForModel(modelName: string): string | undefined {
+    return this.modelToRunner.get(modelName);
   }
 
   getAllRunners(): RunnerRecord[] {

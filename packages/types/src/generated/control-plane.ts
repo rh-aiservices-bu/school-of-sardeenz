@@ -76,6 +76,41 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/{modelName}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream a model's runner logs
+         * @description Server-Sent Events (SSE) endpoint that streams the captured
+         *     stdout/stderr of the runner serving this model. The control plane
+         *     resolves the model's worker and runner, then proxies the worker's
+         *     `GET /runners/{runnerId}/logs` stream through to the caller. The
+         *     dashboard uses this to show live model-startup logs (e.g. vLLM weight
+         *     loading) in the deploy modal.
+         *
+         *     Because deployment is asynchronous, the runner may not be placed yet
+         *     when the caller connects. In that case the control plane keeps the SSE
+         *     connection open (sending `: ping` keepalive comments) and begins
+         *     streaming once the runner is available, rather than returning an error
+         *     that a browser `EventSource` would treat as fatal.
+         *
+         *     Event frames:
+         *     - `log` — a single captured line; `data` is a `RunnerLogLine` JSON object.
+         *     - `end` — the runner process has exited; the stream will close.
+         */
+        get: operations["streamModelLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models/{modelName}/sleep": {
         parameters: {
             query?: never;
@@ -310,6 +345,33 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/weights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse the shared model-weights directory
+         * @description Lists the immediate subdirectories of the model-weights directory
+         *     (`SARDEENZ_WEIGHTS_DIR`) at the given relative `path`, so the dashboard
+         *     can offer a folder picker for the model path. Directories that look
+         *     like a model (they contain `config.json`, `*.safetensors`, `*.gguf`,
+         *     etc.) are flagged with `isModelDir` and are directly selectable. The
+         *     `path` query is resolved relative to the weights root and is rejected
+         *     (`400`) if it escapes it. A missing weights root yields an empty
+         *     listing rather than an error.
+         */
+        get: operations["browseWeights"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -516,6 +578,17 @@ export type components = {
                 [key: string]: unknown;
             };
             /**
+             * @description Runtime module the worker execs to serve this model, as
+             *     `<engine>-<version>` (e.g., "vllm-0.21"). The control plane
+             *     stores it and forwards it to the worker's `StartRunnerRequest`;
+             *     the production (Apptainer) worker resolves it to
+             *     `/modules/<runtimeModule>.sif`. Optional: when omitted the worker
+             *     falls back to `<runnerType>-<engineConfig.version>`. The stub
+             *     launcher ignores it.
+             * @example vllm-0.21
+             */
+            runtimeModule?: string;
+            /**
              * @description If true, the model cannot be evicted by the LRU eviction
              *     engine. It must be explicitly stopped by an operator.
              * @default false
@@ -610,6 +683,11 @@ export type components = {
             engineConfig?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Runtime module the worker execs (`<engine>-<version>`, e.g.
+             *     "vllm-0.21"), resolved to `/modules/<runtimeModule>.sif`.
+             */
+            runtimeModule?: string;
             /** @description Whether the model is pinned (non-evictable). */
             pinned?: boolean;
             /** @description Assigned worker identifier. */
@@ -905,6 +983,38 @@ export type components = {
              */
             unmanagedModules: string[];
         };
+        /** @description A subdirectory within the model-weights directory. */
+        WeightsEntry: {
+            /** @description The directory's own name (no path separators). */
+            name: string;
+            /**
+             * @description Absolute path to the directory, usable directly as a model path
+             *     (the weights root joined with the entry's relative location).
+             */
+            path: string;
+            /**
+             * @description True if the directory looks like it holds model weights (contains
+             *     `config.json`, `*.safetensors`, `*.gguf`, `*.bin`, etc.).
+             */
+            isModelDir: boolean;
+        };
+        /**
+         * @description A single-level listing of the model-weights directory, used by the
+         *     dashboard's model-path folder picker.
+         */
+        WeightsListing: {
+            /** @description Absolute path of the weights root (`SARDEENZ_WEIGHTS_DIR`). */
+            root: string;
+            /** @description Absolute path of the directory that was listed. */
+            path: string;
+            /**
+             * @description Path of the listed directory relative to the root (empty string at
+             *     the root). Use this as the `path` query when navigating.
+             */
+            relativePath: string;
+            /** @description Immediate subdirectories, sorted by name. */
+            entries: components["schemas"]["WeightsEntry"][];
+        };
         /**
          * @description An event emitted on the SSE stream. The `type` field determines
          *     which data fields are populated.
@@ -928,6 +1038,26 @@ export type components = {
             data?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * @description A single captured line of runner output, streamed as the `data` of a
+         *     `log` SSE frame from `GET /api/v1/models/{modelName}/logs`. Mirrors the
+         *     worker-agent `RunnerLogLine` schema (the control plane proxies these
+         *     frames through verbatim).
+         */
+        RunnerLogLine: {
+            /**
+             * Format: date-time
+             * @description ISO-8601 timestamp of when the worker captured the line.
+             */
+            ts: string;
+            /**
+             * @description Which standard stream the line was captured from.
+             * @enum {string}
+             */
+            stream: RunnerLogLineStream;
+            /** @description The captured log line (newline stripped). */
+            content: string;
         };
         /** @description Links a notification to its origin entity. */
         NotificationSource: {
@@ -1165,6 +1295,47 @@ export interface operations {
             };
             /** @description Model is already stopping or stopped */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    streamModelLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE log stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["RunnerLogLine"];
+                };
+            };
+            /** @description Model not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1596,6 +1767,50 @@ export interface operations {
             };
         };
     };
+    browseWeights: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Directory to list, relative to the weights root. Defaults to the
+                 *     root. Must not escape the root (no absolute paths or `..` traversal).
+                 */
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Directory listing retrieved successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeightsListing"];
+                };
+            };
+            /** @description The requested path escapes the weights root */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listNotifications: {
         parameters: {
             query?: {
@@ -1876,4 +2091,8 @@ export enum CatalogItemState {
     IMPORTING = "IMPORTING",
     IMPORTED = "IMPORTED",
     FAILED = "FAILED"
+}
+export enum RunnerLogLineStream {
+    stdout = "stdout",
+    stderr = "stderr"
 }

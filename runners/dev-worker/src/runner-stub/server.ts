@@ -6,6 +6,7 @@ import { registerSleepRoutes } from './routes/sleep.js';
 import { registerProgressRoutes } from './routes/progress.js';
 import { registerCapabilitiesRoutes } from './routes/capabilities.js';
 import { registerInferenceRoutes } from './routes/inference.js';
+import type { LogSink } from '../launcher.js';
 
 export interface RunnerStubConfig {
   port: number;
@@ -25,7 +26,7 @@ export interface RunnerStubConfig {
 export interface RunnerStub {
   server: ReturnType<typeof Fastify>;
   stateMachine: RunnerStateMachine;
-  start: () => Promise<void>;
+  start: (onLog?: LogSink) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -58,9 +59,9 @@ export function createRunnerStub(config: RunnerStubConfig): RunnerStub {
   return {
     server,
     stateMachine,
-    async start() {
+    async start(onLog?: LogSink) {
       await server.listen({ port: config.port, host: '0.0.0.0' });
-      void stateMachine.simulateStartup(config.startupDelayMs);
+      void stateMachine.simulateStartup(config.startupDelayMs, onLog);
     },
     async stop() {
       stateMachine.destroy();
