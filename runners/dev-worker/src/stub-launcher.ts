@@ -9,7 +9,11 @@ export class StubLauncher implements RunnerLauncher {
 
   constructor(private readonly config: DevWorkerConfig) {}
 
-  async start(spec: LaunchSpec, onLog?: LogSink): Promise<LaunchHandle> {
+  async start(
+    spec: LaunchSpec,
+    onLog?: LogSink,
+    onStartupComplete?: () => void,
+  ): Promise<LaunchHandle> {
     const stub = createRunnerStub({
       port: spec.port,
       modelName: spec.modelName,
@@ -26,7 +30,9 @@ export class StubLauncher implements RunnerLauncher {
     });
 
     // The stub runs in-process, so no capture plumbing needed — the log sink is called directly.
-    await stub.start(onLog);
+    // onStartupComplete fires when the simulated startup finishes (state → READY), mirroring the
+    // real launcher, so the manager ends/seals the launch-log stream at the same lifecycle point.
+    await stub.start(onLog, onStartupComplete);
 
     // The stub is a single Fastify server: it serves both the runner-contract management API and
     // the OpenAI `/v1/*` inference routes on `spec.port`. Report the engine port as the same port

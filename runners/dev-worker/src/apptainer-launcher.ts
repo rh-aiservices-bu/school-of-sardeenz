@@ -224,7 +224,11 @@ export class ApptainerLauncher implements RunnerLauncher {
     return { command: this.config.apptainerBin, args, env, sifPath };
   }
 
-  async start(spec: LaunchSpec, onLog?: LogSink): Promise<LaunchHandle> {
+  async start(
+    spec: LaunchSpec,
+    onLog?: LogSink,
+    onStartupComplete?: () => void,
+  ): Promise<LaunchHandle> {
     const plan = this.buildExecPlan(spec);
 
     // Trace the resolved SIF + exec so a stuck/failed cold-start is diagnosable (the two most
@@ -244,11 +248,18 @@ export class ApptainerLauncher implements RunnerLauncher {
 
     const child = this.spawn(plan.command, plan.args, { env: plan.env });
 
-    // Fake launchers injected by tests may not expose stdout/stderr — guard rather than assume.
-    if (onLog) {
-      child.stdout?.on('data', (chunk: Buffer) => onLog('stdout', chunk.toString()));
-      child.stderr?.on('data', (chunk: Buffer) => onLog('stderr', chunk.toString()));
-    }
+    // Forward captured output to `onLog` only until the runner finishes starting; after that we keep
+    // reading (draining) the streams — a full stdio pipe would block the engine — but stop
+    // forwarding, so post-startup request logs never reach the launch-log buffer. The listeners stay
+    // attached for draining; `capturing` gates forwarding. Fake launchers injected by tests may not
+    // expose stdout/stderr — the optional chaining guards that.
+    let capturing = true;
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (capturing && onLog) onLog('stdout', chunk.toString());
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (capturing && onLog) onLog('stderr', chunk.toString());
+    });
 
     // If the exec dies before becoming healthy, surface it instead of hanging on the health poll.
     let exited = false;
@@ -273,6 +284,12 @@ export class ApptainerLauncher implements RunnerLauncher {
       if (!exited) await this.stopChild(child).catch(() => {});
       throw err;
     }
+
+    // Runner is serving and its startup output is fully captured — stop forwarding further output
+    // (request logs) and signal the manager to seal/end the launch-log stream. vLLM's
+    // "Application startup complete" prints before its /health returns 200, so it's already buffered.
+    capturing = false;
+    onStartupComplete?.();
 
     return handle;
   }

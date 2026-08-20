@@ -86,6 +86,11 @@ export class RunnerManager {
           enginePort,
         },
         (stream, content) => this.logBuffer.append(runnerId, stream, content),
+        // Once the engine has finished starting, end the launch-log stream: connected viewers stop
+        // streaming and the buffered startup logs are sealed for later "View starting logs" reopens,
+        // so post-startup request logs never reach the control plane. The buffer is kept until the
+        // runner is stopped (drop() in stopRunner).
+        () => this.logBuffer.markEnded(runnerId),
       );
 
       const record: RunnerRecord = {
@@ -122,11 +127,14 @@ export class RunnerManager {
   private launch(
     spec: Parameters<RunnerLauncher['start']>[0],
     onLog?: LogSink,
+    onStartupComplete?: () => void,
   ): Promise<LaunchHandle> {
     if (!this.launcher.serializeColdStarts) {
-      return this.launcher.start(spec, onLog);
+      return this.launcher.start(spec, onLog, onStartupComplete);
     }
-    const result = this.coldStartChain.then(() => this.launcher.start(spec, onLog));
+    const result = this.coldStartChain.then(() =>
+      this.launcher.start(spec, onLog, onStartupComplete),
+    );
     // Keep the chain alive regardless of this start's success/failure.
     this.coldStartChain = result.then(
       () => undefined,

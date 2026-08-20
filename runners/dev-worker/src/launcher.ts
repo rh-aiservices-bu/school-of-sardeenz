@@ -75,6 +75,17 @@ export interface RunnerLauncher {
    *
    * `onLog`, when provided, receives the runner's captured stdout/stderr as it's produced.
    * Optional and additive — existing callers that don't need logs are unaffected.
+   *
+   * `onStartupComplete`, when provided, is called once the runner has finished starting (the engine
+   * is serving and its startup logs are all captured). After this fires the launcher MUST stop
+   * feeding `onLog` — the manager uses it to end the launch-log stream and seal the buffer so the
+   * retained startup logs stay viewable without post-startup request logs polluting them. Launchers
+   * still keep draining the process's stdio (so a full pipe can't block the engine); they just stop
+   * forwarding it.
    */
-  start(spec: LaunchSpec, onLog?: LogSink): Promise<LaunchHandle>;
+  start(
+    spec: LaunchSpec,
+    onLog?: LogSink,
+    onStartupComplete?: () => void,
+  ): Promise<LaunchHandle>;
 }

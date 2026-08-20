@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Modal,
@@ -19,8 +18,6 @@ import { useModelLogs } from '../hooks/useModelLogs';
 import { StateLabel } from './StateLabel';
 import { LogViewer } from './LogViewer';
 
-const AUTO_CLOSE_DELAY_MS = 2_000;
-
 interface DeployLogsModalProps {
   modelName: string;
   isOpen: boolean;
@@ -28,8 +25,14 @@ interface DeployLogsModalProps {
 }
 
 /**
- * Auto-opens on deploy (and reusable as a "View logs" action) to stream a runner's live
+ * Auto-opens on deploy (and reusable as a "View starting logs" action) to stream a runner's
  * startup logs. Flips to a success or failure state as the model's lifecycle state changes.
+ *
+ * The modal never closes itself — the operator closes it manually. Startup can take minutes, and
+ * the worker ends the log stream (see RunnerLogBuffer) once the engine finishes loading, so live
+ * output stops on its own; the buffered startup logs stay viewable if the modal is reopened later.
+ * The "model available" notification + state change come from the control plane on the real ACTIVE
+ * transition, so an operator who closed the modal is still told when the model is actually up.
  */
 export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalProps) {
   const { t } = useTranslation('models');
@@ -40,17 +43,6 @@ export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalP
   const isActive = model?.state === ModelLifecycleState.ACTIVE;
   const isError = model?.state === ModelLifecycleState.ERROR;
   const isStarting = model?.state === ModelLifecycleState.STARTING || model === undefined;
-
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  // Auto-close a short delay after the model comes up successfully, so the operator sees the
-  // success alert before being taken to the model detail page.
-  useEffect(() => {
-    if (!isOpen || !isActive) return;
-    const timer = setTimeout(() => onCloseRef.current(), AUTO_CLOSE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [isOpen, isActive]);
 
   return (
     <Modal variant={ModalVariant.large} isOpen={isOpen} onClose={onClose} aria-label={t('logs.modalTitle')}>

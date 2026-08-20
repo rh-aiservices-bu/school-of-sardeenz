@@ -28,6 +28,10 @@ export class RunnerLogBuffer {
   private readonly buffers = new Map<string, RunnerLogLine[]>();
   private readonly logListeners = new Map<string, Set<LogListener>>();
   private readonly endListeners = new Map<string, Set<EndListener>>();
+  // Runners whose log stream has been ended (startup complete, or the runner stopped). Recorded so a
+  // client that connects *after* the end signal fired still gets an immediate `end` frame after the
+  // replay, rather than hanging on a stream that will never produce another line.
+  private readonly ended = new Set<string>();
 
   constructor(private readonly cap: number = DEFAULT_CAP) {}
 
@@ -93,12 +97,20 @@ export class RunnerLogBuffer {
     };
   }
 
-  // Notify any connected SSE clients that the runner process has exited, so they can emit the
-  // `end` frame and close. Does not clear the buffer — call drop() for that.
+  // End a runner's log stream: notify connected SSE clients so they emit the `end` frame, and
+  // record the runner as ended so late-connecting clients also get one. Idempotent. Called when the
+  // engine finishes starting (seal the startup logs) and again when the runner stops. Does not clear
+  // the buffer — call drop() for that, so the startup logs stay viewable via "View starting logs".
   markEnded(runnerId: string): void {
+    this.ended.add(runnerId);
     const listeners = this.endListeners.get(runnerId);
     if (!listeners) return;
     for (const cb of listeners) cb();
+  }
+
+  // Whether a runner's log stream has already ended (see markEnded).
+  isEnded(runnerId: string): boolean {
+    return this.ended.has(runnerId);
   }
 
   // Copy of the buffered lines, oldest first — safe for a caller to replay without racing
@@ -117,5 +129,6 @@ export class RunnerLogBuffer {
     this.buffers.delete(runnerId);
     this.logListeners.delete(runnerId);
     this.endListeners.delete(runnerId);
+    this.ended.delete(runnerId);
   }
 }

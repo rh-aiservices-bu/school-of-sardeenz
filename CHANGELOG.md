@@ -46,6 +46,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The model-launch log modal no longer closes itself mid-startup, and startup logs stay
+  viewable.** The deploy modal auto-closed ~2s after the model first reported `ACTIVE`, which — for
+  engines whose startup is still in progress — yanked it away while weights were barely loading. The
+  modal now stays open until the operator closes it; the "model available" notification and state
+  change still fire on the real `ACTIVE` transition (so someone who closed the modal is still told
+  when it's actually up). Once the engine finishes starting, the worker **ends** the launch-log
+  stream and seals the buffered startup logs: post-startup request logs are no longer captured or
+  streamed to the control plane, and reopening the (renamed) **"View starting logs"** action replays
+  just the startup logs and closes cleanly. Implemented via a new `onStartupComplete` launcher
+  signal (`ApptainerLauncher` fires it once vLLM's `/health` is green — after "Application startup
+  complete" — and stops forwarding stdio while still draining it; the dev-worker stub fires it when
+  its simulated startup ends) wired to `RunnerLogBuffer.markEnded`, which now also seals late so a
+  reopened stream still gets an `end` frame.
+
 - **Inference through the routing proxy now reaches the vLLM engine.** `POST /v1/chat/completions`
   (and `/v1/completions`) to the proxy returned the runner's `{"detail":"Not Found"}` because the
   proxy forwarded to the runner's **management** port — the vLLM shim, which serves only the

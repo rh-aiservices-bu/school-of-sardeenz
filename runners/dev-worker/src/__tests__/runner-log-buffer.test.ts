@@ -123,8 +123,19 @@ describe('RunnerLogBuffer', () => {
     expect(ended).toBe(true);
   });
 
-  it('markEnded is a no-op when there are no subscribers', () => {
+  it('markEnded is a no-op (for delivery) when there are no subscribers, but still seals', () => {
     expect(() => buffer.markEnded('nonexistent')).not.toThrow();
+    // Sealed even without a live subscriber, so a client connecting later still gets an end frame.
+    expect(buffer.isEnded('nonexistent')).toBe(true);
+  });
+
+  it('isEnded is false until markEnded seals the runner, and drop clears the seal', () => {
+    expect(buffer.isEnded('runner-1')).toBe(false);
+    buffer.markEnded('runner-1');
+    expect(buffer.isEnded('runner-1')).toBe(true);
+    buffer.drop('runner-1');
+    // After drop the runnerId is fully forgotten — a fresh runner reusing the id starts un-ended.
+    expect(buffer.isEnded('runner-1')).toBe(false);
   });
 
   it('onEnd unsubscribe stops delivery', () => {

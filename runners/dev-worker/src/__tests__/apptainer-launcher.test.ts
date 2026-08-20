@@ -163,6 +163,43 @@ describe('ApptainerLauncher.start', () => {
     expect(handle.enginePort).toBe(9102);
   });
 
+  it('calls onStartupComplete once the runner is healthy', async () => {
+    const { launcher } = makeLauncher(
+      {},
+      { runOnce: () => Promise.resolve(0), healthCheck: () => Promise.resolve({ state: 'READY' }) },
+    );
+    const onStartupComplete = vi.fn();
+
+    await launcher.start(makeSpec(), undefined, onStartupComplete);
+
+    expect(onStartupComplete).toHaveBeenCalledOnce();
+  });
+
+  it('does not call onStartupComplete when the runner exits before becoming healthy', async () => {
+    let calls = 0;
+    const now = vi.fn(() => calls++ * 1000);
+    // Crash the child from inside the first health poll (the launcher attaches its exit listener
+    // only after the verify await + spawn, so emitting earlier would be missed).
+    const { launcher, child } = makeLauncher(
+      { healthTimeoutMs: 10_000 },
+      {
+        healthCheck: () => {
+          child.exitCode = 1;
+          child.emit('exit');
+          return Promise.resolve(null);
+        },
+        now,
+        sleep: () => Promise.resolve(),
+      },
+    );
+    const onStartupComplete = vi.fn();
+
+    await expect(launcher.start(makeSpec(), undefined, onStartupComplete)).rejects.toThrow(
+      /exited before becoming healthy/,
+    );
+    expect(onStartupComplete).not.toHaveBeenCalled();
+  });
+
   it('refuses to start when SIF verification fails', async () => {
     const runOnce = vi.fn(() => Promise.resolve(1));
     const { launcher, spawn } = makeLauncher({}, { runOnce });
