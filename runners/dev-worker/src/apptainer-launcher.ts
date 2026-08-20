@@ -207,6 +207,13 @@ export class ApptainerLauncher implements RunnerLauncher {
     // relying on the shim's `--port + 1` default — the RunnerManager allocates management/engine
     // ports in pairs and must know exactly where inference is served to report it to the proxy.
     args.push('--engine-port', String(spec.enginePort));
+    // Forward `--served-model-name` to `vllm serve` via the shim's `--` passthrough so vLLM
+    // registers the model under the routing name (not its weights path) and client `model` fields
+    // resolve — otherwise inference that reaches the engine 404s with "model does not exist". Using
+    // the passthrough (rather than a dedicated shim flag) keeps this working with already-built SIFs,
+    // whose baked-in shim CLI wouldn't recognise a new flag. Must come last: everything after `--`
+    // goes to vLLM.
+    args.push('--', '--served-model-name', spec.modelName);
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,

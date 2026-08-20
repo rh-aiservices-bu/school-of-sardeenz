@@ -41,6 +41,16 @@ def test_build_vllm_command_enables_sleep_mode_and_binds_internal_port():
     assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
 
 
+def test_build_vllm_command_forwards_served_model_name_after_double_dash():
+    # The worker passes the routing name through the `--` passthrough (see ApptainerLauncher), so the
+    # in-SIF shim needs no dedicated flag — it forwards it verbatim to `vllm serve`.
+    args = parse_args(
+        ["--model", "/w/m", "--port", "9101", "--", "--served-model-name", "org/Llama-3"]
+    )
+    cmd = build_vllm_command(args)
+    assert cmd[cmd.index("--served-model-name") + 1] == "org/Llama-3"
+
+
 def test_build_vllm_command_adds_tensor_parallel_and_forwarded_args():
     args = parse_args(
         ["--model", "/w/m", "--port", "9101", "--tensor-parallel", "2", "--", "--quantization", "fp8"]

@@ -83,6 +83,11 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args[args.indexOf('--port') + 1]).toBe('9101');
     // The engine's OpenAI port is pinned explicitly to the worker-allocated engine port.
     expect(args[args.indexOf('--engine-port') + 1]).toBe('9102');
+    // vLLM serves under the logical model name (not the weights path) so client `model` fields match.
+    // Forwarded through the shim's `--` passthrough to keep working with already-built SIFs.
+    const ddIdx = args.indexOf('--');
+    expect(ddIdx).toBeGreaterThan(-1);
+    expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
 
   it('sets HOME as a process env var, never as an --env flag (Apptainer rejects --env HOME)', () => {
