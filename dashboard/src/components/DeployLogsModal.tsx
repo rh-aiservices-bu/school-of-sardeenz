@@ -1,0 +1,120 @@
+import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  Modal,
+  ModalVariant,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  Button,
+  Alert,
+  AlertVariant,
+  Spinner,
+  Flex,
+  FlexItem,
+} from '@patternfly/react-core';
+import { ModelLifecycleState } from '@sardeenz/types';
+import { useModel } from '../hooks/useModels';
+import { useModelLogs } from '../hooks/useModelLogs';
+import { StateLabel } from './StateLabel';
+import { LogViewer } from './LogViewer';
+
+const AUTO_CLOSE_DELAY_MS = 2_000;
+
+interface DeployLogsModalProps {
+  modelName: string;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+/**
+ * Auto-opens on deploy (and reusable as a "View logs" action) to stream a runner's live
+ * startup logs. Flips to a success or failure state as the model's lifecycle state changes.
+ */
+export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalProps) {
+  const { t } = useTranslation('models');
+  const { t: tCommon } = useTranslation('common');
+  const { data: model } = useModel(modelName);
+  const { logs, isConnected } = useModelLogs(modelName, isOpen);
+
+  const isActive = model?.state === ModelLifecycleState.ACTIVE;
+  const isError = model?.state === ModelLifecycleState.ERROR;
+  const isStarting = model?.state === ModelLifecycleState.STARTING || model === undefined;
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Auto-close a short delay after the model comes up successfully, so the operator sees the
+  // success alert before being taken to the model detail page.
+  useEffect(() => {
+    if (!isOpen || !isActive) return;
+    const timer = setTimeout(() => onCloseRef.current(), AUTO_CLOSE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [isOpen, isActive]);
+
+  return (
+    <Modal variant={ModalVariant.large} isOpen={isOpen} onClose={onClose} aria-label={t('logs.modalTitle')}>
+      <ModalHeader
+        title={t('logs.modalTitle')}
+        titleIconVariant={isError ? 'danger' : isActive ? 'success' : undefined}
+        description={
+          <Flex alignItems={{ default: 'alignItemsCenter' }} gap={{ default: 'gapSm' }}>
+            <FlexItem>
+              <code style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>
+                {modelName}
+              </code>
+            </FlexItem>
+            {model && (
+              <FlexItem>
+                <StateLabel state={model.state} isCompact />
+              </FlexItem>
+            )}
+          </Flex>
+        }
+      />
+      <ModalBody>
+        {isStarting && (
+          <Flex
+            alignItems={{ default: 'alignItemsCenter' }}
+            gap={{ default: 'gapSm' }}
+            style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          >
+            <FlexItem>
+              <Spinner size="md" aria-label={t('logs.startingProgress')} />
+            </FlexItem>
+            <FlexItem>{t('logs.startingProgress')}</FlexItem>
+          </Flex>
+        )}
+
+        {isActive && (
+          <Alert
+            variant={AlertVariant.success}
+            title={t('logs.successTitle')}
+            isInline
+            style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          >
+            {t('logs.successBody')}
+          </Alert>
+        )}
+
+        {isError && (
+          <Alert
+            variant={AlertVariant.danger}
+            title={t('logs.failureTitle')}
+            isInline
+            style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          >
+            {model?.errorMessage ?? t('logs.failureBodyFallback')}
+          </Alert>
+        )}
+
+        <LogViewer logs={logs} isConnected={isConnected} />
+      </ModalBody>
+      <ModalFooter>
+        <Button variant={isActive || isError ? 'primary' : 'secondary'} onClick={onClose}>
+          {tCommon('actions.close')}
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+}

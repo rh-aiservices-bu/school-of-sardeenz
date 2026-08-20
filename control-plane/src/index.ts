@@ -22,6 +22,7 @@ import { ReconciliationService } from './services/reconciliation.js';
 import { NotificationService } from './services/notification.js';
 import { CatalogService } from './services/catalog-service.js';
 import { ModuleStoreService } from './services/module-store.js';
+import { WeightsBrowserService } from './services/weights-browser.js';
 import { StubImporter, OrasImporter, type SifImporter } from './services/sif-importer.js';
 import { WorkerClient } from './clients/worker.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
@@ -96,12 +97,17 @@ async function main(): Promise<void> {
     notificationLogger,
     notifications,
   );
+  const weightsBrowser = new WeightsBrowserService(config.weightsDir, notificationLogger);
   const deployOrchestration = new DeployOrchestrationService(
     lifecycle,
     routingMap,
     workerPool,
     memoryBudget,
-    (baseUrl) => new WorkerClient({ baseUrl }),
+    // startRunner blocks on the worker until the runner is healthy (a large model can take many
+    // minutes to load), so give it a start timeout matching the deploy budget plus a margin — the
+    // worker's own health timeout should fire first with a clean error, not this abort.
+    (baseUrl) =>
+      new WorkerClient({ baseUrl, startTimeoutMs: config.deployTimeoutSecs * 1000 + 60_000 }),
     (host, port) => new RunnerClient({ host, port }),
     config.deployTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
@@ -134,7 +140,9 @@ async function main(): Promise<void> {
       notifications,
       catalogService,
       moduleStore,
+      weightsBrowser,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
+      createWorkerClient: (baseUrl) => new WorkerClient({ baseUrl }),
     },
   });
 

@@ -1,6 +1,6 @@
 import type { DevWorkerConfig } from './config.js';
 import { createRunnerStub } from './runner-stub/server.js';
-import type { LaunchHandle, LaunchSpec, RunnerLauncher } from './launcher.js';
+import type { LaunchHandle, LaunchSpec, LogSink, RunnerLauncher } from './launcher.js';
 
 // Dev launcher: starts an in-process Fastify stub that fakes an engine runner (Phase 3.6).
 // No child process, no SIF — purely local. Cheap enough to start concurrently.
@@ -9,7 +9,7 @@ export class StubLauncher implements RunnerLauncher {
 
   constructor(private readonly config: DevWorkerConfig) {}
 
-  async start(spec: LaunchSpec): Promise<LaunchHandle> {
+  async start(spec: LaunchSpec, onLog?: LogSink): Promise<LaunchHandle> {
     const stub = createRunnerStub({
       port: spec.port,
       modelName: spec.modelName,
@@ -25,7 +25,8 @@ export class StubLauncher implements RunnerLauncher {
       inferenceDelayMs: this.config.inferenceDelayMs,
     });
 
-    await stub.start();
+    // The stub runs in-process, so no capture plumbing needed — the log sink is called directly.
+    await stub.start(onLog);
 
     return {
       host: 'localhost',

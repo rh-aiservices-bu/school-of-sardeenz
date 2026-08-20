@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { CatalogItemState } from '@sardeenz/types';
 import {
   PageSection,
   Content,
@@ -12,6 +13,8 @@ import {
   TextArea,
   FormSelect,
   FormSelectOption,
+  InputGroup,
+  InputGroupItem,
   Switch,
   ActionGroup,
   Button,
@@ -23,6 +26,9 @@ import {
   HelperTextItem,
 } from '@patternfly/react-core';
 import { useDeployModel } from '../../hooks/useModels';
+import { useCatalog } from '../../hooks/useCatalog';
+import { WeightsBrowserModal } from './WeightsBrowserModal';
+import { DeployLogsModal } from '../../components/DeployLogsModal';
 import type { ModelDeploymentRequest } from '../../api/client';
 
 const GIB = 1024 ** 3;
@@ -39,6 +45,10 @@ const DEVICE_OPTIONS = [
   { value: 'CPU', label: 'CPU' },
 ];
 
+// Mirrors the runtimeModule pattern in the control-plane/worker contracts (it becomes a SIF
+// filename segment: /modules/<runtimeModule>.sif).
+const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
 interface FormState {
   modelName: string;
   runnerType: string;
@@ -46,6 +56,7 @@ interface FormState {
   requiredMemoryGib: string;
   deviceType: string;
   tensorParallel: string;
+  runtimeModule: string;
   pinned: boolean;
   engineConfig: string;
 }
@@ -56,6 +67,7 @@ interface FormErrors {
   modelPath?: string;
   requiredMemoryGib?: string;
   tensorParallel?: string;
+  runtimeModule?: string;
   engineConfig?: string;
 }
 
@@ -84,6 +96,12 @@ function validate(form: FormState, t: TFunction<'models'>): FormErrors {
   const tp = parseInt(form.tensorParallel, 10);
   if (isNaN(tp) || tp < 1) {
     errors.tensorParallel = t('deploy.validation.tensorParallelMin');
+  }
+
+  if (!form.runtimeModule.trim()) {
+    errors.runtimeModule = t('deploy.validation.runtimeModuleRequired');
+  } else if (!RUNTIME_MODULE_PATTERN.test(form.runtimeModule.trim())) {
+    errors.runtimeModule = t('deploy.validation.runtimeModulePattern');
   }
 
   if (form.engineConfig.trim()) {
@@ -130,6 +148,7 @@ export function ModelDeploy() {
   const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
   const deployModel = useDeployModel();
+  const { data: catalog } = useCatalog();
 
   const [form, setForm] = useState<FormState>({
     modelName: '',
@@ -138,15 +157,36 @@ export function ModelDeploy() {
     requiredMemoryGib: '',
     deviceType: '',
     tensorParallel: '1',
+    runtimeModule: '',
     pinned: false,
     engineConfig: '',
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [logsModalModelName, setLogsModalModelName] = useState<string | null>(null);
+
+  // Runtime modules that are both installed (IMPORTED) and built for the selected runner. The
+  // catalog entry's sifName is the runtimeModule value (→ /modules/<sifName>.sif).
+  const availableModules = useMemo(
+    () =>
+      (catalog?.runners ?? [])
+        .filter(
+          (item) =>
+            item.entry.runnerType === form.runnerType &&
+            item.status.state === CatalogItemState.IMPORTED,
+        )
+        .map((item) => item.entry),
+    [catalog, form.runnerType],
+  );
 
   const set = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     const updated = { ...form, [field]: value };
+    // Modules are runner-specific, so a runner change invalidates the current selection.
+    if (field === 'runnerType') {
+      updated.runtimeModule = '';
+    }
     setForm(updated);
     if (submitted) {
       setErrors(validate(updated, t));
@@ -173,15 +213,27 @@ export function ModelDeploy() {
       body.deviceType = form.deviceType;
     }
 
+    if (form.runtimeModule.trim()) {
+      body.runtimeModule = form.runtimeModule.trim();
+    }
+
     if (form.engineConfig.trim()) {
       body.engineConfig = JSON.parse(form.engineConfig) as Record<string, unknown>;
     }
 
     deployModel.mutate(body, {
       onSuccess: () => {
-        void navigate(`/models/${encodeURIComponent(body.modelName)}`);
+        setLogsModalModelName(body.modelName);
       },
     });
+  };
+
+  const closeLogsModal = () => {
+    const deployedModelName = logsModalModelName;
+    setLogsModalModelName(null);
+    if (deployedModelName) {
+      void navigate(`/models/${encodeURIComponent(deployedModelName)}`);
+    }
   };
 
   return (
@@ -206,19 +258,6 @@ export function ModelDeploy() {
           )}
 
           <Form onSubmit={handleSubmit} noValidate>
-            <FormGroup label={t('deploy.fields.modelName')} isRequired fieldId="model-name">
-              <TextInput
-                id="model-name"
-                value={form.modelName}
-                onChange={(_ev, val) => set('modelName', val)}
-                isRequired
-                aria-invalid={submitted && !!errors.modelName}
-                aria-describedby="model-name-helper"
-                placeholder="meta-llama/Llama-3.1-8B-Instruct"
-              />
-              <FieldHelper error={errors.modelName} showError={submitted} fieldId="model-name" />
-            </FormGroup>
-
             <FormGroup label={t('deploy.fields.runnerType')} isRequired fieldId="runner-type">
               <FormSelect
                 id="runner-type"
@@ -233,22 +272,79 @@ export function ModelDeploy() {
               <FieldHelper error={errors.runnerType} showError={submitted} fieldId="runner-type" />
             </FormGroup>
 
-            <FormGroup label={t('deploy.fields.modelPath')} isRequired fieldId="model-path">
-              <TextInput
-                id="model-path"
-                value={form.modelPath}
-                onChange={(_ev, val) => set('modelPath', val)}
-                isRequired
-                aria-invalid={submitted && !!errors.modelPath}
-                aria-describedby="model-path-helper"
-                placeholder="/models/meta-llama/Llama-3.1-8B-Instruct"
+            <FormGroup label={t('deploy.fields.runtimeModule')} isRequired fieldId="runtime-module">
+              <FormSelect
+                id="runtime-module"
+                value={form.runtimeModule}
+                onChange={(_ev, val) => set('runtimeModule', val)}
+                aria-label={t('deploy.fields.runtimeModule')}
+                aria-invalid={submitted && !!errors.runtimeModule}
+                validated={submitted && errors.runtimeModule ? 'error' : 'default'}
+              >
+                <FormSelectOption
+                  value=""
+                  label={t('deploy.fields.runtimeModulePlaceholder')}
+                  isPlaceholder
+                  isDisabled
+                />
+                {availableModules.map((entry) => (
+                  <FormSelectOption
+                    key={entry.sifName}
+                    value={entry.sifName}
+                    label={entry.sifName}
+                  />
+                ))}
+              </FormSelect>
+              <FieldHelper
+                hint={
+                  availableModules.length === 0
+                    ? t('deploy.hints.runtimeModuleNone')
+                    : t('deploy.hints.runtimeModule')
+                }
+                error={errors.runtimeModule}
+                showError={submitted}
+                fieldId="runtime-module"
               />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.modelPath')} isRequired fieldId="model-path">
+              <InputGroup>
+                <InputGroupItem isFill>
+                  <TextInput
+                    id="model-path"
+                    value={form.modelPath}
+                    onChange={(_ev, val) => set('modelPath', val)}
+                    isRequired
+                    aria-invalid={submitted && !!errors.modelPath}
+                    aria-describedby="model-path-helper"
+                    placeholder="/models/meta-llama/Llama-3.1-8B-Instruct"
+                  />
+                </InputGroupItem>
+                <InputGroupItem>
+                  <Button variant="control" onClick={() => setBrowseOpen(true)}>
+                    {t('deploy.browse.button')}
+                  </Button>
+                </InputGroupItem>
+              </InputGroup>
               <FieldHelper
                 hint={t('deploy.hints.modelPath')}
                 error={errors.modelPath}
                 showError={submitted}
                 fieldId="model-path"
               />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.modelName')} isRequired fieldId="model-name">
+              <TextInput
+                id="model-name"
+                value={form.modelName}
+                onChange={(_ev, val) => set('modelName', val)}
+                isRequired
+                aria-invalid={submitted && !!errors.modelName}
+                aria-describedby="model-name-helper"
+                placeholder="meta-llama/Llama-3.1-8B-Instruct"
+              />
+              <FieldHelper error={errors.modelName} showError={submitted} fieldId="model-name" />
             </FormGroup>
 
             <FormGroup
@@ -358,6 +454,20 @@ export function ModelDeploy() {
           </Form>
         </CardBody>
       </Card>
+
+      <WeightsBrowserModal
+        isOpen={browseOpen}
+        onClose={() => setBrowseOpen(false)}
+        onSelect={(absolutePath) => set('modelPath', absolutePath)}
+      />
+
+      {logsModalModelName && (
+        <DeployLogsModal
+          modelName={logsModalModelName}
+          isOpen={logsModalModelName !== null}
+          onClose={closeLogsModal}
+        />
+      )}
     </PageSection>
   );
 }

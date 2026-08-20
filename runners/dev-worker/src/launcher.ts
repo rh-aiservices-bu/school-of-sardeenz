@@ -41,6 +41,12 @@ export interface LaunchHandle {
   stop: () => Promise<void>;
 }
 
+// Callback a launcher feeds raw captured output through, one call per stdio 'data' event (not
+// pre-split into lines — the RunnerLogBuffer owns line-splitting). The RunnerManager wires this
+// to `RunnerLogBuffer.append` so live launch output reaches the `/runners/:runnerId/logs` SSE
+// route.
+export type LogSink = (stream: 'stdout' | 'stderr', content: string) => void;
+
 export interface RunnerLauncher {
   /**
    * When true, the RunnerManager serializes `start()` calls (one cold-start at a time) because
@@ -51,6 +57,9 @@ export interface RunnerLauncher {
   /**
    * Start one runner. For real engines this resolves only once the runner is serving (healthy),
    * so the manager's serialization guarantees the previous cold-start finished first.
+   *
+   * `onLog`, when provided, receives the runner's captured stdout/stderr as it's produced.
+   * Optional and additive — existing callers that don't need logs are unaffected.
    */
-  start(spec: LaunchSpec): Promise<LaunchHandle>;
+  start(spec: LaunchSpec, onLog?: LogSink): Promise<LaunchHandle>;
 }

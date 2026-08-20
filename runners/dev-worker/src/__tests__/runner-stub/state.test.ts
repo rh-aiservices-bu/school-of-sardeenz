@@ -127,6 +127,21 @@ describe('RunnerStateMachine', () => {
       expect(pct3).toBeGreaterThan(pct2);
       expect(pct4).toBe(100);
     });
+
+    it('emits simulated vLLM-style log lines through onLog, ending with startup complete', async () => {
+      const lines: { stream: 'stdout' | 'stderr'; content: string }[] = [];
+      await machine.simulateStartup(300, (stream, content) => {
+        lines.push({ stream, content });
+      });
+
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.every((l) => l.stream === 'stdout')).toBe(true);
+      expect(lines[lines.length - 1].content).toMatch(/Application startup complete/);
+    });
+
+    it('does not throw when no onLog callback is provided', async () => {
+      await expect(machine.simulateStartup(50)).resolves.toBeUndefined();
+    });
   });
 
   describe('sleep', () => {

@@ -43,7 +43,7 @@ function makeLauncher(
     {
       spawn,
       runOnce: () => Promise.resolve(0),
-      healthCheck: () => Promise.resolve(true),
+      healthCheck: () => Promise.resolve({ state: 'READY' }),
       sleep: () => Promise.resolve(),
       now: () => 0,
       ...deps,
@@ -142,7 +142,7 @@ describe('ApptainerLauncher.buildExecPlan', () => {
 describe('ApptainerLauncher.start', () => {
   it('verifies the SIF, spawns the exec, and resolves once healthy', async () => {
     const runOnce = vi.fn(() => Promise.resolve(0));
-    const healthCheck = vi.fn(() => Promise.resolve(true));
+    const healthCheck = vi.fn(() => Promise.resolve({ state: 'READY' }));
     const { launcher, spawn, child } = makeLauncher({}, { runOnce, healthCheck });
 
     const handle = await launcher.start(makeSpec());
@@ -179,7 +179,7 @@ describe('ApptainerLauncher.start', () => {
           // Simulate the process crashing during the first poll gap.
           child.exitCode = 1;
           child.emit('exit');
-          return Promise.resolve(false);
+          return Promise.resolve(null);
         },
         now,
         sleep: () => Promise.resolve(),
@@ -189,6 +189,32 @@ describe('ApptainerLauncher.start', () => {
     await expect(launcher.start(makeSpec())).rejects.toThrow(/exited before becoming healthy/);
     // The exec already died — the launcher must not try to signal a dead process.
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('fails fast (and tears down) when the runner reports ERROR before the health timeout', async () => {
+    const healthCheck = vi.fn(() =>
+      Promise.resolve({ state: 'ERROR', message: 'CUDA out of memory' }),
+    );
+    // A long timeout + a sleep that would advance time proves we bail on ERROR, not on timeout.
+    const { launcher, child } = makeLauncher(
+      { healthTimeoutMs: 900_000 },
+      { healthCheck, now: () => 0, sleep: () => Promise.resolve() },
+    );
+    // The runner is still running on ERROR (it didn't crash), so teardown SIGTERMs it; make the
+    // fake child exit in response so stopChild() resolves.
+    child.kill = vi.fn(() => {
+      child.exitCode = 0;
+      child.emit('exit');
+      return true;
+    });
+
+    await expect(launcher.start(makeSpec())).rejects.toThrow(
+      /reported ERROR while starting: CUDA out of memory/,
+    );
+    // The exec is still running (it didn't exit) — the launcher must tear it down.
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    // Only polled once — it did not spin until the timeout.
+    expect(healthCheck).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -52,6 +52,72 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/runners/{runnerId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream a runner's captured logs
+         * @description Server-Sent Events (SSE) endpoint that streams the captured
+         *     stdout/stderr of a runner process. The control plane proxies this to
+         *     the dashboard so operators can watch model startup (e.g. vLLM weight
+         *     loading) in real time.
+         *
+         *     On connect, the worker first replays the runner's buffered log lines
+         *     (a bounded ring buffer, oldest surviving line first), then streams new
+         *     lines live as the process emits them.
+         *
+         *     Event frames:
+         *     - `log` — a single captured line; `data` is a `RunnerLogLine` JSON object.
+         *     - `end` — the runner process has exited; the stream will close.
+         *
+         *     A `: ping` comment is sent every 30 seconds to keep the connection
+         *     alive. Returns `404` if no runner with the given id exists on this
+         *     worker.
+         */
+        get: operations["streamRunnerLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runners/by-model/{modelName}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream a runner's captured logs, addressed by model name
+         * @description Same SSE stream as `GET /runners/{runnerId}/logs`, but addressed by the
+         *     model name instead of the runner id.
+         *
+         *     This is what the control plane uses to watch a **cold-starting** runner:
+         *     it learns the `runnerId` only once its blocking `POST /runners` call
+         *     returns (after the runner is healthy), which is too late to stream
+         *     startup. The worker knows the `model → runner` mapping the instant the
+         *     start command is received, so keying by model name makes a runner's logs
+         *     addressable throughout cold-start.
+         *
+         *     Returns `404` until the worker has actually received the start command
+         *     for this model (the control plane retries).
+         */
+        get: operations["streamRunnerLogsByModel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -121,6 +187,24 @@ export type components = {
             deviceIndex: number;
             /** @description Device type (e.g., "CUDA", "ROCM", "CPU"). */
             deviceType: string;
+        };
+        /**
+         * @description A single captured line of runner output, streamed as the `data` of a
+         *     `log` SSE frame from `GET /runners/{runnerId}/logs`.
+         */
+        RunnerLogLine: {
+            /**
+             * Format: date-time
+             * @description ISO-8601 timestamp of when the worker captured the line.
+             */
+            ts: string;
+            /**
+             * @description Which standard stream the line was captured from.
+             * @enum {string}
+             */
+            stream: RunnerLogLineStream;
+            /** @description The captured log line (newline stripped). */
+            content: string;
         };
         /** @description Response after a runner has been started successfully. */
         StartRunnerResponse: {
@@ -316,4 +400,90 @@ export interface operations {
             };
         };
     };
+    streamRunnerLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Unique identifier of the runner whose logs to stream. */
+                runnerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE log stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["RunnerLogLine"];
+                };
+            };
+            /** @description Runner not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal worker error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    streamRunnerLogsByModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name of the model whose runner logs to stream. */
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE log stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["RunnerLogLine"];
+                };
+            };
+            /** @description No runner for this model (not started yet) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal worker error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+}
+export enum RunnerLogLineStream {
+    stdout = "stdout",
+    stderr = "stderr"
 }

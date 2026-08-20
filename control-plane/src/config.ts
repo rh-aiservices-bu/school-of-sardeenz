@@ -18,6 +18,8 @@ export interface Config {
   // Runner catalog + SIF import
   readonly runnerCatalogUrl: string;
   readonly modulesDir: string;
+  // Shared model-weights directory, browsed by the dashboard model-path picker.
+  readonly weightsDir: string;
   readonly sifImporter: 'stub' | 'oras';
   readonly apptainerBin: string;
   readonly verifySif: boolean;
@@ -92,10 +94,14 @@ export function loadConfig(): Config {
     sleepTimeoutSecs: intEnv('SARDEENZ_SLEEP_TIMEOUT_SECS', 300),
     wakeTimeoutSecs: intEnv('SARDEENZ_WAKE_TIMEOUT_SECS', 300),
     healthCheckIntervalSecs: intEnv('SARDEENZ_HEALTH_CHECK_INTERVAL_SECS', 10),
-    deployTimeoutSecs: intEnv('SARDEENZ_DEPLOY_TIMEOUT_SECS', 600),
+    // 15 min by default — large models can take several minutes to load weights + allocate KV
+    // cache. Override with SARDEENZ_DEPLOY_TIMEOUT_SECS for exceptionally large models.
+    deployTimeoutSecs: intEnv('SARDEENZ_DEPLOY_TIMEOUT_SECS', 900),
     reconciliationIntervalSecs: intEnv('SARDEENZ_RECONCILIATION_INTERVAL_SECS', 30),
     runnerCatalogUrl: optionalEnv('SARDEENZ_RUNNER_CATALOG_URL', DEFAULT_CATALOG_URL),
     modulesDir: optionalEnv('SARDEENZ_MODULES_DIR', '/modules'),
+    // Same var the worker reads; the control plane must have the weights volume mounted to browse it.
+    weightsDir: optionalEnv('SARDEENZ_WEIGHTS_DIR', '/weights'),
     // 'stub' (dev, no apptainer) writes a placeholder SIF; 'oras' runs `apptainer pull oras://…`.
     sifImporter: optionalEnv('SARDEENZ_SIF_IMPORTER', 'stub') === 'oras' ? 'oras' : 'stub',
     apptainerBin: optionalEnv('SARDEENZ_APPTAINER_BIN', 'apptainer'),

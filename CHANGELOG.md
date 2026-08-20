@@ -8,7 +8,119 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Single-file local dev configuration (`.env`).** All configurable ports and connection URLs
+- **Real-time model-launch log streaming.** Deploying a model now opens a modal that streams the
+  runner's live stdout/stderr over SSE (real vLLM output in production, realistic simulated lines in
+  dev-worker stub mode), and flips to success (auto-closing) or failure as the model reaches
+  `ACTIVE`/`ERROR`. The same modal is reachable as a "View logs" action on the model detail page.
+  Previously a launch showed only a "Starting" label with no visibility into what the runner was
+  doing. Data flows over a new HTTP streaming chain: the worker agent captures each runner's output
+  into a per-runner ring buffer and exposes `GET /runners/{runnerId}/logs` (SSE); the control plane
+  resolves the model's worker/runner and stream-proxies it at `GET /api/v1/models/{modelName}/logs`,
+  holding the connection open and emitting keepalives while an async deploy places the runner; the
+  dashboard BFF stream-proxies it at `GET /api/models/{name}/logs` (admin-readonly, cookie auth); and
+  the frontend consumes it via a transient per-model `useModelLogs` EventSource hook rendered in a
+  `LogViewer`. Because a worker's `POST /runners` blocks until the runner is healthy, the control
+  plane never learns the `runnerId` in time to watch a cold-start; logs are therefore addressed by
+  **model name** (`GET /runners/by-model/{modelName}/logs`), which the worker can resolve the instant
+  the start command arrives, so vLLM's weight-loading/startup output (and any failure) streams live
+  throughout cold-start. The worker also logs start-command receipt, the resolved `apptainer exec`
+  command + SIF path, and launcher failures (previously it logged nothing until success). Contracts
+  add the `RunnerLogLine` schema and the streaming endpoints. The dev-worker stub emits vLLM-style log
+  lines as it walks its simulated startup phases, so the feature is fully exercisable in containerless
+  local dev. Control-endpoint poll spam (the engine's `"GET /health"`/`/progress`/… access-log lines,
+  emitted once per control-plane poll) is filtered out at capture so it never clutters the stream.
+  Deploy/health timeouts default to **15 min** (`SARDEENZ_DEPLOY_TIMEOUT_SECS`,
+  `SARDEENZ_HEALTH_TIMEOUT_MS`) and the control plane's `startRunner` call no longer aborts at 60 s —
+  a model that takes minutes to load its weights is no longer marked failed (leaving an orphaned
+  runner) while it's still loading. Conversely, a runner that reports a terminal `ERROR` state (e.g.
+  vLLM fails to load the model / CUDA OOM) now fails the launch **immediately** — with the runner's
+  error message — instead of polling until the 15-min timeout.
+- **Model-path folder picker on the Deploy Model form.** A new "Browse" button opens a modal that
+  navigates the shared model-weights directory (`SARDEENZ_WEIGHTS_DIR`) one level at a time, with a
+  breadcrumb and folders that look like a model (they contain `config.json`, `*.safetensors`,
+  `*.gguf`, etc.) flagged and directly selectable. Backed by a new read-only control-plane endpoint
+  `GET /api/v1/weights?path=<relative>` (`WeightsBrowserService`, path-traversal-guarded) proxied by
+  the BFF at `GET /api/weights` (`admin-readonly`). The control plane now reads `SARDEENZ_WEIGHTS_DIR`
+  (default `/weights`) and must have that directory mounted to browse it. Contracts add the
+  `WeightsListing` / `WeightsEntry` schemas.
+
+### Fixed
+
+- **Deploying a model no longer crashes with "models is not iterable" when a model-detail page is
+  cached.** The optimistic cache update in `useDeployModel` ran over every query matching the
+  `['models']` prefix, which includes the `['models', name]` detail queries whose data is a single
+  `ModelDetail` with no `.models` array — spreading that `undefined` threw. The update now only
+  touches list-shaped entries (extracted as `updateModelListData`, with a regression test).
+
+- **Deleting a model (and other bodyless control-plane actions) no longer 500s.** The dashboard
+  BFF's `ControlPlaneClient` set `Content-Type: application/json` on **every** proxied request,
+  including bodyless ones (`DELETE /models/:name`, sleep/wake, catalog import/refresh/uninstall,
+  notification read/clear). An empty body with that header trips Fastify's default JSON parser on
+  the control plane (`FST_ERR_CTP_EMPTY_JSON_BODY`), which surfaced as "Internal server error" in
+  the UI. The client now sets the JSON content-type only when a body is actually sent.
+
+- **Integration tests no longer flake in the default `npm test` run.** The root `vitest run` picked
+  up the control-plane `*.integration.test.ts` files under default (parallel) settings, so the three
+  files raced on the shared Postgres test database each `TRUNCATE`s — intermittently clobbering each
+  other — and also ran a second time (serially) under `make test-integration`. A default
+  `control-plane/vitest.config.ts` now excludes the integration glob from the parallel run; the
+  integration suite runs only via `npm run test:integration` / `make test-integration` (which sets
+  `fileParallelism: false`).
+
+- **Integration tests no longer run against (and wipe) the dev database.** The control-plane
+  integration harness loaded the repo `.env` and truncated `models`, `memory_profiles`,
+  `benchmarks`, and `settings` in whatever `SARDEENZ_DATABASE_URL` pointed at — i.e. the dev DB —
+  cleaning up Redis on teardown but never Postgres, so the last test run left `herd-model` /
+  `stuck-model` behind (surfacing as phantom entries on the dashboard Models page). The harness now
+  targets a **dedicated test database** (dev DB name suffixed with `_test`, e.g. `sardeenz_test`,
+  plus Redis logical DB `1`), **auto-creates** it (advisory-locked so parallel vitest workers don't
+  race), **refuses** to run against any database whose name doesn't end in `_test` (override with
+  `SARDEENZ_ALLOW_NON_TEST_DB=1`), and truncates on teardown too. Overridable via
+  `SARDEENZ_TEST_DATABASE_URL` / `SARDEENZ_TEST_REDIS_URL`. See `docs/development/setup.md`.
+
+- **Unified `dotenv` to v17 tree-wide.** `@redocly/cli` pinned `dotenv@16.4.7` at the workspace
+  root while each service nested `17.4.2`, so an editor/root TypeScript server resolving the root
+  copy flagged phantom `'quiet' does not exist in type 'DotenvConfigOptions'` errors on the
+  `loadRootEnv()` helpers (`quiet` was added in dotenv v17). Added a root `overrides` entry forcing
+  `dotenv` to `^17.0.0`, deduping the whole tree (redocly included) to `17.4.2`.
+
+### Changed
+
+- **Reordered the Deploy Model form fields** to lead with runtime selection: Runner Type, Runtime
+  Module, Model Path, Model Name, then the remaining fields (required memory, device type, tensor
+  parallel, pinned, engine config).
+
+- **Runtime Module on the Deploy Model form is now a required dropdown** instead of a free-text
+  field. It lists the runner catalog entries that are installed (`IMPORTED`) and built for the
+  selected runner type (`entry.runnerType === runnerType`), offering each module's `sifName` as the
+  value. Deploys must pick a module explicitly rather than relying on the worker's
+  `<runnerType>-<engineConfig.version>` fallback (which fails when no version is set). Changing the
+  runner type clears the selection, and an empty-state hint points operators to the Runner Catalog
+  when no compatible module is installed.
+
+- **Dev worker now detects real GPUs in `apptainer` mode.** Previously the worker advertised a
+  device fleet fabricated from `SARDEENZ_DEVICE_COUNT` / `SARDEENZ_DEVICE_MEMORY_GB` (defaults
+  `2` × `24 GiB`) in **every** mode — so an apptainer-mode worker on a single 8 GiB card still told
+  the control plane it had `2 × 24 GiB`, corrupting placement/budget decisions. The worker now
+  queries `nvidia-smi` at registration in apptainer mode and advertises the real devices, falling
+  back to the configured fleet only when `nvidia-smi` is absent (CPU dev box) or in `stub` mode
+  (always simulated). The startup log states the origin explicitly — `detected 1x CUDA @ 8 GiB`,
+  `simulating 2x CUDA @ 24 GiB`, or `configured … (no nvidia-smi)` — and the advertised
+  `engineName` is `<runner> (apptainer)` instead of `Dev Stub (<runner>)` when not stubbing. Set
+  `SARDEENZ_DEVICE_COUNT` / `SARDEENZ_DEVICE_MEMORY_GB` to shape the simulated fleet in stub mode.
+
+### Added
+
+- **Explicit runtime-module (SIF) selection when deploying a model.** The Apptainer worker needs to
+  know which SIF to exec; previously the only way to influence that from the UI was stuffing a
+  `version` into `engineConfig` (the worker derived `<runnerType>-<version>`), which was undiscoverable
+  and error-prone. `runtimeModule` is now a first-class, optional field plumbed end to end: a
+  **Runtime Module** field on the dashboard deploy form (and a row on the model detail page), a new
+  optional `runtimeModule` property on `ModelDeploymentRequest`/model-detail in the control-plane
+  contract (pattern `^[A-Za-z0-9_.-]+$`), a `runtime_module` column on the `models` table
+  (migration `002`), and forwarding through the deploy path into the worker's `StartRunnerRequest`
+  (the worker resolves it to `/modules/<runtimeModule>.sif`). When omitted, the worker still falls
+  back to `<runnerType>-<engineConfig.version>`, so existing deployments are unaffected. All configurable ports and connection URLs
   now come from one git-ignored `.env` file at the repo root (documented in a committed
   `.env.example`), so port clashes with other local projects are resolved in one place. The
   compose stack reads it automatically for the container **host-port mappings**

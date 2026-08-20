@@ -9,6 +9,7 @@ export interface ModelRecord {
   deviceType: string | null;
   tensorParallel: number;
   engineConfig: Record<string, unknown> | null;
+  runtimeModule: string | null;
   pinned: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -23,6 +24,7 @@ interface ModelRow {
   device_type: string | null;
   tensor_parallel: number;
   engine_config: Record<string, unknown> | null;
+  runtime_module: string | null;
   pinned: boolean;
   created_at: Date;
   updated_at: Date;
@@ -38,6 +40,7 @@ function rowToRecord(row: ModelRow): ModelRecord {
     deviceType: row.device_type,
     tensorParallel: row.tensor_parallel,
     engineConfig: row.engine_config,
+    runtimeModule: row.runtime_module,
     pinned: row.pinned,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -55,11 +58,12 @@ export class ModelRepository {
     deviceType?: string;
     tensorParallel?: number;
     engineConfig?: Record<string, unknown>;
+    runtimeModule?: string;
     pinned?: boolean;
   }): Promise<ModelRecord> {
     const result = await this.db.query<ModelRow>(
-      `INSERT INTO models (name, runner_type, model_path, required_memory, device_type, tensor_parallel, engine_config, pinned)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO models (name, runner_type, model_path, required_memory, device_type, tensor_parallel, engine_config, runtime_module, pinned)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         params.name,
@@ -69,6 +73,7 @@ export class ModelRepository {
         params.deviceType ?? null,
         params.tensorParallel ?? 1,
         params.engineConfig ? JSON.stringify(params.engineConfig) : null,
+        params.runtimeModule ?? null,
         params.pinned ?? false,
       ],
     );

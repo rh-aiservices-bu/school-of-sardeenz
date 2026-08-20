@@ -15,11 +15,12 @@ export class ControlPlaneClient {
 
   async proxyRequest(method: string, path: string, body?: unknown): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
-    const init: RequestInit = {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-    };
+    const init: RequestInit = { method };
+    // Only send a JSON content-type when there is actually a body. Setting it on
+    // bodyless requests (DELETE, sleep/wake, etc.) trips Fastify's default JSON
+    // parser with FST_ERR_CTP_EMPTY_JSON_BODY on the control plane.
     if (body !== undefined) {
+      init.headers = { 'Content-Type': 'application/json' };
       init.body = JSON.stringify(body);
     }
     return fetch(url, init);
@@ -70,6 +71,11 @@ export class ControlPlaneClient {
 
   async wakeModel(name: string): Promise<ProxyResult> {
     return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/wake`);
+  }
+
+  async browseWeights(path?: string): Promise<ProxyResult> {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+    return this.request('GET', `/api/v1/weights${qs}`);
   }
 
   async listWorkers(): Promise<ProxyResult> {

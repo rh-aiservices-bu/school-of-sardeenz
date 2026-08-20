@@ -23,6 +23,7 @@ export interface DeployModelParams {
   deviceType?: string;
   tensorParallel: number;
   engineConfig?: Record<string, unknown>;
+  runtimeModule?: string;
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
@@ -67,9 +68,19 @@ export class DeployOrchestrationService {
         deviceType: params.deviceType,
         tensorParallel: params.tensorParallel,
         engineConfig: params.engineConfig,
+        runtimeModule: params.runtimeModule,
         devices: params.devices,
       };
       const runnerInfo = await workerClient.startRunner(startRequest);
+
+      // Persist the placement immediately (before waitForReady) so log streaming can
+      // resolve the runner while the model is still STARTING, rather than only after
+      // the ACTIVE transition below.
+      await this.lifecycle.setRunnerEndpoint(params.modelName, {
+        runnerId: runnerInfo.runnerId,
+        host: runnerInfo.host,
+        port: runnerInfo.port,
+      });
 
       const runnerClient = this.createRunnerClient(runnerInfo.host, runnerInfo.port);
       await this.waitForReady(params.modelName, runnerClient);

@@ -217,6 +217,29 @@ export class ModelLifecycleService {
     }
   }
 
+  /**
+   * Persist the runner placement (runnerId/host/port) without performing a state
+   * transition. Deploy orchestration calls this as soon as the worker places the
+   * runner, so logs are addressable during STARTING — before the ACTIVE transition
+   * (which also writes these fields) has happened.
+   */
+  async setRunnerEndpoint(
+    modelName: string,
+    endpoint: { runnerId: string; host: string; port: number },
+  ): Promise<void> {
+    const key = modelStateKey(this.keyPrefix, modelName);
+    const state = await this.getState(modelName);
+    if (!state) {
+      throw ControlPlaneError.modelNotFound(modelName);
+    }
+
+    state.runnerId = endpoint.runnerId;
+    state.runnerHost = endpoint.host;
+    state.runnerPort = endpoint.port;
+
+    await this.redis.set(key, JSON.stringify(state));
+  }
+
   async removeModel(modelName: string): Promise<void> {
     const key = modelStateKey(this.keyPrefix, modelName);
     await this.redis.del(key);

@@ -32,6 +32,7 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import { useModel, useSleepModel, useWakeModel, useDeleteModel } from '../../hooks/useModels';
 import { ApiError } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
+import { DeployLogsModal } from '../../components/DeployLogsModal';
 import { formatBytes, formatRelativeTime, formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -51,6 +52,7 @@ export function ModelDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [engineConfigExpanded, setEngineConfigExpanded] = useState(false);
+  const [showLogsModal, setShowLogsModal] = useState(false);
 
   const handleSleepConfirm = () => {
     if (!modelName) return;
@@ -150,6 +152,13 @@ export function ModelDetail() {
         <FlexItem>
           <StateLabel state={model.state} />
         </FlexItem>
+        {(isStarting || isActive || isError) && (
+          <FlexItem align={{ default: !isAdmin ? 'alignRight' : undefined }}>
+            <Button variant="secondary" onClick={() => setShowLogsModal(true)}>
+              {t('detail.viewLogs.button')}
+            </Button>
+          </FlexItem>
+        )}
         {isAdmin && (
           <FlexItem align={{ default: 'alignRight' }}>
             <Flex gap={{ default: 'gapSm' }}>
@@ -325,6 +334,11 @@ export function ModelDetail() {
         </DescriptionListGroup>
 
         <DescriptionListGroup>
+          <DescriptionListTerm>{t('detail.fields.runtimeModule')}</DescriptionListTerm>
+          <DescriptionListDescription>{model.runtimeModule ?? '—'}</DescriptionListDescription>
+        </DescriptionListGroup>
+
+        <DescriptionListGroup>
           <DescriptionListTerm>{t('detail.fields.pinned')}</DescriptionListTerm>
           <DescriptionListDescription>
             {model.pinned ? (
@@ -493,6 +507,15 @@ export function ModelDetail() {
           </Button>
         </ModalFooter>
       </Modal>
+
+      {/* Live logs modal */}
+      {showLogsModal && (
+        <DeployLogsModal
+          modelName={model.modelName}
+          isOpen={showLogsModal}
+          onClose={() => setShowLogsModal(false)}
+        />
+      )}
     </PageSection>
   );
 }

@@ -12,8 +12,12 @@ interface DeployBody {
   deviceType?: string;
   tensorParallel?: number;
   engineConfig?: Record<string, unknown>;
+  runtimeModule?: string;
   pinned?: boolean;
 }
+
+// Mirrors the worker-agent contract's runtimeModule pattern; it becomes a SIF filename segment.
+const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
 export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post<{ Body: DeployBody }>('/api/v1/models', async (request, reply) => {
@@ -44,6 +48,15 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       throw ControlPlaneError.invalidRequest('tensorParallel must be a positive integer');
     }
 
+    if (
+      body.runtimeModule !== undefined &&
+      (typeof body.runtimeModule !== 'string' || !RUNTIME_MODULE_PATTERN.test(body.runtimeModule))
+    ) {
+      throw ControlPlaneError.invalidRequest(
+        'runtimeModule must match ^[A-Za-z0-9_.-]+$ (e.g. "vllm-0.21")',
+      );
+    }
+
     let dbCreated = false;
     let redisCreated = false;
 
@@ -56,6 +69,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         deviceType: body.deviceType,
         tensorParallel: body.tensorParallel,
         engineConfig: body.engineConfig,
+        runtimeModule: body.runtimeModule,
         pinned: body.pinned,
       });
       dbCreated = true;
@@ -159,6 +173,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           deviceType: body.deviceType,
           tensorParallel: body.tensorParallel ?? 1,
           engineConfig: body.engineConfig,
+          runtimeModule: body.runtimeModule,
           devices: result.devices,
         })
         .catch((err: unknown) => {
@@ -251,6 +266,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         deviceType: record?.deviceType ?? undefined,
         tensorParallel: record?.tensorParallel ?? 1,
         engineConfig: record?.engineConfig ?? undefined,
+        runtimeModule: record?.runtimeModule ?? undefined,
         pinned: record?.pinned ?? false,
         workerId: state?.workerId ?? undefined,
         deviceIndices: state?.deviceIndices ?? undefined,

@@ -115,6 +115,27 @@ describe('ControlPlaneClient', () => {
     });
   });
 
+  describe('browseWeights', () => {
+    it('lists the weights root with no path query', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { root: '/weights', entries: [] }));
+
+      await client.browseWeights();
+
+      expect(firstCallUrl()).toBe('http://cp.test/api/v1/weights');
+      expect(firstCallInit().method).toBe('GET');
+    });
+
+    it('URL-encodes the relative path query', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { entries: [] }));
+
+      await client.browseWeights('org-a/model x');
+
+      expect(firstCallUrl()).toBe(
+        `http://cp.test/api/v1/weights?path=${encodeURIComponent('org-a/model x')}`,
+      );
+    });
+  });
+
   describe('deployModel', () => {
     it('sends POST with body', async () => {
       fetchSpy.mockResolvedValue(makeFetchResponse(202, { modelName: 'test', state: 'PENDING' }));
@@ -131,6 +152,29 @@ describe('ControlPlaneClient', () => {
 
       expect(firstCallInit().method).toBe('POST');
       expect(firstCallInit().body).toBe(JSON.stringify(body));
+    });
+
+    it('sets JSON content-type on bodied requests', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      await client.deployModel({ modelName: 'test' });
+
+      expect(firstCallInit().headers).toEqual({ 'Content-Type': 'application/json' });
+    });
+  });
+
+  describe('deleteModel', () => {
+    it('sends DELETE without a body or JSON content-type', async () => {
+      // Regression: a JSON content-type on a bodyless request trips Fastify's
+      // default parser (FST_ERR_CTP_EMPTY_JSON_BODY) on the control plane.
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, {}));
+
+      await client.deleteModel('meta-llama/Llama-3.1-8B');
+
+      expect(firstCallUrl()).toContain(encodeURIComponent('meta-llama/Llama-3.1-8B'));
+      expect(firstCallInit().method).toBe('DELETE');
+      expect(firstCallInit().body).toBeUndefined();
+      expect(firstCallInit().headers).toBeUndefined();
     });
   });
 

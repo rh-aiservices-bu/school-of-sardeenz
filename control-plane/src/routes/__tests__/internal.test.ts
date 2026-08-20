@@ -102,7 +102,9 @@ function toDeps(mocks: Mocks): RouteDeps {
     notifications: {} as RouteDeps['notifications'],
     catalogService: {} as RouteDeps['catalogService'],
     moduleStore: {} as RouteDeps['moduleStore'],
+    weightsBrowser: {} as RouteDeps['weightsBrowser'],
     createRunnerClient: mocks.createRunnerClient,
+    createWorkerClient: vi.fn(),
   };
 }
 
