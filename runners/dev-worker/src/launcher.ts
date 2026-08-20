@@ -29,14 +29,29 @@ export interface LaunchSpec {
   tensorParallel: number;
   engineConfig?: Record<string, unknown>;
   devices: DeviceRef[];
+  /** Management port for the runner-contract API (health/sleep/wake/progress). */
   port: number;
+  /**
+   * Port the worker allocated for the engine's OpenAI inference server. Runners that split the
+   * management and inference servers (e.g. the ApptainerLauncher's vLLM shim) bind the engine
+   * here; single-server launchers (the StubLauncher) may ignore it and serve inference on `port`.
+   */
+  enginePort: number;
 }
 
 // Opaque handle returned by a launcher and stored by the RunnerManager. `stop()` closes over
 // whatever process/stub the launcher created.
 export interface LaunchHandle {
   host: string;
+  /** Management port the runner-contract API is actually listening on. */
   port: number;
+  /**
+   * Port the runner actually serves OpenAI inference (`/v1/*`) on. Equals `port` for
+   * single-server launchers (the stub); differs for engines with a separate OpenAI server
+   * (the ApptainerLauncher's vLLM). The RunnerManager reports this to the control plane so the
+   * proxy targets the engine, not the management shim.
+   */
+  enginePort: number;
   pid?: number;
   stop: () => Promise<void>;
 }

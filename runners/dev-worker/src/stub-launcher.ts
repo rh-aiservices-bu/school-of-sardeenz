@@ -28,9 +28,13 @@ export class StubLauncher implements RunnerLauncher {
     // The stub runs in-process, so no capture plumbing needed — the log sink is called directly.
     await stub.start(onLog);
 
+    // The stub is a single Fastify server: it serves both the runner-contract management API and
+    // the OpenAI `/v1/*` inference routes on `spec.port`. Report the engine port as the same port
+    // (the allocated `spec.enginePort` of the pair is left unused) so the proxy targets this server.
     return {
       host: 'localhost',
       port: spec.port,
+      enginePort: spec.port,
       stop: () => stub.stop(),
     };
   }

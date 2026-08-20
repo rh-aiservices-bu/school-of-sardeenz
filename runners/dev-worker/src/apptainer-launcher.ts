@@ -203,6 +203,10 @@ export class ApptainerLauncher implements RunnerLauncher {
 
     args.push(sifPath, ...this.config.runnerEntrypoint);
     args.push('--model', spec.modelPath, '--port', String(spec.port));
+    // Pin the engine's OpenAI port explicitly to the worker-allocated engine port rather than
+    // relying on the shim's `--port + 1` default — the RunnerManager allocates management/engine
+    // ports in pairs and must know exactly where inference is served to report it to the proxy.
+    args.push('--engine-port', String(spec.enginePort));
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -250,6 +254,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     const handle: LaunchHandle = {
       host: '127.0.0.1',
       port: spec.port,
+      enginePort: spec.enginePort,
       pid: child.pid,
       stop: () => this.stopChild(child),
     };

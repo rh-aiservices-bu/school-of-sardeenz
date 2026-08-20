@@ -56,7 +56,12 @@ function makeRegistration(): WorkerRegistration {
 const instantLauncher: RunnerLauncher = {
   serializeColdStarts: false,
   start: (spec: LaunchSpec): Promise<LaunchHandle> =>
-    Promise.resolve({ host: 'localhost', port: spec.port, stop: () => Promise.resolve() }),
+    Promise.resolve({
+      host: 'localhost',
+      port: spec.port,
+      enginePort: spec.enginePort,
+      stop: () => Promise.resolve(),
+    }),
 };
 
 async function readUntil(

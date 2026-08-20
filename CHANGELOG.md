@@ -46,6 +46,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Inference through the routing proxy now reaches the vLLM engine.** `POST /v1/chat/completions`
+  (and `/v1/completions`) to the proxy returned the runner's `{"detail":"Not Found"}` because the
+  proxy forwarded to the runner's **management** port — the vLLM shim, which serves only the
+  runner-contract control API — while vLLM's OpenAI server runs on a separate **engine** port
+  (`--port + 1`, e.g. `9102`). Nothing propagated that engine port past the worker. `StartRunnerResponse`
+  now carries an optional `enginePort`; the worker allocates management/engine ports in **pairs** (so a
+  second runner's management port can't collide with the first's engine port) and the `ApptainerLauncher`
+  pins vLLM's OpenAI server to it via `--engine-port`. The control plane registers the engine port as the
+  model's routing endpoint (the proxy forwards `/v1/*` there) while keeping health/sleep/wake/log-stream
+  on the management port; it persists `runnerEnginePort` so wake re-registers — and sleep/stop remove —
+  the correct endpoint. Runners that serve inference on the management port omit `enginePort` and fall
+  back to it, so the dev-worker stub (single Fastify server) is unaffected. `GET /v1/models` was already
+  fine — the proxy synthesizes it from the routing map. (#77)
+
 - **Deploying a model no longer crashes with "models is not iterable" when a model-detail page is
   cached.** The optimistic cache update in `useDeployModel` ran over every query matching the
   `['models']` prefix, which includes the `['models', name]` detail queries whose data is a single

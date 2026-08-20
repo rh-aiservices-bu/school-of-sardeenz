@@ -61,7 +61,7 @@ describe('RunnerManager', () => {
     await manager.stopAll();
   });
 
-  it('starts a runner and returns runnerId, host, port', async () => {
+  it('starts a runner and returns runnerId, host, port, enginePort', async () => {
     const result = await manager.startRunner({
       modelName: 'test-model',
       runnerType: 'vllm',
@@ -74,9 +74,11 @@ describe('RunnerManager', () => {
     expect(result.runnerId).toMatch(/^runner-/);
     expect(result.host).toBe('localhost');
     expect(result.port).toBe(19301);
+    // The stub is a single server, so inference is served on the management port.
+    expect(result.enginePort).toBe(19301);
   });
 
-  it('allocates sequential ports for multiple runners', async () => {
+  it('allocates ports in (management, engine) pairs so engine ports never collide', async () => {
     const r1 = await manager.startRunner({
       modelName: 'model-a',
       runnerType: 'vllm',
@@ -94,8 +96,10 @@ describe('RunnerManager', () => {
       devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
     });
 
+    // Ports step by 2: r1 reserves (19301, 19302), r2 reserves (19303, 19304). Were the manager to
+    // step by 1, r2's management port (19302) would collide with r1's engine port (management + 1).
     expect(r1.port).toBe(19301);
-    expect(r2.port).toBe(19302);
+    expect(r2.port).toBe(19303);
   });
 
   it('rejects duplicate model names with ConflictError', async () => {
@@ -222,7 +226,12 @@ describe('RunnerManager', () => {
         maxConcurrent = Math.max(maxConcurrent, active);
         await new Promise((r) => setTimeout(r, 20));
         active--;
-        return { host: 'localhost', port: spec.port, stop: () => Promise.resolve() };
+        return {
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        };
       },
     };
     const mgr = new RunnerManager(makeConfig(), makeRegistration(), gate);

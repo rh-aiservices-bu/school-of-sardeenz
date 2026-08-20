@@ -21,6 +21,7 @@ function makeSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
     tensorParallel: 1,
     devices: [{ deviceIndex: 2, deviceType: 'CUDA' }],
     port: 9101,
+    enginePort: 9102,
     ...overrides,
   };
 }
@@ -80,6 +81,8 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args).toContain('--model');
     expect(args[args.indexOf('--model') + 1]).toBe('/weights/llama');
     expect(args[args.indexOf('--port') + 1]).toBe('9101');
+    // The engine's OpenAI port is pinned explicitly to the worker-allocated engine port.
+    expect(args[args.indexOf('--engine-port') + 1]).toBe('9102');
   });
 
   it('sets HOME as a process env var, never as an --env flag (Apptainer rejects --env HOME)', () => {
@@ -152,6 +155,7 @@ describe('ApptainerLauncher.start', () => {
     expect(handle.pid).toBe(child.pid);
     expect(handle.host).toBe('127.0.0.1');
     expect(handle.port).toBe(9101);
+    expect(handle.enginePort).toBe(9102);
   });
 
   it('refuses to start when SIF verification fails', async () => {
