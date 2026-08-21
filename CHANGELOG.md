@@ -185,7 +185,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   works with already-built SIFs) so vLLM registers the model under the routing name instead of its
   weights path — without it, requests that reached the engine were rejected with
   `"The model ... does not exist"` (a 404 from vLLM) because the client's `model` field never matched the
-  path vLLM served under. (#77)
+  path vLLM served under. The management-vs-engine (`enginePort`) port model is now documented in
+  `docs/architecture/components/runner-contract.md` and `proxy.md`, and `docs/project/phase4.md`
+  carries a GPU-gated end-to-end re-verification checklist for it. (#77)
 
 - **Deploying a model no longer crashes with "models is not iterable" when a model-detail page is
   cached.** The optimistic cache update in `useDeployModel` ran over every query matching the

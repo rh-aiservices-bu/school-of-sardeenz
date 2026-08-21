@@ -179,12 +179,12 @@ When the resolver returns `Resolution::Starting`, the model's wake is already in
 
 The parking loop checks for the following terminal conditions on every wake from `receiver.changed()`:
 
-| State in cache | Action                                                                                                                                                          |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward                                                                                                |
-| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503                                                                                               |
-| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404                                                                                                  |
-| `DRAINING`     | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (matches the resolver's up-front fail-fast for draining models)                             |
+| State in cache | Action                                                                                                                                                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward                                                                                                                                                                                                        |
+| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503                                                                                                                                                                                                       |
+| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404                                                                                                                                                                                                          |
+| `DRAINING`     | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (matches the resolver's up-front fail-fast for draining models)                                                                                                                                       |
 | `SLEEPING`     | If the model has already left `SLEEPING` during this wait, treat as a rollback: remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (client retry re-triggers cleanly). Still-`SLEEPING` before the wake has progressed is not a rollback — keep waiting. |
 
 `STARTING` — and `SLEEPING` before the model has been observed leaving it — cause the loop to keep waiting; the wake is still in progress.
@@ -239,6 +239,8 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
 ```
 
 A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. The metadata block is optional and passed through to `/v1/models` responses without interpretation.
+
+The `port` in each endpoint is the runner's **engine (inference) port** — where the engine's `/v1/*` server listens — not the runner's management port. The control plane registers this port (a two-port engine like vLLM serves the runner contract on a separate management port it never publishes to the routing map; a single-server runner reports the same value for both). The proxy forwards to whatever `host:port` the entry names and needs no knowledge of the distinction.
 
 ### Model States
 
@@ -353,16 +355,16 @@ All socket address and numeric values are validated at startup; a parse failure 
 
 Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). All metric names use the `sardeenz_proxy_` prefix.
 
-| Metric                                    | Type      | Labels                             | Description                                             |
-| ----------------------------------------- | --------- | ---------------------------------- | ------------------------------------------------------- |
-| `sardeenz_proxy_requests_total`           | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                    |
-| `sardeenz_proxy_request_duration_seconds` | Histogram | —                                  | End-to-end request latency, excluding parking wait time |
-| `sardeenz_proxy_active_connections`       | Gauge     | —                                  | Currently active forwarded connections                  |
-| `sardeenz_proxy_parked_connections`       | Gauge     | `model`                            | Currently parked connections, per model                 |
-| `sardeenz_proxy_wake_triggers_total`      | Counter   | —                                  | Wake triggers fired to the control plane                |
-| `sardeenz_proxy_parking_duration_seconds` | Histogram | —                                  | Time a request spent parked before forwarding           |
-| `sardeenz_proxy_circuit_breaker_state`    | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open    |
-| `sardeenz_proxy_routing_parse_errors_total` | Counter | `model`                            | Routing entries that failed to deserialize during Redis sync, per model |
+| Metric                                      | Type      | Labels                             | Description                                                             |
+| ------------------------------------------- | --------- | ---------------------------------- | ----------------------------------------------------------------------- |
+| `sardeenz_proxy_requests_total`             | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                                    |
+| `sardeenz_proxy_request_duration_seconds`   | Histogram | —                                  | End-to-end request latency, excluding parking wait time                 |
+| `sardeenz_proxy_active_connections`         | Gauge     | —                                  | Currently active forwarded connections                                  |
+| `sardeenz_proxy_parked_connections`         | Gauge     | `model`                            | Currently parked connections, per model                                 |
+| `sardeenz_proxy_wake_triggers_total`        | Counter   | —                                  | Wake triggers fired to the control plane                                |
+| `sardeenz_proxy_parking_duration_seconds`   | Histogram | —                                  | Time a request spent parked before forwarding                           |
+| `sardeenz_proxy_circuit_breaker_state`      | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                    |
+| `sardeenz_proxy_routing_parse_errors_total` | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model |
 
 ## Health Endpoints
 
