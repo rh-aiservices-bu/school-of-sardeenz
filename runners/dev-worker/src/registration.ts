@@ -43,7 +43,7 @@ export class WorkerRegistration {
         },
       ],
       devices: this.devices,
-      managementUrl: `http://localhost:${this.config.workerPort}`,
+      managementUrl: `http://${this.config.advertiseHost}:${this.config.workerPort}`,
     };
 
     const pipeline = this.redis.pipeline();

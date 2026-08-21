@@ -14,6 +14,7 @@ export interface ApptainerConfig {
   healthTimeoutMs: number;
   healthIntervalMs: number;
   stopGraceMs: number;
+  advertiseHost: string;
 }
 
 export interface DevWorkerConfig {
@@ -22,6 +23,7 @@ export interface DevWorkerConfig {
   redisKeyPrefix: string;
   workerId: string;
   workerPort: number;
+  advertiseHost: string;
   runnerPortStart: number;
   deviceCount: number;
   deviceType: string;
@@ -95,6 +97,7 @@ export function loadConfig(): DevWorkerConfig {
     redisKeyPrefix: envStr('SARDEENZ_REDIS_KEY_PREFIX', 'sardeenz'),
     workerId: envStr('SARDEENZ_WORKER_ID', 'dev-worker-0'),
     workerPort: envInt('SARDEENZ_WORKER_PORT', 9100),
+    advertiseHost: envStr('SARDEENZ_WORKER_ADVERTISE_HOST', 'localhost'),
     runnerPortStart: envInt('SARDEENZ_RUNNER_PORT_START', 9101),
     deviceCount: envInt('SARDEENZ_DEVICE_COUNT', 2),
     deviceType: envStr('SARDEENZ_DEVICE_TYPE', 'CUDA'),
@@ -125,6 +128,7 @@ export function loadConfig(): DevWorkerConfig {
       // Larger than the in-SIF shim's own drain budget so the graceful stop (which reaps vLLM's
       // separate session) completes before the SIGKILL backstop — see apptainer-launcher.ts.
       stopGraceMs: envInt('SARDEENZ_STOP_GRACE_MS', 30000),
+      advertiseHost: envStr('SARDEENZ_WORKER_ADVERTISE_HOST', 'localhost'),
     },
   };
 }

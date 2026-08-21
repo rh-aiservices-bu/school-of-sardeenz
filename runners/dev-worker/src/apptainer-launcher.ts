@@ -28,6 +28,8 @@ export interface ApptainerLauncherConfig {
   healthTimeoutMs: number;
   healthIntervalMs: number;
   stopGraceMs: number;
+  /** Address advertised in the launch handle's `host` (control-plane-reachable). */
+  advertiseHost: string;
 }
 
 export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
@@ -47,6 +49,7 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
   // shim itself wedges.
   healthIntervalMs: 1_000,
   stopGraceMs: 30_000,
+  advertiseHost: 'localhost',
 };
 
 // Minimal child-process surface the launcher relies on — lets tests inject a fake.
@@ -271,7 +274,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     child.once('error', onExit);
 
     const handle: LaunchHandle = {
-      host: '127.0.0.1',
+      host: this.config.advertiseHost,
       port: spec.port,
       enginePort: spec.enginePort,
       pid: child.pid,

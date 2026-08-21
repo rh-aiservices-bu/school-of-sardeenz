@@ -173,9 +173,26 @@ describe('ApptainerLauncher.start', () => {
     expect(runOnce).toHaveBeenCalledWith('apptainer', ['verify', '/modules/vllm-0.21.sif']);
     expect(spawn).toHaveBeenCalledOnce();
     expect(handle.pid).toBe(child.pid);
-    expect(handle.host).toBe('127.0.0.1');
+    expect(handle.host).toBe(DEFAULT_APPTAINER_CONFIG.advertiseHost);
     expect(handle.port).toBe(9101);
     expect(handle.enginePort).toBe(9102);
+  });
+
+  it('uses advertiseHost from config for the launch handle host', async () => {
+    const { launcher } = makeLauncher({ advertiseHost: '10.244.1.5' });
+
+    const handle = await launcher.start(makeSpec());
+
+    expect(handle.host).toBe('10.244.1.5');
+  });
+
+  it('still probes the health endpoint on 127.0.0.1 regardless of advertiseHost', async () => {
+    const healthCheck = vi.fn(() => Promise.resolve({ state: 'READY' }));
+    const { launcher } = makeLauncher({ advertiseHost: '10.244.1.5' }, { healthCheck });
+
+    await launcher.start(makeSpec());
+
+    expect(healthCheck).toHaveBeenCalledWith('http://127.0.0.1:9101/health');
   });
 
   it('calls onStartupComplete once the runner is healthy', async () => {

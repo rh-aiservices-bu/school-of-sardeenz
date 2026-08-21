@@ -11,6 +11,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     redisKeyPrefix: 'sardeenz',
     workerId: 'test-worker-0',
     workerPort: 9100,
+    advertiseHost: 'localhost',
     runnerPortStart: 9101,
     deviceCount: 2,
     deviceType: 'CUDA',
@@ -34,6 +35,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
       healthTimeoutMs: 300000,
       healthIntervalMs: 1000,
       stopGraceMs: 15000,
+      advertiseHost: 'localhost',
     },
     ...overrides,
   };

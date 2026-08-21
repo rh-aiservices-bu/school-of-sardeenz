@@ -9,6 +9,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     redisKeyPrefix: 'sardeenz',
     workerId: 'test-worker-0',
     workerPort: 9100,
+    advertiseHost: 'localhost',
     runnerPortStart: 9101,
     deviceCount: 2,
     deviceType: 'CUDA',
@@ -32,6 +33,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
       healthTimeoutMs: 300000,
       healthIntervalMs: 1000,
       stopGraceMs: 15000,
+      advertiseHost: 'localhost',
     },
     ...overrides,
   };
@@ -121,6 +123,20 @@ describe('WorkerRegistration', () => {
       expect(info.devices[0].deviceType).toBe('CUDA');
       expect(info.devices[0].memoryTotalBytes).toBe(config.deviceMemoryBytes);
       expect(info.managementUrl).toBe('http://localhost:9100');
+    });
+
+    it('uses advertiseHost in managementUrl', async () => {
+      config = makeConfig({ advertiseHost: '10.244.1.5' });
+      registration = new WorkerRegistration(mockRedis as never, config);
+
+      await registration.register();
+
+      const infoCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':info'),
+      );
+      const info = JSON.parse(infoCall!.args[1] as string) as WorkerInfo;
+
+      expect(info.managementUrl).toBe('http://10.244.1.5:9100');
     });
 
     it('writes initial memory report with zero usage', async () => {

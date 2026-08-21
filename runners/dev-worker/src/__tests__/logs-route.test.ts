@@ -12,6 +12,7 @@ function makeConfig(): DevWorkerConfig {
     redisKeyPrefix: 'sardeenz',
     workerId: 'logs-route-worker',
     workerPort: 0,
+    advertiseHost: 'localhost',
     runnerPortStart: 19500,
     deviceCount: 2,
     deviceType: 'CUDA',
@@ -35,6 +36,7 @@ function makeConfig(): DevWorkerConfig {
       healthTimeoutMs: 300000,
       healthIntervalMs: 1000,
       stopGraceMs: 15000,
+      advertiseHost: 'localhost',
     },
   };
 }

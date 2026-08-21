@@ -67,6 +67,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # Advertised in the worker's Redis registration (managementUrl) so the control plane —
+            # running in a different pod — can reach this worker's management API. localhost would
+            # only resolve inside this pod's own network namespace.
+            - name: SARDEENZ_WORKER_ADVERTISE_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           resources:
             requests:
               # Cold-starts spike host RAM (torch + CUDA init + graph capture) — spike Gate 9c.

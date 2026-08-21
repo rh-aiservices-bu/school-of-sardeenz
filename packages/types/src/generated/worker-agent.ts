@@ -240,10 +240,13 @@ export type components = {
             /**
              * Format: uri
              * @description HTTP URL where the worker's management API is listening
-             *     (e.g., "http://localhost:9100"). The control plane uses this to
-             *     send start/stop runner commands.
+             *     (e.g., "http://10.244.1.5:9100"). Must be an address the control
+             *     plane can actually reach — never "localhost" outside single-host
+             *     dev setups, since in-cluster the control plane runs in a
+             *     different pod. The control plane uses this to send start/stop
+             *     runner commands and rejects workers that register without it.
              */
-            managementUrl?: string;
+            managementUrl: string;
         };
         /** @description Capability of a runner type available on this worker. */
         WorkerCapability: {

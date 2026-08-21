@@ -36,7 +36,7 @@ function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
     devices: [],
     lastHeartbeatAt: null,
     joinedAt: new Date().toISOString(),
-    managementUrl: null,
+    managementUrl: 'http://dead-worker:9100',
     ...overrides,
   };
 }

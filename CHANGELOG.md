@@ -84,6 +84,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   /runners/{runnerId}/logs` for a window without leaking forever. The SSE route's `stream()` was
   also hardened: `cleanup()` is now idempotent and closes the response (`reply.raw.end()`) once the
   stream ends, instead of only clearing listeners and leaving the socket open. (#112)
+- **Worker `managementUrl` no longer advertises `http://localhost:<port>` in-cluster, and the
+  contract now matches the control plane's hard requirement for it.** (#111)
+  - The dev-worker agent (both `stub` and `apptainer` launch modes) advertises a configurable
+    `advertiseHost` (`SARDEENZ_WORKER_ADVERTISE_HOST`, default `localhost`) instead of a hard-coded
+    `localhost`/`127.0.0.1` — a worker deployed via `deployment/sif-runner/` now sets this from
+    `status.podIP` so the control plane, running in a different pod, can actually reach it. The
+    Apptainer launcher's own `/health` probe is unaffected — it still targets `127.0.0.1` since
+    that check runs in-pod.
+  - `WorkerInfo.managementUrl` is now `required` in `packages/contracts/specs/worker-agent.yaml`
+    (types regenerated), matching the control plane's existing hard requirement. Worker registration
+    payloads missing (or with an empty) `managementUrl` are now rejected at discovery
+    (`WorkerPoolService.parseWorkerInfo`) instead of silently producing a `null` that later
+    surfaced as a 500 at deploy time.
 - **`sleepModel` now honors `SARDEENZ_SLEEP_TIMEOUT_SECS` on the runner's `/sleep` call.**
   `RunnerClient.sleep()` previously always used the client's instance-level default (30 s),
   ignoring `SleepWakeService.sleepTimeoutMs` — a model whose offload takes longer than 30 s (e.g.
