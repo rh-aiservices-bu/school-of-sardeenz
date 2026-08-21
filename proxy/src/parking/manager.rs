@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use metrics::{counter, gauge, histogram};
-use tokio::sync::Mutex;
 
 use crate::config::ParkingConfig;
 use crate::error::ProxyError;
@@ -29,7 +28,7 @@ pub struct ParkingManager {
     config: ParkingConfig,
     routing_cache: RoutingMapCache,
     wake_client: WakeTriggerClient,
-    pending_wakes: Arc<Mutex<HashMap<String, WakeState>>>,
+    pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
     parked_count: Arc<ParkedCount>,
 }
 
@@ -39,22 +38,27 @@ struct ParkedCount {
 }
 
 /// RAII guard for a reserved parking slot. All release accounting — the
-/// global + per-model counters, the parked-connections gauge, and the
-/// parking-duration histogram — runs in `Drop`, so a slot is reclaimed even
-/// when the handler future is cancelled mid-park.
-///
-/// Extension point: #94 will fold `pending_wakes` cleanup into this guard.
+/// global + per-model counters, the parked-connections gauge, the
+/// parking-duration histogram, and (as of #94) the thundering-herd
+/// `pending_wakes` entry when the last parked request for a model departs —
+/// runs in `Drop`, so a slot is reclaimed even when the handler future is
+/// cancelled mid-park.
 struct ParkingSlotGuard {
     parked_count: Arc<ParkedCount>,
+    pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
     model_name: String,
     park_start: std::time::Instant,
 }
 
 impl ParkingSlotGuard {
     /// Call ONLY after the slot has been reserved (counters incremented).
-    fn new(parked_count: Arc<ParkedCount>, model_name: String) -> Self {
+    fn new(
+        parked_count: Arc<ParkedCount>,
+        pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
+        model_name: String,
+    ) -> Self {
         gauge!("sardeenz_proxy_parked_connections", "model" => model_name.clone()).increment(1);
-        Self { parked_count, model_name, park_start: std::time::Instant::now() }
+        Self { parked_count, pending_wakes, model_name, park_start: std::time::Instant::now() }
     }
 }
 
@@ -63,14 +67,32 @@ impl Drop for ParkingSlotGuard {
         use std::sync::atomic::Ordering;
 
         self.parked_count.global.fetch_sub(1, Ordering::SeqCst);
-        {
+        let was_last = {
             let mut per_model = self.parked_count.per_model.lock().unwrap();
-            if let Some(count) = per_model.get_mut(&self.model_name) {
-                *count = count.saturating_sub(1);
-                if *count == 0 {
-                    per_model.remove(&self.model_name);
+            match per_model.get_mut(&self.model_name) {
+                Some(count) => {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        per_model.remove(&self.model_name);
+                        true
+                    } else {
+                        false
+                    }
                 }
+                None => false,
             }
+        };
+        // #94: clear the thundering-herd entry only when the LAST parked
+        // request for this model departs (timeout OR client-disconnect
+        // cancellation — both run this Drop). A timeout/cancel is terminal
+        // for ONE request while the rest of the herd may still be waiting
+        // productively, so an earlier departure must NOT remove the entry.
+        // (Contrast do_park's Active/Error/vanished arms, which are terminal
+        // for the WHOLE herd and remove the entry eagerly.) Lock order:
+        // per_model is released above before pending_wakes is acquired, and
+        // no other path nests these two, so there is no deadlock.
+        if was_last {
+            self.pending_wakes.lock().unwrap().remove(&self.model_name);
         }
         gauge!("sardeenz_proxy_parked_connections", "model" => self.model_name.clone())
             .decrement(1);
@@ -89,7 +111,7 @@ impl ParkingManager {
             config,
             routing_cache,
             wake_client,
-            pending_wakes: Arc::new(Mutex::new(HashMap::new())),
+            pending_wakes: Arc::new(std::sync::Mutex::new(HashMap::new())),
             parked_count: Arc::new(ParkedCount {
                 global: std::sync::atomic::AtomicUsize::new(0),
                 per_model: std::sync::Mutex::new(HashMap::new()),
@@ -108,31 +130,39 @@ impl ParkingManager {
 
     async fn do_park(&self, model_name: &str, fire_wake: bool) -> Result<(), ProxyError> {
         // Thundering herd: only the first request fires the wake trigger.
-        // The lock is held across the trigger_wake call so concurrent
-        // requests correctly see InFlight state instead of skipping the wake.
-        if fire_wake {
-            let mut pending = self.pending_wakes.lock().await;
-            if !pending.contains_key(model_name) {
-                pending.insert(model_name.to_string(), WakeState::InFlight);
-                drop(pending);
-
-                match self.wake_client.trigger_wake(model_name).await {
-                    Ok(()) => {
-                        counter!("sardeenz_proxy_wake_triggers_total", "result" => "accepted")
-                            .increment(1);
-                        let mut pending = self.pending_wakes.lock().await;
-                        if let Some(state) = pending.get_mut(model_name) {
-                            *state = WakeState::Triggered;
-                        }
+        // `is_first` is computed in a block scoped strictly to the lock
+        // guard's lifetime — std::sync::MutexGuard is !Send, and an
+        // explicit `drop()` mid-block isn't enough on its own to convince
+        // the async-fn liveness analysis the guard doesn't span the
+        // `trigger_wake(...).await` below; ending its declaring block
+        // before the await is what makes `do_park`'s future Send.
+        let is_first = fire_wake
+            && {
+                let mut pending = self.pending_wakes.lock().unwrap();
+                if pending.contains_key(model_name) {
+                    false
+                } else {
+                    pending.insert(model_name.to_string(), WakeState::InFlight);
+                    true
+                }
+            };
+        if is_first {
+            match self.wake_client.trigger_wake(model_name).await {
+                Ok(()) => {
+                    counter!("sardeenz_proxy_wake_triggers_total", "result" => "accepted")
+                        .increment(1);
+                    let mut pending = self.pending_wakes.lock().unwrap();
+                    if let Some(state) = pending.get_mut(model_name) {
+                        *state = WakeState::Triggered;
                     }
-                    Err(e) => {
-                        counter!("sardeenz_proxy_wake_triggers_total", "result" => "failed")
-                            .increment(1);
-                        self.pending_wakes.lock().await.remove(model_name);
-                        return Err(ProxyError::ModelUnavailable(format!(
-                            "wake trigger failed: {e}"
-                        )));
-                    }
+                }
+                Err(e) => {
+                    counter!("sardeenz_proxy_wake_triggers_total", "result" => "failed")
+                        .increment(1);
+                    self.pending_wakes.lock().unwrap().remove(model_name);
+                    return Err(ProxyError::ModelUnavailable(format!(
+                        "wake trigger failed: {e}"
+                    )));
                 }
             }
         }
@@ -144,17 +174,17 @@ impl ParkingManager {
         loop {
             match self.routing_cache.get(model_name).await {
                 Some(entry) if entry.state == ModelState::Active => {
-                    self.pending_wakes.lock().await.remove(model_name);
+                    self.pending_wakes.lock().unwrap().remove(model_name);
                     return Ok(());
                 }
                 Some(entry) if entry.state == ModelState::Error => {
-                    self.pending_wakes.lock().await.remove(model_name);
+                    self.pending_wakes.lock().unwrap().remove(model_name);
                     return Err(ProxyError::ModelUnavailable(format!(
                         "{model_name} entered error state during wake"
                     )));
                 }
                 None => {
-                    self.pending_wakes.lock().await.remove(model_name);
+                    self.pending_wakes.lock().unwrap().remove(model_name);
                     return Err(ProxyError::ModelNotFound(model_name.to_string()));
                 }
                 _ => {}
@@ -162,9 +192,9 @@ impl ParkingManager {
 
             tokio::select! {
                 _ = tokio::time::sleep_until(deadline) => {
-                    // Clean up pending_wakes on timeout so future requests
-                    // can retry the wake trigger.
-                    self.cleanup_pending_wakes_if_last(model_name).await;
+                    // The guard's Drop clears the pending_wakes entry once
+                    // this is the last parked request for the model, so
+                    // future requests can retry the wake trigger.
                     return Err(ProxyError::ParkingTimeout(model_name.to_string()));
                 }
                 result = receiver.changed() => {
@@ -175,25 +205,6 @@ impl ParkingManager {
                     }
                 }
             }
-        }
-    }
-
-    /// Remove the pending_wakes entry if no other requests are parked for
-    /// this model (so the next request can fire a fresh wake trigger).
-    async fn cleanup_pending_wakes_if_last(&self, model_name: &str) {
-        // Scope the std::sync::MutexGuard to this block so it is provably
-        // dropped before the `.await` below — std::sync::MutexGuard is
-        // !Send, and an explicit `drop()` inside the `if` isn't enough to
-        // convince the generator liveness analysis it doesn't span the
-        // await point.
-        let count = {
-            let per_model = self.parked_count.per_model.lock().unwrap();
-            per_model.get(model_name).copied().unwrap_or(0)
-        };
-        // count includes this request (not yet decremented). If count <= 1,
-        // this is the last parked request — clean up.
-        if count <= 1 {
-            self.pending_wakes.lock().await.remove(model_name);
         }
     }
 
@@ -225,7 +236,11 @@ impl ParkingManager {
         *per_model.entry(model_name.to_string()).or_insert(0) += 1;
         drop(per_model);
 
-        Ok(ParkingSlotGuard::new(self.parked_count.clone(), model_name.to_string()))
+        Ok(ParkingSlotGuard::new(
+            self.parked_count.clone(),
+            self.pending_wakes.clone(),
+            model_name.to_string(),
+        ))
     }
 
     // NOTE: kept #[allow(dead_code)] despite blueprint A7 — main.rs

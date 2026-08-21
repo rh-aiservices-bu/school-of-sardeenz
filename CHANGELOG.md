@@ -61,6 +61,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A cancelled parked herd no longer suppresses the next request's wake trigger.** To prevent a
+  thundering herd, only the first parked request for a sleeping model fires a wake trigger; the rest
+  dedup against a `pending_wakes` entry. That entry was cleared only on the parking-timeout path, so
+  if the entire parked herd was cancelled (all clients disconnected) while still parked — not timed
+  out — the entry was orphaned, and a subsequent request for the same model deduped against the stale
+  entry and never re-fired the wake, leaving the model asleep. Cleanup of `pending_wakes` is now
+  folded into `ParkingSlotGuard::Drop` (which already runs on cancellation, #92), gated by a
+  "was this the last parked request for the model" check, so the last departing request — whether it
+  timed out or was cancelled — always clears the entry and the next request re-fires the wake. (#94)
 - **Circuit-breaker half-open probes no longer leak, permanently stranding a recovering endpoint.**
   The half-open probe was tracked by a boolean set when a probe was admitted and cleared only when
   that probe recorded an outcome — so a probe request cancelled by a client disconnect before it
