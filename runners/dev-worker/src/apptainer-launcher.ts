@@ -194,6 +194,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     };
     if (useNv) {
       envFlags.CUDA_VISIBLE_DEVICES = spec.devices.map((d) => d.deviceIndex).join(',');
+      envFlags.SARDEENZ_DEVICE_INDICES = spec.devices.map((d) => d.deviceIndex).join(',');
     }
     // NOTE: HOME is deliberately NOT an `--env` flag — Apptainer rejects it. It is passed as a
     // process env var below so the container inherits a writable HOME on node-local scratch.

@@ -7,10 +7,26 @@ integration gates (Phase 4 Task 9).
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
+from sardeenz_vllm_runner import memory as mem
 from sardeenz_vllm_runner import state as st
 from sardeenz_vllm_runner.cli import build_vllm_command, parse_args
+
+
+def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) -> None:
+    """Inject a fake `torch` module — torch isn't installed outside the runner-vllm image."""
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+        is_available=lambda: True,
+        device_count=lambda: device_count,
+        mem_get_info=lambda index: (1_000, 10_000),
+        memory_reserved=lambda index: 2_000,
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
 
 def test_parse_args_defaults_engine_port_to_port_plus_one():
@@ -117,3 +133,29 @@ def test_health_error_state_carries_message():
     health = status.health()
     assert health["state"] == st.ERROR
     assert health["message"] == "boom"
+
+
+def test_health_omits_active_requests_when_none():
+    status = st.RunnerStatus()
+    health = status.health(active_requests=None)
+    assert "activeRequests" not in health
+
+
+def test_health_includes_active_requests_when_present():
+    status = st.RunnerStatus()
+    health = status.health(active_requests=5)
+    assert health["activeRequests"] == 5
+
+
+def test_memory_report_remaps_device_indices_from_env(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_torch(monkeypatch, device_count=2)
+    monkeypatch.setenv("SARDEENZ_DEVICE_INDICES", "3,7")
+    report = mem.memory_report()
+    assert [d["deviceIndex"] for d in report["devices"]] == [3, 7]
+
+
+def test_memory_report_falls_back_to_local_index_without_env(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_torch(monkeypatch, device_count=2)
+    monkeypatch.delenv("SARDEENZ_DEVICE_INDICES", raising=False)
+    report = mem.memory_report()
+    assert [d["deviceIndex"] for d in report["devices"]] == [0, 1]

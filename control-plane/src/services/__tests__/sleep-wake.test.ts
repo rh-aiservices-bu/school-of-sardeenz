@@ -128,3 +128,48 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
     );
   });
 });
+
+describe('SleepWakeService — activeRequests unknown handling (#116)', () => {
+  let mocks: Mocks;
+  let service: SleepWakeService;
+
+  beforeEach(() => {
+    mocks = createMocks();
+    service = createService(mocks);
+  });
+
+  it('pollRunnerHealth returns null activeRequests when the field is missing from the response', async () => {
+    mocks.runnerClient.getHealth.mockResolvedValue({ state: RunnerState.READY });
+
+    const result = await service.pollRunnerHealth(
+      'test-model',
+      mocks.runnerClient as unknown as RunnerClient,
+    );
+
+    expect(result.activeRequests).toBeNull();
+  });
+
+  it('pollRunnerHealth returns null activeRequests when the health check throws', async () => {
+    mocks.runnerClient.getHealth.mockRejectedValue(new Error('connection refused'));
+
+    const result = await service.pollRunnerHealth(
+      'test-model',
+      mocks.runnerClient as unknown as RunnerClient,
+    );
+
+    expect(result.state).toBe(RunnerState.ERROR);
+    expect(result.activeRequests).toBeNull();
+  });
+
+  it('waitForDrain (via sleepModel) keeps polling while activeRequests is unknown, then completes once it reports 0', async () => {
+    // First poll: unknown (missing field) — must not be treated as "drained". Second poll: drained.
+    mocks.runnerClient.getHealth
+      .mockResolvedValueOnce({ state: RunnerState.READY })
+      .mockResolvedValueOnce({ state: RunnerState.READY, activeRequests: 0 });
+
+    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+
+    expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(2);
+    expect(mocks.runnerClient.sleep).toHaveBeenCalled();
+  });
+});

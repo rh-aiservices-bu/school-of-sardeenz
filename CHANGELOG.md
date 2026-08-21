@@ -93,6 +93,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   logged at `debug` instead of `warn` to avoid alert noise. `/readyz` now also reports
   `consecutiveLeaseFailures` in the `lease_failures` check, so an operator can distinguish an
   ordinary (elected) follower from a follower actively failing to renew. (#91)
+- **vLLM shim now reports cluster-global GPU indices in its memory report, and `activeRequests` is
+  scraped from vLLM instead of hardcoded to 0.** `/memory-report` always reported container-local
+  device indices (`0..n-1`), which don't match the control plane's cluster-global device
+  assignments once a runner is scoped to a non-zero-indexed GPU. The worker agent now sets
+  `SARDEENZ_DEVICE_INDICES` (parallel to `CUDA_VISIBLE_DEVICES`) when launching a CUDA runner, and
+  the shim remaps its local device slots through it, falling back to the local index when unset.
+  Separately, `activeRequests` in `/health` was hardcoded to `0`, which made the sleep-wake drain
+  loop treat every model as already drained; the shim now scrapes vLLM's `/metrics` for
+  `vllm:num_requests_running`/`vllm:num_requests_waiting` and reports their sum, and `/sleep` now
+  refuses (409) while requests are active. When the metric can't be scraped, the shim omits
+  `activeRequests` entirely (contract-optional) rather than reporting a misleading `0`, and the
+  control plane's drain/health polling treats a missing count as **unknown** — distinct from a
+  confirmed `0` — so a scrape failure can no longer be mistaken for "drained". (#116)
 - **Parked requests now fail fast on mid-wake rollback and inspect the wake response instead of
   hanging or leaking.** A request parked waiting for a sleeping model to wake had three gaps: (1) if
   the model rolled **back** to `SLEEPING` after starting to wake, or (2) transitioned to `DRAINING`

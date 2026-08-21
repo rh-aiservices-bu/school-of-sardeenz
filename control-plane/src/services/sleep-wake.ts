@@ -33,7 +33,7 @@ export function toRoutingState(state: ModelLifecycleState): ModelState | null {
 /** Result returned by pollRunnerHealth. */
 export interface RunnerHealthResult {
   state: RunnerState;
-  activeRequests: number;
+  activeRequests: number | null;
   message?: string;
 }
 
@@ -244,7 +244,7 @@ export class SleepWakeService {
 
       return {
         state: health.state,
-        activeRequests: health.activeRequests ?? 0,
+        activeRequests: health.activeRequests ?? null,
         message: health.message,
       };
     } catch (err) {
@@ -252,7 +252,7 @@ export class SleepWakeService {
       const message = err instanceof Error ? err.message : String(err);
       return {
         state: RunnerState.ERROR,
-        activeRequests: 0,
+        activeRequests: null,
         message,
       };
     }
@@ -272,7 +272,7 @@ export class SleepWakeService {
     while (!signal.aborted) {
       const result = await this.pollRunnerHealth(modelName, runnerClient);
 
-      if (result.activeRequests === 0) {
+      if (result.activeRequests !== null && result.activeRequests === 0) {
         return;
       }
 
