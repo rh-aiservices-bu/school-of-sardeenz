@@ -29,6 +29,30 @@ export interface RoutingMapUpdate {
 const ROUTING_MAP_FIELD = 'routing-map';
 const ROUTING_UPDATES_CHANNEL = 'routing-updates';
 
+// Shared Lua: encode a RoutingEntry with `endpoints` ALWAYS a JSON array. cjson.encode
+// serializes an empty Lua table as `{}`, but the proxy consumer types endpoints as an array
+// (RoutingEntry.endpoints: Vec<RunnerEndpoint>, proxy/src/generated/proxy_control_plane.rs:50),
+// so `{}` breaks deserialization and the model silently vanishes from the routing map (#79).
+// We encode the array separately and splice it in — never string.gsub the encoded body, since
+// model names are attacker-influenced and could collide with a replacement pattern.
+const LUA_ENCODE_ROUTING_ENTRY = `
+  local function encode_routing_entry(entry)
+    local eps = entry.endpoints
+    local encoded_eps
+    if type(eps) ~= 'table' or #eps == 0 then
+      encoded_eps = '[]'
+    else
+      encoded_eps = cjson.encode(eps)
+    end
+    entry.endpoints = nil
+    local body = cjson.encode(entry)
+    if body == '{}' then
+      return '{"endpoints":' .. encoded_eps .. '}'
+    end
+    return string.sub(body, 1, -2) .. ',"endpoints":' .. encoded_eps .. '}'
+  end
+`;
+
 export class RoutingMapService {
   private readonly hashKey: string;
   private readonly pubsubChannel: string;
@@ -97,6 +121,7 @@ export class RoutingMapService {
     const now = new Date().toISOString();
 
     const luaScript = `
+      ${LUA_ENCODE_ROUTING_ENTRY}
       local raw = redis.call('HGET', KEYS[1], ARGV[1])
       local entry
       if raw then
@@ -114,7 +139,7 @@ export class RoutingMapService {
       filtered[#filtered + 1] = ep
       entry.endpoints = filtered
       entry.updatedAt = ARGV[3]
-      redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(entry))
+      redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
       redis.call('PUBLISH', KEYS[2], ARGV[4])
       return 1
     `;
@@ -142,6 +167,7 @@ export class RoutingMapService {
     const now = new Date().toISOString();
 
     const luaScript = `
+      ${LUA_ENCODE_ROUTING_ENTRY}
       local raw = redis.call('HGET', KEYS[1], ARGV[1])
       if not raw then return nil end
       local entry = cjson.decode(raw)
@@ -156,7 +182,7 @@ export class RoutingMapService {
       end
       entry.endpoints = filtered
       entry.updatedAt = ARGV[4]
-      redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(entry))
+      redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
       redis.call('PUBLISH', KEYS[2], ARGV[5])
       return 1
     `;
@@ -189,6 +215,7 @@ export class RoutingMapService {
     const now = new Date().toISOString();
 
     const luaScript = `
+      ${LUA_ENCODE_ROUTING_ENTRY}
       local raw = redis.call('HGET', KEYS[1], ARGV[1])
       if not raw then return nil end
       local entry = cjson.decode(raw)
@@ -203,7 +230,7 @@ export class RoutingMapService {
       end
       if not changed then return nil end
       entry.updatedAt = ARGV[5]
-      redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(entry))
+      redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
       redis.call('PUBLISH', KEYS[2], ARGV[6])
       return 1
     `;

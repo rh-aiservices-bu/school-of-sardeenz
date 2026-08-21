@@ -61,6 +61,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Sleeping a model no longer corrupts its routing entry.** The control plane's routing-map Lua
+  scripts encoded the `endpoints` array with `cjson.encode`, which serializes an empty Lua table as
+  `{}` (a JSON object) rather than `[]` (a JSON array) — so removing the last endpoint (e.g. when a
+  model is put to sleep) wrote a routing entry the stateless proxy could not parse, silently dropping
+  the model from the routing map. The three routing-map scripts (`addEndpoint`, `removeEndpoint`,
+  `updateEndpointHealth`) now encode `endpoints` as a JSON array unconditionally, and the
+  model-lifecycle `transition` script applies the same `[]`-forcing fix to an empty `deviceIndices`
+  array. Regression coverage lands as a gated integration suite that asserts the raw persisted Redis
+  payloads (not the parsed round-trip, which would mask the bug). (#79)
 - **Dashboard Playwright e2e suite is now runnable, enforced, and lint/typechecked.** The suite was
   entirely non-functional — every test that used the `bffPort` fixture failed before its body ran,
   because (a) the BFF only served the SPA under `NODE_ENV=production` while the fixture set
