@@ -61,6 +61,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard Playwright e2e suite is now runnable, enforced, and lint/typechecked.** The suite was
+  entirely non-functional — every test that used the `bffPort` fixture failed before its body ran,
+  because (a) the BFF only served the SPA under `NODE_ENV=production` while the fixture set
+  `NODE_ENV=test`, and (b) the readiness probe polled `/api/health`, a route that was allowlisted but
+  never registered. Static serving is now decoupled from `NODE_ENV` via `SARDEENZ_SERVE_STATIC=1`
+  (set by the fixture), a real liveness `GET /api/health` is registered (making the auth allowlist
+  entry truthful), and `SARDEENZ_CLIENT_DIR` lets the fixture point the tsx-spawned server at the
+  built `dist/client` bundle (unset in production, where the default resolves the same path). The
+  suite is now covered by ESLint (`dashboard/e2e/` un-ignored, with a type-aware override) and by a
+  new `typecheck:e2e` wired into `make typecheck`, and `test:e2e` builds the client before running.
+  Two vacuous `auth.spec.ts` assertions (a `x || !x` tautology and a not-401/not-403 check) were
+  replaced with a concrete redirect-URL assertion and an explicit `200`. The nine specs now run to
+  real pass/fail; pre-existing PatternFly-6 selector drift surfaced by the newly-runnable suite is
+  tracked as a follow-up. (#102)
 - **Phase-4 spike-gate suite (`tests/gates/run-gates.sh`) no longer reports false results.**
   Gate 5 (SIGTERM shutdown) used `kill -0` to check survival, which counts a zombie/defunct process
   as "alive" — it now records the runner PIDs before signalling and asserts no matching process

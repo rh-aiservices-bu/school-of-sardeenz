@@ -62,3 +62,7 @@ __pycache__/
 
 # Claude Code worktrees (milestone execution)
 .claude/worktrees/
+
+# Playwright e2e run artifacts
+dashboard/playwright-report/
+dashboard/test-results/

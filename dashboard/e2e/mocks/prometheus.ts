@@ -48,8 +48,8 @@ export class MockPrometheus {
   private app: FastifyInstance;
   private _port = 0;
 
-  private rangeFactory: RangeResponseFactory = MockPrometheus.emptyRangeResponse;
-  private instantFactory: InstantResponseFactory = MockPrometheus.emptyInstantResponse;
+  private rangeFactory: RangeResponseFactory = () => MockPrometheus.emptyRangeResponse();
+  private instantFactory: InstantResponseFactory = () => MockPrometheus.emptyInstantResponse();
   private errorMode = false;
 
   constructor() {
@@ -61,11 +61,11 @@ export class MockPrometheus {
   // Default canned responses
   // ---------------------------------------------------------------------------
 
-  static emptyRangeResponse(_query: string): PrometheusRangeResponse {
+  static emptyRangeResponse(): PrometheusRangeResponse {
     return { status: 'success', data: { resultType: 'matrix', result: [] } };
   }
 
-  static emptyInstantResponse(_query: string): PrometheusInstantResponse {
+  static emptyInstantResponse(): PrometheusInstantResponse {
     return { status: 'success', data: { resultType: 'vector', result: [] } };
   }
 
@@ -90,7 +90,7 @@ export class MockPrometheus {
    * Factory that returns a range response with one latency series per model label.
    */
   static latencyRangeFactory(models: string[]): RangeResponseFactory {
-    return (_query: string): PrometheusRangeResponse => {
+    return (): PrometheusRangeResponse => {
       const now = Math.floor(Date.now() / 1000);
       const result = models.map((model) =>
         MockPrometheus.buildRangeSeries({ model }, now - 900, 10, 90, 0.1),
@@ -105,7 +105,7 @@ export class MockPrometheus {
   static memoryInstantFactory(
     devices: Array<{ label: string; bytes: number }>,
   ): InstantResponseFactory {
-    return (_query: string): PrometheusInstantResponse => {
+    return (): PrometheusInstantResponse => {
       const now = Math.floor(Date.now() / 1000);
       const result: PrometheusInstantSeries[] = devices.map(({ label, bytes }) => ({
         metric: { device: label },
@@ -197,8 +197,8 @@ export class MockPrometheus {
 
   /** Reset to default (empty) responses. */
   reset(): void {
-    this.rangeFactory = MockPrometheus.emptyRangeResponse;
-    this.instantFactory = MockPrometheus.emptyInstantResponse;
+    this.rangeFactory = () => MockPrometheus.emptyRangeResponse();
+    this.instantFactory = () => MockPrometheus.emptyInstantResponse();
     this.errorMode = false;
   }
 }

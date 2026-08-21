@@ -56,13 +56,8 @@ test.describe('Auth — login page', () => {
     // Navigate directly to /login — the React app renders it regardless of auth mode
     await page.goto(bffUrl(bffPort, '/login'));
 
-    // In AUTH_MODE=none, the Login component redirects to / immediately.
-    // So we check that we either see the login page or get redirected to home.
-    const isAtHome = page.url().includes('/login') === false;
-    const isAtLogin = page.url().includes('/login');
-
-    // Either outcome is acceptable — AUTH_MODE=none redirects away from login
-    expect(isAtHome || isAtLogin).toBeTruthy();
+    // AUTH_MODE=none: the Login component redirects to `from` (default '/').
+    await expect(page).toHaveURL(bffUrl(bffPort, '/'));
   });
 
   test('health endpoint is public', async ({ page, bffPort }) => {
@@ -73,7 +68,6 @@ test.describe('Auth — login page', () => {
 
   test('healthz probe endpoint is public', async ({ page, bffPort }) => {
     const response = await page.request.get(bffUrl(bffPort, '/healthz'));
-    expect(response.status()).not.toBe(401);
-    expect(response.status()).not.toBe(403);
+    expect(response.status()).toBe(200);
   });
 });
