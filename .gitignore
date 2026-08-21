@@ -59,3 +59,6 @@ logs/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Claude Code worktrees (milestone execution)
+.claude/worktrees/
