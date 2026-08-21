@@ -11,7 +11,9 @@ function makeConfig(): DevWorkerConfig {
     redisKeyPrefix: 'sardeenz',
     workerId: 'e2e-worker',
     workerPort: 0,
+    advertiseHost: 'localhost',
     runnerPortStart: 19400,
+    maxRunners: 32,
     deviceCount: 2,
     deviceType: 'CUDA',
     deviceMemoryBytes: 24 * 1024 * 1024 * 1024,
@@ -34,6 +36,7 @@ function makeConfig(): DevWorkerConfig {
       healthTimeoutMs: 300000,
       healthIntervalMs: 1000,
       stopGraceMs: 15000,
+      advertiseHost: 'localhost',
     },
   };
 }

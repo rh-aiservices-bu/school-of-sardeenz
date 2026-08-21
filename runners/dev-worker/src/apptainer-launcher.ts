@@ -28,6 +28,8 @@ export interface ApptainerLauncherConfig {
   healthTimeoutMs: number;
   healthIntervalMs: number;
   stopGraceMs: number;
+  /** Address advertised in the launch handle's `host` (control-plane-reachable). */
+  advertiseHost: string;
 }
 
 export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
@@ -47,12 +49,14 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
   // shim itself wedges.
   healthIntervalMs: 1_000,
   stopGraceMs: 30_000,
+  advertiseHost: 'localhost',
 };
 
 // Minimal child-process surface the launcher relies on — lets tests inject a fake.
 export interface ChildHandle {
   readonly pid?: number;
   readonly exitCode?: number | null;
+  readonly signalCode?: NodeJS.Signals | null;
   /** Present when spawned with stdio piped (the default spawn); absent for injected fakes that
    * don't need log capture. */
   readonly stdout?: NodeJS.ReadableStream;
@@ -229,6 +233,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     spec: LaunchSpec,
     onLog?: LogSink,
     onStartupComplete?: () => void,
+    onExit?: () => void,
   ): Promise<LaunchHandle> {
     const plan = this.buildExecPlan(spec);
 
@@ -264,25 +269,25 @@ export class ApptainerLauncher implements RunnerLauncher {
 
     // If the exec dies before becoming healthy, surface it instead of hanging on the health poll.
     let exited = false;
-    const onExit = (): void => {
+    const exitHandler = (): void => {
       exited = true;
     };
-    child.once('exit', onExit);
-    child.once('error', onExit);
+    child.once('exit', exitHandler);
+    child.once('error', exitHandler);
 
     const handle: LaunchHandle = {
-      host: '127.0.0.1',
+      host: this.config.advertiseHost,
       port: spec.port,
       enginePort: spec.enginePort,
       pid: child.pid,
-      stop: () => this.stopChild(child),
+      stop: () => this.stopChild(child, () => exited),
     };
 
     try {
       await this.waitUntilHealthy(spec.port, () => exited);
     } catch (err) {
       // Only tear down a still-running exec; if it already died, there is nothing to signal.
-      if (!exited) await this.stopChild(child).catch(() => {});
+      if (!exited) await this.stopChild(child, () => exited).catch(() => {});
       throw err;
     }
 
@@ -291,6 +296,13 @@ export class ApptainerLauncher implements RunnerLauncher {
     // "Application startup complete" prints before its /health returns 200, so it's already buffered.
     capturing = false;
     onStartupComplete?.();
+
+    // Post-startup supervision: if the runner exits on its own from here on (not via a deliberate
+    // stop()), let the manager know so it can reap the record and free device memory instead of
+    // leaving a phantom reservation.
+    if (onExit) {
+      child.once('exit', () => onExit());
+    }
 
     return handle;
   }
@@ -322,10 +334,11 @@ export class ApptainerLauncher implements RunnerLauncher {
   }
 
   // SIGTERM, then SIGKILL after the grace period if it hasn't exited (spike Gate 5: no orphan).
-  private stopChild(child: ChildHandle): Promise<void> {
+  private stopChild(child: ChildHandle, hasExited: () => boolean): Promise<void> {
     return new Promise((resolve) => {
-      // Already exited — nothing to signal.
-      if (child.exitCode !== null && child.exitCode !== undefined) {
+      // Already exited — nothing to signal. Covers both a normal exit (exitCode set) and a
+      // signal-killed child (exitCode null, signalCode set) — hasExited() tracks either.
+      if (hasExited()) {
         resolve();
         return;
       }
@@ -334,6 +347,7 @@ export class ApptainerLauncher implements RunnerLauncher {
         if (done) return;
         done = true;
         clearTimeout(killTimer);
+        clearTimeout(backstopTimer);
         resolve();
       };
       child.once('exit', finish);
@@ -344,6 +358,11 @@ export class ApptainerLauncher implements RunnerLauncher {
       }, this.config.stopGraceMs);
       // Do not keep the event loop alive solely for the grace timer.
       if (typeof killTimer.unref === 'function') killTimer.unref();
+      // Backstop: if the child never emits 'exit' at all (e.g. a fake/child whose process group
+      // vanished without the event firing), resolve anyway so stop() can't hang forever. Deliberately
+      // not unref()'d — a stop() caller waiting on this promise should keep the process alive until
+      // it settles.
+      const backstopTimer = setTimeout(finish, this.config.stopGraceMs + 5_000);
     });
   }
 }

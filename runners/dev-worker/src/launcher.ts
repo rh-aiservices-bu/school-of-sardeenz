@@ -82,10 +82,16 @@ export interface RunnerLauncher {
    * retained startup logs stay viewable without post-startup request logs polluting them. Launchers
    * still keep draining the process's stdio (so a full pipe can't block the engine); they just stop
    * forwarding it.
+   *
+   * `onExit`, when provided, is called if the runner's underlying process exits on its own after
+   * `start()` has already resolved (i.e. post-startup, unsupervised termination) — not for exits
+   * during startup or via a deliberate `stop()`. Lets the manager reap the record and free its
+   * device memory instead of leaving a phantom reservation.
    */
   start(
     spec: LaunchSpec,
     onLog?: LogSink,
     onStartupComplete?: () => void,
+    onExit?: () => void,
   ): Promise<LaunchHandle>;
 }

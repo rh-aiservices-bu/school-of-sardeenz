@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RunnerManager, ConflictError, NotFoundError } from '../runner-manager.js';
+import { RunnerLogBuffer, RETAIN_TTL_MS } from '../runner-log-buffer.js';
 import type { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
 import type { LaunchHandle, LaunchSpec, RunnerLauncher } from '../launcher.js';
@@ -10,7 +11,9 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     redisKeyPrefix: 'sardeenz',
     workerId: 'test-worker-0',
     workerPort: 19300,
+    advertiseHost: 'localhost',
     runnerPortStart: 19301,
+    maxRunners: 32,
     deviceCount: 2,
     deviceType: 'CUDA',
     deviceMemoryBytes: 24 * 1024 * 1024 * 1024,
@@ -33,6 +36,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
       healthTimeoutMs: 300000,
       healthIntervalMs: 1000,
       stopGraceMs: 15000,
+      advertiseHost: 'localhost',
     },
     ...overrides,
   };
@@ -48,6 +52,31 @@ function makeRegistration(): WorkerRegistration {
     startHeartbeat: () => {},
     stopHeartbeat: () => {},
   } as unknown as WorkerRegistration;
+}
+
+// A launcher whose start() captures the onExit callback the manager wired in, so a test can fire
+// it later to simulate the runner's process exiting on its own (post-startup supervision).
+function makeSupervisedLauncher(): {
+  launcher: RunnerLauncher;
+  fireExit: (runnerId: string) => void;
+} {
+  const onExitByRunnerId = new Map<string, () => void>();
+  const launcher: RunnerLauncher = {
+    serializeColdStarts: false,
+    start: (spec: LaunchSpec, _onLog, _onStartupComplete, onExit): Promise<LaunchHandle> => {
+      if (onExit) onExitByRunnerId.set(spec.runnerId, onExit);
+      return Promise.resolve({
+        host: 'localhost',
+        port: spec.port,
+        enginePort: spec.enginePort,
+        stop: () => Promise.resolve(),
+      });
+    },
+  };
+  return {
+    launcher,
+    fireExit: (runnerId) => onExitByRunnerId.get(runnerId)?.(),
+  };
 }
 
 describe('RunnerManager', () => {
@@ -253,6 +282,66 @@ describe('RunnerManager', () => {
     expect(mgr.getAllRunners()).toHaveLength(3);
   });
 
+  it('marks log stream ended and retains buffer when launch fails', async () => {
+    const logBuffer = new RunnerLogBuffer();
+    const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+    const retainSpy = vi.spyOn(logBuffer, 'retain');
+    const failing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: () => Promise.reject(new Error('launch boom')),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), failing, logBuffer);
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'fails-to-launch',
+        runnerType: 'vllm',
+        modelPath: '/models/fail',
+        requiredMemory: 1,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow('launch boom');
+
+    expect(markEndedSpy).toHaveBeenCalledTimes(1);
+    expect(retainSpy).toHaveBeenCalledTimes(1);
+    const runnerId = markEndedSpy.mock.calls[0][0];
+    expect(retainSpy.mock.calls[0][0]).toBe(runnerId);
+  });
+
+  it('buffer dropped after retain TTL on failed launch', async () => {
+    vi.useFakeTimers();
+    try {
+      const logBuffer = new RunnerLogBuffer();
+      const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+      const failing: RunnerLauncher = {
+        serializeColdStarts: false,
+        start: () => Promise.reject(new Error('launch boom')),
+      };
+      const mgr = new RunnerManager(makeConfig(), makeRegistration(), failing, logBuffer);
+
+      await expect(
+        mgr.startRunner({
+          modelName: 'fails-then-expires',
+          runnerType: 'vllm',
+          modelPath: '/models/fail-expires',
+          requiredMemory: 1,
+          tensorParallel: 1,
+          devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        }),
+      ).rejects.toThrow('launch boom');
+
+      const runnerId = markEndedSpy.mock.calls[0][0];
+      logBuffer.append(runnerId, 'stdout', 'failure log\n');
+
+      expect(logBuffer.has(runnerId)).toBe(true);
+      vi.advanceTimersByTime(RETAIN_TTL_MS);
+      expect(logBuffer.has(runnerId)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('allows starting a model after it was stopped', async () => {
     const r1 = await manager.startRunner({
       modelName: 'recycled',
@@ -273,5 +362,201 @@ describe('RunnerManager', () => {
       devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     });
     expect(r2.runnerId).not.toBe(r1.runnerId);
+  });
+
+  it('cleans up when a runner exits unexpectedly after startup', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const logBuffer = new RunnerLogBuffer();
+    const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+    const retainSpy = vi.spyOn(logBuffer, 'retain');
+    const registration = makeRegistration();
+    const freeMemorySpy = vi.spyOn(registration, 'freeMemory');
+    const mgr = new RunnerManager(makeConfig(), registration, launcher, logBuffer);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'crashes-later',
+      runnerType: 'vllm',
+      modelPath: '/models/crashes-later',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(mgr.getRunner(runnerId)).toBeDefined();
+
+    fireExit(runnerId);
+
+    expect(mgr.getRunner(runnerId)).toBeUndefined();
+    expect(freeMemorySpy).toHaveBeenCalledWith(0, 1024 * 1024 * 1024);
+    expect(markEndedSpy).toHaveBeenCalledWith(runnerId);
+    expect(retainSpy).toHaveBeenCalledWith(runnerId);
+
+    // The model slot is freed too — a replacement runner can be started for the same model.
+    const restarted = await mgr.startRunner({
+      modelName: 'crashes-later',
+      runnerType: 'vllm',
+      modelPath: '/models/crashes-later',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(restarted.runnerId).not.toBe(runnerId);
+  });
+
+  it('supervision callback no-ops when stopRunner has already cleaned up', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const registration = makeRegistration();
+    const freeMemorySpy = vi.spyOn(registration, 'freeMemory');
+    const mgr = new RunnerManager(makeConfig(), registration, launcher);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'stopped-deliberately',
+      runnerType: 'vllm',
+      modelPath: '/models/stopped-deliberately',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await mgr.stopRunner(runnerId);
+    expect(freeMemorySpy).toHaveBeenCalledTimes(1);
+
+    // The process exiting in response to the deliberate stop still fires the supervision callback —
+    // it must no-op rather than free memory a second time for a record that's already gone.
+    fireExit(runnerId);
+    expect(freeMemorySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses released port after stop', async () => {
+    const a = await manager.startRunner({
+      modelName: 'port-reuse-a',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(a.port).toBe(19301);
+
+    await manager.stopRunner(a.runnerId);
+
+    const b = await manager.startRunner({
+      modelName: 'port-reuse-b',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-b',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
+  });
+
+  it('reuses released port after unexpected exit', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+
+    const a = await mgr.startRunner({
+      modelName: 'port-reuse-exit-a',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-exit-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(a.port).toBe(19301);
+
+    fireExit(a.runnerId);
+
+    const b = await mgr.startRunner({
+      modelName: 'port-reuse-exit-b',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-exit-b',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
+  });
+
+  it('range exhaustion produces clear error', async () => {
+    const mgr = new RunnerManager(makeConfig({ maxRunners: 1 }), makeRegistration());
+
+    await mgr.startRunner({
+      modelName: 'exhaust-a',
+      runnerType: 'vllm',
+      modelPath: '/models/exhaust-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'exhaust-b',
+        runnerType: 'vllm',
+        modelPath: '/models/exhaust-b',
+        requiredMemory: 1024 * 1024 * 1024,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow(/port range exhausted/i);
+  });
+
+  it('workerPort is never allocated', async () => {
+    const mgr = new RunnerManager(
+      makeConfig({ workerPort: 19301, runnerPortStart: 19301, maxRunners: 3 }),
+      makeRegistration(),
+    );
+
+    const a = await mgr.startRunner({
+      modelName: 'skip-worker-port',
+      runnerType: 'vllm',
+      modelPath: '/models/skip-worker-port',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(a.port).toBe(19303);
+  });
+
+  it('port released on failed launch', async () => {
+    let attempt = 0;
+    const failing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> => {
+        attempt++;
+        if (attempt === 1) {
+          return Promise.reject(new Error('cold-start boom'));
+        }
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const mgr = new RunnerManager(makeConfig({ maxRunners: 1 }), makeRegistration(), failing);
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'released-on-failure-a',
+        runnerType: 'vllm',
+        modelPath: '/models/released-on-failure-a',
+        requiredMemory: 1,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow('cold-start boom');
+
+    const b = await mgr.startRunner({
+      modelName: 'released-on-failure-b',
+      runnerType: 'vllm',
+      modelPath: '/models/released-on-failure-b',
+      requiredMemory: 1,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
   });
 });

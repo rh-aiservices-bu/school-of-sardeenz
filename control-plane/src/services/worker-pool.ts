@@ -27,7 +27,7 @@ export interface WorkerRecord {
   devices: WorkerDevice[];
   lastHeartbeatAt: string | null;
   joinedAt: string;
-  managementUrl: string | null;
+  managementUrl: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ export interface WorkerRecord {
 interface WorkerInfoPayload {
   capabilities: WorkerCapability[];
   devices: WorkerDevice[];
-  managementUrl?: string;
+  managementUrl: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,9 @@ function parseWorkerInfo(raw: string): WorkerInfoPayload | null {
       'capabilities' in parsed &&
       'devices' in parsed &&
       Array.isArray((parsed as Record<string, unknown>).capabilities) &&
-      Array.isArray((parsed as Record<string, unknown>).devices)
+      Array.isArray((parsed as Record<string, unknown>).devices) &&
+      typeof (parsed as Record<string, unknown>).managementUrl === 'string' &&
+      ((parsed as Record<string, unknown>).managementUrl as string).length > 0
     ) {
       return parsed as WorkerInfoPayload;
     }
@@ -180,7 +182,7 @@ export class WorkerPoolService {
         devices: payload.devices,
         lastHeartbeatAt: existing?.lastHeartbeatAt ?? null,
         joinedAt: existing?.joinedAt ?? now,
-        managementUrl: payload.managementUrl ?? null,
+        managementUrl: payload.managementUrl,
       };
       this.workers.set(workerId, record);
       discoveredWorkerIds.push(workerId);

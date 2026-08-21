@@ -30,6 +30,7 @@ function makeSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
 class FakeChild extends EventEmitter implements ChildHandle {
   pid = 4242;
   exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   kill = vi.fn(() => true);
 }
 
@@ -173,9 +174,26 @@ describe('ApptainerLauncher.start', () => {
     expect(runOnce).toHaveBeenCalledWith('apptainer', ['verify', '/modules/vllm-0.21.sif']);
     expect(spawn).toHaveBeenCalledOnce();
     expect(handle.pid).toBe(child.pid);
-    expect(handle.host).toBe('127.0.0.1');
+    expect(handle.host).toBe(DEFAULT_APPTAINER_CONFIG.advertiseHost);
     expect(handle.port).toBe(9101);
     expect(handle.enginePort).toBe(9102);
+  });
+
+  it('uses advertiseHost from config for the launch handle host', async () => {
+    const { launcher } = makeLauncher({ advertiseHost: '10.244.1.5' });
+
+    const handle = await launcher.start(makeSpec());
+
+    expect(handle.host).toBe('10.244.1.5');
+  });
+
+  it('still probes the health endpoint on 127.0.0.1 regardless of advertiseHost', async () => {
+    const healthCheck = vi.fn(() => Promise.resolve({ state: 'READY' }));
+    const { launcher } = makeLauncher({ advertiseHost: '10.244.1.5' }, { healthCheck });
+
+    await launcher.start(makeSpec());
+
+    expect(healthCheck).toHaveBeenCalledWith('http://127.0.0.1:9101/health');
   });
 
   it('calls onStartupComplete once the runner is healthy', async () => {
@@ -213,6 +231,45 @@ describe('ApptainerLauncher.start', () => {
       /exited before becoming healthy/,
     );
     expect(onStartupComplete).not.toHaveBeenCalled();
+  });
+
+  it('calls onExit after post-startup exit', async () => {
+    const { launcher, child } = makeLauncher();
+    const onExit = vi.fn();
+
+    await launcher.start(makeSpec(), undefined, undefined, onExit);
+    expect(onExit).not.toHaveBeenCalled();
+
+    // The runner exits on its own well after start() resolved (e.g. a crash during inference).
+    child.exitCode = 0;
+    child.emit('exit');
+    expect(onExit).toHaveBeenCalledOnce();
+  });
+
+  it('does not call onExit during startup failure', async () => {
+    let calls = 0;
+    const now = vi.fn(() => calls++ * 1000);
+    // Same crash-during-health-check setup as the onStartupComplete equivalent above — the exit
+    // listener that drives onExit is only attached once start() resolves, so a startup-time exit
+    // must not reach it.
+    const { launcher, child } = makeLauncher(
+      { healthTimeoutMs: 10_000 },
+      {
+        healthCheck: () => {
+          child.exitCode = 1;
+          child.emit('exit');
+          return Promise.resolve(null);
+        },
+        now,
+        sleep: () => Promise.resolve(),
+      },
+    );
+    const onExit = vi.fn();
+
+    await expect(launcher.start(makeSpec(), undefined, undefined, onExit)).rejects.toThrow(
+      /exited before becoming healthy/,
+    );
+    expect(onExit).not.toHaveBeenCalled();
   });
 
   it('refuses to start when SIF verification fails', async () => {
@@ -304,6 +361,40 @@ describe('ApptainerLauncher stop / SIGTERM propagation', () => {
       expect(child.kill).toHaveBeenCalledWith('SIGKILL');
 
       child.emit('exit');
+      await expect(stopped).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves for a child whose exitCode is null and signalCode is SIGKILL', async () => {
+    const { launcher, child } = makeLauncher();
+    const handle = await launcher.start(makeSpec());
+
+    // The process was killed by a signal (e.g. the OOM-killer) rather than exiting normally —
+    // exitCode stays null, but the child has already emitted 'exit'.
+    child.exitCode = null;
+    child.signalCode = 'SIGKILL';
+    child.emit('exit');
+
+    await expect(handle.stop()).resolves.toBeUndefined();
+    expect(child.kill).not.toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('resolves within a bounded time even when the child never emits exit (backstop)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { launcher, child } = makeLauncher({ stopGraceMs: 5_000 });
+      const handle = await launcher.start(makeSpec());
+
+      const stopped = handle.stop();
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+      vi.advanceTimersByTime(5_000);
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+      // The child never emits 'exit' — only the backstop timer (stopGraceMs + 5000) resolves stop().
+      vi.advanceTimersByTime(5_000);
       await expect(stopped).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();

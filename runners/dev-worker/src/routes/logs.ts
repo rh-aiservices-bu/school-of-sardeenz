@@ -43,31 +43,45 @@ export function registerLogRoutes(app: FastifyInstance, runnerManager: RunnerMan
       writeLog(line);
     }
 
-    // If the runner's stream already ended (startup finished, or the runner stopped) before this
-    // client connected, the replay above is the whole story — send `end` now so the client stops
-    // waiting for live lines that will never come. This is the "View starting logs" reopen path:
-    // the sealed startup logs replay, then the stream closes cleanly.
-    if (logBuffer.isEnded(runnerId)) {
-      write('end', '{}');
-    }
-
     const unsubscribeLog = logBuffer.onLog(runnerId, writeLog);
-    const unsubscribeEnd = logBuffer.onEnd(runnerId, () => {
-      write('end', '{}');
-    });
 
     const pingInterval = setInterval(() => {
-      reply.raw.write(': ping\n\n');
+      if (!reply.raw.writableEnded) {
+        reply.raw.write(': ping\n\n');
+      }
     }, 30_000);
 
+    let unsubscribeEnd = (): void => {};
+
+    // Idempotent: the `close`/`error`/`end`-frame paths can all race to call this once the
+    // underlying socket is already gone, and reply.raw.end() would throw on a second call.
     const cleanup = (): void => {
+      if (reply.raw.writableEnded) return;
       clearInterval(pingInterval);
       unsubscribeLog();
       unsubscribeEnd();
+      reply.raw.end();
     };
 
+    // If the runner's stream already ended (startup finished, launch failed, or the runner
+    // stopped) before this client connected, the replay above is the whole story — send `end` now
+    // and close the response, rather than leaving the client hanging on a stream that will never
+    // produce another line. This is the "View starting logs" reopen path (and the failed-launch
+    // late-attach path): the sealed logs replay, then the stream closes cleanly. Deferred to a
+    // microtask so `cleanup` (which reads `unsubscribeEnd`) is fully assigned first.
+    if (logBuffer.isEnded(runnerId)) {
+      write('end', '{}');
+      queueMicrotask(cleanup);
+    }
+
+    unsubscribeEnd = logBuffer.onEnd(runnerId, () => {
+      write('end', '{}');
+      cleanup();
+    });
+
     // reply.hijack() already told Fastify not to manage this response — the handler can return
-    // once listeners are wired; the connection itself stays open until the client disconnects.
+    // once listeners are wired; the connection itself stays open until the client disconnects or
+    // cleanup() closes it server-side.
     req.raw.on('close', cleanup);
     req.raw.on('error', cleanup);
   };

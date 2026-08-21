@@ -94,10 +94,10 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
       // Try to attach to the worker's by-model log stream. Returns true once the attach is
       // resolved (piping started, or a terminal error was surfaced) so the poll loop can stop;
       // returns false to signal "retry" — the worker hasn't received the start command yet (404),
-      // the worker isn't reachable, or its management URL isn't known yet.
+      // the worker isn't reachable.
       const tryAttach = async (workerId: string): Promise<boolean> => {
         const worker = deps.workerPool.getWorker(workerId);
-        if (!worker || !worker.managementUrl) return false;
+        if (!worker) return false;
 
         const workerClient = deps.createWorkerClient(worker.managementUrl);
 

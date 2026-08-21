@@ -38,7 +38,7 @@ export class StubLauncher implements RunnerLauncher {
     // the OpenAI `/v1/*` inference routes on `spec.port`. Report the engine port as the same port
     // (the allocated `spec.enginePort` of the pair is left unused) so the proxy targets this server.
     return {
-      host: 'localhost',
+      host: this.config.advertiseHost,
       port: spec.port,
       enginePort: spec.port,
       stop: () => stub.stop(),

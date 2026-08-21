@@ -270,20 +270,6 @@ describe('DeployOrchestrationService', () => {
       );
     });
 
-    it('transitions to ERROR when worker has no managementUrl', async () => {
-      mocks.workerPool.getWorker.mockReturnValue(makeWorker({ managementUrl: null }));
-
-      await expect(service.deployModel(makeParams())).rejects.toThrow('no management URL');
-
-      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
-        'test-model',
-        ModelLifecycleState.ERROR,
-        expect.objectContaining({
-          errorMessage: expect.stringContaining('no management URL') as string,
-        }),
-      );
-    });
-
     it('releases capacity when worker is not found', async () => {
       mocks.workerPool.getWorker.mockReturnValue(null);
 

@@ -51,13 +51,6 @@ export class DeployOrchestrationService {
       if (!worker) {
         throw ControlPlaneError.workerNotFound(params.workerId);
       }
-      if (!worker.managementUrl) {
-        throw new ControlPlaneError(
-          500,
-          'INTERNAL_ERROR',
-          `Worker ${params.workerId} has no management URL`,
-        );
-      }
 
       const workerClient = this.createWorkerClient(worker.managementUrl);
       const startRequest: StartRunnerRequest = {

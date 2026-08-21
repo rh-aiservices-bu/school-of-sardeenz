@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { RunnerLogBuffer, type RunnerLogLine } from '../runner-log-buffer.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  RunnerLogBuffer,
+  RETAIN_TTL_MS,
+  MAX_RETAINED,
+  type RunnerLogLine,
+} from '../runner-log-buffer.js';
 
 describe('RunnerLogBuffer', () => {
   let buffer: RunnerLogBuffer;
@@ -174,5 +179,60 @@ describe('RunnerLogBuffer', () => {
 
     expect(buffer.getBuffer('runner-1').map((l) => l.content)).toEqual(['one']);
     expect(buffer.getBuffer('runner-2').map((l) => l.content)).toEqual(['two']);
+  });
+
+  describe('retain', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('retain schedules drop after TTL', () => {
+      buffer.append('runner-1', 'stdout', 'line\n');
+      buffer.retain('runner-1');
+
+      expect(buffer.has('runner-1')).toBe(true);
+      vi.advanceTimersByTime(RETAIN_TTL_MS - 1);
+      expect(buffer.has('runner-1')).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(buffer.has('runner-1')).toBe(false);
+    });
+
+    it('retain evicts oldest when cap exceeded', () => {
+      for (let i = 0; i < MAX_RETAINED; i++) {
+        buffer.append(`runner-${i}`, 'stdout', 'line\n');
+        buffer.retain(`runner-${i}`);
+      }
+      expect(buffer.has('runner-0')).toBe(true);
+
+      buffer.append('runner-overflow', 'stdout', 'line\n');
+      buffer.retain('runner-overflow');
+
+      expect(buffer.has('runner-0')).toBe(false);
+      expect(buffer.has('runner-overflow')).toBe(true);
+    });
+
+    it('retain is idempotent — re-retain resets timer', () => {
+      buffer.append('runner-1', 'stdout', 'line\n');
+      buffer.retain('runner-1');
+
+      vi.advanceTimersByTime(RETAIN_TTL_MS / 2);
+      buffer.retain('runner-1');
+      vi.advanceTimersByTime(RETAIN_TTL_MS / 2);
+
+      expect(buffer.has('runner-1')).toBe(true);
+    });
+
+    it('drop cancels pending retain timer', () => {
+      buffer.append('runner-1', 'stdout', 'line\n');
+      buffer.retain('runner-1');
+      buffer.drop('runner-1');
+
+      expect(() => vi.advanceTimersByTime(RETAIN_TTL_MS)).not.toThrow();
+      expect(buffer.has('runner-1')).toBe(false);
+    });
   });
 });

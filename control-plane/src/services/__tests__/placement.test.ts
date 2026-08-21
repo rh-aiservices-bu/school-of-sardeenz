@@ -23,7 +23,7 @@ function makeWorker(
     devices,
     lastHeartbeatAt: new Date().toISOString(),
     joinedAt: new Date().toISOString(),
-    managementUrl: null,
+    managementUrl: `http://${workerId}:9100`,
   };
 }
 

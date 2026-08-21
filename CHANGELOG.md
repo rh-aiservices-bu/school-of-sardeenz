@@ -72,6 +72,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dev worker: runner ports were allocated monotonically and never reclaimed.** `RunnerManager`
+  tracked ports with an ever-incrementing counter, so a long-lived worker cycling models through
+  start/stop (or crash/restart) would eventually walk past `runnerPortStart + <range>` and hand out
+  an out-of-range port. Port allocation now scans a bounded range
+  (`[runnerPortStart, runnerPortStart + maxRunners * 2)`, new `SARDEENZ_MAX_RUNNERS` config,
+  default 32) for the lowest free `(management, engine)` pair, tracked in a `usedPorts` set that's
+  released on `stopRunner()`, on unexpected-exit cleanup, and when a launch fails — so a stopped or
+  crashed runner's ports are reused by the next start instead of leaking. The scan also skips
+  `config.workerPort` so a runner can never collide with the worker's own listener, and an injectable
+  `probePortAvailable` (real TCP bind check in production, `undefined` in tests) double-checks a
+  candidate pair is actually free before handing it out. Range exhaustion now throws a clear error
+  naming the configured range instead of silently returning an out-of-range port. (#114)
+- **Worker Deployment: signing-key import silently no-oped, no liveness/readiness probes, and the
+  heartbeat kept advertising a wedged worker.** (#118)
+  - `deployment/sif-runner/worker-deployment.yaml`'s entrypoint imported the SIF signing public key
+    with `|| true`, so a missing/invalid ConfigMap left the keyring empty and the worker started
+    anyway with `apptainer verify` silently unable to trust anything. The script now checks
+    `apptainer key list` after import when `SARDEENZ_VERIFY_SIF` is true (the default) and exits 1
+    with a clear error if the keyring is empty, instead of serving unverifiable SIFs.
+  - The Deployment had no liveness/readiness/startup probes, so Kubernetes had no way to detect a
+    wedged worker or hold traffic until it was ready. Added a `management` container port (9100)
+    plus `startupProbe`/`livenessProbe`/`readinessProbe` against `GET /healthz`.
+  - `WorkerRegistration.startHeartbeat()` refreshed the Redis heartbeat key unconditionally on a
+    timer, so a hung worker (event loop blocked, health endpoint unresponsive) kept looking alive to
+    the control plane indefinitely. The heartbeat write is now gated on a successful `GET /healthz`
+    (skipped on non-200 or a fetch failure) and sets the key with a TTL
+    (`redis.set(key, value, 'PX', heartbeatIntervalMs * 4)`) so a worker that stops refreshing
+    expires instead of lingering forever.
+- **Dev worker: signal-killed runners were never reaped, and a runner exiting on its own after
+  startup left a phantom VRAM reservation.** (#109)
+  - `ApptainerLauncher.stopChild()` treated `exitCode !== null` as the only "already exited"
+    signal, so a child killed by a signal (`exitCode` stays `null`, `signalCode` set instead — e.g.
+    an OOM-kill) was never recognized as dead: `stop()` would still send `SIGTERM`/`SIGKILL` to an
+    already-gone process and, if the fake/real child never emitted a further `exit` event, hang
+    forever. `stopChild()` now takes a `hasExited()` predicate (backed by the launcher's own
+    `exit`/`error` listener flag, which fires for a signal-killed child too) instead of reading
+    `child.exitCode` directly, and a non-`unref()`'d backstop timer (`stopGraceMs + 5s`) guarantees
+    `stop()` resolves even if `exit` never fires at all.
+  - Runners had no supervision after startup completed: if the underlying process died on its own
+    (crash, OOM-kill) rather than via a deliberate `stopRunner()`, its `RunnerRecord` and device
+    memory reservation lived on forever. `RunnerLauncher.start()` now accepts an optional `onExit`
+    callback, invoked once if the process exits after `start()` has already resolved; both
+    `ApptainerLauncher` and `StubLauncher` wire it in. `RunnerManager.startRunner()` passes a
+    `handleUnexpectedExit` closure that frees the runner's device memory and removes its record
+    (guarded on the record still existing, so it's a no-op during a deliberate `stopRunner()`,
+    which now clears the record before calling `handle.stop()`).
+- **Dev worker: failed launch leaked log buffers, hung SSE log clients, and discarded failure
+  logs.** `startRunner`'s catch block rolled back the reserved model slot but never sealed or
+  retained the runner's log stream, so a client attached mid-launch (`GET
+  /runners/by-model/{modelName}/logs`) hung forever waiting for an `end` frame, the log buffer and
+  its listeners stayed in memory indefinitely since there's no `stopRunner()` call to `drop()`
+  them, and the failure logs became unreachable once the model slot was rolled back. `RunnerManager`
+  now calls `logBuffer.markEnded(runnerId)` and the new `logBuffer.retain(runnerId)` in the catch
+  block; `retain()` schedules an automatic `drop()` after a 5-minute TTL (capped at 20 retained
+  buffers, evicting oldest-first) so failure logs stay retrievable via `GET
+  /runners/{runnerId}/logs` for a window without leaking forever. The SSE route's `stream()` was
+  also hardened: `cleanup()` is now idempotent and closes the response (`reply.raw.end()`) once the
+  stream ends, instead of only clearing listeners and leaving the socket open. (#112)
+- **Worker `managementUrl` no longer advertises `http://localhost:<port>` in-cluster, and the
+  contract now matches the control plane's hard requirement for it.** (#111)
+  - The dev-worker agent (both `stub` and `apptainer` launch modes) advertises a configurable
+    `advertiseHost` (`SARDEENZ_WORKER_ADVERTISE_HOST`, default `localhost`) instead of a hard-coded
+    `localhost`/`127.0.0.1` — a worker deployed via `deployment/sif-runner/` now sets this from
+    `status.podIP` so the control plane, running in a different pod, can actually reach it. The
+    Apptainer launcher's own `/health` probe is unaffected — it still targets `127.0.0.1` since
+    that check runs in-pod.
+  - `WorkerInfo.managementUrl` is now `required` in `packages/contracts/specs/worker-agent.yaml`
+    (types regenerated), matching the control plane's existing hard requirement. Worker registration
+    payloads missing (or with an empty) `managementUrl` are now rejected at discovery
+    (`WorkerPoolService.parseWorkerInfo`) instead of silently producing a `null` that later
+    surfaced as a 500 at deploy time.
 - **`sleepModel` now honors `SARDEENZ_SLEEP_TIMEOUT_SECS` on the runner's `/sleep` call.**
   `RunnerClient.sleep()` previously always used the client's instance-level default (30 s),
   ignoring `SleepWakeService.sleepTimeoutMs` — a model whose offload takes longer than 30 s (e.g.

@@ -13,6 +13,7 @@ export class WorkerRegistration {
     // The advertised fleet. Defaults to the configured (simulated) fleet when not supplied — real
     // deployments pass GPUs resolved via resolveDevices() (nvidia-smi in apptainer mode).
     devices?: DetectedDevice[],
+    private readonly fetchFn: typeof fetch = globalThis.fetch,
   ) {
     this.devices =
       devices ??
@@ -43,7 +44,7 @@ export class WorkerRegistration {
         },
       ],
       devices: this.devices,
-      managementUrl: `http://localhost:${this.config.workerPort}`,
+      managementUrl: `http://${this.config.advertiseHost}:${this.config.workerPort}`,
     };
 
     const pipeline = this.redis.pipeline();
@@ -58,11 +59,18 @@ export class WorkerRegistration {
 
   startHeartbeat(): void {
     if (this.heartbeatTimer) return;
+    const heartbeatKey = this.key('workers', this.config.workerId, 'heartbeat');
+    const ttlMs = this.config.heartbeatIntervalMs * 4;
     this.heartbeatTimer = setInterval(() => {
-      void this.redis.set(
-        this.key('workers', this.config.workerId, 'heartbeat'),
-        new Date().toISOString(),
-      );
+      void (async () => {
+        try {
+          const res = await this.fetchFn(`http://127.0.0.1:${this.config.workerPort}/healthz`);
+          if (!res.ok) return;
+          await this.redis.set(heartbeatKey, new Date().toISOString(), 'PX', ttlMs);
+        } catch {
+          // Health check failed or Redis write failed — skip this tick and let the key age out.
+        }
+      })();
     }, this.config.heartbeatIntervalMs);
   }
 

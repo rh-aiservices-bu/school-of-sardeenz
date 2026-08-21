@@ -12,6 +12,8 @@ export type RunnerLogLine = WorkerAgentComponents['schemas']['RunnerLogLine'];
 export type LogStream = 'stdout' | 'stderr';
 
 const DEFAULT_CAP = 1000;
+export const RETAIN_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export const MAX_RETAINED = 20;
 
 // The control plane and the launcher poll the runner's control endpoints (health/progress/etc.)
 // constantly, so the engine's HTTP access log fills with one line per poll — pure noise for a human
@@ -32,6 +34,8 @@ export class RunnerLogBuffer {
   // client that connects *after* the end signal fired still gets an immediate `end` frame after the
   // replay, rather than hanging on a stream that will never produce another line.
   private readonly ended = new Set<string>();
+  // Pending drop() timers scheduled by retain(), keyed by runnerId.
+  private readonly retainTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly cap: number = DEFAULT_CAP) {}
 
@@ -126,9 +130,39 @@ export class RunnerLogBuffer {
   // Clear a runner's buffer and listeners (called once its SSE clients have had a chance to see
   // the `end` frame).
   drop(runnerId: string): void {
+    const timer = this.retainTimers.get(runnerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.retainTimers.delete(runnerId);
+    }
+
     this.buffers.delete(runnerId);
     this.logListeners.delete(runnerId);
     this.endListeners.delete(runnerId);
     this.ended.delete(runnerId);
+  }
+
+  // Schedule a runner's buffer for automatic drop() after RETAIN_TTL_MS. Used when a launch fails:
+  // there's no stopRunner() call to drop() the buffer, so without this the failure logs (and their
+  // listeners) would remain in memory forever. Caps the number of retained buffers at MAX_RETAINED,
+  // evicting the oldest-scheduled retention first, so a burst of failed launches can't leak memory
+  // faster than the TTL reclaims it. Idempotent — calling again resets the TTL.
+  retain(runnerId: string): void {
+    const existing = this.retainTimers.get(runnerId);
+    if (existing) clearTimeout(existing);
+
+    if (!this.retainTimers.has(runnerId) && this.retainTimers.size >= MAX_RETAINED) {
+      const oldest = this.retainTimers.keys().next().value!;
+      clearTimeout(this.retainTimers.get(oldest));
+      this.retainTimers.delete(oldest);
+      this.drop(oldest);
+    }
+
+    const timer = setTimeout(() => {
+      this.retainTimers.delete(runnerId);
+      this.drop(runnerId);
+    }, RETAIN_TTL_MS);
+    timer.unref();
+    this.retainTimers.set(runnerId, timer);
   }
 }

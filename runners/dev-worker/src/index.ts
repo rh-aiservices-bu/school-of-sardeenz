@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { loadRootEnv } from './load-env.js';
 import { loadConfig } from './config.js';
 import { WorkerRegistration } from './registration.js';
-import { RunnerManager } from './runner-manager.js';
+import { RunnerManager, probePortAvailable } from './runner-manager.js';
 import { StubLauncher } from './stub-launcher.js';
 import { ApptainerLauncher } from './apptainer-launcher.js';
 import type { RunnerLauncher } from './launcher.js';
@@ -29,7 +29,13 @@ const deviceReport = await resolveDevices(config);
 
 const redis = new Redis(config.redisUrl);
 const registration = new WorkerRegistration(redis, config, deviceReport.devices);
-const runnerManager = new RunnerManager(config, registration, createLauncher());
+const runnerManager = new RunnerManager(
+  config,
+  registration,
+  createLauncher(),
+  undefined,
+  probePortAvailable,
+);
 
 const server = createServer(runnerManager);
 
