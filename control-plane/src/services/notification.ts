@@ -25,13 +25,11 @@ export interface NotificationLogger {
 }
 
 const NOTIFICATIONS_LIST = 'notifications';
-const NOTIFICATIONS_READ_SET = 'notifications:read';
 const NOTIFICATIONS_CHANNEL = 'notifications';
 const MAX_NOTIFICATIONS = 200;
 
 export class NotificationService {
   private readonly listKey: string;
-  private readonly readSetKey: string;
   private readonly channel: string;
 
   constructor(
@@ -40,7 +38,6 @@ export class NotificationService {
     private readonly logger: NotificationLogger,
   ) {
     this.listKey = redisKey(keyPrefix, NOTIFICATIONS_LIST);
-    this.readSetKey = redisKey(keyPrefix, NOTIFICATIONS_READ_SET);
     this.channel = redisKey(keyPrefix, NOTIFICATIONS_CHANNEL);
   }
 
@@ -75,18 +72,8 @@ export class NotificationService {
 
   async listNotifications(limit = 50, offset = 0): Promise<StoredNotification[]> {
     try {
-      const [rawList, readIds] = await Promise.all([
-        this.redis.lrange(this.listKey, offset, offset + limit - 1),
-        this.redis.smembers(this.readSetKey),
-      ]);
-
-      const readSet = new Set(readIds);
-
-      return rawList.map((raw: string) => {
-        const notification = JSON.parse(raw) as StoredNotification;
-        notification.isRead = readSet.has(notification.id);
-        return notification;
-      });
+      const rawList = await this.redis.lrange(this.listKey, offset, offset + limit - 1);
+      return rawList.map((raw: string) => JSON.parse(raw) as StoredNotification);
     } catch (err) {
       this.logger.error(
         { err: err instanceof Error ? err.message : String(err) },
@@ -98,7 +85,15 @@ export class NotificationService {
 
   async markAsRead(id: string): Promise<void> {
     try {
-      await this.redis.sadd(this.readSetKey, id);
+      const rawList = await this.redis.lrange(this.listKey, 0, -1);
+      const index = rawList.findIndex(
+        (raw: string) => (JSON.parse(raw) as StoredNotification).id === id,
+      );
+      if (index === -1) return;
+
+      const notification = JSON.parse(rawList[index]) as StoredNotification;
+      notification.isRead = true;
+      await this.redis.lset(this.listKey, index, JSON.stringify(notification));
     } catch (err) {
       this.logger.error(
         { id, err: err instanceof Error ? err.message : String(err) },
@@ -111,11 +106,15 @@ export class NotificationService {
   async markAllAsRead(): Promise<void> {
     try {
       const rawList = await this.redis.lrange(this.listKey, 0, -1);
-      const ids = rawList.map((raw: string) => (JSON.parse(raw) as StoredNotification).id);
+      if (rawList.length === 0) return;
 
-      if (ids.length > 0) {
-        await this.redis.sadd(this.readSetKey, ...ids);
-      }
+      const pipeline = this.redis.pipeline();
+      rawList.forEach((raw: string, index: number) => {
+        const notification = JSON.parse(raw) as StoredNotification;
+        notification.isRead = true;
+        pipeline.lset(this.listKey, index, JSON.stringify(notification));
+      });
+      await pipeline.exec();
     } catch (err) {
       this.logger.error(
         { err: err instanceof Error ? err.message : String(err) },
@@ -136,8 +135,6 @@ export class NotificationService {
       if (target) {
         await this.redis.lrem(this.listKey, 1, target);
       }
-
-      await this.redis.srem(this.readSetKey, id);
     } catch (err) {
       this.logger.error(
         { id, err: err instanceof Error ? err.message : String(err) },
@@ -149,7 +146,7 @@ export class NotificationService {
 
   async clearAll(): Promise<void> {
     try {
-      await this.redis.del(this.listKey, this.readSetKey);
+      await this.redis.del(this.listKey);
     } catch (err) {
       this.logger.error(
         { err: err instanceof Error ? err.message : String(err) },

@@ -308,10 +308,17 @@ export class ReconciliationService {
     for (const budget of allBudgets) {
       if (budget.stale) continue;
       for (const device of budget.devices) {
-        deviceMemoryBytes.set({ worker_id: budget.workerId, state: 'total' }, device.totalBytes);
-        deviceMemoryBytes.set({ worker_id: budget.workerId, state: 'used' }, device.usedBytes);
+        const deviceIndex = String(device.deviceIndex);
         deviceMemoryBytes.set(
-          { worker_id: budget.workerId, state: 'available' },
+          { worker_id: budget.workerId, device_index: deviceIndex, state: 'total' },
+          device.totalBytes,
+        );
+        deviceMemoryBytes.set(
+          { worker_id: budget.workerId, device_index: deviceIndex, state: 'used' },
+          device.usedBytes,
+        );
+        deviceMemoryBytes.set(
+          { worker_id: budget.workerId, device_index: deviceIndex, state: 'available' },
           device.availableBytes,
         );
       }

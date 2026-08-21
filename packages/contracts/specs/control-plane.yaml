@@ -971,6 +971,8 @@ components:
             Model name used as the routing key. Must be unique across the
             cluster. This is what clients specify in the `model` field of
             OpenAI API requests.
+          pattern: '^[A-Za-z0-9._/-]{1,200}$'
+          maxLength: 200
           examples:
             - "meta-llama/Llama-3.1-8B-Instruct"
         runnerType:

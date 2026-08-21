@@ -8,6 +8,7 @@ function createMockPipeline() {
   return {
     lpush: vi.fn().mockReturnThis(),
     ltrim: vi.fn().mockReturnThis(),
+    lset: vi.fn().mockReturnThis(),
     exec: vi.fn().mockResolvedValue([]),
   };
 }
@@ -16,9 +17,7 @@ const mockRedis = {
   lpush: vi.fn().mockResolvedValue(1),
   ltrim: vi.fn().mockResolvedValue('OK'),
   lrange: vi.fn().mockResolvedValue([]),
-  smembers: vi.fn().mockResolvedValue([]),
-  sadd: vi.fn().mockResolvedValue(1),
-  srem: vi.fn().mockResolvedValue(1),
+  lset: vi.fn().mockResolvedValue('OK'),
   lrem: vi.fn().mockResolvedValue(1),
   del: vi.fn().mockResolvedValue(1),
   publish: vi.fn().mockResolvedValue(1),
@@ -107,13 +106,13 @@ describe('NotificationService', () => {
   });
 
   describe('listNotifications', () => {
-    it('returns parsed notifications with read state merged from smembers', async () => {
+    it('returns parsed notifications as stored (isRead already in the JSON)', async () => {
       const notification1 = {
         id: 'n1',
         title: 'Notification 1',
         variant: 'info',
         timestamp: '2026-06-29T10:00:00.000Z',
-        isRead: false,
+        isRead: true,
       };
       const notification2 = {
         id: 'n2',
@@ -127,21 +126,15 @@ describe('NotificationService', () => {
         JSON.stringify(notification1),
         JSON.stringify(notification2),
       ]);
-      mockRedis.smembers.mockResolvedValue(['n1']);
 
       const result = await service.listNotifications();
 
-      expect(result).toEqual([
-        { ...notification1, isRead: true },
-        { ...notification2, isRead: false },
-      ]);
+      expect(result).toEqual([notification1, notification2]);
       expect(mockRedis.lrange).toHaveBeenCalledWith('test:notifications', 0, 49);
-      expect(mockRedis.smembers).toHaveBeenCalledWith('test:notifications:read');
     });
 
     it('handles custom limit and offset', async () => {
       mockRedis.lrange.mockResolvedValue([]);
-      mockRedis.smembers.mockResolvedValue([]);
 
       await service.listNotifications(10, 5);
 
@@ -150,39 +143,84 @@ describe('NotificationService', () => {
   });
 
   describe('markAsRead', () => {
-    it('calls sadd with the notification id', async () => {
+    it('finds the notification by id and LSETs it with isRead true', async () => {
+      const notification = {
+        id: 'test-id-123',
+        title: 'Target',
+        variant: 'info',
+        timestamp: '2026-06-29T10:00:00.000Z',
+        isRead: false,
+      };
+      mockRedis.lrange.mockResolvedValue([JSON.stringify(notification)]);
+
       await service.markAsRead('test-id-123');
 
-      expect(mockRedis.sadd).toHaveBeenCalledWith('test:notifications:read', 'test-id-123');
+      expect(mockRedis.lset).toHaveBeenCalledWith(
+        'test:notifications',
+        0,
+        JSON.stringify({ ...notification, isRead: true }),
+      );
+    });
+
+    it('is a no-op when the notification is not found', async () => {
+      mockRedis.lrange.mockResolvedValue([]);
+
+      await service.markAsRead('nonexistent-id');
+
+      expect(mockRedis.lset).not.toHaveBeenCalled();
     });
   });
 
   describe('markAllAsRead', () => {
-    it('reads all notification IDs from list and calls sadd', async () => {
+    it('LSETs every notification in the list with isRead true', async () => {
       const notifications = [
-        { id: 'n1', title: 'N1', variant: 'info', timestamp: '2026-06-29T10:00:00.000Z' },
-        { id: 'n2', title: 'N2', variant: 'info', timestamp: '2026-06-29T11:00:00.000Z' },
+        {
+          id: 'n1',
+          title: 'N1',
+          variant: 'info',
+          timestamp: '2026-06-29T10:00:00.000Z',
+          isRead: false,
+        },
+        {
+          id: 'n2',
+          title: 'N2',
+          variant: 'info',
+          timestamp: '2026-06-29T11:00:00.000Z',
+          isRead: false,
+        },
       ];
 
       mockRedis.lrange.mockResolvedValue(notifications.map((n) => JSON.stringify(n)));
+      const pipelineMock = createMockPipeline();
+      mockRedis.pipeline.mockReturnValue(pipelineMock);
 
       await service.markAllAsRead();
 
       expect(mockRedis.lrange).toHaveBeenCalledWith('test:notifications', 0, -1);
-      expect(mockRedis.sadd).toHaveBeenCalledWith('test:notifications:read', 'n1', 'n2');
+      expect(pipelineMock.lset).toHaveBeenCalledWith(
+        'test:notifications',
+        0,
+        JSON.stringify({ ...notifications[0], isRead: true }),
+      );
+      expect(pipelineMock.lset).toHaveBeenCalledWith(
+        'test:notifications',
+        1,
+        JSON.stringify({ ...notifications[1], isRead: true }),
+      );
+      expect(pipelineMock.exec).toHaveBeenCalled();
     });
 
-    it('skips sadd when list is empty', async () => {
+    it('skips the pipeline when list is empty', async () => {
       mockRedis.lrange.mockResolvedValue([]);
 
       await service.markAllAsRead();
 
-      expect(mockRedis.sadd).not.toHaveBeenCalled();
+      expect(mockRedis.pipeline).not.toHaveBeenCalled();
     });
   });
 
   describe('removeNotification', () => {
-    it('finds notification in list by id and calls lrem + srem', async () => {
+    it('finds notification in list by id and calls lrem', async () => {
       const notification = {
         id: 'target-id',
         title: 'Target',
@@ -196,7 +234,6 @@ describe('NotificationService', () => {
       await service.removeNotification('target-id');
 
       expect(mockRedis.lrem).toHaveBeenCalledWith('test:notifications', 1, rawNotification);
-      expect(mockRedis.srem).toHaveBeenCalledWith('test:notifications:read', 'target-id');
     });
 
     it('handles notification not found gracefully (no lrem call)', async () => {
@@ -212,15 +249,14 @@ describe('NotificationService', () => {
       await service.removeNotification('nonexistent-id');
 
       expect(mockRedis.lrem).not.toHaveBeenCalled();
-      expect(mockRedis.srem).toHaveBeenCalledWith('test:notifications:read', 'nonexistent-id');
     });
   });
 
   describe('clearAll', () => {
-    it('calls del on both list and read set keys', async () => {
+    it('calls del on the list key', async () => {
       await service.clearAll();
 
-      expect(mockRedis.del).toHaveBeenCalledWith('test:notifications', 'test:notifications:read');
+      expect(mockRedis.del).toHaveBeenCalledWith('test:notifications');
     });
   });
 });

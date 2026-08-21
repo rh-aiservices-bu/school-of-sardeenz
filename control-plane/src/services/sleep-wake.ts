@@ -7,7 +7,7 @@ import {
   wakeTriggersTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
-import { delay } from '../utils.js';
+import { delaySafe } from '../utils.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
@@ -279,11 +279,9 @@ export class SleepWakeService {
         return;
       }
 
-      await delay(this.healthCheckIntervalMs, signal);
+      await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
-    // AbortSignal.timeout() throws DOMException('TimeoutError') when aborted,
-    // but the while loop exits cleanly — fall through to the error.
     const message = `Drain timed out after ${this.sleepTimeoutMs}ms for model ${modelName}`;
     throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName });
   }
@@ -311,7 +309,7 @@ export class SleepWakeService {
         );
       }
 
-      await delay(this.healthCheckIntervalMs, signal);
+      await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
     const message = `Wake timed out after ${this.wakeTimeoutMs}ms for model ${modelName}`;

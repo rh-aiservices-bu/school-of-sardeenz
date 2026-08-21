@@ -79,6 +79,12 @@ describe('LruEvictionStrategy', () => {
   });
 });
 
+/** Uniform 8e9-byte memoryByModel map, keyed by each model's modelName — for tests that aren't
+ * exercising size-based selection and just need every candidate to have a non-zero size. */
+function uniformMemory(models: ModelState[], bytes = 8e9): Map<string, number> {
+  return new Map(models.map((m) => [m.modelName, bytes]));
+}
+
 describe('EvictionEngine', () => {
   it('excludes pinned models', () => {
     const engine = new EvictionEngine();
@@ -87,7 +93,13 @@ describe('EvictionEngine', () => {
       makeModelState({ modelName: 'unpinned-model', lastInferenceAt: '2026-01-01T00:01:00Z' }),
     ];
 
-    const victims = engine.selectVictims(models, new Set(['pinned-model']), 8e9);
+    const victims = engine.selectVictims(
+      models,
+      new Set(['pinned-model']),
+      8e9,
+      undefined,
+      uniformMemory(models),
+    );
     expect(victims).toHaveLength(1);
     expect(victims[0].modelName).toBe('unpinned-model');
   });
@@ -125,7 +137,13 @@ describe('EvictionEngine', () => {
       makeModelState({ modelName: 'c', lastInferenceAt: '2026-01-01T00:03:00Z' }),
     ];
 
-    const victims = engine.selectVictims(models, new Set(), 100e9);
+    const victims = engine.selectVictims(
+      models,
+      new Set(),
+      100e9,
+      undefined,
+      uniformMemory(models),
+    );
     expect(victims).toHaveLength(1);
   });
 
@@ -138,7 +156,13 @@ describe('EvictionEngine', () => {
       makeModelState({ modelName: 'pending', state: ModelLifecycleState.PENDING }),
     ];
 
-    const victims = engine.selectVictims(models, new Set(), 100e9);
+    const victims = engine.selectVictims(
+      models,
+      new Set(),
+      100e9,
+      undefined,
+      uniformMemory(models),
+    );
     const names = victims.map((v) => v.modelName);
     expect(names).toContain('active');
     expect(names).toContain('sleeping');
@@ -153,7 +177,13 @@ describe('EvictionEngine', () => {
       makeModelState({ modelName: 'on-w2', workerId: 'w2' }),
     ];
 
-    const victims = engine.selectVictims(models, new Set(), 8e9, new Set(['w1']));
+    const victims = engine.selectVictims(
+      models,
+      new Set(),
+      8e9,
+      new Set(['w1']),
+      uniformMemory(models),
+    );
     expect(victims).toHaveLength(1);
     expect(victims[0].modelName).toBe('on-w1');
   });
@@ -166,11 +196,65 @@ describe('EvictionEngine', () => {
       makeModelState({ modelName: 'on-w3', workerId: 'w3' }),
     ];
 
-    const victims = engine.selectVictims(models, new Set(), 100e9, new Set(['w1', 'w2']));
+    const victims = engine.selectVictims(
+      models,
+      new Set(),
+      100e9,
+      new Set(['w1', 'w2']),
+      uniformMemory(models),
+    );
     const names = victims.map((v) => v.modelName);
     expect(names).toContain('on-w1');
     expect(names).toContain('on-w2');
     expect(names).not.toContain('on-w3');
+  });
+
+  it('excludes candidates with zero or unknown memoryBytes', () => {
+    const engine = new EvictionEngine();
+    const models: ModelState[] = [
+      makeModelState({ modelName: 'zero-size', lastInferenceAt: '2026-01-01T00:01:00Z' }),
+      makeModelState({ modelName: 'sized', lastInferenceAt: '2026-01-01T00:02:00Z' }),
+    ];
+    // memoryByModel omits 'zero-size' entirely — mirrors a stale/missing record, which maps to 0.
+    const memoryByModel = new Map([['sized', 8e9]]);
+
+    const victims = engine.selectVictims(models, new Set(), 8e9, undefined, memoryByModel);
+
+    expect(victims.map((v) => v.modelName)).toEqual(['sized']);
+  });
+
+  it('selects victims from a mix of zero-size and sized candidates', () => {
+    const engine = new EvictionEngine();
+    const models: ModelState[] = [
+      makeModelState({ modelName: 'zero-size', lastInferenceAt: '2026-01-01T00:01:00Z' }),
+      makeModelState({ modelName: 'sized-a', lastInferenceAt: '2026-01-01T00:02:00Z' }),
+      makeModelState({ modelName: 'sized-b', lastInferenceAt: '2026-01-01T00:03:00Z' }),
+    ];
+    const memoryByModel = new Map([
+      ['zero-size', 0],
+      ['sized-a', 4e9],
+      ['sized-b', 4e9],
+    ]);
+
+    const victims = engine.selectVictims(models, new Set(), 8e9, undefined, memoryByModel);
+
+    expect(victims.map((v) => v.modelName)).toEqual(['sized-a', 'sized-b']);
+  });
+
+  it('returns empty when all candidates have zero memoryBytes', () => {
+    const engine = new EvictionEngine();
+    const models: ModelState[] = [
+      makeModelState({ modelName: 'a', lastInferenceAt: '2026-01-01T00:01:00Z' }),
+      makeModelState({ modelName: 'b', lastInferenceAt: '2026-01-01T00:02:00Z' }),
+    ];
+    const memoryByModel = new Map([
+      ['a', 0],
+      ['b', 0],
+    ]);
+
+    const victims = engine.selectVictims(models, new Set(), 8e9, undefined, memoryByModel);
+
+    expect(victims).toHaveLength(0);
   });
 
   it('returns empty array when circuit breaker is open', () => {

@@ -81,6 +81,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `sleepTimeoutMs` through explicitly. `wake()` is unaffected — it returns as soon as the runner
   begins reloading, and `waitForReady` (not the `/wake` call itself) enforces `wakeTimeoutMs`.
   (#89)
+- **Low-severity fixes bundle: graceful shutdown, unreachable timeouts, zero-size eviction, metric
+  overwrites, unbounded notification storage, modelName validation.** (#96)
+  - Hijacked SSE responses (model-launch log streaming) were invisible to Fastify's own connection
+    tracking, so `app.close()` during `SIGTERM`/`SIGINT` shutdown would hang waiting for a
+    connection that would never end on its own. `buildServer` now decorates the Fastify instance
+    with a `hijackedResponses: Set<ServerResponse>` registry; `registerModelLogRoutes` adds/removes
+    its raw response on hijack/cleanup, and `shutdown()` ends every registered response before
+    `app.close()`, plus an `unref()`'d 10s watchdog `process.exit(1)` as a last resort.
+  - `SleepWakeService.waitForDrain`/`waitForReady` and `DeployOrchestrationService.waitForReady`
+    polled with `delay()`, which rejects as soon as its `AbortSignal` fires — so the `RUNNER_TIMEOUT`
+    `ControlPlaneError` thrown after each polling loop was unreachable; an `AbortError`/
+    `DOMException` propagated instead. Added `delaySafe()` (resolves instead of rejecting on abort)
+    in `utils.ts` and switched all three polling loops to it, letting `while (!signal.aborted)` end
+    the loop normally so the `RUNNER_TIMEOUT` error is actually thrown.
+  - `EvictionEngine.selectVictims` could select a candidate with `memoryBytes <= 0` (missing/stale
+    `memoryByModel` entry) as a victim — evicting a model that frees zero capacity and can never
+    satisfy `requiredBytes`. Zero/negative-size candidates are now filtered out (with a warning
+    naming them) before victim selection.
+  - `sardeenz_control_plane_device_memory_bytes` had no per-device label, so
+    `ReconciliationService.refreshMetrics` overwrote one worker's multi-GPU gauge values with
+    whichever device was set last. Added a `device_index` label, populated from each device's index.
+  - `NotificationService` tracked read state in a separate, unbounded `notifications:read` Redis set
+    that was never trimmed alongside the capped notification list, and diverged from `LREM`-removed
+    entries. Reworked to store `isRead` directly on each notification's JSON in the existing capped
+    list: `markAsRead`/`markAllAsRead` now `LSET` the notification in place instead of `SADD`-ing to
+    the read set, and `removeNotification`/`clearAll` no longer touch it.
+  - `POST /api/v1/models` accepted any non-empty string as `modelName`, including values unsafe as
+    routing keys or SIF/log-path segments. Added `pattern: '^[A-Za-z0-9._/-]{1,200}$'` and
+    `maxLength: 200` to `ModelDeploymentRequest.modelName` in the OpenAPI spec (request only, not
+    response schemas) and a matching runtime check in the deploy route.
 - **`DELETE /api/v1/models/:modelName` no longer 404s or 409s on evicted/stopped models.** Eviction
   clears a model's Redis lifecycle state but intentionally keeps its DB record (a tombstone, so the
   model reappears in `GET /api/v1/models` as `STOPPED` and can be redeployed). The delete route,

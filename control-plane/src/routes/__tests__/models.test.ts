@@ -236,6 +236,38 @@ describe('POST /api/v1/models deploy-path eviction', () => {
   });
 });
 
+describe('POST /api/v1/models modelName validation', () => {
+  it('accepts a modelName with the org/model-name shape', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, modelName: 'meta-llama/Llama-3.1-8B-Instruct' },
+    });
+
+    expect(res.statusCode).not.toBe(400);
+  });
+
+  it.each([
+    ['contains a space', 'my model'],
+    ['contains a colon', 'model:tag'],
+    ['exceeds 200 characters', 'a'.repeat(201)],
+    ['is empty', ''],
+  ])('rejects modelName that %s', async (_desc, modelName) => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, modelName },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+});
+
 describe('DELETE /api/v1/models/:modelName background deletion', () => {
   let app: FastifyInstance;
   let logInfo: ReturnType<typeof vi.fn>;

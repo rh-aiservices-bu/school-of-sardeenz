@@ -7,7 +7,7 @@ import {
   runnerHealthCheckErrorsTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
-import { delay } from '../utils.js';
+import { delaySafe } from '../utils.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
@@ -150,7 +150,7 @@ export class DeployOrchestrationService {
         );
       }
 
-      await delay(this.healthCheckIntervalMs, signal);
+      await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
     const message = `Deploy timed out after ${this.deployTimeoutMs}ms for model ${modelName}`;

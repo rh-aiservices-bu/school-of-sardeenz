@@ -19,6 +19,9 @@ interface DeployBody {
 // Mirrors the worker-agent contract's runtimeModule pattern; it becomes a SIF filename segment.
 const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
+// Mirrors ModelDeploymentRequest.modelName in packages/contracts/specs/control-plane.yaml.
+const MODEL_NAME_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
+
 export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post<{ Body: DeployBody }>('/api/v1/models', async (request, reply) => {
     if (!deps.leaderElection.isLeader) {
@@ -39,6 +42,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       throw ControlPlaneError.invalidRequest(
         'modelName (string), runnerType (string), modelPath (string), and requiredMemory (positive number) are required',
       );
+    }
+
+    if (!MODEL_NAME_PATTERN.test(body.modelName)) {
+      throw ControlPlaneError.invalidRequest('modelName must match ^[A-Za-z0-9._/-]{1,200}$');
     }
 
     if (
@@ -239,7 +246,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             });
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
-          app.log.error({ err, modelName: body.modelName }, 'Background capacity reclamation failed');
+          app.log.error(
+            { err, modelName: body.modelName },
+            'Background capacity reclamation failed',
+          );
 
           try {
             await deps.lifecycle.transition(body.modelName, ModelLifecycleState.ERROR, {

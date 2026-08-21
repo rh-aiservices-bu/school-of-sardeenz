@@ -97,13 +97,15 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
     await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('test-model', '10.0.0.1', 5002);
-    expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalledWith('test-model', '10.0.0.1', 5001);
+    expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalledWith(
+      'test-model',
+      '10.0.0.1',
+      5001,
+    );
   });
 
   it('wakeModel re-registers the endpoint under the engine port', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(
-      makeState({ state: ModelLifecycleState.SLEEPING }),
-    );
+    mocks.lifecycle.getState.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
 
     await service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient);
 
@@ -223,5 +225,48 @@ describe('SleepWakeService — timeout threading (#89)', () => {
     await service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.runnerClient.wake).toHaveBeenCalledWith();
+  });
+});
+
+describe('SleepWakeService — RUNNER_TIMEOUT reachability (#96)', () => {
+  it('waitForDrain surfaces RUNNER_TIMEOUT, not an AbortError, when the drain never completes', async () => {
+    const mocks = createMocks();
+    mocks.runnerClient.getHealth.mockResolvedValue({
+      state: RunnerState.READY,
+      activeRequests: 5,
+    });
+    const service = new SleepWakeService(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      mocks.memoryBudget as unknown as MemoryBudgetService,
+      50,
+      50,
+      10,
+    );
+
+    await expect(
+      service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient),
+    ).rejects.toMatchObject({ code: 'RUNNER_TIMEOUT' });
+  });
+
+  it('waitForReady surfaces RUNNER_TIMEOUT, not an AbortError, when the runner never becomes ready', async () => {
+    const mocks = createMocks();
+    mocks.lifecycle.getState.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
+    mocks.runnerClient.getHealth.mockResolvedValue({
+      state: RunnerState.STARTING,
+      activeRequests: 0,
+    });
+    const service = new SleepWakeService(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      mocks.memoryBudget as unknown as MemoryBudgetService,
+      50,
+      50,
+      10,
+    );
+
+    await expect(
+      service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient),
+    ).rejects.toMatchObject({ code: 'RUNNER_TIMEOUT' });
   });
 });

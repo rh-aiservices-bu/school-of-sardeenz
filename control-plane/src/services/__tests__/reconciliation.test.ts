@@ -9,6 +9,7 @@ import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { Redis } from '../../clients/redis.js';
+import { deviceMemoryBytes } from '../../health/metrics.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
@@ -542,6 +543,60 @@ describe('ReconciliationService', () => {
 
       expect(mocks.memoryBudget.refreshAll).toHaveBeenCalledOnce();
       expect(mocks.lifecycle.getAllStates).toHaveBeenCalled();
+    });
+  });
+
+  describe('tick — refreshMetrics device labels', () => {
+    it('sets distinct device_index labels for each device on a worker with multiple GPUs', async () => {
+      mocks.workerPool.getAllWorkers.mockReturnValue([]);
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([
+        {
+          workerId: 'w1',
+          lastReportAt: new Date().toISOString(),
+          stale: false,
+          devices: [
+            {
+              deviceIndex: 0,
+              deviceType: 'gpu',
+              totalBytes: 16e9,
+              usedBytes: 4e9,
+              reservedBytes: 0,
+              availableBytes: 12e9,
+            },
+            {
+              deviceIndex: 1,
+              deviceType: 'gpu',
+              totalBytes: 16e9,
+              usedBytes: 2e9,
+              reservedBytes: 0,
+              availableBytes: 14e9,
+            },
+          ],
+        },
+      ]);
+
+      const setSpy = vi.spyOn(deviceMemoryBytes, 'set');
+
+      await service.tick();
+
+      expect(setSpy).toHaveBeenCalledWith(
+        { worker_id: 'w1', device_index: '0', state: 'total' },
+        16e9,
+      );
+      expect(setSpy).toHaveBeenCalledWith(
+        { worker_id: 'w1', device_index: '1', state: 'total' },
+        16e9,
+      );
+      expect(setSpy).toHaveBeenCalledWith(
+        { worker_id: 'w1', device_index: '0', state: 'used' },
+        4e9,
+      );
+      expect(setSpy).toHaveBeenCalledWith(
+        { worker_id: 'w1', device_index: '1', state: 'used' },
+        2e9,
+      );
+
+      setSpy.mockRestore();
     });
   });
 

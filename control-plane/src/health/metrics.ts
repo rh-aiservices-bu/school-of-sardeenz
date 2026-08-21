@@ -21,8 +21,8 @@ export const workersTotal = new Gauge({
 
 export const deviceMemoryBytes = new Gauge({
   name: 'sardeenz_control_plane_device_memory_bytes',
-  help: 'Device memory by worker and state',
-  labelNames: ['worker_id', 'state'] as const,
+  help: 'Device memory by worker, device, and state',
+  labelNames: ['worker_id', 'device_index', 'state'] as const,
   registers: [registry],
 });
 

@@ -178,7 +178,17 @@ async function main(): Promise<void> {
     app.log.info({ signal }, 'Shutting down');
     reconciliation.stop();
     await leaderElection.stop();
+    // Hijacked responses (SSE log streams) are invisible to Fastify's own connection tracking, so
+    // app.close() would otherwise wait forever for them to end on their own.
+    for (const res of app.hijackedResponses) {
+      res.end();
+    }
     await app.close();
+    // Belt-and-braces: if something still keeps the event loop alive (a connection app.close()
+    // couldn't reach), don't hang the process indefinitely.
+    setTimeout(() => {
+      process.exit(1);
+    }, 10_000).unref();
     redis.disconnect();
     await db.end();
     process.exit(0);

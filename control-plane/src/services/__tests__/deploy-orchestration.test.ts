@@ -149,7 +149,12 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ACTIVE,
-        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerEnginePort: 5001, runnerId: 'runner-abc' },
+        {
+          runnerHost: '10.0.0.1',
+          runnerPort: 5001,
+          runnerEnginePort: 5001,
+          runnerId: 'runner-abc',
+        },
       );
       expect(mocks.routingMap.setModelState).toHaveBeenCalledWith('test-model', ModelState.ACTIVE);
     });
@@ -186,7 +191,12 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ACTIVE,
-        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerEnginePort: 5002, runnerId: 'runner-abc' },
+        {
+          runnerHost: '10.0.0.1',
+          runnerPort: 5001,
+          runnerEnginePort: 5002,
+          runnerId: 'runner-abc',
+        },
       );
     });
 
@@ -351,7 +361,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
 
-    it('transitions to ERROR on deploy timeout', async () => {
+    it('transitions to ERROR on deploy timeout, surfacing RUNNER_TIMEOUT (not an AbortError) (#96)', async () => {
       mocks.runnerClient.getHealth.mockResolvedValue({
         state: RunnerState.STARTING,
         activeRequests: 0,
@@ -368,7 +378,12 @@ describe('DeployOrchestrationService', () => {
         50,
       );
 
-      await expect(shortTimeoutService.deployModel(makeParams())).rejects.toThrow();
+      // Before delaySafe(), delay() rejected with an AbortError as soon as the timeout signal
+      // fired, which propagated straight out of waitForReady's polling loop — the RUNNER_TIMEOUT
+      // ControlPlaneError below the loop was unreachable.
+      await expect(shortTimeoutService.deployModel(makeParams())).rejects.toMatchObject({
+        code: 'RUNNER_TIMEOUT',
+      });
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',

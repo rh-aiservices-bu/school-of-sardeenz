@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import type { ServerResponse } from 'node:http';
 
 import type { Config } from './config.js';
 import type { Redis } from './clients/redis.js';
@@ -23,6 +24,17 @@ export interface ServerDeps {
   routes: RouteDeps;
 }
 
+declare module 'fastify' {
+  interface FastifyInstance {
+    /**
+     * Hijacked responses (e.g. SSE log streams) bypass Fastify's own connection tracking, so
+     * `app.close()` never learns about them and graceful shutdown hangs waiting for a response
+     * that will never end on its own. Routes that hijack register their raw response here.
+     */
+    hijackedResponses: Set<ServerResponse>;
+  }
+}
+
 export async function buildServer(deps: ServerDeps) {
   const app = Fastify({
     logger: {
@@ -35,6 +47,8 @@ export async function buildServer(deps: ServerDeps) {
     requestIdHeader: 'x-request-id',
     genReqId: () => crypto.randomUUID(),
   });
+
+  app.decorate('hijackedResponses', new Set<ServerResponse>());
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ControlPlaneError) {
