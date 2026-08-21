@@ -61,6 +61,178 @@ function buildApp(over: Overrides = {}): {
   return { app, logInfo, logError };
 }
 
+interface DeployOverrides {
+  place?: ReturnType<typeof vi.fn>;
+  eligibleWorkerIds?: ReturnType<typeof vi.fn>;
+  selectVictims?: ReturnType<typeof vi.fn>;
+  createModel?: ReturnType<typeof vi.fn>;
+  transition?: ReturnType<typeof vi.fn>;
+  getAllStates?: ReturnType<typeof vi.fn>;
+  getState?: ReturnType<typeof vi.fn>;
+  removeModel?: ReturnType<typeof vi.fn>;
+  stopModel?: ReturnType<typeof vi.fn>;
+  refreshAll?: ReturnType<typeof vi.fn>;
+  deployModel?: ReturnType<typeof vi.fn>;
+  findAll?: ReturnType<typeof vi.fn>;
+  createModelRecord?: ReturnType<typeof vi.fn>;
+  setModelState?: ReturnType<typeof vi.fn>;
+}
+
+function buildDeployApp(over: DeployOverrides = {}): {
+  app: FastifyInstance;
+  deps: Record<string, unknown>;
+  logError: ReturnType<typeof vi.fn>;
+} {
+  const logError = vi.fn();
+
+  const deps = {
+    leaderElection: { isLeader: true },
+    modelRepository: {
+      create: over.createModelRecord ?? vi.fn(() => Promise.resolve()),
+      findAll: over.findAll ?? vi.fn(() => Promise.resolve([])),
+      delete: vi.fn(() => Promise.resolve()),
+    },
+    lifecycle: {
+      createModel: over.createModel ?? vi.fn(() => Promise.resolve()),
+      getAllStates: over.getAllStates ?? vi.fn(() => Promise.resolve([])),
+      getLastInferenceTimestamps: vi.fn(() => Promise.resolve(new Map())),
+      getState: over.getState ?? vi.fn(() => Promise.resolve(null)),
+      transition: over.transition ?? vi.fn(() => Promise.resolve()),
+      removeModel: over.removeModel ?? vi.fn(() => Promise.resolve()),
+    },
+    workerPool: { getAllWorkers: vi.fn(() => []) },
+    memoryBudget: {
+      getAllBudgets: vi.fn(() => []),
+      reserveCapacity: vi.fn(),
+      refreshAll: over.refreshAll ?? vi.fn(() => Promise.resolve()),
+    },
+    placement: {
+      place: over.place ?? vi.fn(() => null),
+      eligibleWorkerIds: over.eligibleWorkerIds ?? vi.fn(() => new Set(['w1'])),
+    },
+    eviction: {
+      selectVictims: over.selectVictims ?? vi.fn(() => []),
+      startTimer: vi.fn(() => vi.fn()),
+      recordEviction: vi.fn(),
+    },
+    sleepWake: {
+      stopModel: over.stopModel ?? vi.fn(() => Promise.resolve()),
+    },
+    deployOrchestration: {
+      deployModel: over.deployModel ?? vi.fn(() => Promise.resolve()),
+    },
+    routingMap: {
+      setModelState: over.setModelState ?? vi.fn(() => Promise.resolve()),
+    },
+    notifications: {
+      createNotification: vi.fn(() => Promise.resolve()),
+    },
+    createRunnerClient: vi.fn(() => ({})),
+  } as unknown as RouteDeps;
+
+  const app = Fastify({ logger: false });
+  app.log.error = logError;
+  app.setErrorHandler((error: Error & { statusCode?: number; code?: string }, _req, reply) => {
+    return reply.code(error.statusCode ?? 500).send({ error: error.message, code: error.code });
+  });
+  registerModelRoutes(app, deps);
+  return { app, deps: deps as unknown as Record<string, unknown>, logError };
+}
+
+const DEPLOY_BODY = {
+  modelName: 'm1',
+  runnerType: 'vllm',
+  modelPath: '/models/m1',
+  requiredMemory: 8e9,
+};
+
+describe('POST /api/v1/models deploy-path eviction', () => {
+  it('returns 202 with capacity reclamation message when eviction is needed', async () => {
+    const victim = {
+      modelName: 'old-model',
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'w1',
+      memoryBytes: 8e9,
+      lastInferenceAt: null,
+      pinned: false,
+    };
+    const { app, deps } = buildDeployApp({
+      selectVictims: vi.fn(() => [victim]),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ state: string; message: string }>()).toMatchObject({
+      modelName: 'm1',
+      state: ModelLifecycleState.PENDING,
+      message: 'Capacity reclamation in progress',
+    });
+
+    const placement = deps.placement as { eligibleWorkerIds: ReturnType<typeof vi.fn> };
+    expect(placement.eligibleWorkerIds).toHaveBeenCalledOnce();
+  });
+
+  it('transitions to ERROR and notifies when background reclamation fails', async () => {
+    const victim = {
+      modelName: 'old-model',
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'w1',
+      memoryBytes: 8e9,
+      lastInferenceAt: null,
+      pinned: false,
+    };
+    // place() returns null both on the initial attempt and after reclamation,
+    // forcing the background block into its failure path.
+    const { app, deps } = buildDeployApp({
+      selectVictims: vi.fn(() => [victim]),
+      place: vi.fn(() => null),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const lifecycle = deps.lifecycle as { transition: ReturnType<typeof vi.fn> };
+    const routingMap = deps.routingMap as { setModelState: ReturnType<typeof vi.fn> };
+    const notifications = deps.notifications as { createNotification: ReturnType<typeof vi.fn> };
+
+    expect(lifecycle.transition).toHaveBeenCalledWith(
+      'm1',
+      ModelLifecycleState.ERROR,
+      expect.objectContaining({ errorMessage: expect.any(String) as string }),
+    );
+    expect(routingMap.setModelState).toHaveBeenCalledWith('m1', 'ERROR');
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: 'danger' }),
+    );
+  });
+
+  it('throws PLACEMENT_FAILED when no worker is eligible', async () => {
+    const { app } = buildDeployApp({
+      eligibleWorkerIds: vi.fn(() => new Set()),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(503);
+    expect(res.json<{ code: string }>().code).toBe('PLACEMENT_FAILED');
+  });
+
+  it('throws PLACEMENT_FAILED when eligible workers exist but no victims are found', async () => {
+    const { app } = buildDeployApp({
+      selectVictims: vi.fn(() => []),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(503);
+    expect(res.json<{ code: string }>().code).toBe('PLACEMENT_FAILED');
+  });
+});
+
 describe('DELETE /api/v1/models/:modelName background deletion', () => {
   let app: FastifyInstance;
   let logInfo: ReturnType<typeof vi.fn>;

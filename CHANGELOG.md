@@ -72,6 +72,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Deploy-path eviction no longer selects victims cluster-wide, and eviction/re-placement no longer
+  block the deploy request.** `POST /api/v1/models` used to call `eviction.selectVictims` with no
+  worker scope on a placement miss, so a model could be evicted from a worker that could never have
+  hosted the new model anyway (wrong runner type or hardware); the stop/remove/refresh/re-place
+  sequence also ran synchronously in the request handler, holding the HTTP response open for the
+  full eviction cycle. `PlacementPipeline` gained a public `eligibleWorkerIds()` method (runner-type
+  and hardware filtering, independent of capacity) and `EvictionEngine.selectVictims`'s 4th parameter
+  changed from a single optional `targetWorkerId` to a `ReadonlySet<string>` of target workers, used
+  by both the deploy path (all eligible workers) and the wake path (the model's own worker, wrapped in
+  a set). The deploy handler now computes the eligible set and selects victims synchronously (still
+  failing fast with `PLACEMENT_FAILED` if no worker is eligible or no victims are found), then moves
+  the actual stop/remove/budget-refresh/re-place/deploy sequence into a background task and replies
+  `202` immediately with `state: 'PENDING'` and a "Capacity reclamation in progress" message; a
+  background failure transitions the model to `ERROR`, updates the routing map, and sends a danger
+  notification, mirroring `DeployOrchestrationService`'s existing error-transition pattern. (#86)
 - **Background model deletion no longer risks crashing the control plane on an unhandled promise
   rejection.** `DELETE /api/v1/models/:modelName` kicks off `sleepWake.stopModel` →
   `lifecycle.removeModel` → `modelRepository.delete` in the background after replying `202`; the

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ModelLifecycleState } from '@sardeenz/types';
+import { ModelLifecycleState, ModelState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
@@ -95,33 +95,87 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         tensorParallel: body.tensorParallel ?? 1,
       };
 
-      let result = deps.placement.place(placementRequest, workers, budgets);
+      const result = deps.placement.place(placementRequest, workers, budgets);
 
-      if (!result) {
-        const allStates = await deps.lifecycle.getAllStates();
-        const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
-          allStates.map((s) => s.modelName),
-        );
-        for (const s of allStates) {
-          s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+      if (result) {
+        for (const device of result.devices) {
+          deps.memoryBudget.reserveCapacity(
+            result.workerId,
+            device.deviceIndex,
+            body.requiredMemory / (body.tensorParallel ?? 1),
+          );
         }
-        const allRecords = await deps.modelRepository.findAll();
-        const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
-        const memoryByModel = new Map(
-          allRecords
-            .filter((r) => r.requiredMemory !== null)
-            .map((r) => [r.name, r.requiredMemory!]),
-        );
 
-        const victims = deps.eviction.selectVictims(
-          allStates,
-          pinnedModels,
-          body.requiredMemory,
-          undefined,
-          memoryByModel,
-        );
+        await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
+          workerId: result.workerId,
+          deviceIndices: result.devices.map((d) => d.deviceIndex),
+        });
 
-        if (victims.length > 0) {
+        deps.deployOrchestration
+          .deployModel({
+            modelName: body.modelName,
+            workerId: result.workerId,
+            runnerType: body.runnerType,
+            modelPath: body.modelPath,
+            requiredMemory: body.requiredMemory,
+            deviceType: body.deviceType,
+            tensorParallel: body.tensorParallel ?? 1,
+            engineConfig: body.engineConfig,
+            runtimeModule: body.runtimeModule,
+            devices: result.devices,
+          })
+          .catch((err: unknown) => {
+            app.log.error(
+              { err, modelName: body.modelName },
+              'Background deploy orchestration failed',
+            );
+          });
+
+        return reply.code(202).send({
+          modelName: body.modelName,
+          state: ModelLifecycleState.STARTING,
+          message: `Placed on worker ${result.workerId}`,
+        });
+      }
+
+      const eligibleWorkerIds = deps.placement.eligibleWorkerIds(placementRequest, workers);
+      if (eligibleWorkerIds.size === 0) {
+        throw ControlPlaneError.placementFailed(
+          body.modelName,
+          'No worker with sufficient capacity',
+        );
+      }
+
+      const allStates = await deps.lifecycle.getAllStates();
+      const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
+        allStates.map((s) => s.modelName),
+      );
+      for (const s of allStates) {
+        s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+      }
+      const allRecords = await deps.modelRepository.findAll();
+      const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
+      const memoryByModel = new Map(
+        allRecords.filter((r) => r.requiredMemory !== null).map((r) => [r.name, r.requiredMemory!]),
+      );
+
+      const victims = deps.eviction.selectVictims(
+        allStates,
+        pinnedModels,
+        body.requiredMemory,
+        eligibleWorkerIds,
+        memoryByModel,
+      );
+
+      if (victims.length === 0) {
+        throw ControlPlaneError.placementFailed(
+          body.modelName,
+          'No worker with sufficient capacity',
+        );
+      }
+
+      void (async () => {
+        try {
           const stopTimer = deps.eviction.startTimer();
           for (const victim of victims) {
             const victimState = await deps.lifecycle.getState(victim.modelName);
@@ -139,54 +193,80 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           const refreshedBudgets = new Map(
             deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]),
           );
-          result = deps.placement.place(placementRequest, workers, refreshedBudgets);
+          const reclaimed = deps.placement.place(placementRequest, workers, refreshedBudgets);
+
+          if (!reclaimed) {
+            throw ControlPlaneError.placementFailed(
+              body.modelName,
+              'No worker with sufficient capacity after capacity reclamation',
+            );
+          }
+
+          for (const device of reclaimed.devices) {
+            deps.memoryBudget.reserveCapacity(
+              reclaimed.workerId,
+              device.deviceIndex,
+              body.requiredMemory / (body.tensorParallel ?? 1),
+            );
+          }
+
+          await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
+            workerId: reclaimed.workerId,
+            deviceIndices: reclaimed.devices.map((d) => d.deviceIndex),
+          });
+
+          deps.deployOrchestration
+            .deployModel({
+              modelName: body.modelName,
+              workerId: reclaimed.workerId,
+              runnerType: body.runnerType,
+              modelPath: body.modelPath,
+              requiredMemory: body.requiredMemory,
+              deviceType: body.deviceType,
+              tensorParallel: body.tensorParallel ?? 1,
+              engineConfig: body.engineConfig,
+              runtimeModule: body.runtimeModule,
+              devices: reclaimed.devices,
+            })
+            .catch((err: unknown) => {
+              app.log.error(
+                { err, modelName: body.modelName },
+                'Background deploy orchestration failed',
+              );
+            });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          app.log.error({ err, modelName: body.modelName }, 'Background capacity reclamation failed');
+
+          try {
+            await deps.lifecycle.transition(body.modelName, ModelLifecycleState.ERROR, {
+              errorMessage: message,
+            });
+            await deps.routingMap.setModelState(body.modelName, ModelState.ERROR);
+          } catch {
+            // Intentionally swallowed — do not mask the original error.
+          }
+
+          deps.notifications
+            .createNotification({
+              title: 'Model deployment failed',
+              description: `${body.modelName}: ${message}`,
+              variant: 'danger',
+              source: { type: 'model', name: body.modelName },
+            })
+            .catch((notifyErr: unknown) => {
+              app.log.debug(
+                { err: notifyErr, modelName: body.modelName },
+                'Failed to create failure notification',
+              );
+            });
         }
-      }
-
-      if (!result) {
-        throw ControlPlaneError.placementFailed(
-          body.modelName,
-          'No worker with sufficient capacity',
-        );
-      }
-
-      for (const device of result.devices) {
-        deps.memoryBudget.reserveCapacity(
-          result.workerId,
-          device.deviceIndex,
-          body.requiredMemory / (body.tensorParallel ?? 1),
-        );
-      }
-
-      await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
-        workerId: result.workerId,
-        deviceIndices: result.devices.map((d) => d.deviceIndex),
-      });
-
-      deps.deployOrchestration
-        .deployModel({
-          modelName: body.modelName,
-          workerId: result.workerId,
-          runnerType: body.runnerType,
-          modelPath: body.modelPath,
-          requiredMemory: body.requiredMemory,
-          deviceType: body.deviceType,
-          tensorParallel: body.tensorParallel ?? 1,
-          engineConfig: body.engineConfig,
-          runtimeModule: body.runtimeModule,
-          devices: result.devices,
-        })
-        .catch((err: unknown) => {
-          app.log.error(
-            { err, modelName: body.modelName },
-            'Background deploy orchestration failed',
-          );
-        });
+      })();
 
       return reply.code(202).send({
         modelName: body.modelName,
-        state: ModelLifecycleState.STARTING,
-        message: `Placed on worker ${result.workerId}`,
+        state: ModelLifecycleState.PENDING,
+        message: 'Capacity reclamation in progress',
       });
     } catch (err) {
       if (redisCreated) {
@@ -477,7 +557,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             allStates,
             pinnedModels,
             requiredMemory,
-            state.workerId,
+            new Set([state.workerId]),
             memoryByModel,
           );
 

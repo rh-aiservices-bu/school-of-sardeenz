@@ -359,6 +359,106 @@ describe('PlacementPipeline', () => {
   });
 });
 
+describe('PlacementPipeline.eligibleWorkerIds', () => {
+  const pipeline = new PlacementPipeline();
+
+  it('returns worker ids matching runner type and hardware, ignoring capacity', () => {
+    const workers = [
+      makeWorker(
+        'w1',
+        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+      ),
+      makeWorker(
+        'w2',
+        [{ runnerType: 'triton', supportedDeviceTypes: ['CUDA'] }],
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+      ),
+    ];
+
+    const eligible = pipeline.eligibleWorkerIds(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      workers,
+    );
+
+    expect(eligible).toEqual(new Set(['w1']));
+  });
+
+  it('excludes unhealthy workers', () => {
+    const workers = [
+      {
+        ...makeWorker(
+          'w1',
+          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        ),
+        status: WorkerStatus.OFFLINE,
+      },
+    ];
+
+    const eligible = pipeline.eligibleWorkerIds(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      workers,
+    );
+
+    expect(eligible.size).toBe(0);
+  });
+
+  it('filters by device type when specified', () => {
+    const workers = [
+      makeWorker(
+        'w1',
+        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+      ),
+      makeWorker(
+        'w2',
+        [{ runnerType: 'vllm', supportedDeviceTypes: ['ROCM'] }],
+        [{ deviceIndex: 0, deviceType: 'ROCM', memoryTotalBytes: 32e9 }],
+      ),
+    ];
+
+    const eligible = pipeline.eligibleWorkerIds(
+      {
+        modelName: 'test',
+        runnerType: 'vllm',
+        requiredMemory: 8e9,
+        deviceType: 'ROCM',
+        tensorParallel: 1,
+      },
+      workers,
+    );
+
+    expect(eligible).toEqual(new Set(['w2']));
+  });
+
+  it('returns an empty set when no worker matches', () => {
+    const workers = [
+      makeWorker(
+        'w1',
+        [{ runnerType: 'triton', supportedDeviceTypes: ['CUDA'] }],
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+      ),
+    ];
+
+    const eligible = pipeline.eligibleWorkerIds(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      workers,
+    );
+
+    expect(eligible.size).toBe(0);
+  });
+
+  it('returns an empty set when there are no workers', () => {
+    const eligible = pipeline.eligibleWorkerIds(
+      { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+      [],
+    );
+
+    expect(eligible.size).toBe(0);
+  });
+});
+
 describe('MostAvailableCapacityStrategy', () => {
   const strategy = new MostAvailableCapacityStrategy();
 

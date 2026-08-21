@@ -153,9 +153,24 @@ describe('EvictionEngine', () => {
       makeModelState({ modelName: 'on-w2', workerId: 'w2' }),
     ];
 
-    const victims = engine.selectVictims(models, new Set(), 8e9, 'w1');
+    const victims = engine.selectVictims(models, new Set(), 8e9, new Set(['w1']));
     expect(victims).toHaveLength(1);
     expect(victims[0].modelName).toBe('on-w1');
+  });
+
+  it('filters by target worker set with multiple workers', () => {
+    const engine = new EvictionEngine();
+    const models: ModelState[] = [
+      makeModelState({ modelName: 'on-w1', workerId: 'w1' }),
+      makeModelState({ modelName: 'on-w2', workerId: 'w2' }),
+      makeModelState({ modelName: 'on-w3', workerId: 'w3' }),
+    ];
+
+    const victims = engine.selectVictims(models, new Set(), 100e9, new Set(['w1', 'w2']));
+    const names = victims.map((v) => v.modelName);
+    expect(names).toContain('on-w1');
+    expect(names).toContain('on-w2');
+    expect(names).not.toContain('on-w3');
   });
 
   it('returns empty array when circuit breaker is open', () => {

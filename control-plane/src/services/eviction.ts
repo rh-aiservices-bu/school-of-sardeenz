@@ -62,7 +62,7 @@ export class EvictionEngine {
     allModels: ModelState[],
     pinnedModels: Set<string>,
     requiredBytes: number,
-    targetWorkerId?: string,
+    targetWorkerIds?: ReadonlySet<string>,
     memoryByModel?: Map<string, number>,
   ): EvictionCandidate[] {
     if (this.isCircuitBreakerOpen()) {
@@ -74,7 +74,7 @@ export class EvictionEngine {
         (m) => m.state === ModelLifecycleState.ACTIVE || m.state === ModelLifecycleState.SLEEPING,
       )
       .filter((m) => !pinnedModels.has(m.modelName))
-      .filter((m) => !targetWorkerId || m.workerId === targetWorkerId)
+      .filter((m) => !targetWorkerIds || targetWorkerIds.has(m.workerId ?? ''))
       .filter((m) => {
         if (!m.stateChangedAt) return true;
         const activeAge = (Date.now() - new Date(m.stateChangedAt).getTime()) / 1000;
