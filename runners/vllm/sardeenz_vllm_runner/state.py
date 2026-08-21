@@ -90,9 +90,11 @@ class RunnerStatus:
             self._state = READY
             self._sleep_level = None
 
-    def health(self, active_requests: int = 0) -> dict[str, Any]:
+    def health(self, active_requests: int | None = 0) -> dict[str, Any]:
         with self._lock:
-            body: dict[str, Any] = {"state": self._state, "activeRequests": active_requests}
+            body: dict[str, Any] = {"state": self._state}
+            if active_requests is not None:
+                body["activeRequests"] = active_requests
             if self._message:
                 body["message"] = self._message
             if self._state == STARTING:

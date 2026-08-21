@@ -7,7 +7,7 @@ import {
   runnerHealthCheckErrorsTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
-import { delay } from '../utils.js';
+import { delaySafe } from '../utils.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
@@ -109,6 +109,7 @@ export class DeployOrchestrationService {
         runnerId: runnerInfo.runnerId,
       });
       await this.routingMap.setModelState(params.modelName, ModelState.ACTIVE);
+      this.memoryBudget.releaseModelReservations(params.modelName);
 
       this.notifications
         ?.createNotification({
@@ -149,7 +150,7 @@ export class DeployOrchestrationService {
         );
       }
 
-      await delay(this.healthCheckIntervalMs, signal);
+      await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
     const message = `Deploy timed out after ${this.deployTimeoutMs}ms for model ${modelName}`;
@@ -195,9 +196,6 @@ export class DeployOrchestrationService {
   }
 
   private releaseReservations(params: DeployModelParams): void {
-    const perDevice = params.requiredMemory / params.tensorParallel;
-    for (const device of params.devices) {
-      this.memoryBudget.releaseCapacity(params.workerId, device.deviceIndex, perDevice);
-    }
+    this.memoryBudget.releaseModelReservations(params.modelName);
   }
 }

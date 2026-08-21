@@ -7,8 +7,9 @@ import {
   wakeTriggersTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
-import { delay } from '../utils.js';
+import { delaySafe } from '../utils.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
+import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 
 /** Maps a ModelLifecycleState to the ModelState exposed in the routing map. */
@@ -33,7 +34,7 @@ export function toRoutingState(state: ModelLifecycleState): ModelState | null {
 /** Result returned by pollRunnerHealth. */
 export interface RunnerHealthResult {
   state: RunnerState;
-  activeRequests: number;
+  activeRequests: number | null;
   message?: string;
 }
 
@@ -41,6 +42,7 @@ export class SleepWakeService {
   constructor(
     private readonly lifecycle: ModelLifecycleService,
     private readonly routingMap: RoutingMapService,
+    private readonly memoryBudget: MemoryBudgetService,
     private readonly sleepTimeoutMs: number,
     private readonly wakeTimeoutMs: number,
     private readonly healthCheckIntervalMs: number,
@@ -74,7 +76,7 @@ export class SleepWakeService {
 
       // Send sleep command. The runner's /sleep call is synchronous — it blocks until
       // offload is complete, so we apply the sleep timeout to this call directly.
-      await runnerClient.sleep(SleepLevel.L1_HOST_RAM);
+      await runnerClient.sleep(SleepLevel.L1_HOST_RAM, this.sleepTimeoutMs);
 
       // Clear the endpoint so the proxy stops routing to this model. Match on the same
       // (host, engine port) pair the endpoint was registered under.
@@ -216,6 +218,7 @@ export class SleepWakeService {
 
       // Remove from routing map entirely.
       await this.routingMap.removeModel(modelName);
+      this.memoryBudget.releaseModelReservations(modelName);
     } catch (err) {
       await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
       throw err;
@@ -244,7 +247,7 @@ export class SleepWakeService {
 
       return {
         state: health.state,
-        activeRequests: health.activeRequests ?? 0,
+        activeRequests: health.activeRequests ?? null,
         message: health.message,
       };
     } catch (err) {
@@ -252,7 +255,7 @@ export class SleepWakeService {
       const message = err instanceof Error ? err.message : String(err);
       return {
         state: RunnerState.ERROR,
-        activeRequests: 0,
+        activeRequests: null,
         message,
       };
     }
@@ -272,15 +275,13 @@ export class SleepWakeService {
     while (!signal.aborted) {
       const result = await this.pollRunnerHealth(modelName, runnerClient);
 
-      if (result.activeRequests === 0) {
+      if (result.activeRequests !== null && result.activeRequests === 0) {
         return;
       }
 
-      await delay(this.healthCheckIntervalMs, signal);
+      await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
-    // AbortSignal.timeout() throws DOMException('TimeoutError') when aborted,
-    // but the while loop exits cleanly — fall through to the error.
     const message = `Drain timed out after ${this.sleepTimeoutMs}ms for model ${modelName}`;
     throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName });
   }
@@ -308,7 +309,7 @@ export class SleepWakeService {
         );
       }
 
-      await delay(this.healthCheckIntervalMs, signal);
+      await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
     const message = `Wake timed out after ${this.wakeTimeoutMs}ms for model ${modelName}`;

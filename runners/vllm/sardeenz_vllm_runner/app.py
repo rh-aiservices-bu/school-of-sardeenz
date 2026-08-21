@@ -31,6 +31,28 @@ def _kvcached_enabled() -> bool:
     return os.environ.get("ENABLE_KVCACHED", "true").lower() in ("1", "true", "yes", "on")
 
 
+async def _scrape_active_requests(client: httpx.AsyncClient, engine_base_url: str) -> int | None:
+    """Scrape vLLM's Prometheus /metrics for running+waiting request counts.
+
+    Returns None (unknown) rather than 0 when the metric can't be read, so callers don't mistake
+    "couldn't scrape" for "drained" — a false 0 would short-circuit the drain loop.
+    """
+    try:
+        resp = await client.get(f"{engine_base_url}/metrics", timeout=2.0)
+        if resp.status_code != 200:
+            return None
+        running = 0
+        waiting = 0
+        for line in resp.text.splitlines():
+            if line.startswith("vllm:num_requests_running "):
+                running = int(float(line.split()[-1]))
+            elif line.startswith("vllm:num_requests_waiting "):
+                waiting = int(float(line.split()[-1]))
+        return running + waiting
+    except Exception:
+        return None
+
+
 async def _health_poller(app: FastAPI) -> None:
     """Flip STARTING → READY once vLLM serves, then keep watching: flip → ERROR if the subprocess
     dies at any point (a post-startup crash must not leave the runner reporting READY forever)."""
@@ -82,7 +104,8 @@ def create_app(args: RunnerArgs) -> FastAPI:
 
     @app.get("/health")
     async def get_health() -> JSONResponse:
-        return JSONResponse(status().health(active_requests=0))
+        active = await _scrape_active_requests(app.state.client, app.state.engine.base_url)
+        return JSONResponse(status().health(active_requests=active))
 
     @app.get("/capabilities")
     async def get_capabilities() -> JSONResponse:
@@ -122,6 +145,9 @@ def create_app(args: RunnerArgs) -> FastAPI:
             return _error(400, "BAD_REQUEST", f"Unsupported sleep level: {level!r}")
         if status().state == st.STARTING:
             return _error(409, "NOT_READY", "Runner is still starting")
+        active = await _scrape_active_requests(app.state.client, app.state.engine.base_url)
+        if active is not None and active > 0:
+            return _error(409, "NOT_READY", "Runner has active requests")
 
         freed = sum(d["memoryUsedBytes"] for d in memory_report(args.device_type)["devices"])
         try:

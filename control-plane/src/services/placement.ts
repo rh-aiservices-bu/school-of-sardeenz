@@ -79,6 +79,17 @@ export class PlacementPipeline {
     }
   }
 
+  eligibleWorkerIds(request: PlacementRequest, workers: WorkerRecord[]): Set<string> {
+    const healthyWorkers = this.filterByHealth(workers);
+    if (healthyWorkers.length === 0) return new Set();
+
+    const afterRunnerType = this.filterByRunnerType(request, healthyWorkers);
+    if (afterRunnerType.length === 0) return new Set();
+
+    const afterHardware = this.filterByHardware(request, afterRunnerType);
+    return new Set(afterHardware.map(({ worker }) => worker.workerId));
+  }
+
   private filterByHealth(workers: WorkerRecord[]): WorkerRecord[] {
     return workers.filter((w) => w.status === WorkerStatus.ONLINE);
   }

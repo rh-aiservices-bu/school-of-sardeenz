@@ -32,11 +32,9 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   const redis = createRedisClient(config);
-  const subscriber = createRedisClient(config);
   const db = createDatabasePool(config);
 
   await redis.connect();
-  await subscriber.connect();
 
   const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
   const applied = await runMigrations(db, migrationsDir);
@@ -67,6 +65,7 @@ async function main(): Promise<void> {
   const sleepWake = new SleepWakeService(
     lifecycle,
     routingMap,
+    memoryBudget,
     config.sleepTimeoutSecs * 1000,
     config.wakeTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
@@ -75,6 +74,7 @@ async function main(): Promise<void> {
     info: (obj: Record<string, unknown>, msg: string) => console.log(msg, obj),
     warn: (obj: Record<string, unknown>, msg: string) => console.warn(msg, obj),
     error: (obj: Record<string, unknown>, msg: string) => console.error(msg, obj),
+    debug: (obj: Record<string, unknown>, msg: string) => console.debug(msg, obj),
   };
   const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
 
@@ -118,12 +118,12 @@ async function main(): Promise<void> {
     leaseNamespace: config.leaseNamespace,
     renewIntervalMs: 10_000,
     leaseDurationMs: 30_000,
+    logger: notificationLogger,
   });
 
   const app = await buildServer({
     config,
     redis,
-    subscriber,
     db,
     routes: {
       config,
@@ -178,15 +178,29 @@ async function main(): Promise<void> {
     app.log.info({ signal }, 'Shutting down');
     reconciliation.stop();
     await leaderElection.stop();
+    // Hijacked responses (SSE log streams) are invisible to Fastify's own connection tracking, so
+    // app.close() would otherwise wait forever for them to end on their own.
+    for (const res of app.hijackedResponses) {
+      res.end();
+    }
     await app.close();
+    // Belt-and-braces: if something still keeps the event loop alive (a connection app.close()
+    // couldn't reach), don't hang the process indefinitely.
+    setTimeout(() => {
+      process.exit(1);
+    }, 10_000).unref();
     redis.disconnect();
-    subscriber.disconnect();
     await db.end();
     process.exit(0);
   };
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  process.on('unhandledRejection', (reason: unknown) => {
+    app.log.fatal({ err: reason }, 'Unhandled promise rejection — exiting');
+    process.exit(1);
+  });
 
   await app.listen({ host: config.listenAddr, port: config.listenPort });
   app.log.info(
@@ -195,6 +209,7 @@ async function main(): Promise<void> {
       redisUrl: redactUrl(config.redisUrl),
       databaseUrl: redactUrl(config.databaseUrl),
       isLeader: leaderElection.isLeader,
+      leadershipMode: leaderElection.leadershipMode,
     },
     'Control plane started',
   );

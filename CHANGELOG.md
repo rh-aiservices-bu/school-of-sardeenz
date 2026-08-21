@@ -59,8 +59,135 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (default `/weights`) and must have that directory mounted to browse it. Contracts add the
   `WeightsListing` / `WeightsEntry` schemas.
 
+### Removed
+
+- **Consumer-less `GET /api/v1/events` SSE route.** The control plane's cluster-events SSE endpoint
+  had no consumer anywhere in the repo (the dashboard BFF has its own separate `/api/events` SSE
+  route) and leaked a Redis subscriber connection per request that outlived client disconnects on
+  some code paths. Rather than fix the leak in dead code, the route, its handler
+  (`control-plane/src/routes/events.ts`), and the `/api/v1/events` path and `Events` tag in the
+  OpenAPI contract are deleted. `ClusterEvent`/`ClusterEventType`/`RunnerLogLine` schemas are
+  unaffected — they're still used by model-logs, the BFF's events route, and the catalog event
+  emitter. (#90)
+
 ### Fixed
 
+- **`sleepModel` now honors `SARDEENZ_SLEEP_TIMEOUT_SECS` on the runner's `/sleep` call.**
+  `RunnerClient.sleep()` previously always used the client's instance-level default (30 s),
+  ignoring `SleepWakeService.sleepTimeoutMs` — a model whose offload takes longer than 30 s (e.g.
+  large weights being written to host RAM) would have its `/sleep` request aborted mid-offload
+  even though the configured sleep timeout was higher. `RunnerClient.post()`/`sleep()` now accept
+  an optional per-call `timeoutMs` (falling back to the instance default), and `sleepModel` passes
+  `sleepTimeoutMs` through explicitly. `wake()` is unaffected — it returns as soon as the runner
+  begins reloading, and `waitForReady` (not the `/wake` call itself) enforces `wakeTimeoutMs`.
+  (#89)
+- **Low-severity fixes bundle: graceful shutdown, unreachable timeouts, zero-size eviction, metric
+  overwrites, unbounded notification storage, modelName validation.** (#96)
+  - Hijacked SSE responses (model-launch log streaming) were invisible to Fastify's own connection
+    tracking, so `app.close()` during `SIGTERM`/`SIGINT` shutdown would hang waiting for a
+    connection that would never end on its own. `buildServer` now decorates the Fastify instance
+    with a `hijackedResponses: Set<ServerResponse>` registry; `registerModelLogRoutes` adds/removes
+    its raw response on hijack/cleanup, and `shutdown()` ends every registered response before
+    `app.close()`, plus an `unref()`'d 10s watchdog `process.exit(1)` as a last resort.
+  - `SleepWakeService.waitForDrain`/`waitForReady` and `DeployOrchestrationService.waitForReady`
+    polled with `delay()`, which rejects as soon as its `AbortSignal` fires — so the `RUNNER_TIMEOUT`
+    `ControlPlaneError` thrown after each polling loop was unreachable; an `AbortError`/
+    `DOMException` propagated instead. Added `delaySafe()` (resolves instead of rejecting on abort)
+    in `utils.ts` and switched all three polling loops to it, letting `while (!signal.aborted)` end
+    the loop normally so the `RUNNER_TIMEOUT` error is actually thrown.
+  - `EvictionEngine.selectVictims` could select a candidate with `memoryBytes <= 0` (missing/stale
+    `memoryByModel` entry) as a victim — evicting a model that frees zero capacity and can never
+    satisfy `requiredBytes`. Zero/negative-size candidates are now filtered out (with a warning
+    naming them) before victim selection.
+  - `sardeenz_control_plane_device_memory_bytes` had no per-device label, so
+    `ReconciliationService.refreshMetrics` overwrote one worker's multi-GPU gauge values with
+    whichever device was set last. Added a `device_index` label, populated from each device's index.
+  - `NotificationService` tracked read state in a separate, unbounded `notifications:read` Redis set
+    that was never trimmed alongside the capped notification list, and diverged from `LREM`-removed
+    entries. Reworked to store `isRead` directly on each notification's JSON in the existing capped
+    list: `markAsRead`/`markAllAsRead` now `LSET` the notification in place instead of `SADD`-ing to
+    the read set, and `removeNotification`/`clearAll` no longer touch it.
+  - `POST /api/v1/models` accepted any non-empty string as `modelName`, including values unsafe as
+    routing keys or SIF/log-path segments. Added `pattern: '^[A-Za-z0-9._/-]{1,200}$'` and
+    `maxLength: 200` to `ModelDeploymentRequest.modelName` in the OpenAPI spec (request only, not
+    response schemas) and a matching runtime check in the deploy route.
+- **`DELETE /api/v1/models/:modelName` no longer 404s or 409s on evicted/stopped models.** Eviction
+  clears a model's Redis lifecycle state but intentionally keeps its DB record (a tombstone, so the
+  model reappears in `GET /api/v1/models` as `STOPPED` and can be redeployed). The delete route,
+  however, only ever looked at Redis state: a missing state meant `MODEL_NOT_FOUND` (404), and an
+  explicit `STOPPED` state (e.g. after a background delete completed but the DB row lingered) was
+  rejected as `INVALID_STATE` (409) — leaving evicted tombstones undeletable through the API. The
+  handler now fetches Redis state and the DB record in parallel: no state and no record is a real
+  404; no state but a DB record is a tombstone, deleted synchronously with a `202`/`STOPPED`
+  response; and only `STOPPING` still 409s, so `STOPPED` models fall through to the normal
+  stop/remove/delete background flow. (#85)
+- **VRAM reservations are no longer cleared prematurely or leaked on stop/evict/worker loss.**
+  `MemoryBudgetService` used to track one reservation per device (`workerId:deviceIndex`) and
+  auto-clear it whenever a worker's next memory report showed `usedBytes >= reservedBytes` — an
+  unrelated model reporting usage on the same device, or a report arriving in an unlucky order,
+  could satisfy and wipe another model's in-flight reservation, letting a second deploy be placed
+  on capacity that was still spoken for. Conversely, a model's reservation was never released when
+  it stopped, was evicted, or its worker died, permanently shrinking `availableBytes` for that
+  device until the control plane restarted. Reservations are now tracked per `(workerId,
+  deviceIndex, modelName)`, `availableBytes` is `total - used - reserved` (co-located models'
+  reservations sum rather than being collapsed via `max(used, reserved)`), and reservations are
+  only ever cleared explicitly: `DeployOrchestrationService` releases a model's reservation once it
+  reaches `ACTIVE` (actual usage takes over) or fails, `SleepWakeService.stopModel` releases it on
+  full stop (but not on sleep, which must keep holding its budget), and
+  `ReconciliationService.handleDeadWorkers` clears every reservation for a worker the moment it's
+  declared dead. `MemoryBudgetService.reserveCapacity` gained a `modelName` parameter (idempotent —
+  repeated calls set rather than accumulate), `releaseCapacity` was replaced by
+  `releaseModelReservations(modelName)`, and the periodic `clearSatisfiedReservations` inference
+  was removed entirely. (#87)
+- **Deploy-path eviction no longer selects victims cluster-wide, and eviction/re-placement no longer
+  block the deploy request.** `POST /api/v1/models` used to call `eviction.selectVictims` with no
+  worker scope on a placement miss, so a model could be evicted from a worker that could never have
+  hosted the new model anyway (wrong runner type or hardware); the stop/remove/refresh/re-place
+  sequence also ran synchronously in the request handler, holding the HTTP response open for the
+  full eviction cycle. `PlacementPipeline` gained a public `eligibleWorkerIds()` method (runner-type
+  and hardware filtering, independent of capacity) and `EvictionEngine.selectVictims`'s 4th parameter
+  changed from a single optional `targetWorkerId` to a `ReadonlySet<string>` of target workers, used
+  by both the deploy path (all eligible workers) and the wake path (the model's own worker, wrapped in
+  a set). The deploy handler now computes the eligible set and selects victims synchronously (still
+  failing fast with `PLACEMENT_FAILED` if no worker is eligible or no victims are found), then moves
+  the actual stop/remove/budget-refresh/re-place/deploy sequence into a background task and replies
+  `202` immediately with `state: 'PENDING'` and a "Capacity reclamation in progress" message; a
+  background failure transitions the model to `ERROR`, updates the routing map, and sends a danger
+  notification, mirroring `DeployOrchestrationService`'s existing error-transition pattern. (#86)
+- **Background model deletion no longer risks crashing the control plane on an unhandled promise
+  rejection.** `DELETE /api/v1/models/:modelName` kicks off `sleepWake.stopModel` →
+  `lifecycle.removeModel` → `modelRepository.delete` in the background after replying `202`; the
+  `.then(onFulfilled, onRejected)` form used an async `onFulfilled` callback whose own rejections
+  (from `removeModel`/`delete`) were never passed to `onRejected`, so a failure partway through
+  produced an unhandled rejection. Replaced with a `try`/`catch` async IIFE so every step's failure
+  is caught and logged, and added a `process.on('unhandledRejection', ...)` safety net in
+  `index.ts` that logs fatally and exits rather than leaving the process in an undefined state.
+  (#84)
+- **Leader election no longer self-elects silently outside Kubernetes or swallows lease
+  failures.** Off-cluster (no `KUBERNETES_SERVICE_HOST`), the control plane used to become "leader"
+  unconditionally with no warning, which is only safe for a genuine single-instance deployment and
+  silently masked a misconfigured multi-replica setup. Startup now requires
+  `SARDEENZ_SINGLE_INSTANCE=true` (or `1`) to run without a Kubernetes Lease, throwing a clear error
+  otherwise, and logs a `warn` plus the new `leadershipMode` (`'kubernetes-lease' | 'single-instance'`)
+  field on the startup line. Lease acquire/renew failures — previously caught and discarded with no
+  trace — are now logged (throttled to the first failure and every 10th thereafter, via the new
+  `sardeenz_control_plane_leader_lease_failures_total` counter), with routine 409 lease contention
+  logged at `debug` instead of `warn` to avoid alert noise. `/readyz` now also reports
+  `consecutiveLeaseFailures` in the `lease_failures` check, so an operator can distinguish an
+  ordinary (elected) follower from a follower actively failing to renew. (#91)
+- **vLLM shim now reports cluster-global GPU indices in its memory report, and `activeRequests` is
+  scraped from vLLM instead of hardcoded to 0.** `/memory-report` always reported container-local
+  device indices (`0..n-1`), which don't match the control plane's cluster-global device
+  assignments once a runner is scoped to a non-zero-indexed GPU. The worker agent now sets
+  `SARDEENZ_DEVICE_INDICES` (parallel to `CUDA_VISIBLE_DEVICES`) when launching a CUDA runner, and
+  the shim remaps its local device slots through it, falling back to the local index when unset.
+  Separately, `activeRequests` in `/health` was hardcoded to `0`, which made the sleep-wake drain
+  loop treat every model as already drained; the shim now scrapes vLLM's `/metrics` for
+  `vllm:num_requests_running`/`vllm:num_requests_waiting` and reports their sum, and `/sleep` now
+  refuses (409) while requests are active. When the metric can't be scraped, the shim omits
+  `activeRequests` entirely (contract-optional) rather than reporting a misleading `0`, and the
+  control plane's drain/health polling treats a missing count as **unknown** — distinct from a
+  confirmed `0` — so a scrape failure can no longer be mistaken for "drained". (#116)
 - **Parked requests now fail fast on mid-wake rollback and inspect the wake response instead of
   hanging or leaking.** A request parked waiting for a sleeping model to wake had three gaps: (1) if
   the model rolled **back** to `SLEEPING` after starting to wake, or (2) transitioned to `DRAINING`

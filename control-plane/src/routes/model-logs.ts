@@ -42,6 +42,7 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
       }
 
       await reply.hijack();
+      app.hijackedResponses.add(reply.raw);
 
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -77,6 +78,7 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
         clearInterval(pingTimer);
         abortController.abort();
         upstreamStream?.destroy();
+        app.hijackedResponses.delete(reply.raw);
         if (!reply.raw.writableEnded) {
           reply.raw.end();
         }

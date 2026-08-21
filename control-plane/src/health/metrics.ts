@@ -21,8 +21,8 @@ export const workersTotal = new Gauge({
 
 export const deviceMemoryBytes = new Gauge({
   name: 'sardeenz_control_plane_device_memory_bytes',
-  help: 'Device memory by worker and state',
-  labelNames: ['worker_id', 'state'] as const,
+  help: 'Device memory by worker, device, and state',
+  labelNames: ['worker_id', 'device_index', 'state'] as const,
   registers: [registry],
 });
 
@@ -90,6 +90,13 @@ export const stateTransitionsTotal = new Counter({
 export const leaderIsLeader = new Gauge({
   name: 'sardeenz_control_plane_leader_is_leader',
   help: '1 if this instance is the leader, 0 otherwise',
+  registers: [registry],
+});
+
+export const leaderLeaseFailuresTotal = new Counter({
+  name: 'sardeenz_control_plane_leader_lease_failures_total',
+  help: 'Leader lease acquisition/renewal failures',
+  labelNames: ['reason'] as const,
   registers: [registry],
 });
 

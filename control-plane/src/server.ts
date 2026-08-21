@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import type { ServerResponse } from 'node:http';
 
 import type { Config } from './config.js';
 import type { Redis } from './clients/redis.js';
@@ -12,7 +13,6 @@ import { registerModelLogRoutes } from './routes/model-logs.js';
 import { registerWorkerRoutes } from './routes/workers.js';
 import { registerClusterRoutes } from './routes/cluster.js';
 import { registerInternalRoutes } from './routes/internal.js';
-import { registerEventRoutes } from './routes/events.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerWeightsRoutes } from './routes/weights.js';
@@ -20,9 +20,19 @@ import { registerWeightsRoutes } from './routes/weights.js';
 export interface ServerDeps {
   config: Config;
   redis: Redis;
-  subscriber: Redis;
   db: DatabasePool;
   routes: RouteDeps;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /**
+     * Hijacked responses (e.g. SSE log streams) bypass Fastify's own connection tracking, so
+     * `app.close()` never learns about them and graceful shutdown hangs waiting for a response
+     * that will never end on its own. Routes that hijack register their raw response here.
+     */
+    hijackedResponses: Set<ServerResponse>;
+  }
 }
 
 export async function buildServer(deps: ServerDeps) {
@@ -37,6 +47,8 @@ export async function buildServer(deps: ServerDeps) {
     requestIdHeader: 'x-request-id',
     genReqId: () => crypto.randomUUID(),
   });
+
+  app.decorate('hijackedResponses', new Set<ServerResponse>());
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ControlPlaneError) {
@@ -62,7 +74,6 @@ export async function buildServer(deps: ServerDeps) {
   registerWorkerRoutes(app, deps.routes);
   registerClusterRoutes(app, deps.routes);
   registerInternalRoutes(app, deps.routes);
-  registerEventRoutes(app, deps.subscriber, deps.config.redisKeyPrefix);
   registerNotificationRoutes(app, deps.routes);
   registerCatalogRoutes(app, deps.routes);
   registerWeightsRoutes(app, deps.routes);

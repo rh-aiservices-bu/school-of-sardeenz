@@ -31,10 +31,12 @@ export class RunnerClient {
     return this.get<MemoryReport>('/memory-report');
   }
 
-  async sleep(level: string): Promise<SleepResponse> {
-    return this.post<SleepResponse>('/sleep', { level });
+  async sleep(level: string, timeoutMs?: number): Promise<SleepResponse> {
+    return this.post<SleepResponse>('/sleep', { level }, timeoutMs ?? this.timeoutMs);
   }
 
+  // /wake returns quickly — the runner begins reloading but does not block until READY.
+  // The 30s instance default is appropriate; waitForReady handles the long poll.
   async wake(): Promise<WakeResponse> {
     return this.post<WakeResponse>('/wake');
   }
@@ -62,12 +64,16 @@ export class RunnerClient {
     return response.json() as Promise<T>;
   }
 
-  private async post<T>(path: string, body?: unknown): Promise<T> {
+  private async post<T>(
+    path: string,
+    body?: unknown,
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       const text = await response.text();

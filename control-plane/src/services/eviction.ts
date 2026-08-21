@@ -62,7 +62,7 @@ export class EvictionEngine {
     allModels: ModelState[],
     pinnedModels: Set<string>,
     requiredBytes: number,
-    targetWorkerId?: string,
+    targetWorkerIds?: ReadonlySet<string>,
     memoryByModel?: Map<string, number>,
   ): EvictionCandidate[] {
     if (this.isCircuitBreakerOpen()) {
@@ -74,7 +74,7 @@ export class EvictionEngine {
         (m) => m.state === ModelLifecycleState.ACTIVE || m.state === ModelLifecycleState.SLEEPING,
       )
       .filter((m) => !pinnedModels.has(m.modelName))
-      .filter((m) => !targetWorkerId || m.workerId === targetWorkerId)
+      .filter((m) => !targetWorkerIds || targetWorkerIds.has(m.workerId ?? ''))
       .filter((m) => {
         if (!m.stateChangedAt) return true;
         const activeAge = (Date.now() - new Date(m.stateChangedAt).getTime()) / 1000;
@@ -91,9 +91,20 @@ export class EvictionEngine {
         }),
       );
 
-    if (candidates.length === 0) return [];
+    // A model with unknown/zero memoryBytes (not yet in memoryByModel, or a stale record)
+    // "frees" nothing when evicted — including it would let the LRU strategy pick it as a victim
+    // without ever satisfying requiredBytes, evicting models for no gain.
+    const zeroSize = candidates.filter((c) => c.memoryBytes <= 0);
+    if (zeroSize.length > 0) {
+      console.warn(
+        `Eviction: skipping candidates with zero/unknown memoryBytes: ${zeroSize.map((c) => c.modelName).join(', ')}`,
+      );
+    }
+    const sizedCandidates = candidates.filter((c) => c.memoryBytes > 0);
 
-    const victims = this.strategy.selectVictims(candidates, requiredBytes);
+    if (sizedCandidates.length === 0) return [];
+
+    const victims = this.strategy.selectVictims(sizedCandidates, requiredBytes);
     return victims.slice(0, this.config.maxPerCycle);
   }
 

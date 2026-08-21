@@ -6,7 +6,7 @@ import type { DatabasePool } from '../clients/database.js';
 export interface ProbesDeps {
   redis: Redis;
   db: DatabasePool;
-  leaderElection?: { readonly isLeader: boolean };
+  leaderElection?: { readonly isLeader: boolean; readonly consecutiveLeaseFailures: number };
 }
 
 export function registerProbes(app: FastifyInstance, deps: ProbesDeps): void {
@@ -38,7 +38,13 @@ export function registerProbes(app: FastifyInstance, deps: ProbesDeps): void {
 
     if (deps.leaderElection) {
       const leading = deps.leaderElection.isLeader;
+      // A follower is intentionally reported not-ready: only the leader drives reconciliation,
+      // eviction, and sleep/wake orchestration, so routing traffic to a follower would leave
+      // those responsibilities unserved even though the instance itself is healthy. This is
+      // distinct from a follower that is actively failing lease operations (see lease_failures
+      // below) — both report 503, but the failure count tells an operator which case they're in.
       checks['leader'] = leading ? 'leader' : 'follower';
+      checks['lease_failures'] = String(deps.leaderElection.consecutiveLeaseFailures);
       if (!leading) ready = false;
     }
 

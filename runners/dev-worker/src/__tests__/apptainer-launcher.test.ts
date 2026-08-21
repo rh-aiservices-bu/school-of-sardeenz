@@ -108,6 +108,21 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(plan.args.some((a) => a.startsWith('CUDA_VISIBLE_DEVICES='))).toBe(false);
   });
 
+  it('passes SARDEENZ_DEVICE_INDICES alongside CUDA_VISIBLE_DEVICES for CUDA runners', () => {
+    const { launcher } = makeLauncher();
+    const plan = launcher.buildExecPlan(makeSpec());
+    expect(plan.args).toContain('CUDA_VISIBLE_DEVICES=2');
+    expect(plan.args).toContain('SARDEENZ_DEVICE_INDICES=2');
+  });
+
+  it('omits SARDEENZ_DEVICE_INDICES for CPU runners', () => {
+    const { launcher } = makeLauncher();
+    const plan = launcher.buildExecPlan(
+      makeSpec({ deviceType: 'CPU', devices: [{ deviceIndex: 0, deviceType: 'CPU' }] }),
+    );
+    expect(plan.args.some((a) => a.startsWith('SARDEENZ_DEVICE_INDICES='))).toBe(false);
+  });
+
   it('joins multiple assigned GPU indices into CUDA_VISIBLE_DEVICES', () => {
     const { launcher } = makeLauncher();
     const plan = launcher.buildExecPlan(

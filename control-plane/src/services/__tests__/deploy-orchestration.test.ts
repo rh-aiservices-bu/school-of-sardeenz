@@ -59,7 +59,7 @@ interface MockDeps {
     getWorker: ReturnType<typeof vi.fn>;
   };
   memoryBudget: {
-    releaseCapacity: ReturnType<typeof vi.fn>;
+    releaseModelReservations: ReturnType<typeof vi.fn>;
   };
   workerClient: {
     startRunner: ReturnType<typeof vi.fn>;
@@ -85,7 +85,7 @@ function createMocks(): MockDeps {
       getWorker: vi.fn().mockReturnValue(makeWorker()),
     },
     memoryBudget: {
-      releaseCapacity: vi.fn(),
+      releaseModelReservations: vi.fn(),
     },
     workerClient: {
       startRunner: vi.fn().mockResolvedValue(makeRunnerResponse()),
@@ -149,9 +149,20 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ACTIVE,
-        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerEnginePort: 5001, runnerId: 'runner-abc' },
+        {
+          runnerHost: '10.0.0.1',
+          runnerPort: 5001,
+          runnerEnginePort: 5001,
+          runnerId: 'runner-abc',
+        },
       );
       expect(mocks.routingMap.setModelState).toHaveBeenCalledWith('test-model', ModelState.ACTIVE);
+    });
+
+    it('releases the model reservation after transitioning to ACTIVE (#87)', async () => {
+      await service.deployModel(makeParams());
+
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
 
     it('routes inference to the engine port while keeping management on the runner port', async () => {
@@ -180,7 +191,12 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ACTIVE,
-        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerEnginePort: 5002, runnerId: 'runner-abc' },
+        {
+          runnerHost: '10.0.0.1',
+          runnerPort: 5001,
+          runnerEnginePort: 5002,
+          runnerId: 'runner-abc',
+        },
       );
     });
 
@@ -273,7 +289,7 @@ describe('DeployOrchestrationService', () => {
 
       await expect(service.deployModel(makeParams())).rejects.toThrow();
 
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalledWith('worker-1', 0, 1_000_000);
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
   });
 
@@ -288,7 +304,7 @@ describe('DeployOrchestrationService', () => {
         ModelLifecycleState.ERROR,
         expect.objectContaining({ errorMessage: 'connection refused' }),
       );
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalledWith('worker-1', 0, 1_000_000);
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
   });
 
@@ -342,10 +358,10 @@ describe('DeployOrchestrationService', () => {
         ModelLifecycleState.ERROR,
         expect.objectContaining({ errorMessage: expect.stringContaining('OOM killed') as string }),
       );
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalled();
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
 
-    it('transitions to ERROR on deploy timeout', async () => {
+    it('transitions to ERROR on deploy timeout, surfacing RUNNER_TIMEOUT (not an AbortError) (#96)', async () => {
       mocks.runnerClient.getHealth.mockResolvedValue({
         state: RunnerState.STARTING,
         activeRequests: 0,
@@ -362,19 +378,24 @@ describe('DeployOrchestrationService', () => {
         50,
       );
 
-      await expect(shortTimeoutService.deployModel(makeParams())).rejects.toThrow();
+      // Before delaySafe(), delay() rejected with an AbortError as soon as the timeout signal
+      // fired, which propagated straight out of waitForReady's polling loop — the RUNNER_TIMEOUT
+      // ControlPlaneError below the loop was unreachable.
+      await expect(shortTimeoutService.deployModel(makeParams())).rejects.toMatchObject({
+        code: 'RUNNER_TIMEOUT',
+      });
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ERROR,
         expect.objectContaining({ errorMessage: expect.any(String) as string }),
       );
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalled();
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
   });
 
   describe('deployModel — capacity release', () => {
-    it('releases per-device capacity for multi-device deployments', async () => {
+    it('releases the model reservation once, regardless of device count', async () => {
       mocks.workerPool.getWorker.mockReturnValue(null);
 
       const params = makeParams({
@@ -388,8 +409,8 @@ describe('DeployOrchestrationService', () => {
 
       await expect(service.deployModel(params)).rejects.toThrow();
 
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalledWith('worker-1', 0, 1_000_000);
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalledWith('worker-1', 1, 1_000_000);
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -400,7 +421,7 @@ describe('DeployOrchestrationService', () => {
 
       await expect(service.deployModel(makeParams())).rejects.toThrow('Worker not found');
 
-      expect(mocks.memoryBudget.releaseCapacity).toHaveBeenCalled();
+      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
     });
   });
 });

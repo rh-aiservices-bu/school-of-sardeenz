@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { ServerResponse } from 'node:http';
 import { ModelLifecycleState } from '@sardeenz/types';
 
 import { registerModelLogRoutes } from '../model-logs.js';
@@ -101,6 +102,7 @@ function toDeps(mocks: Mocks, deployTimeoutSecs = 5): RouteDeps {
 
 async function buildTestApp(deps: RouteDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  app.decorate('hijackedResponses', new Set<ServerResponse>());
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ControlPlaneError) {
       return reply.code(error.statusCode).send(error.toResponse());
@@ -152,6 +154,28 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     expect(res.body).toContain('event: end');
     expect(mocks.createWorkerClient).toHaveBeenCalledWith('http://worker-1:8080');
     expect(streamRunnerLogsByModel).toHaveBeenCalledWith('test-model', expect.any(AbortSignal));
+  });
+
+  it('registers the hijacked raw response and removes it once the stream ends', async () => {
+    const mocks = createMocks();
+    mocks.lifecycle.getState.mockResolvedValue(
+      makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE }),
+    );
+    mocks.workerPool.getWorker.mockReturnValue(makeWorker());
+    const streamRunnerLogsByModel = vi
+      .fn()
+      .mockResolvedValue(makeUpstreamResponse(['event: log\ndata: hello world\n\n']));
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    app = await buildTestApp(toDeps(mocks));
+
+    const addSpy = vi.spyOn(app.hijackedResponses, 'add');
+    const deleteSpy = vi.spyOn(app.hijackedResponses, 'delete');
+
+    await app.inject({ method: 'GET', url: '/api/v1/models/test-model/logs' });
+
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+    expect(app.hijackedResponses.size).toBe(0);
   });
 
   it('retries while the worker returns 404, then streams once the runner registers', async () => {

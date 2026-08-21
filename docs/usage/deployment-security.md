@@ -40,7 +40,6 @@ Any caller with network access to the control plane can:
 | Sleep / wake models   | `POST /api/v1/models/:name/sleep\|wake`        | Changes resource allocation        |
 | Read cluster topology | `GET /api/v1/workers`, `GET /api/v1/cluster/*` | Reveals infrastructure details     |
 | Read routing map      | `GET /api/v1/models`                           | Reveals model endpoints            |
-| Consume SSE events    | `GET /api/v1/events`                           | Real-time cluster state stream     |
 | Scrape metrics        | `GET /metrics`                                 | Prometheus operational data        |
 
 ### Recommended deployment constraints
