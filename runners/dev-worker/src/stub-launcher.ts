@@ -13,6 +13,7 @@ export class StubLauncher implements RunnerLauncher {
     spec: LaunchSpec,
     onLog?: LogSink,
     onStartupComplete?: () => void,
+    _onExit?: () => void,
   ): Promise<LaunchHandle> {
     const stub = createRunnerStub({
       port: spec.port,

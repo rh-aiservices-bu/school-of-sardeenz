@@ -69,6 +69,27 @@ export class RunnerManager {
     // rather than both proceeding.
     this.modelToRunner.set(params.modelName, runnerId);
 
+    // Post-startup supervision: if the runner's process exits on its own (crash, OOM-kill, etc.)
+    // rather than via a deliberate stopRunner(), reap its record and free its device memory so a
+    // dead runner doesn't leave a phantom VRAM reservation. Guarded on `this.runners.has` so this
+    // no-ops when stopRunner() has already removed the record before calling handle.stop() (see
+    // stopRunner's ordering below) — otherwise a deliberate stop would double-free memory.
+    const handleUnexpectedExit = (): void => {
+      if (!this.runners.has(runnerId)) return;
+      const record = this.runners.get(runnerId)!;
+      for (const device of record.devices) {
+        const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
+        this.registration.freeMemory(device.deviceIndex, perDeviceMemory);
+      }
+      this.runners.delete(runnerId);
+      this.modelToRunner.delete(record.modelName);
+      this.logBuffer.markEnded(runnerId);
+      this.logBuffer.retain(runnerId);
+      console.log(
+        `[worker] Runner ${runnerId} (${params.modelName}) exited unexpectedly — cleaned up`,
+      );
+    };
+
     try {
       const handle = await this.launch(
         {
@@ -91,6 +112,7 @@ export class RunnerManager {
         // so post-startup request logs never reach the control plane. The buffer is kept until the
         // runner is stopped (drop() in stopRunner).
         () => this.logBuffer.markEnded(runnerId),
+        handleUnexpectedExit,
       );
 
       const record: RunnerRecord = {
@@ -133,12 +155,13 @@ export class RunnerManager {
     spec: Parameters<RunnerLauncher['start']>[0],
     onLog?: LogSink,
     onStartupComplete?: () => void,
+    onExit?: () => void,
   ): Promise<LaunchHandle> {
     if (!this.launcher.serializeColdStarts) {
-      return this.launcher.start(spec, onLog, onStartupComplete);
+      return this.launcher.start(spec, onLog, onStartupComplete, onExit);
     }
     const result = this.coldStartChain.then(() =>
-      this.launcher.start(spec, onLog, onStartupComplete),
+      this.launcher.start(spec, onLog, onStartupComplete, onExit),
     );
     // Keep the chain alive regardless of this start's success/failure.
     this.coldStartChain = result.then(
@@ -154,15 +177,19 @@ export class RunnerManager {
       throw new NotFoundError(`Runner ${runnerId} not found`);
     }
 
-    await record.handle.stop();
+    // Remove the record and free memory BEFORE stopping the process: the process exiting in
+    // response to stop() fires the launcher's post-startup supervision callback
+    // (handleUnexpectedExit in startRunner), which guards on `this.runners.has(runnerId)` — clearing
+    // the record here first makes that guard a no-op so a deliberate stop doesn't double-free memory.
+    this.runners.delete(runnerId);
+    this.modelToRunner.delete(record.modelName);
 
     for (const device of record.devices) {
       const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
       this.registration.freeMemory(device.deviceIndex, perDeviceMemory);
     }
 
-    this.runners.delete(runnerId);
-    this.modelToRunner.delete(record.modelName);
+    await record.handle.stop();
 
     // Signal any connected SSE clients that the stream is over before dropping the buffer —
     // otherwise a client's `end` frame would race a listener set already cleared by drop().

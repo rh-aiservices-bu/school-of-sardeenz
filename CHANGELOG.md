@@ -72,6 +72,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dev worker: signal-killed runners were never reaped, and a runner exiting on its own after
+  startup left a phantom VRAM reservation.** (#109)
+  - `ApptainerLauncher.stopChild()` treated `exitCode !== null` as the only "already exited"
+    signal, so a child killed by a signal (`exitCode` stays `null`, `signalCode` set instead — e.g.
+    an OOM-kill) was never recognized as dead: `stop()` would still send `SIGTERM`/`SIGKILL` to an
+    already-gone process and, if the fake/real child never emitted a further `exit` event, hang
+    forever. `stopChild()` now takes a `hasExited()` predicate (backed by the launcher's own
+    `exit`/`error` listener flag, which fires for a signal-killed child too) instead of reading
+    `child.exitCode` directly, and a non-`unref()`'d backstop timer (`stopGraceMs + 5s`) guarantees
+    `stop()` resolves even if `exit` never fires at all.
+  - Runners had no supervision after startup completed: if the underlying process died on its own
+    (crash, OOM-kill) rather than via a deliberate `stopRunner()`, its `RunnerRecord` and device
+    memory reservation lived on forever. `RunnerLauncher.start()` now accepts an optional `onExit`
+    callback, invoked once if the process exits after `start()` has already resolved; both
+    `ApptainerLauncher` and `StubLauncher` wire it in. `RunnerManager.startRunner()` passes a
+    `handleUnexpectedExit` closure that frees the runner's device memory and removes its record
+    (guarded on the record still existing, so it's a no-op during a deliberate `stopRunner()`,
+    which now clears the record before calling `handle.stop()`).
 - **Dev worker: failed launch leaked log buffers, hung SSE log clients, and discarded failure
   logs.** `startRunner`'s catch block rolled back the reserved model slot but never sealed or
   retained the runner's log stream, so a client attached mid-launch (`GET

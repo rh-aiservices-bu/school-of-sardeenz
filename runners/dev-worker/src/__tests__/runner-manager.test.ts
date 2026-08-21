@@ -53,6 +53,31 @@ function makeRegistration(): WorkerRegistration {
   } as unknown as WorkerRegistration;
 }
 
+// A launcher whose start() captures the onExit callback the manager wired in, so a test can fire
+// it later to simulate the runner's process exiting on its own (post-startup supervision).
+function makeSupervisedLauncher(): {
+  launcher: RunnerLauncher;
+  fireExit: (runnerId: string) => void;
+} {
+  const onExitByRunnerId = new Map<string, () => void>();
+  const launcher: RunnerLauncher = {
+    serializeColdStarts: false,
+    start: (spec: LaunchSpec, _onLog, _onStartupComplete, onExit): Promise<LaunchHandle> => {
+      if (onExit) onExitByRunnerId.set(spec.runnerId, onExit);
+      return Promise.resolve({
+        host: 'localhost',
+        port: spec.port,
+        enginePort: spec.enginePort,
+        stop: () => Promise.resolve(),
+      });
+    },
+  };
+  return {
+    launcher,
+    fireExit: (runnerId) => onExitByRunnerId.get(runnerId)?.(),
+  };
+}
+
 describe('RunnerManager', () => {
   let manager: RunnerManager;
 
@@ -336,5 +361,67 @@ describe('RunnerManager', () => {
       devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     });
     expect(r2.runnerId).not.toBe(r1.runnerId);
+  });
+
+  it('cleans up when a runner exits unexpectedly after startup', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const logBuffer = new RunnerLogBuffer();
+    const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+    const retainSpy = vi.spyOn(logBuffer, 'retain');
+    const registration = makeRegistration();
+    const freeMemorySpy = vi.spyOn(registration, 'freeMemory');
+    const mgr = new RunnerManager(makeConfig(), registration, launcher, logBuffer);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'crashes-later',
+      runnerType: 'vllm',
+      modelPath: '/models/crashes-later',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(mgr.getRunner(runnerId)).toBeDefined();
+
+    fireExit(runnerId);
+
+    expect(mgr.getRunner(runnerId)).toBeUndefined();
+    expect(freeMemorySpy).toHaveBeenCalledWith(0, 1024 * 1024 * 1024);
+    expect(markEndedSpy).toHaveBeenCalledWith(runnerId);
+    expect(retainSpy).toHaveBeenCalledWith(runnerId);
+
+    // The model slot is freed too — a replacement runner can be started for the same model.
+    const restarted = await mgr.startRunner({
+      modelName: 'crashes-later',
+      runnerType: 'vllm',
+      modelPath: '/models/crashes-later',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(restarted.runnerId).not.toBe(runnerId);
+  });
+
+  it('supervision callback no-ops when stopRunner has already cleaned up', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const registration = makeRegistration();
+    const freeMemorySpy = vi.spyOn(registration, 'freeMemory');
+    const mgr = new RunnerManager(makeConfig(), registration, launcher);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'stopped-deliberately',
+      runnerType: 'vllm',
+      modelPath: '/models/stopped-deliberately',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await mgr.stopRunner(runnerId);
+    expect(freeMemorySpy).toHaveBeenCalledTimes(1);
+
+    // The process exiting in response to the deliberate stop still fires the supervision callback —
+    // it must no-op rather than free memory a second time for a record that's already gone.
+    fireExit(runnerId);
+    expect(freeMemorySpy).toHaveBeenCalledTimes(1);
   });
 });
