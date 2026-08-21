@@ -61,6 +61,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Redis sync no longer silently drops routing entries it can't parse, and reconnects with backoff.**
+  When the proxy's Redis sync encountered an unparseable routing-map entry, it silently dropped that
+  model from the routing map — a single malformed write could deregister a live model with no signal.
+  Sync now counts every unparseable entry (`sardeenz_proxy_routing_parse_errors_total`, labeled by
+  model) and logs it, and carries forward the previous entry for a present-but-unparseable key
+  (instead of dropping it) so one bad write can't take a model offline; a genuinely removed key
+  (absent from Redis) is still dropped correctly. Separately, when the Redis sync stream ended
+  cleanly the proxy reconnected in a tight loop; reconnect now uses capped exponential backoff with
+  full jitter (500 ms base, 5 s cap), and `/readyz` reports not-ready on every sync exit path (both
+  clean-end and error) rather than only some. (#99)
 - **Parking slots and connection gauges no longer leak when a client disconnects mid-park.** When a
   client dropped its connection while its request was parked waiting for a model to wake, the parking
   slot counters (global and per-model) and the `sardeenz_proxy_parked_connections` gauge were never

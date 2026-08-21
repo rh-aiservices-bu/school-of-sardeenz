@@ -358,6 +358,7 @@ Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). Al
 | `sardeenz_proxy_wake_triggers_total`      | Counter   | —                                  | Wake triggers fired to the control plane                |
 | `sardeenz_proxy_parking_duration_seconds` | Histogram | —                                  | Time a request spent parked before forwarding           |
 | `sardeenz_proxy_circuit_breaker_state`    | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open    |
+| `sardeenz_proxy_routing_parse_errors_total` | Counter | `model`                            | Routing entries that failed to deserialize during Redis sync, per model |
 
 ## Health Endpoints
 

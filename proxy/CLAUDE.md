@@ -107,7 +107,7 @@ All env vars read at startup by `Config::from_env()`.
 
 ## Conventions
 
-- **Metrics prefix:** all Prometheus metrics use `sardeenz_proxy_` (7 metrics total, see design doc)
+- **Metrics prefix:** all Prometheus metrics use `sardeenz_proxy_` (8 metrics total, see design doc)
 - **Admin vs. inference ports:** health, readiness, and metrics are on `SARDEENZ_ADMIN_ADDR`, never on the inference port
 - **Readiness:** `/readyz` returns 200 only when `redis_connected AND routing_map_loaded` — both flags required
 - **Error types:** all handler errors go through `ProxyError` → `IntoResponse`; use `ProxyError::status_code()` for metrics labels
