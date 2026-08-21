@@ -184,6 +184,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
                 ? deps.createRunnerClient(victimState.runnerHost, victimState.runnerPort)
                 : null;
             await deps.sleepWake.stopModel(victim.modelName, victimRunner);
+            // Registry semantics: DB row kept; only Redis lifecycle cleared (see #121).
             await deps.lifecycle.removeModel(victim.modelName);
             deps.eviction.recordEviction('capacity');
           }
@@ -374,21 +375,32 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
 
-      const state = await deps.lifecycle.getState(modelName);
-      if (!state) {
+      const [state, record] = await Promise.all([
+        deps.lifecycle.getState(modelName),
+        deps.modelRepository.findByName(modelName),
+      ]);
+
+      if (!state && !record) {
         throw ControlPlaneError.modelNotFound(modelName);
       }
 
-      if (
-        state.state === ModelLifecycleState.STOPPING ||
-        state.state === ModelLifecycleState.STOPPED
-      ) {
-        throw ControlPlaneError.invalidState(modelName, state.state, 'delete');
+      if (!state && record) {
+        await deps.modelRepository.delete(modelName);
+        return reply.code(202).send({
+          modelName,
+          state: ModelLifecycleState.STOPPED,
+          previousState: ModelLifecycleState.STOPPED,
+          message: 'Model record removed',
+        });
+      }
+
+      if (state!.state === ModelLifecycleState.STOPPING) {
+        throw ControlPlaneError.invalidState(modelName, state!.state, 'delete');
       }
 
       const runnerClient =
-        state.runnerHost && state.runnerPort
-          ? deps.createRunnerClient(state.runnerHost, state.runnerPort)
+        state!.runnerHost && state!.runnerPort
+          ? deps.createRunnerClient(state!.runnerHost, state!.runnerPort)
           : null;
 
       deps.notifications
@@ -416,7 +428,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       return reply.code(202).send({
         modelName,
         state: ModelLifecycleState.STOPPING,
-        previousState: state.state,
+        previousState: state!.state,
         message: 'Model removal initiated',
       });
     },
@@ -568,6 +580,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
                 ? deps.createRunnerClient(vs.runnerHost, vs.runnerPort)
                 : null;
             await deps.sleepWake.stopModel(victim.modelName, vr);
+            // Registry semantics: DB row kept; only Redis lifecycle cleared (see #121).
             await deps.lifecycle.removeModel(victim.modelName);
             deps.eviction.recordEviction('wake');
           }

@@ -72,6 +72,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`DELETE /api/v1/models/:modelName` no longer 404s or 409s on evicted/stopped models.** Eviction
+  clears a model's Redis lifecycle state but intentionally keeps its DB record (a tombstone, so the
+  model reappears in `GET /api/v1/models` as `STOPPED` and can be redeployed). The delete route,
+  however, only ever looked at Redis state: a missing state meant `MODEL_NOT_FOUND` (404), and an
+  explicit `STOPPED` state (e.g. after a background delete completed but the DB row lingered) was
+  rejected as `INVALID_STATE` (409) — leaving evicted tombstones undeletable through the API. The
+  handler now fetches Redis state and the DB record in parallel: no state and no record is a real
+  404; no state but a DB record is a tombstone, deleted synchronously with a `202`/`STOPPED`
+  response; and only `STOPPING` still 409s, so `STOPPED` models fall through to the normal
+  stop/remove/delete background flow. (#85)
 - **Deploy-path eviction no longer selects victims cluster-wide, and eviction/re-placement no longer
   block the deploy request.** `POST /api/v1/models` used to call `eviction.selectVictims` with no
   worker scope on a placement miss, so a model could be evicted from a worker that could never have

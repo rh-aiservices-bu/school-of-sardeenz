@@ -23,6 +23,8 @@ interface Overrides {
   stopModel?: ReturnType<typeof vi.fn>;
   removeModel?: ReturnType<typeof vi.fn>;
   deleteModel?: ReturnType<typeof vi.fn>;
+  findByName?: ReturnType<typeof vi.fn>;
+  getState?: ReturnType<typeof vi.fn>;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -36,7 +38,7 @@ function buildApp(over: Overrides = {}): {
   const deps = {
     leaderElection: { isLeader: true },
     lifecycle: {
-      getState: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
+      getState: over.getState ?? vi.fn(() => Promise.resolve(ACTIVE_STATE)),
       removeModel: over.removeModel ?? vi.fn(() => Promise.resolve()),
     },
     sleepWake: {
@@ -44,6 +46,7 @@ function buildApp(over: Overrides = {}): {
     },
     modelRepository: {
       delete: over.deleteModel ?? vi.fn(() => Promise.resolve()),
+      findByName: over.findByName ?? vi.fn(() => Promise.resolve({ name: 'm1' })),
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
@@ -282,5 +285,63 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
       { err: expect.any(Error) as Error, modelName: 'm1' },
       'Background model deletion failed',
     );
+  });
+});
+
+describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
+  it('returns 202 and removes DB row for evicted model (no Redis state)', async () => {
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({
+      getState: vi.fn(() => Promise.resolve(null)),
+      findByName: vi.fn(() => Promise.resolve({ name: 'm1' })),
+      deleteModel,
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ state: string }>()).toMatchObject({
+      modelName: 'm1',
+      state: ModelLifecycleState.STOPPED,
+      previousState: ModelLifecycleState.STOPPED,
+    });
+    expect(deleteModel).toHaveBeenCalledWith('m1');
+  });
+
+  it('returns 404 when model has neither Redis state nor DB record', async () => {
+    const { app } = buildApp({
+      getState: vi.fn(() => Promise.resolve(null)),
+      findByName: vi.fn(() => Promise.resolve(null)),
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ code: string }>().code).toBe('MODEL_NOT_FOUND');
+  });
+
+  it('allows delete when model is in STOPPED state', async () => {
+    const { app } = buildApp({
+      getState: vi.fn(() =>
+        Promise.resolve({ ...ACTIVE_STATE, state: ModelLifecycleState.STOPPED }),
+      ),
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('returns 409 when model is in STOPPING state', async () => {
+    const { app } = buildApp({
+      getState: vi.fn(() =>
+        Promise.resolve({ ...ACTIVE_STATE, state: ModelLifecycleState.STOPPING }),
+      ),
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
   });
 });
