@@ -150,6 +150,7 @@ impl RunningProxy {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+
 }
 
 fn make_active_entry(model_name: &str, host: &str, port: u16) -> RoutingEntry {
@@ -272,6 +273,102 @@ async fn test_redis_malformed_entry() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // NOTE: the parse-error counter (sardeenz_proxy_routing_parse_errors_total)
+    // is exercised directly against parse_routing_map() in
+    // src/state/redis_sync.rs's unit tests, not here. This harness never
+    // installs a metrics recorder (see common/proxy_builder.rs), so counter!
+    // calls silently no-op and a /metrics scrape here would never see it.
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_redis_malformed_entry_survives_refresh() {
+    let mut harness = RedisTestHarness::new().await;
+    let good_model = "test/good-model-refresh";
+    let bad_model = "test/bad-model-refresh";
+    let runner = MockRunner::spawn(good_model).await;
+
+    let entry = make_active_entry(good_model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(good_model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": good_model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Write a malformed second entry directly, then trigger a refresh.
+    let _: () = harness
+        .conn
+        .hset(harness.routing_map_key(), bad_model, "not valid json {{{")
+        .await
+        .unwrap();
+    harness.publish_update("refresh").await;
+
+    // Wait for the proxy to pick up the refresh.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The unrelated good model must still be routable after the refresh.
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": good_model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_redis_malformed_entry_carried_forward() {
+    let mut harness = RedisTestHarness::new().await;
+    let model = "test/carry-forward-model";
+    let runner = MockRunner::spawn(model).await;
+
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Overwrite the SAME key with malformed JSON, then trigger a refresh.
+    let _: () = harness
+        .conn
+        .hset(harness.routing_map_key(), model, "not valid json {{{")
+        .await
+        .unwrap();
+    harness.publish_update("refresh").await;
+
+    // Wait for the proxy to pick up the refresh.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The previous entry is carried forward — the model stays routable
+    // despite the latest write being unparseable.
+    let resp = client
+        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
 
     harness.cleanup().await;
 }

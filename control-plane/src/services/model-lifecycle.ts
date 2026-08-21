@@ -185,7 +185,18 @@ export class ModelLifecycleService {
         state['errorMessage'] = cjson.null
       end
 
-      local encoded = cjson.encode(state)
+      -- #79 audit: cjson encodes an empty Lua table as {}; deviceIndices is a JSON array on the
+      -- consumer side. Force [] only when the field is present but empty (rare); null and
+      -- non-empty arrays round-trip correctly, so the common path stays cjson.encode(state).
+      local dev = state['deviceIndices']
+      local encoded
+      if type(dev) == 'table' and #dev == 0 then
+        state['deviceIndices'] = nil
+        local body = cjson.encode(state)
+        encoded = string.sub(body, 1, -2) .. ',"deviceIndices":[]}'
+      else
+        encoded = cjson.encode(state)
+      end
       redis.call('SET', KEYS[1], encoded)
       return currentState .. '|' .. encoded
     `;

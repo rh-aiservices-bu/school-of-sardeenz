@@ -58,4 +58,19 @@ async fn test_wake_trigger_failure_returns_503() {
         cp.wake_count_for(model).await >= 1,
         "control plane should have received at least one wake call"
     );
+
+    // #97: the client-facing error must NOT leak the control plane's
+    // response body/message — only the generic wording. This is decisive:
+    // if wake.rs's non-2xx branch reverted to interpolating `{status}:
+    // {body}` into the error, the mock's "mock failure" message (embedded
+    // in the JSON body) would leak through and this assertion would fail.
+    let message = body["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        !message.contains("mock failure"),
+        "client-facing error must not leak the control plane's response body: {message}"
+    );
+    assert!(
+        message.contains("rejected by control plane"),
+        "expected the generic non-2xx error wording, got: {message}"
+    );
 }

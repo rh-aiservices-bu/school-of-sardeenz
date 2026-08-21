@@ -251,3 +251,88 @@ async fn test_circuit_breaker_recovers() {
 
     assert_eq!(resp2.status(), StatusCode::OK, "circuit should be Closed after recovery");
 }
+
+/// Verifies traffic distribution across both replicas after an outage
+/// followed by a routing-map swap to live endpoints. This is NOT a #93
+/// probe-strand regression guard: the circuits tripped here are keyed on
+/// the two throwaway unreachable ports, and `insert_active_model_multi`
+/// replaces the routing entry with live runners on different ports, so
+/// those circuits start fresh/Closed and the tripped (HalfOpen-eligible)
+/// circuits are never exercised again. The decisive test for the #93
+/// HalfOpen-probe-leak fix is the unit test
+/// `dropped_probe_guard_releases_probe_immediately` in
+/// `src/forwarding/circuit_breaker.rs`.
+#[tokio::test]
+async fn test_both_replicas_recover_after_open() {
+    use crate::common::MockRunner;
+
+    let model = "dual-replica/model-v1";
+    const THRESHOLD: u32 = 3;
+
+    let a = MockRunner::spawn(model).await;
+    let b = MockRunner::spawn(model).await;
+
+    let proxy = TestProxy::spawn_with_config(TestProxyConfig {
+        control_plane_url: "http://127.0.0.1:1".to_string(),
+        cb_failure_threshold: THRESHOLD,
+        cb_failure_window: Duration::from_secs(30),
+        cb_recovery_timeout: Duration::from_millis(100),
+        ..Default::default()
+    })
+    .await;
+
+    // Trip both circuits with two unreachable endpoints.
+    let (dh1, dp1) = unreachable_endpoint();
+    let (dh2, dp2) = unreachable_endpoint();
+    {
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        let entry = RoutingEntry {
+            model_name: model.to_string(),
+            state: ModelState::Active,
+            endpoints: vec![
+                RunnerEndpoint { host: dh1, port: dp1, weight: 1, healthy: true, runner_id: None },
+                RunnerEndpoint { host: dh2, port: dp2, weight: 1, healthy: true, runner_id: None },
+            ],
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            metadata: None,
+        };
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
+    }
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({ "model": model, "messages": [{"role":"user","content":"Hi"}] });
+
+    for _ in 0..(THRESHOLD * 2 + 2) {
+        let _ = client
+            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .json(&payload)
+            .send()
+            .await;
+    }
+
+    crate::common::insert_active_model_multi(
+        &proxy.routing_cache,
+        model,
+        vec![(a.addr, 1), (b.addr, 1)],
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    for _ in 0..10 {
+        let resp = client
+            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .json(&payload)
+            .send()
+            .await
+            .expect("request to proxy failed");
+        assert_ne!(
+            resp.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no request should 503 while both replicas are recoverable"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(a.request_count() > 0, "replica A should receive traffic after recovery");
+    assert!(b.request_count() > 0, "replica B should receive traffic after recovery");
+}

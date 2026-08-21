@@ -27,6 +27,14 @@ use sardeenz_proxy::generated::proxy_control_plane::{
 };
 use sardeenz_proxy::routing::RoutingMapCache;
 
+#[derive(Clone, Copy, PartialEq)]
+enum WakeResponseMode {
+    Accept,      // default: 202 + accepted:true (+ fire wake_actions)
+    FailHttp,    // 500 + accepted:false  (current fail_wakes behavior)
+    SoftReject,  // 202 + accepted:false + currentState/message
+    Malformed,   // 202 + non-deserializable body (+ fire wake_actions)
+}
+
 // ---------------------------------------------------------------------------
 // Shared mock-CP state (accessible after spawn)
 // ---------------------------------------------------------------------------
@@ -60,7 +68,7 @@ struct HandlerState {
     /// On wake, after `delay`, write an Active entry for (model, addr) into
     /// `cache`.
     wake_actions: Arc<Vec<WakeAction>>,
-    fail_wakes: bool,
+    mode: WakeResponseMode,
 }
 
 struct WakeAction {
@@ -92,13 +100,13 @@ impl MockControlPlane {
 }
 
 pub struct MockControlPlaneBuilder {
-    fail_wakes: bool,
+    mode: WakeResponseMode,
     wake_actions: Vec<WakeAction>,
 }
 
 impl MockControlPlaneBuilder {
     pub fn new() -> Self {
-        Self { fail_wakes: false, wake_actions: Vec::new() }
+        Self { mode: WakeResponseMode::Accept, wake_actions: Vec::new() }
     }
 
     /// When a wake for `model_name` arrives, update `cache` to Active (after
@@ -120,9 +128,22 @@ impl MockControlPlaneBuilder {
     }
 
     /// Fail all wake requests with HTTP 500.
-    #[allow(dead_code)]
     pub fn fail_wakes(mut self) -> Self {
-        self.fail_wakes = true;
+        self.mode = WakeResponseMode::FailHttp;
+        self
+    }
+
+    /// Respond 202 but with `accepted: false` and a `currentState`,
+    /// modelling a soft-rejected wake (Scenario C).
+    pub fn soft_reject_wakes(mut self) -> Self {
+        self.mode = WakeResponseMode::SoftReject;
+        self
+    }
+
+    /// Respond 202 with a body that is NOT a valid `WakeTriggerResponse`,
+    /// exercising the lenient parse fallback.
+    pub fn malformed_wake_body(mut self) -> Self {
+        self.mode = WakeResponseMode::Malformed;
         self
     }
 
@@ -138,7 +159,7 @@ impl MockControlPlaneBuilder {
         let state = HandlerState {
             shared: shared.clone(),
             wake_actions: Arc::new(self.wake_actions),
-            fail_wakes: self.fail_wakes,
+            mode: self.mode,
         };
 
         let app = Router::new().route("/api/v1/wake", post(handle_wake)).with_state(state);
@@ -162,14 +183,26 @@ async fn handle_wake(
         *counts.entry(req.model_name.clone()).or_insert(0) += 1;
     }
 
-    if state.fail_wakes {
-        let resp = WakeTriggerResponse {
-            accepted: false,
-            model_name: req.model_name,
-            current_state: None,
-            message: Some("mock failure".to_string()),
-        };
-        return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(resp)).into_response();
+    match state.mode {
+        WakeResponseMode::FailHttp => {
+            let resp = WakeTriggerResponse {
+                accepted: false,
+                model_name: req.model_name,
+                current_state: None,
+                message: Some("mock failure".to_string()),
+            };
+            return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(resp)).into_response();
+        }
+        WakeResponseMode::SoftReject => {
+            let resp = WakeTriggerResponse {
+                accepted: false,
+                model_name: req.model_name,
+                current_state: Some(ModelState::Error),
+                message: Some("no VRAM available".to_string()),
+            };
+            return (StatusCode::ACCEPTED, axum::Json(resp)).into_response();
+        }
+        WakeResponseMode::Accept | WakeResponseMode::Malformed => {}
     }
 
     // Fire any matching wake actions asynchronously.
@@ -188,6 +221,10 @@ async fn handle_wake(
                 cache.update_entry(model, entry).await;
             });
         }
+    }
+
+    if state.mode == WakeResponseMode::Malformed {
+        return (StatusCode::ACCEPTED, "not-a-wake-response").into_response();
     }
 
     let resp = WakeTriggerResponse {

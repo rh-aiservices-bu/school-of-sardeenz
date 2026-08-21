@@ -54,7 +54,7 @@ posture, and the production worker agent's SIF-launch path.
 4. **Production worker agent — SIF launch** — the worker agent that runs in the worker Pod and
    starts runners via `apptainer exec` of the engine SIF, reusing the Phase 3.6 worker-agent
    management API, Redis self-registration, and runner contract.
-5. **Contract touch-ups** — how the worker agent learns *which* SIF to exec for a given
+5. **Contract touch-ups** — how the worker agent learns _which_ SIF to exec for a given
    runner type + version (module selector on the worker-agent API).
 6. **Verification** — automate the spike's gates against the built artifacts; record perf on the
    target RWX backend.
@@ -66,7 +66,7 @@ posture, and the production worker agent's SIF-launch path.
   a future option if idmapped mounts ever matter — see ADR-016).
 - **GPU driver management** — assumes the NVIDIA GPU Operator on worker nodes.
 - **Replacing the dev-worker stub path** (Phase 3.6) — it stays for containerless local dev; this
-  phase adds the *production* launch path alongside it.
+  phase adds the _production_ launch path alongside it.
 - **Scoped seccomp profile via the Security Profiles Operator** — the ADR-016 hardening endgame;
   Phase 4 ships the mild `Unconfined` SCC and records SPO as follow-up.
 - **Control-plane kvcached oversubscription / co-location policy (Phase 5).** The existing
@@ -76,24 +76,24 @@ posture, and the production worker agent's SIF-launch path.
     (two runners on one GPU), exactly as the spike did — it does **not** depend on the control
     plane deciding to co-locate. That is sufficient for Phase 4 acceptance.
   - The **production** path — the control plane deliberately packing two kvcached-capable runners
-    onto one device *past* naive byte-sum capacity (kvcached's whole point: elastic, reclaimable
+    onto one device _past_ naive byte-sum capacity (kvcached's whole point: elastic, reclaimable
     usage) — needs new placement logic keyed on the `kvCacheElasticSharing` capability (Task 5).
-    That, plus guarding against *silently* co-locating two **non**-kvcached runners that would
+    That, plus guarding against _silently_ co-locating two **non**-kvcached runners that would
     OOM a real GPU, is a **Phase 5 design item**. Phase 4 only adds the capability flag so Phase 5
     has something to key on.
 
 ## Dependencies
 
-| Dependency | Status | Notes |
-|---|---|---|
-| Phase 3.6 dev worker | Complete | Reuse: `runners/dev-worker` registration, management API, runner-manager, worker-agent contract |
-| Worker-agent API spec | Complete | `packages/contracts/specs/worker-agent.yaml` — extend with a module selector (Task 6) |
-| Engine runner contract | Complete | `packages/contracts/specs/engine-runner.yaml` — the SIF's runner shim implements this |
-| Phase 2 control plane | Complete | Issues `POST/DELETE /runners`; byte-budget placement/eviction unchanged in Phase 4 (kvcached oversubscription is out of scope — see below) |
-| Phase 1 proxy | Complete | Traffic shifting for zero-downtime version upgrades |
-| OpenShift/OKD 4.15+ (tested on 4.21) | Cluster | `/dev/fuse` annotation, `crun`, custom SCC rights |
-| Shared RWX StorageClass | Cluster | Module store + weights; EFS proven, CephFS the target |
-| GPU node(s) + NVIDIA GPU Operator | Cluster | For GPU runners and the kvcached gate |
+| Dependency                           | Status   | Notes                                                                                                                                      |
+| ------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Phase 3.6 dev worker                 | Complete | Reuse: `runners/dev-worker` registration, management API, runner-manager, worker-agent contract                                            |
+| Worker-agent API spec                | Complete | `packages/contracts/specs/worker-agent.yaml` — extend with a module selector (Task 6)                                                      |
+| Engine runner contract               | Complete | `packages/contracts/specs/engine-runner.yaml` — the SIF's runner shim implements this                                                      |
+| Phase 2 control plane                | Complete | Issues `POST/DELETE /runners`; byte-budget placement/eviction unchanged in Phase 4 (kvcached oversubscription is out of scope — see below) |
+| Phase 1 proxy                        | Complete | Traffic shifting for zero-downtime version upgrades                                                                                        |
+| OpenShift/OKD 4.15+ (tested on 4.21) | Cluster  | `/dev/fuse` annotation, `crun`, custom SCC rights                                                                                          |
+| Shared RWX StorageClass              | Cluster  | Module store + weights; EFS proven, CephFS the target                                                                                      |
+| GPU node(s) + NVIDIA GPU Operator    | Cluster  | For GPU runners and the kvcached gate                                                                                                      |
 
 > **Platform caveat:** the `/dev/fuse` annotation needs no MachineConfig on **4.15+** (works on
 > Managed OpenShift — ROSA/ARO — too). On clusters **older than 4.15** it requires a CRI-O
@@ -129,7 +129,7 @@ Two build-time / run-time boundaries:
 ### Design decisions baked in (traceable to the spike)
 
 - **The runner shim lives inside the SIF**, not on the worker. `apptainer exec <sif>
-  <runner-entrypoint>` starts the shim, which starts the engine and serves the runner contract.
+<runner-entrypoint>` starts the shim, which starts the engine and serves the runner contract.
   This co-versions the shim with the engine and keeps the worker image engine-agnostic. The
   worker agent only needs to know the SIF path + the entrypoint + ports/binds.
 - **The worker agent is the production counterpart of the Phase 3.6 dev worker.** Refactor a
@@ -181,9 +181,11 @@ easyconfig, no from-source stack.
 Document how runner images and SIFs are produced so any contributor can add an engine.
 
 **Files to create:**
+
 - `containers/README.md`
 
 **Content:**
+
 - The two image kinds: `worker-base` (the host that execs SIFs) vs. `runner-<engine>` (becomes a
   SIF). Point at ADR-015/016/017.
 - The pipeline: `Containerfile` → CI build+scan+sign → librarian `apptainer build/pull` +
@@ -198,9 +200,10 @@ Document how runner images and SIFs are produced so any contributor can add an e
 The slim worker host image (materialize the spike §4 image).
 
 **Files to create:**
+
 - `containers/worker-base/Containerfile` — UBI9 + EPEL Apptainer (rootless, **not** `-suid`) +
   `fuse-overlayfs`/`squashfuse`/`fuse3` + `tzdata` + `ln -sf /usr/share/zoneinfo/Etc/UTC
-  /etc/localtime` (required — Apptainer bind-mounts `/etc/localtime` by default). If the
+/etc/localtime` (required — Apptainer bind-mounts `/etc/localtime` by default). If the
   production worker agent is TypeScript (Task 4), also install Node here.
 - `containers/worker-base/README.md` — what it is, why `tzdata`/`/etc/localtime`, why rootless
   Apptainer, how it's built (`oc new-build`/CI), and the SCC/annotation it must run under.
@@ -214,11 +217,12 @@ The reference runner image that becomes the vLLM SIF. Derived from the v1
 stripped to just the vLLM+kvcached stages (no Node/app).
 
 **Files to create:**
+
 - `containers/runner-vllm/Containerfile` — multi-stage: `FROM quay.io/vllm/vllm-cuda:<pinned>`;
   builder stage installs the CUDA devel toolchain + git and `pip wheel`s the pinned
   `github.com/ovg-project/kvcached` commit (`--no-build-isolation`, `LIBRARY_PATH` includes CUDA
   stubs); runtime stage `pip install`s the wheel and sets `ENV ENABLE_KVCACHED=true
-  KVCACHED_AUTOPATCH=1`. Include the **runner-entrypoint shim** (Task 5) or install it here.
+KVCACHED_AUTOPATCH=1`. Include the **runner-entrypoint shim** (Task 5) or install it here.
 - `containers/runner-vllm/README.md` — the base image tag, the pinned kvcached commit (and the
   rule: pin per vLLM version, re-run Gate 9 on bumps), the enablement env, and the cache-dir
   caveat (redirected at exec, not here).
@@ -232,13 +236,14 @@ Extract a `RunnerLauncher` interface from the Phase 3.6 worker agent and add the
 implementation, so the same agent runs stubs in dev and SIFs in prod.
 
 **Files (recommended TS, reusing `runners/dev-worker`):**
+
 - Refactor `runners/dev-worker/src/runner-manager.ts` to depend on a `RunnerLauncher` interface
   (`start(config) → {pid, host, port}`, `stop(runnerId)`), moving the current fork-stub logic into
   a `StubLauncher`.
 - Add `ApptainerLauncher` that builds and runs the `apptainer exec` command:
   `apptainer exec --nv --bind /weights --env XDG_CACHE_HOME=/scratch/cache --env
-  HF_HOME=/scratch/cache/huggingface --env FLASHINFER_WORKSPACE_DIR=/scratch/cache/flashinfer
-  /modules/<engine>-<version>.sif <runner-entrypoint> --model /weights/<model> --port <PORT>`
+HF_HOME=/scratch/cache/huggingface --env FLASHINFER_WORKSPACE_DIR=/scratch/cache/flashinfer
+/modules/<engine>-<version>.sif <runner-entrypoint> --model /weights/<model> --port <PORT>`
   (kvcached env baked in the image; pass explicitly to be safe). Do **not** pass `--env HOME=…`
   (Apptainer rejects it — set `HOME=/scratch/home` as a container env instead). Handle SIGTERM →
   propagate to the exec (spike Gate 5: the inner process dies with the launcher, no orphan).
@@ -256,7 +261,7 @@ implementation, so the same agent runs stubs in dev and SIFs in prod.
 
 ### Task 5: Runner shim in the SIF (vLLM runner contract)
 
-The engine-specific shim that runs *inside* the SIF, exposes the runner contract
+The engine-specific shim that runs _inside_ the SIF, exposes the runner contract
 (`engine-runner.yaml`), and drives vLLM (start, `/health`, `/sleep`↔`/wake` via vLLM's own
 endpoints, `/memory-report`, `/progress`, `/capabilities` incl. kvcached). This is the
 production `runners/vllm` implementation.
@@ -268,18 +273,19 @@ those endpoints onto vLLM + kvcached. Sleep/wake uses vLLM's sleep levels.
 
 **kvcached capability flag (contract convention):** `engine-runner.yaml`'s
 `WorkerCapability.features` well-known keys today are `kvCacheOffload` (host-RAM KV offload — a
-*different* thing), `prefixCaching`, `streamingInference`, `chatTemplate`, `toolUse`. Add a new
+_different_ thing), `prefixCaching`, `streamingInference`, `chatTemplate`, `toolUse`. Add a new
 well-known key for **elastic GPU-memory sharing across co-located runners** (e.g.
 `kvCacheElasticSharing`) and have the vLLM shim declare it. Don't overload `kvCacheOffload`. This
 is what a future control-plane oversubscription policy keys on (see Out of scope + Task 6).
 
 ### Task 6: Worker-agent contract — module/version selector
 
-The worker agent must know *which* SIF to exec. Extend the worker-agent API so `StartRunnerRequest`
+The worker agent must know _which_ SIF to exec. Extend the worker-agent API so `StartRunnerRequest`
 carries the runtime module (e.g. `runtimeModule: "vllm-0.21"` or `runnerType` + `runnerVersion`),
 resolved to `/modules/<...>.sif` by a documented convention.
 
 **Files to modify:**
+
 - `packages/contracts/specs/worker-agent.yaml` — add the module/version field(s) to
   `StartRunnerRequest`; regenerate types (`npm run codegen -w @sardeenz/types`, or root
   `npm run codegen`).
@@ -287,7 +293,7 @@ resolved to `/modules/<...>.sif` by a documented convention.
   feature key (Task 5) to the documented `WorkerCapability.features` set.
 - Control plane placement/deploy path — populate the module field (which SIF a model's
   runnerType+version maps to). Keep back-compat with the dev-worker stub (it can ignore/echo the
-  field). **Note:** this does *not* change placement/oversubscription logic — see Out of scope.
+  field). **Note:** this does _not_ change placement/oversubscription logic — see Out of scope.
 
 **Validation:** `npm run validate -w @sardeenz/contracts`; types compile.
 
@@ -297,6 +303,7 @@ The job that turns a runner image into a signed SIF on the module PVC (ADR-017).
 serving worker.
 
 **Files to create:**
+
 - `deployment/librarian/` — a Kubernetes `Job` (or CronJob) manifest that: mounts the module PVC
   **read-write** + a node-local `emptyDir` scratch (`APPTAINER_TMPDIR`/`CACHEDIR`, sized for one
   uncompressed image, ~50Gi) + memory request/limit (≥8Gi/16Gi — the spike OOM finding);
@@ -308,11 +315,12 @@ serving worker.
 
 **SIF signing key management (this is new — ADR-013 governs only env-var app secrets, not
 signing keypairs; see ADR-017):**
+
 - Generate an Apptainer signing keypair (`apptainer key newpair`).
 - The **private key** lives in a Kubernetes `Secret` mounted **only** into the librarian job
   (never on workers), imported into the job's keyring before `apptainer sign`.
 - The **public key** is distributed to every worker (ConfigMap or Secret → `apptainer key
-  import` into the worker's keyring, or baked into `worker-base`) so the worker can
+import` into the worker's keyring, or baked into `worker-base`) so the worker can
   `apptainer verify` at exec; `apptainer.conf` can require verification.
 - Record a rotation approach (re-sign existing SIFs with a new key; roll the public key to
   workers before retiring the old one).
@@ -327,10 +335,11 @@ The cluster-side shape from the spike (ADR-016), as reusable manifests.
 > **Manifest format — decide first (this is the repo's FIRST K8s manifests).** `deployment/` is
 > empty and `containers/control-plane|dashboard` ship only Dockerfiles, so there is no precedent
 > to copy. Pick a format and namespace/naming convention before writing Task 7/8 manifests.
-> *Recommended:* a **Kustomize** base under `deployment/sif-runner/` (raw YAML is fine too; avoid
+> _Recommended:_ a **Kustomize** base under `deployment/sif-runner/` (raw YAML is fine too; avoid
 > Helm unless the project adopts it elsewhere). Record the choice at the top of `deployment/`.
 
 **Files to create (under `deployment/`):**
+
 - The custom seccomp SCC (`apptainer-spike-seccomp` → rename to a product name, e.g.
   `sardeenz-sif-runner`) + `oc adm policy add-scc-to-user` / RoleBinding to the worker SA.
 - The worker `Deployment` template: `containers/worker-base` image, `seccompProfile: Unconfined`,
@@ -364,6 +373,7 @@ cannot mount the module PVC read-write (per the chosen mechanism).
 Turn the spike's gates into a repeatable suite runnable against a real cluster (gated on GPU).
 
 **Coverage:**
+
 - CPU gates (0–6): userns probe, build/exec a SIF, no-copy squashfuse (process check + zero
   scratch growth), weights via `--bind`, long-lived runner + clean SIGTERM, parallel/hot-add.
 - GPU gates (7–9): `--nv` visibility, ipc/pid/net namespace sharing, **two runners + kvcached on
@@ -380,22 +390,23 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
 
 ## Task Summary
 
-| # | Task | Layer | Primary artifacts |
-|---|---|---|---|
-| 1 | `containers/` convention doc | Docs | `containers/README.md` |
-| 2 | `worker-base` image | Containers | `containers/worker-base/{Containerfile,README.md}` |
-| 3 | `runner-vllm` image (vLLM+kvcached) | Containers | `containers/runner-vllm/{Containerfile,README.md}` |
-| 4 | Worker agent launcher abstraction + ApptainerLauncher | Worker | `runners/dev-worker` refactor + prod agent |
-| 5 | vLLM runner shim (contract in the SIF) | Runner | `runners/vllm/` |
-| 6 | Worker-agent module selector | Contracts | `packages/contracts/specs/worker-agent.yaml` + types |
-| 7 | SIF librarian build/sign/convert | Build/Deploy | `deployment/librarian/`, `scripts/build-sif.sh` |
-| 8 | Worker SCC + Deployment manifests | Deploy | `deployment/` (SCC, worker Deployment, RBAC) |
-| 9 | Integration tests (spike gates) | Tests | cluster gate suite |
-| 10 | CephFS re-validation + docs | Docs/Verify | CHANGELOG, README, CLAUDE.md, perf record |
+| #   | Task                                                  | Layer        | Primary artifacts                                    |
+| --- | ----------------------------------------------------- | ------------ | ---------------------------------------------------- |
+| 1   | `containers/` convention doc                          | Docs         | `containers/README.md`                               |
+| 2   | `worker-base` image                                   | Containers   | `containers/worker-base/{Containerfile,README.md}`   |
+| 3   | `runner-vllm` image (vLLM+kvcached)                   | Containers   | `containers/runner-vllm/{Containerfile,README.md}`   |
+| 4   | Worker agent launcher abstraction + ApptainerLauncher | Worker       | `runners/dev-worker` refactor + prod agent           |
+| 5   | vLLM runner shim (contract in the SIF)                | Runner       | `runners/vllm/`                                      |
+| 6   | Worker-agent module selector                          | Contracts    | `packages/contracts/specs/worker-agent.yaml` + types |
+| 7   | SIF librarian build/sign/convert                      | Build/Deploy | `deployment/librarian/`, `scripts/build-sif.sh`      |
+| 8   | Worker SCC + Deployment manifests                     | Deploy       | `deployment/` (SCC, worker Deployment, RBAC)         |
+| 9   | Integration tests (spike gates)                       | Tests        | cluster gate suite                                   |
+| 10  | CephFS re-validation + docs                           | Docs/Verify  | CHANGELOG, README, CLAUDE.md, perf record            |
 
 ## Acceptance Criteria
 
 ### Images & pipeline
+
 - [ ] `containers/worker-base` and `containers/runner-vllm` build in CI
 - [ ] The librarian job converts the vLLM+kvcached image to a **signed** SIF on the module PVC,
       using node-local scratch and adequate memory (no OOM)
@@ -404,6 +415,7 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
       convention
 
 ### Worker & launch
+
 - [ ] A worker Pod admits under the custom SCC with `/dev/fuse` present; `apptainer exec` runs
       unprivileged (Gates 0–3 against the real `worker-base`)
 - [ ] The production worker agent starts a vLLM runner by `apptainer exec` of a SIF, reads weights
@@ -411,7 +423,17 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
 - [ ] Cache dirs are redirected to `/scratch`; no read-only-SIF cache failures
 - [x] The dev-worker stub path (Phase 3.6) still passes all its tests (shared launcher interface)
 
+### Two-port routing end-to-end (#77 re-verification)
+
+The two-port (management vs engine) runner model is implemented and unit-tested; this item re-verifies it on a live GPU deployment — the exact reproduction from #77:
+
+- [ ] Deploy a vLLM model, wait for `ACTIVE`, then `POST /v1/chat/completions` through the proxy returns a **real completion** (not `{"detail":"Not Found"}`)
+- [ ] `HGET sardeenz:routing-map <model>` shows the **engine** port (not the management port) as the endpoint
+- [ ] `GET /v1/models` through the proxy still lists the model
+- [ ] sleep → wake → infer still resolves (the persisted `runnerEnginePort` path re-registers the same engine endpoint)
+
 ### Multi-version & GPU
+
 - [ ] Two engine versions run side-by-side; a new SIF hot-adds with no Pod restart (Gate 6)
 - [ ] GPU visible inside the SIF via `--nv` (Gate 7); ipc/pid/net shared across the SIF (Gate 8)
 - [ ] **Two runners share one GPU via kvcached** through the worker agent (Gate 9) — elastic, not
@@ -419,13 +441,15 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
 - [ ] Worker verifies the SIF signature at exec
 
 ### Supply chain & perf
+
 - [ ] SIFs are signed at build and verified at exec; the public key is distributed to workers
 - [ ] Runtime perf recorded on the target RWX backend (CephFS re-run recorded; EFS numbers from
       the spike retained as the floor)
 
 ### Quality
+
 - [x] `npm run lint` / `npm run typecheck` pass; OpenAPI specs valid; generated types compile
-- [x] Integration gate suite authored (`tests/gates/run-gates.sh`); *running* it is cluster-gated
+- [x] Integration gate suite authored (`tests/gates/run-gates.sh`); _running_ it is cluster-gated
       (CPU gates on any 4.15+ cluster; GPU gates on a GPU cluster)
 
 ## Decisions already made (proceed on these; recorded here so they aren't re-litigated)
@@ -453,7 +477,7 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
 ## References
 
 - [Phase 4 Apptainer spike](phase4-apptainer-spike.md) — runbook, gates, findings, manifests
-- [ADR-015](../architecture/adrs/adr-015-sif-runtime-packaging.md) · [ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md) · [ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md) · [ADR-010](../architecture/adrs/adr-010-engine-runners.md) · [ADR-004](../architecture/adrs/adr-004-highlander-runtime.md) *(superseded)*
+- [ADR-015](../architecture/adrs/adr-015-sif-runtime-packaging.md) · [ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md) · [ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md) · [ADR-010](../architecture/adrs/adr-010-engine-runners.md) · [ADR-004](../architecture/adrs/adr-004-highlander-runtime.md) _(superseded)_
 - [Architecture overview — Runtime Delivery (Apptainer SIF)](../architecture/overview.md#runtime-delivery--apptainer-sif)
 - [Worker-agent contract](../../packages/contracts/specs/worker-agent.yaml) · [Engine runner contract](../../packages/contracts/specs/engine-runner.yaml)
 - [Phase 3.6 dev worker](phase3.6.md) — the worker-agent management API, registration, runner-manager to reuse

@@ -35,4 +35,8 @@ pub fn describe_metrics() {
         "sardeenz_proxy_circuit_breaker_state",
         "Circuit breaker state per endpoint (0=closed, 1=open, 2=half-open)"
     );
+    describe_counter!(
+        "sardeenz_proxy_routing_parse_errors_total",
+        "Routing entries that failed to deserialize during Redis sync, labeled by model"
+    );
 }

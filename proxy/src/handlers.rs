@@ -9,9 +9,26 @@ use crate::generated::proxy_control_plane::ModelState;
 use crate::routing::resolver::Resolution;
 use crate::state::AppState;
 
+/// RAII guard that decrements `sardeenz_proxy_active_connections` on drop,
+/// so the gauge is balanced even if the handler future is cancelled.
+struct ActiveConnectionGuard;
+
+impl ActiveConnectionGuard {
+    fn new() -> Self {
+        gauge!("sardeenz_proxy_active_connections").increment(1);
+        Self
+    }
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        gauge!("sardeenz_proxy_active_connections").decrement(1);
+    }
+}
+
 pub async fn handle_inference(State(state): State<AppState>, request: Request<Body>) -> Response {
     let start = std::time::Instant::now();
-    gauge!("sardeenz_proxy_active_connections").increment(1);
+    let _active_guard = ActiveConnectionGuard::new();
 
     let response = match handle_inference_inner(state, request).await {
         Ok(resp) => resp,
@@ -20,7 +37,6 @@ pub async fn handle_inference(State(state): State<AppState>, request: Request<Bo
 
     let elapsed = start.elapsed().as_secs_f64();
     let status = response.status().as_u16().to_string();
-    gauge!("sardeenz_proxy_active_connections").decrement(1);
     counter!("sardeenz_proxy_requests_total", "status" => status).increment(1);
     histogram!("sardeenz_proxy_request_duration_seconds").record(elapsed);
 
@@ -68,23 +84,35 @@ async fn handle_inference_inner(
         )));
     }
 
-    // Pick an endpoint via weighted round-robin, respecting circuit breaker
-    let healthy_endpoints: Vec<_> = {
-        let mut eps = Vec::new();
-        for ep in &entry.endpoints {
+    // Build candidates with a NON-mutating availability check, so we do not
+    // strand a probe on any endpoint the balancer won't select (#93).
+    let mut candidates: Vec<_> = entry
+        .endpoints
+        .iter()
+        .filter(|ep| {
             let key = format!("{}:{}", ep.host, ep.port);
-            if state.circuit_breaker.is_allowed(&key).await {
-                eps.push(ep.clone());
-            }
-        }
-        eps
-    };
+            state.circuit_breaker.is_available(&key)
+        })
+        .cloned()
+        .collect();
 
-    let endpoint = state
-        .balancer
-        .pick(&healthy_endpoints)
-        .ok_or_else(|| ProxyError::AllEndpointsUnhealthy(model_name.clone()))?
-        .clone();
+    // Reserve the half-open probe on the endpoint the balancer picks. If
+    // another task claimed it between is_available and here, drop that
+    // candidate and re-pick — a lost probe race is NOT a 503. Bounded because
+    // each miss removes one candidate; when none remain, pick() → None →
+    // AllEndpointsUnhealthy.
+    let (endpoint, probe_guard) = loop {
+        let picked = state
+            .balancer
+            .pick(&candidates)
+            .ok_or_else(|| ProxyError::AllEndpointsUnhealthy(model_name.clone()))?
+            .clone();
+        let key = format!("{}:{}", picked.host, picked.port);
+        match state.circuit_breaker.try_acquire_probe(&key) {
+            Some(guard) => break (picked, guard),
+            None => candidates.retain(|ep| format!("{}:{}", ep.host, ep.port) != key),
+        }
+    };
 
     // Preserve query string via path_and_query
     let path = parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(parts.uri.path());
@@ -102,15 +130,20 @@ async fn handle_inference_inner(
     {
         Ok(response) => {
             if response.status().is_server_error() {
-                state.circuit_breaker.record_failure(&ep_key).await;
+                state.circuit_breaker.record_failure(&ep_key);
             } else {
-                state.circuit_breaker.record_success(&ep_key).await;
+                state.circuit_breaker.record_success(&ep_key);
             }
+            probe_guard.disarm();
             Ok(response)
         }
         Err(e) => {
-            state.circuit_breaker.record_failure(&ep_key).await;
-            Err(ProxyError::Upstream(e.to_string()))
+            state.circuit_breaker.record_failure(&ep_key);
+            probe_guard.disarm();
+            // Log the raw error (may embed the internal endpoint URL) server-side
+            // only; the client-facing error must not disclose cluster topology.
+            tracing::warn!(endpoint = %ep_key, error = %e, "upstream request failed");
+            Err(ProxyError::Upstream("upstream request failed".to_string()))
         }
     }
 }

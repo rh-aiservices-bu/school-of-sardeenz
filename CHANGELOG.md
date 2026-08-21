@@ -61,6 +61,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Parked requests now fail fast on mid-wake rollback and inspect the wake response instead of
+  hanging or leaking.** A request parked waiting for a sleeping model to wake had three gaps: (1) if
+  the model rolled **back** to `SLEEPING` after starting to wake, or (2) transitioned to `DRAINING`
+  while parked, the request kept waiting until the full parking timeout (up to 120 s) before
+  returning 503, and (3) the proxy ignored `WakeTriggerResponse.accepted`, treating any 2xx wake
+  trigger as success even when the control plane reported it had not accepted the wake. The parking
+  loop now treats a return to `SLEEPING` — but only once the model has been observed leaving it, so
+  the ordinary still-waking path is unaffected — and any `DRAINING` transition as terminal, failing
+  fast with a 503 so the client can retry cleanly; and `trigger_wake` now inspects the 2xx body,
+  treating `accepted: false` as a failed wake while remaining lenient to an unparseable body (a
+  control-plane serialization slip does not break waking). This also folds in **#97**'s fix early: a
+  non-success wake-trigger response (and the soft-reject detail) is logged server-side only and the
+  client receives a generic error, so the control plane's response body no longer leaks into
+  client-facing errors. (#98)
+- **A cancelled parked herd no longer suppresses the next request's wake trigger.** To prevent a
+  thundering herd, only the first parked request for a sleeping model fires a wake trigger; the rest
+  dedup against a `pending_wakes` entry. That entry was cleared only on the parking-timeout path, so
+  if the entire parked herd was cancelled (all clients disconnected) while still parked — not timed
+  out — the entry was orphaned, and a subsequent request for the same model deduped against the stale
+  entry and never re-fired the wake, leaving the model asleep. Cleanup of `pending_wakes` is now
+  folded into `ParkingSlotGuard::Drop` (which already runs on cancellation, #92), gated by a
+  "was this the last parked request for the model" check, so the last departing request — whether it
+  timed out or was cancelled — always clears the entry and the next request re-fires the wake. (#94)
+- **Circuit-breaker half-open probes no longer leak, permanently stranding a recovering endpoint.**
+  The half-open probe was tracked by a boolean set when a probe was admitted and cleared only when
+  that probe recorded an outcome — so a probe request cancelled by a client disconnect before it
+  returned left the flag stuck, and the endpoint sat in HalfOpen forever with no further probe ever
+  admitted, never recovering. The probe reservation is now claimed **after** load balancing (on the
+  endpoint actually chosen, not every candidate) and is RAII-guarded (`ProbeGuard`): a probe dropped
+  before recording an outcome releases immediately, while a probe that recorded an outcome disarms
+  its guard so it cannot clear a claim a different task has since taken. A leak-backstop expiry
+  (`probe_timeout`, derived as `max(recovery_timeout, upstream_timeout)` so a legitimate long probe
+  is never mistaken for a leaked one) re-admits a probe even if a release is somehow missed.
+  Candidate selection uses a new non-mutating `is_available`, so building the candidate set no longer
+  claims probes on endpoints the balancer won't pick. The circuits map was switched from an async to
+  a blocking (`std::sync::Mutex`) lock so the guard's `Drop` can release without awaiting (same
+  pattern as #92), and upstream forwarding failures now return a generic error to the client with the
+  underlying cause logged server-side (internal endpoint URLs no longer leak in error bodies). (#93)
+- **Redis sync no longer silently drops routing entries it can't parse, and reconnects with backoff.**
+  When the proxy's Redis sync encountered an unparseable routing-map entry, it silently dropped that
+  model from the routing map — a single malformed write could deregister a live model with no signal.
+  Sync now counts every unparseable entry (`sardeenz_proxy_routing_parse_errors_total`, labeled by
+  model) and logs it, and carries forward the previous entry for a present-but-unparseable key
+  (instead of dropping it) so one bad write can't take a model offline; a genuinely removed key
+  (absent from Redis) is still dropped correctly. Separately, when the Redis sync stream ended
+  cleanly the proxy reconnected in a tight loop; reconnect now uses capped exponential backoff with
+  full jitter (500 ms base, 5 s cap), and `/readyz` reports not-ready on every sync exit path (both
+  clean-end and error) rather than only some. (#99)
+- **Parking slots and connection gauges no longer leak when a client disconnects mid-park.** When a
+  client dropped its connection while its request was parked waiting for a model to wake, the parking
+  slot counters (global and per-model) and the `sardeenz_proxy_parked_connections` gauge were never
+  released — because release happened on an explicit code path that request cancellation skipped —
+  slowly exhausting the parking capacity. Release is now cancel-safe via an RAII guard
+  (`ParkingSlotGuard`) whose `Drop` reclaims the global/per-model counters, decrements the parked
+  gauge, and records the park-duration histogram, so a dropped (cancelled) request future always
+  releases its slot; the per-model counter's mutex was switched from an async to a blocking
+  (`std::sync::Mutex`) lock so the guard's `Drop` can release without awaiting. The active-connection
+  gauge is likewise now released via an RAII guard. (#92)
+- **Sleeping a model no longer corrupts its routing entry.** The control plane's routing-map Lua
+  scripts encoded the `endpoints` array with `cjson.encode`, which serializes an empty Lua table as
+  `{}` (a JSON object) rather than `[]` (a JSON array) — so removing the last endpoint (e.g. when a
+  model is put to sleep) wrote a routing entry the stateless proxy could not parse, silently dropping
+  the model from the routing map. The three routing-map scripts (`addEndpoint`, `removeEndpoint`,
+  `updateEndpointHealth`) now encode `endpoints` as a JSON array unconditionally, and the
+  model-lifecycle `transition` script applies the same `[]`-forcing fix to an empty `deviceIndices`
+  array. Regression coverage lands as a gated integration suite that asserts the raw persisted Redis
+  payloads (not the parsed round-trip, which would mask the bug). (#79)
 - **Dashboard Playwright e2e suite is now runnable, enforced, and lint/typechecked.** The suite was
   entirely non-functional — every test that used the `bffPort` fixture failed before its body ran,
   because (a) the BFF only served the SPA under `NODE_ENV=production` while the fixture set
@@ -118,7 +185,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   works with already-built SIFs) so vLLM registers the model under the routing name instead of its
   weights path — without it, requests that reached the engine were rejected with
   `"The model ... does not exist"` (a 404 from vLLM) because the client's `model` field never matched the
-  path vLLM served under. (#77)
+  path vLLM served under. The management-vs-engine (`enginePort`) port model is now documented in
+  `docs/architecture/components/runner-contract.md` and `proxy.md`, and `docs/project/phase4.md`
+  carries a GPU-gated end-to-end re-verification checklist for it. (#77)
 
 - **Deploying a model no longer crashes with "models is not iterable" when a model-detail page is
   cached.** The optimistic cache update in `useDeployModel` ran over every query matching the

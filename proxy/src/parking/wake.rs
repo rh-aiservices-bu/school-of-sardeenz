@@ -1,4 +1,4 @@
-use crate::generated::proxy_control_plane::WakeTriggerRequest;
+use crate::generated::proxy_control_plane::{WakeTriggerRequest, WakeTriggerResponse};
 
 /// HTTP client for sending wake triggers to the control plane.
 #[derive(Clone)]
@@ -27,13 +27,51 @@ impl WakeTriggerClient {
             .send()
             .await?;
 
-        if response.status().is_success() {
-            tracing::info!(model_name, "wake trigger accepted");
-            Ok(())
-        } else {
-            let status = response.status();
+        let status = response.status();
+        if status.is_success() {
+            // 2xx: inspect the WakeTriggerResponse. Be lenient — a body that
+            // fails to deserialize must NOT break waking (a control-plane
+            // serialization slip is not an outage), so fall back to the old
+            // status-only success. See #98.
             let body = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!("wake trigger returned {status}: {body}"))
+            match serde_json::from_str::<WakeTriggerResponse>(&body) {
+                Ok(parsed) if !parsed.accepted => {
+                    // Log control-plane detail server-side ONLY; the
+                    // client-facing error must not disclose internal state.
+                    tracing::warn!(
+                        model_name,
+                        current_state = ?parsed.current_state,
+                        message = ?parsed.message,
+                        "wake trigger soft-rejected by control plane"
+                    );
+                    Err(anyhow::anyhow!("control plane did not accept wake"))
+                }
+                Ok(_) => {
+                    tracing::info!(model_name, "wake trigger accepted");
+                    Ok(())
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        model_name,
+                        error = %e,
+                        "wake response body did not deserialize; treating 2xx as success"
+                    );
+                    Ok(())
+                }
+            }
+        } else {
+            // Non-2xx: log status + body server-side, return a GENERIC error so
+            // the control plane's response body never reaches the client. This
+            // folds in #97's leak fix (project-lead decision 2026-08-21), using
+            // the same generic-error-+-tracing::warn pattern #93 established.
+            let body = response.text().await.unwrap_or_default();
+            tracing::warn!(
+                model_name,
+                %status,
+                body = ?body,
+                "wake trigger returned non-success status"
+            );
+            Err(anyhow::anyhow!("wake trigger rejected by control plane"))
         }
     }
 }

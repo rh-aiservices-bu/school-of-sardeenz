@@ -15,6 +15,20 @@ The contract covers the **management sideband** — the endpoints the control pl
 - **Drain and stop.** Draining is a routing concern — the control plane removes the runner from the routing map, and the proxy stops sending traffic. Stopping is a process concern — the worker sends SIGTERM. Neither requires an HTTP endpoint on the runner.
 - **Device memory push.** Workers periodically push device memory snapshots to Redis/Valkey for the control plane's global view. The runner contract's `/memory-report` is a pull endpoint for on-demand queries.
 
+## Management and Inference Ports
+
+A runner exposes two logically distinct HTTP surfaces, which may live on **separate ports**:
+
+- **Management port** — the runner-contract API this document describes (`/health`, `/progress`, `/memory-report`, `/sleep`, `/wake`, `/sleep-status`, `/capabilities`). The control plane uses it for lifecycle and health.
+- **Inference (engine) port** — the engine's native OpenAI-compatible API (`/v1/*`) that the routing proxy forwards client traffic to.
+
+When the worker starts a runner, its `StartRunnerResponse` reports the management port as `port` and the inference port as the optional `enginePort` (see [`worker-agent.yaml`](../../../packages/contracts/specs/worker-agent.yaml)). The worker allocates these as a **pair** so a second runner's management port cannot collide with the first runner's engine port.
+
+- **Two-port engines (e.g. vLLM):** vLLM's OpenAI server listens on a port distinct from the runner shim's management port. The shim reports both; the control plane health-polls the management port but **registers the engine port** as the model's routing-map endpoint, so the proxy reaches the engine directly.
+- **Single-server runners (e.g. the dev-worker stub):** one server answers both the contract API and `/v1/*`, so `enginePort` equals `port`. When `enginePort` is omitted, the control plane registers `port` as the inference endpoint.
+
+The control plane persists the engine port (`runnerEnginePort`) so sleep→wake re-registers the same endpoint.
+
 ## Runner State Model
 
 A runner progresses through five states. The state is always available via `GET /health`.

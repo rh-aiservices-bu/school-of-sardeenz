@@ -21,6 +21,28 @@ use tracing_subscriber::EnvFilter;
 use crate::config::Config;
 use crate::state::AppState;
 
+/// Starting delay before the first Redis reconnect attempt.
+const REDIS_RECONNECT_BASE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
+/// Upper bound the reconnect backoff grows toward across repeated failures.
+const REDIS_RECONNECT_MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Double the backoff, capped at `REDIS_RECONNECT_MAX_BACKOFF`.
+fn grow_backoff(current: std::time::Duration) -> std::time::Duration {
+    (current * 2).min(REDIS_RECONNECT_MAX_BACKOFF)
+}
+
+/// Full jitter: a random delay in `[0, delay]`. Avoids a new dependency
+/// (no `rand` in Cargo.toml) by drawing entropy from the wall clock.
+fn with_jitter(delay: std::time::Duration) -> std::time::Duration {
+    let delay_millis = delay.as_millis() as u64;
+    let jitter_millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()))
+        .unwrap_or(0)
+        % (delay_millis + 1);
+    std::time::Duration::from_millis(jitter_millis)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load the repo-root .env for local dev (walks up from cwd). Never overrides real env vars,
@@ -60,16 +82,21 @@ async fn main() -> anyhow::Result<()> {
     // Start Redis sync in background with shutdown awareness
     let redis_state = state.clone();
     let redis_handle = tokio::spawn(async move {
+        let mut backoff = REDIS_RECONNECT_BASE_BACKOFF;
         loop {
             tokio::select! {
                 biased;
                 _ = rx_redis.changed() => break,
                 result = state::start_redis_sync(redis_state.clone()) => {
-                    if let Err(e) = result {
-                        tracing::error!(error = %e, "redis sync failed, retrying in 5s");
-                        redis_state.set_redis_connected(false);
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    // Unified: a clean stream end and an error both mean the
+                    // connection is gone and must be retried with backoff.
+                    redis_state.set_redis_connected(false);
+                    match result {
+                        Ok(()) => tracing::warn!("redis sync ended, reconnecting"),
+                        Err(e) => tracing::error!(error = %e, "redis sync failed, reconnecting"),
                     }
+                    tokio::time::sleep(with_jitter(backoff)).await;
+                    backoff = grow_backoff(backoff);
                 }
             }
         }
@@ -202,5 +229,41 @@ fn redact_url(url: &str) -> String {
             parsed.to_string()
         }
         Err(_) => "<invalid-url>".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grow_backoff_doubles_then_caps() {
+        let mut backoff = REDIS_RECONNECT_BASE_BACKOFF;
+
+        backoff = grow_backoff(backoff);
+        assert_eq!(backoff, std::time::Duration::from_millis(1000));
+
+        backoff = grow_backoff(backoff);
+        assert_eq!(backoff, std::time::Duration::from_millis(2000));
+
+        backoff = grow_backoff(backoff);
+        assert_eq!(backoff, std::time::Duration::from_millis(4000));
+
+        // 4000 * 2 = 8000, which exceeds the 5s cap.
+        backoff = grow_backoff(backoff);
+        assert_eq!(backoff, REDIS_RECONNECT_MAX_BACKOFF);
+
+        // Stays capped on further growth.
+        backoff = grow_backoff(backoff);
+        assert_eq!(backoff, REDIS_RECONNECT_MAX_BACKOFF);
+    }
+
+    #[test]
+    fn with_jitter_never_exceeds_input() {
+        for _ in 0..1000 {
+            let delay = std::time::Duration::from_millis(500);
+            let jittered = with_jitter(delay);
+            assert!(jittered <= delay, "jittered delay {jittered:?} exceeded input {delay:?}");
+        }
     }
 }
