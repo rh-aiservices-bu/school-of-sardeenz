@@ -177,15 +177,17 @@ When the resolver returns `Resolution::Starting`, the model's wake is already in
 
 ### State Transitions During Parking
 
-The parking loop checks for three terminal conditions on every wake from `receiver.changed()`:
+The parking loop checks for the following terminal conditions on every wake from `receiver.changed()`:
 
-| State in cache | Action                                                            |
-| -------------- | ----------------------------------------------------------------- |
-| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward  |
-| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 |
-| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404    |
+| State in cache | Action                                                                                                                                                          |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward                                                                                                |
+| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503                                                                                               |
+| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404                                                                                                  |
+| `DRAINING`     | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (matches the resolver's up-front fail-fast for draining models)                             |
+| `SLEEPING`     | If the model has already left `SLEEPING` during this wait, treat as a rollback: remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (client retry re-triggers cleanly). Still-`SLEEPING` before the wake has progressed is not a rollback — keep waiting. |
 
-Any other state (`SLEEPING`, `STARTING`, `DRAINING`) causes the loop to re-wait.
+`STARTING` — and `SLEEPING` before the model has been observed leaving it — cause the loop to keep waiting; the wake is still in progress.
 
 ### Timeout and Backpressure
 

@@ -61,6 +61,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Parked requests now fail fast on mid-wake rollback and inspect the wake response instead of
+  hanging or leaking.** A request parked waiting for a sleeping model to wake had three gaps: (1) if
+  the model rolled **back** to `SLEEPING` after starting to wake, or (2) transitioned to `DRAINING`
+  while parked, the request kept waiting until the full parking timeout (up to 120 s) before
+  returning 503, and (3) the proxy ignored `WakeTriggerResponse.accepted`, treating any 2xx wake
+  trigger as success even when the control plane reported it had not accepted the wake. The parking
+  loop now treats a return to `SLEEPING` — but only once the model has been observed leaving it, so
+  the ordinary still-waking path is unaffected — and any `DRAINING` transition as terminal, failing
+  fast with a 503 so the client can retry cleanly; and `trigger_wake` now inspects the 2xx body,
+  treating `accepted: false` as a failed wake while remaining lenient to an unparseable body (a
+  control-plane serialization slip does not break waking). This also folds in **#97**'s fix early: a
+  non-success wake-trigger response (and the soft-reject detail) is logged server-side only and the
+  client receives a generic error, so the control plane's response body no longer leaks into
+  client-facing errors. (#98)
 - **A cancelled parked herd no longer suppresses the next request's wake trigger.** To prevent a
   thundering herd, only the first parked request for a sleeping model fires a wake trigger; the rest
   dedup against a `pending_wakes` entry. That entry was cleared only on the parking-timeout path, so

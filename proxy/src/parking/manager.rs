@@ -170,6 +170,16 @@ impl ParkingManager {
         // Wait for the model to become active
         let mut receiver = self.routing_cache.subscribe();
         let deadline = tokio::time::Instant::now() + self.config.timeout;
+        // A return to SLEEPING counts as a rollback only once we have observed
+        // the model leave SLEEPING (STARTING/Active). On the ordinary wake path
+        // the cache still reads SLEEPING for the first iterations after the
+        // trigger fires — that is the wake in progress, not a rollback.
+        // Best-effort: the watch channel retains only the latest value, so a
+        // very fast SLEEPING→STARTING→SLEEPING rollback whose intervening
+        // STARTING is never observed falls through to the parking-timeout
+        // path instead of fast-failing — still correct (503 either way),
+        // just not instantaneous in that rare case.
+        let mut left_sleeping = false;
 
         loop {
             match self.routing_cache.get(model_name).await {
@@ -187,7 +197,26 @@ impl ParkingManager {
                     self.pending_wakes.lock().unwrap().remove(model_name);
                     return Err(ProxyError::ModelNotFound(model_name.to_string()));
                 }
-                _ => {}
+                Some(entry) if entry.state == ModelState::Draining => {
+                    self.pending_wakes.lock().unwrap().remove(model_name);
+                    return Err(ProxyError::ModelUnavailable(format!(
+                        "{model_name} is draining"
+                    )));
+                }
+                Some(entry) if entry.state == ModelState::Sleeping && left_sleeping => {
+                    self.pending_wakes.lock().unwrap().remove(model_name);
+                    return Err(ProxyError::ModelUnavailable(format!(
+                        "{model_name} rolled back to sleeping during wake"
+                    )));
+                }
+                Some(entry) => {
+                    // STARTING (wake in progress) or still-SLEEPING-pending:
+                    // keep waiting. Record once the model has left SLEEPING so a
+                    // later return to SLEEPING is recognised as a rollback.
+                    if entry.state != ModelState::Sleeping {
+                        left_sleeping = true;
+                    }
+                }
             }
 
             tokio::select! {
