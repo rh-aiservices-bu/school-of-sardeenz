@@ -155,6 +155,8 @@ describe('ModelLifecycleService.setRunnerEndpoint', () => {
     expect(stored.runnerId).toBe('runner-1');
     expect(stored.runnerHost).toBe('10.0.0.5');
     expect(stored.runnerPort).toBe(9000);
+    // No distinct engine port supplied → falls back to the management port.
+    expect(stored.runnerEnginePort).toBe(9000);
     // State itself is untouched — no transition happened.
     expect(stored.state).toBe(ModelLifecycleState.STARTING);
     expect(stored.stateChangedAt).toBe('2026-01-01T00:00:00.000Z');

@@ -131,10 +131,12 @@ describe('DeployOrchestrationService', () => {
         ModelState.STARTING,
       );
       expect(mocks.workerClient.startRunner).toHaveBeenCalledOnce();
+      // No distinct engine port reported → inference falls back to the management port.
       expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', {
         runnerId: 'runner-abc',
         host: '10.0.0.1',
         port: 5001,
+        enginePort: 5001,
       });
       expect(mocks.runnerClient.getHealth).toHaveBeenCalledOnce();
       expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
@@ -147,9 +149,39 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         ModelLifecycleState.ACTIVE,
-        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerId: 'runner-abc' },
+        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerEnginePort: 5001, runnerId: 'runner-abc' },
       );
       expect(mocks.routingMap.setModelState).toHaveBeenCalledWith('test-model', ModelState.ACTIVE);
+    });
+
+    it('routes inference to the engine port while keeping management on the runner port', async () => {
+      // vLLM-style runner: management shim on 5001, OpenAI server on 5002.
+      mocks.workerClient.startRunner.mockResolvedValue(
+        makeRunnerResponse({ port: 5001, enginePort: 5002 }),
+      );
+
+      await service.deployModel(makeParams());
+
+      // Health polling targets the management port (the runner client is created from host+port).
+      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', {
+        runnerId: 'runner-abc',
+        host: '10.0.0.1',
+        port: 5001,
+        enginePort: 5002,
+      });
+      // The proxy-facing routing endpoint targets the engine port.
+      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
+        host: '10.0.0.1',
+        port: 5002,
+        weight: 1,
+        healthy: true,
+        runnerId: 'runner-abc',
+      });
+      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+        'test-model',
+        ModelLifecycleState.ACTIVE,
+        { runnerHost: '10.0.0.1', runnerPort: 5001, runnerEnginePort: 5002, runnerId: 'runner-abc' },
+      );
     });
 
     it('passes full start request to worker client', async () => {

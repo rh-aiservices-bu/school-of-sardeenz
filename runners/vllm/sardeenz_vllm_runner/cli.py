@@ -14,7 +14,9 @@ class RunnerArgs:
     host: str
     device_type: str
     tensor_parallel: int
-    # Extra args passed through to `vllm serve` (everything after `--`).
+    # Extra args passed through to `vllm serve` (everything after `--`). The worker forwards
+    # `--served-model-name <routing-name>` here so vLLM registers the model under the routing name
+    # (not its weights path) and client `model` fields resolve — see ApptainerLauncher.
     engine_args: list[str] = field(default_factory=list)
 
 

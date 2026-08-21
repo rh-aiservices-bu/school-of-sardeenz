@@ -56,7 +56,12 @@ function makeRegistration(): WorkerRegistration {
 const instantLauncher: RunnerLauncher = {
   serializeColdStarts: false,
   start: (spec: LaunchSpec): Promise<LaunchHandle> =>
-    Promise.resolve({ host: 'localhost', port: spec.port, stop: () => Promise.resolve() }),
+    Promise.resolve({
+      host: 'localhost',
+      port: spec.port,
+      enginePort: spec.enginePort,
+      stop: () => Promise.resolve(),
+    }),
 };
 
 async function readUntil(
@@ -130,6 +135,38 @@ describe('GET /runners/:runnerId/logs', () => {
     logBuffer.append(runnerId, 'stdout', 'live line\n');
     received = await readUntil(reader, decoder, (r) => r.includes('live line'));
     expect(received).toContain('live line');
+
+    await reader.cancel();
+    await manager.stopRunner(runnerId);
+  });
+
+  it('replays sealed startup logs then ends immediately when reopened after startup', async () => {
+    // Simulates the "View starting logs" reopen: the runner finished starting (stream sealed via
+    // markEnded), the buffer retains the startup logs, and a fresh connection should replay them
+    // then get an end frame right away rather than hanging for live lines that never come.
+    const { runnerId } = await manager.startRunner({
+      modelName: 'logs-model-sealed',
+      runnerType: 'vllm',
+      modelPath: '/models/logs-sealed',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    const logBuffer = manager.getLogBuffer();
+    logBuffer.append(runnerId, 'stdout', 'startup line\n');
+    logBuffer.append(runnerId, 'stdout', 'Application startup complete.\n');
+    logBuffer.markEnded(runnerId); // startup complete — stream sealed, buffer kept
+
+    const res = await fetch(`${baseUrl}/runners/${runnerId}/logs`);
+    expect(res.status).toBe(200);
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const received = await readUntil(reader, decoder, (r) => r.includes('event: end'));
+    expect(received).toContain('startup line');
+    expect(received).toContain('Application startup complete.');
+    expect(received).toContain('event: end');
 
     await reader.cancel();
     await manager.stopRunner(runnerId);

@@ -21,6 +21,7 @@ function makeSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
     tensorParallel: 1,
     devices: [{ deviceIndex: 2, deviceType: 'CUDA' }],
     port: 9101,
+    enginePort: 9102,
     ...overrides,
   };
 }
@@ -80,6 +81,13 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args).toContain('--model');
     expect(args[args.indexOf('--model') + 1]).toBe('/weights/llama');
     expect(args[args.indexOf('--port') + 1]).toBe('9101');
+    // The engine's OpenAI port is pinned explicitly to the worker-allocated engine port.
+    expect(args[args.indexOf('--engine-port') + 1]).toBe('9102');
+    // vLLM serves under the logical model name (not the weights path) so client `model` fields match.
+    // Forwarded through the shim's `--` passthrough to keep working with already-built SIFs.
+    const ddIdx = args.indexOf('--');
+    expect(ddIdx).toBeGreaterThan(-1);
+    expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
 
   it('sets HOME as a process env var, never as an --env flag (Apptainer rejects --env HOME)', () => {
@@ -152,6 +160,44 @@ describe('ApptainerLauncher.start', () => {
     expect(handle.pid).toBe(child.pid);
     expect(handle.host).toBe('127.0.0.1');
     expect(handle.port).toBe(9101);
+    expect(handle.enginePort).toBe(9102);
+  });
+
+  it('calls onStartupComplete once the runner is healthy', async () => {
+    const { launcher } = makeLauncher(
+      {},
+      { runOnce: () => Promise.resolve(0), healthCheck: () => Promise.resolve({ state: 'READY' }) },
+    );
+    const onStartupComplete = vi.fn();
+
+    await launcher.start(makeSpec(), undefined, onStartupComplete);
+
+    expect(onStartupComplete).toHaveBeenCalledOnce();
+  });
+
+  it('does not call onStartupComplete when the runner exits before becoming healthy', async () => {
+    let calls = 0;
+    const now = vi.fn(() => calls++ * 1000);
+    // Crash the child from inside the first health poll (the launcher attaches its exit listener
+    // only after the verify await + spawn, so emitting earlier would be missed).
+    const { launcher, child } = makeLauncher(
+      { healthTimeoutMs: 10_000 },
+      {
+        healthCheck: () => {
+          child.exitCode = 1;
+          child.emit('exit');
+          return Promise.resolve(null);
+        },
+        now,
+        sleep: () => Promise.resolve(),
+      },
+    );
+    const onStartupComplete = vi.fn();
+
+    await expect(launcher.start(makeSpec(), undefined, onStartupComplete)).rejects.toThrow(
+      /exited before becoming healthy/,
+    );
+    expect(onStartupComplete).not.toHaveBeenCalled();
   });
 
   it('refuses to start when SIF verification fails', async () => {

@@ -46,6 +46,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The model-launch log modal no longer closes itself mid-startup, and startup logs stay
+  viewable.** The deploy modal auto-closed ~2s after the model first reported `ACTIVE`, which — for
+  engines whose startup is still in progress — yanked it away while weights were barely loading. The
+  modal now stays open until the operator closes it; the "model available" notification and state
+  change still fire on the real `ACTIVE` transition (so someone who closed the modal is still told
+  when it's actually up). Once the engine finishes starting, the worker **ends** the launch-log
+  stream and seals the buffered startup logs: post-startup request logs are no longer captured or
+  streamed to the control plane, and reopening the (renamed) **"View starting logs"** action replays
+  just the startup logs and closes cleanly. Implemented via a new `onStartupComplete` launcher
+  signal (`ApptainerLauncher` fires it once vLLM's `/health` is green — after "Application startup
+  complete" — and stops forwarding stdio while still draining it; the dev-worker stub fires it when
+  its simulated startup ends) wired to `RunnerLogBuffer.markEnded`, which now also seals late so a
+  reopened stream still gets an `end` frame.
+
+- **Inference through the routing proxy now reaches the vLLM engine.** `POST /v1/chat/completions`
+  (and `/v1/completions`) to the proxy returned the runner's `{"detail":"Not Found"}` because the
+  proxy forwarded to the runner's **management** port — the vLLM shim, which serves only the
+  runner-contract control API — while vLLM's OpenAI server runs on a separate **engine** port
+  (`--port + 1`, e.g. `9102`). Nothing propagated that engine port past the worker. `StartRunnerResponse`
+  now carries an optional `enginePort`; the worker allocates management/engine ports in **pairs** (so a
+  second runner's management port can't collide with the first's engine port) and the `ApptainerLauncher`
+  pins vLLM's OpenAI server to it via `--engine-port`. The control plane registers the engine port as the
+  model's routing endpoint (the proxy forwards `/v1/*` there) while keeping health/sleep/wake/log-stream
+  on the management port; it persists `runnerEnginePort` so wake re-registers — and sleep/stop remove —
+  the correct endpoint. Runners that serve inference on the management port omit `enginePort` and fall
+  back to it, so the dev-worker stub (single Fastify server) is unaffected. `GET /v1/models` was already
+  fine — the proxy synthesizes it from the routing map. The worker also now forwards
+  `--served-model-name <routing-name>` to `vllm serve` (via the shim's existing `--` passthrough, so it
+  works with already-built SIFs) so vLLM registers the model under the routing name instead of its
+  weights path — without it, requests that reached the engine were rejected with
+  `"The model ... does not exist"` (a 404 from vLLM) because the client's `model` field never matched the
+  path vLLM served under. (#77)
+
 - **Deploying a model no longer crashes with "models is not iterable" when a model-detail page is
   cached.** The optimistic cache update in `useDeployModel` ran over every query matching the
   `['models']` prefix, which includes the `['models', name]` detail queries whose data is a single

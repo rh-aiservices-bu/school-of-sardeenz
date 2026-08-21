@@ -28,7 +28,14 @@ export interface ModelState {
   state: ModelLifecycleState;
   workerId: string | null;
   runnerHost: string | null;
+  /** Management port (runner-contract API) — used for health/sleep/wake/stop. */
   runnerPort: number | null;
+  /**
+   * Inference port (`/v1/*`) the proxy targets. May differ from the management port (e.g. vLLM
+   * serves its OpenAI API on a separate port). Optional: pre-existing persisted state and runners
+   * that serve inference on the management port won't carry it — callers fall back to runnerPort.
+   */
+  runnerEnginePort?: number | null;
   runnerId: string | null;
   deviceIndices: number[] | null;
   lastInferenceAt: string | null;
@@ -104,6 +111,7 @@ export class ModelLifecycleService {
       workerId: workerId ?? null,
       runnerHost: null,
       runnerPort: null,
+      runnerEnginePort: null,
       runnerId: null,
       deviceIndices: null,
       lastInferenceAt: null,
@@ -124,7 +132,13 @@ export class ModelLifecycleService {
     updates?: Partial<
       Pick<
         ModelState,
-        'workerId' | 'runnerHost' | 'runnerPort' | 'runnerId' | 'deviceIndices' | 'errorMessage'
+        | 'workerId'
+        | 'runnerHost'
+        | 'runnerPort'
+        | 'runnerEnginePort'
+        | 'runnerId'
+        | 'deviceIndices'
+        | 'errorMessage'
       >
     >,
   ): Promise<ModelState> {
@@ -225,7 +239,7 @@ export class ModelLifecycleService {
    */
   async setRunnerEndpoint(
     modelName: string,
-    endpoint: { runnerId: string; host: string; port: number },
+    endpoint: { runnerId: string; host: string; port: number; enginePort?: number },
   ): Promise<void> {
     const key = modelStateKey(this.keyPrefix, modelName);
     const state = await this.getState(modelName);
@@ -236,6 +250,7 @@ export class ModelLifecycleService {
     state.runnerId = endpoint.runnerId;
     state.runnerHost = endpoint.host;
     state.runnerPort = endpoint.port;
+    state.runnerEnginePort = endpoint.enginePort ?? endpoint.port;
 
     await this.redis.set(key, JSON.stringify(state));
   }

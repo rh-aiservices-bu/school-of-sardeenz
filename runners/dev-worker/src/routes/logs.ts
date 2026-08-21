@@ -42,6 +42,15 @@ export function registerLogRoutes(app: FastifyInstance, runnerManager: RunnerMan
     for (const line of logBuffer.getBuffer(runnerId)) {
       writeLog(line);
     }
+
+    // If the runner's stream already ended (startup finished, or the runner stopped) before this
+    // client connected, the replay above is the whole story — send `end` now so the client stops
+    // waiting for live lines that will never come. This is the "View starting logs" reopen path:
+    // the sealed startup logs replay, then the stream closes cleanly.
+    if (logBuffer.isEnded(runnerId)) {
+      write('end', '{}');
+    }
+
     const unsubscribeLog = logBuffer.onLog(runnerId, writeLog);
     const unsubscribeEnd = logBuffer.onEnd(runnerId, () => {
       write('end', '{}');

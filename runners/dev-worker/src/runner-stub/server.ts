@@ -26,7 +26,7 @@ export interface RunnerStubConfig {
 export interface RunnerStub {
   server: ReturnType<typeof Fastify>;
   stateMachine: RunnerStateMachine;
-  start: (onLog?: LogSink) => Promise<void>;
+  start: (onLog?: LogSink, onStartupComplete?: () => void) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -59,9 +59,15 @@ export function createRunnerStub(config: RunnerStubConfig): RunnerStub {
   return {
     server,
     stateMachine,
-    async start(onLog?: LogSink) {
+    async start(onLog?: LogSink, onStartupComplete?: () => void) {
       await server.listen({ port: config.port, host: '0.0.0.0' });
-      void stateMachine.simulateStartup(config.startupDelayMs, onLog);
+      // simulateStartup resolves when the stub reaches READY (all startup log lines emitted), which
+      // is the stub's "startup complete" — mirror the real launcher and notify then. Swallow a
+      // rejection (e.g. the stub is destroyed mid-startup) so it never becomes an unhandled promise.
+      void stateMachine.simulateStartup(config.startupDelayMs, onLog).then(
+        () => onStartupComplete?.(),
+        () => {},
+      );
     },
     async stop() {
       stateMachine.destroy();

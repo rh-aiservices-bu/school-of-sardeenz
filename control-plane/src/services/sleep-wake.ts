@@ -76,12 +76,13 @@ export class SleepWakeService {
       // offload is complete, so we apply the sleep timeout to this call directly.
       await runnerClient.sleep(SleepLevel.L1_HOST_RAM);
 
-      // Clear the endpoint so the proxy stops routing to this model.
+      // Clear the endpoint so the proxy stops routing to this model. Match on the same
+      // (host, engine port) pair the endpoint was registered under.
       if (modelState.runnerHost && modelState.runnerPort) {
         await this.routingMap.removeEndpoint(
           modelName,
           modelState.runnerHost,
-          modelState.runnerPort,
+          modelState.runnerEnginePort ?? modelState.runnerPort,
         );
       }
 
@@ -127,11 +128,12 @@ export class SleepWakeService {
       // Poll health until the runner reports READY.
       await this.waitForReady(modelName, runnerClient);
 
-      // Re-register the endpoint and flip state to ACTIVE.
+      // Re-register the endpoint and flip state to ACTIVE. Route inference to the engine port
+      // (falling back to the management port for pre-engine-port state or single-server runners).
       if (modelState.runnerHost && modelState.runnerPort) {
         const endpoint: RunnerEndpoint = {
           host: modelState.runnerHost,
-          port: modelState.runnerPort,
+          port: modelState.runnerEnginePort ?? modelState.runnerPort,
           weight: 1,
           healthy: true,
           ...(modelState.runnerId ? { runnerId: modelState.runnerId } : {}),
@@ -177,12 +179,13 @@ export class SleepWakeService {
         }
       }
 
-      // Remove the endpoint so routing stops immediately.
+      // Remove the endpoint so routing stops immediately. Match on the same (host, engine port)
+      // pair the endpoint was registered under.
       if (modelState.runnerHost && modelState.runnerPort) {
         await this.routingMap.removeEndpoint(
           modelName,
           modelState.runnerHost,
-          modelState.runnerPort,
+          modelState.runnerEnginePort ?? modelState.runnerPort,
         );
       }
 

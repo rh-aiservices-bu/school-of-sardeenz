@@ -167,7 +167,7 @@
       "stateChanged": "State changed to"
     },
     "viewLogs": {
-      "button": "View logs"
+      "button": "View starting logs"
     }
   },
   "logs": {
@@ -178,7 +178,7 @@
     "waiting": "Waiting for logs…",
     "startingProgress": "Starting model…",
     "successTitle": "Model started successfully",
-    "successBody": "The model is now active. Closing this dialog…",
+    "successBody": "The model is now active.",
     "failureTitle": "Model failed to start",
     "failureBodyFallback": "The model entered an error state. Check the logs above for details."
   }

@@ -212,8 +212,20 @@ export type components = {
             runnerId: string;
             /** @description Hostname or IP where the runner is listening. */
             host: string;
-            /** @description Port where the runner is listening. */
+            /**
+             * @description Management port where the runner's runner-contract API is listening
+             *     (`/health`, `/progress`, `/memory-report`, `/sleep`, `/wake`, …).
+             *     The control plane uses this port for lifecycle and health checks.
+             */
             port: number;
+            /**
+             * @description Port where the runner serves OpenAI-compatible inference traffic
+             *     (`/v1/*`). Some runners (e.g. vLLM) run the engine's OpenAI server on
+             *     a port distinct from the management port; the control plane registers
+             *     this port as the model's routing endpoint so the proxy forwards
+             *     inference here. When omitted, inference is served on `port`.
+             */
+            enginePort?: number;
         };
         /**
          * @description Worker registration data pushed to Redis at

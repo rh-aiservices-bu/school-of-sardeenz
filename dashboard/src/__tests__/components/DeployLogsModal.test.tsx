@@ -2,14 +2,11 @@
  * DeployLogsModal behaviour tests.
  *
  * Following the project convention (see role-visibility.test.tsx and
- * MemoryVisualization.test.tsx), we test the state-derivation and
- * auto-close logic directly, mirroring DeployLogsModal.tsx exactly, rather
- * than rendering PatternFly components — full rendering coverage is left to
- * the Playwright e2e suite.
+ * MemoryVisualization.test.tsx), we test the state-derivation logic directly,
+ * mirroring DeployLogsModal.tsx exactly, rather than rendering PatternFly
+ * components — full rendering coverage is left to the Playwright e2e suite.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-const AUTO_CLOSE_DELAY_MS = 2_000;
+import { describe, it, expect } from 'vitest';
 
 type ModelLifecycleState =
   | 'PENDING'
@@ -102,70 +99,5 @@ describe('DeployLogsModal — failure body', () => {
 
   it('falls back to a generic message when errorMessage is absent', () => {
     expect(deriveFailureBody({ state: 'ERROR' }, 'fallback')).toBe('fallback');
-  });
-});
-
-describe('DeployLogsModal — auto-close on success', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('calls onClose after AUTO_CLOSE_DELAY_MS once the model becomes ACTIVE', () => {
-    const onClose = vi.fn();
-    const { isActive } = deriveFlags({ state: 'ACTIVE' });
-
-    // Mirrors the `useEffect(() => { if (!isOpen || !isActive) return; ... }, [isOpen, isActive])`
-    // in DeployLogsModal.tsx.
-    const isOpen = true;
-    const timer = isOpen && isActive ? setTimeout(onClose, AUTO_CLOSE_DELAY_MS) : undefined;
-
-    expect(onClose).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(AUTO_CLOSE_DELAY_MS);
-    expect(onClose).toHaveBeenCalledOnce();
-
-    clearTimeout(timer);
-  });
-
-  it('does not schedule an auto-close while STARTING', () => {
-    const onClose = vi.fn();
-    const { isActive } = deriveFlags({ state: 'STARTING' });
-
-    const isOpen = true;
-    if (isOpen && isActive) {
-      setTimeout(onClose, AUTO_CLOSE_DELAY_MS);
-    }
-
-    vi.advanceTimersByTime(AUTO_CLOSE_DELAY_MS);
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('does not schedule an auto-close on ERROR (stays open with logs visible)', () => {
-    const onClose = vi.fn();
-    const { isActive } = deriveFlags({ state: 'ERROR' });
-
-    const isOpen = true;
-    if (isOpen && isActive) {
-      setTimeout(onClose, AUTO_CLOSE_DELAY_MS);
-    }
-
-    vi.advanceTimersByTime(AUTO_CLOSE_DELAY_MS);
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('cancels the pending auto-close timer if the modal closes before it fires', () => {
-    const onClose = vi.fn();
-    const { isActive } = deriveFlags({ state: 'ACTIVE' });
-
-    // isOpen flips false before the timer elapses — cleanup clears it (effect return fn).
-    const timer = setTimeout(onClose, AUTO_CLOSE_DELAY_MS);
-    expect(isActive).toBe(true);
-    clearTimeout(timer);
-
-    vi.advanceTimersByTime(AUTO_CLOSE_DELAY_MS);
-    expect(onClose).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,10 @@ import { randomUUID } from 'node:crypto';
 export interface RunnerRecord {
   runnerId: string;
   modelName: string;
+  /** Management port (runner-contract API). */
   port: number;
+  /** Inference port (`/v1/*`) the proxy targets — equals `port` for the single-server stub. */
+  enginePort: number;
   host: string;
   requiredMemory: number;
   devices: { deviceIndex: number; deviceType: string }[];
@@ -54,13 +57,13 @@ export class RunnerManager {
 
   async startRunner(
     params: StartRunnerParams,
-  ): Promise<{ runnerId: string; host: string; port: number }> {
+  ): Promise<{ runnerId: string; host: string; port: number; enginePort: number }> {
     if (this.modelToRunner.has(params.modelName)) {
       throw new ConflictError(`Runner for model ${params.modelName} already exists`);
     }
 
     const runnerId = `runner-${randomUUID().slice(0, 8)}`;
-    const port = this.allocatePort();
+    const { port, enginePort } = this.allocatePorts();
 
     // Reserve the model slot up-front so concurrent starts of the same model race to ConflictError
     // rather than both proceeding.
@@ -80,14 +83,21 @@ export class RunnerManager {
           engineConfig: params.engineConfig,
           devices: params.devices,
           port,
+          enginePort,
         },
         (stream, content) => this.logBuffer.append(runnerId, stream, content),
+        // Once the engine has finished starting, end the launch-log stream: connected viewers stop
+        // streaming and the buffered startup logs are sealed for later "View starting logs" reopens,
+        // so post-startup request logs never reach the control plane. The buffer is kept until the
+        // runner is stopped (drop() in stopRunner).
+        () => this.logBuffer.markEnded(runnerId),
       );
 
       const record: RunnerRecord = {
         runnerId,
         modelName: params.modelName,
-        port,
+        port: handle.port,
+        enginePort: handle.enginePort,
         host: handle.host,
         requiredMemory: params.requiredMemory,
         devices: params.devices,
@@ -101,10 +111,11 @@ export class RunnerManager {
       }
 
       console.log(
-        `[worker] Started runner ${runnerId} for ${params.modelName} on ${handle.host}:${port}`,
+        `[worker] Started runner ${runnerId} for ${params.modelName} on ${handle.host}:${handle.port}` +
+          (handle.enginePort !== handle.port ? ` (inference on :${handle.enginePort})` : ''),
       );
 
-      return { runnerId, host: handle.host, port };
+      return { runnerId, host: handle.host, port: handle.port, enginePort: handle.enginePort };
     } catch (err) {
       // Roll back the reserved model slot so a failed start doesn't permanently block the model.
       this.modelToRunner.delete(params.modelName);
@@ -116,11 +127,14 @@ export class RunnerManager {
   private launch(
     spec: Parameters<RunnerLauncher['start']>[0],
     onLog?: LogSink,
+    onStartupComplete?: () => void,
   ): Promise<LaunchHandle> {
     if (!this.launcher.serializeColdStarts) {
-      return this.launcher.start(spec, onLog);
+      return this.launcher.start(spec, onLog, onStartupComplete);
     }
-    const result = this.coldStartChain.then(() => this.launcher.start(spec, onLog));
+    const result = this.coldStartChain.then(() =>
+      this.launcher.start(spec, onLog, onStartupComplete),
+    );
     // Keep the chain alive regardless of this start's success/failure.
     this.coldStartChain = result.then(
       () => undefined,
@@ -177,10 +191,15 @@ export class RunnerManager {
     return Array.from(this.runners.values());
   }
 
-  private allocatePort(): number {
+  // Allocate a (management, engine) port pair, stepping by 2. Real engines (vLLM) serve inference
+  // on `management + 1`, so allocating one port per runner would let a second runner's management
+  // port collide with the first runner's engine port. Pairing avoids that regardless of launcher;
+  // single-server launchers (the stub) simply leave the engine port of the pair unused.
+  private allocatePorts(): { port: number; enginePort: number } {
     const port = this.nextPort;
-    this.nextPort++;
-    return port;
+    const enginePort = this.nextPort + 1;
+    this.nextPort += 2;
+    return { port, enginePort };
   }
 }
 

@@ -73,6 +73,11 @@ export class DeployOrchestrationService {
       };
       const runnerInfo = await workerClient.startRunner(startRequest);
 
+      // The management port drives health/sleep/wake; the engine port (when the runner reports a
+      // distinct one, e.g. vLLM's OpenAI server) is where inference is served and what the proxy
+      // must target. Runners that serve inference on the management port omit enginePort — fall back.
+      const enginePort = runnerInfo.enginePort ?? runnerInfo.port;
+
       // Persist the placement immediately (before waitForReady) so log streaming can
       // resolve the runner while the model is still STARTING, rather than only after
       // the ACTIVE transition below.
@@ -80,14 +85,17 @@ export class DeployOrchestrationService {
         runnerId: runnerInfo.runnerId,
         host: runnerInfo.host,
         port: runnerInfo.port,
+        enginePort,
       });
 
+      // Health-poll the management shim, not the engine port.
       const runnerClient = this.createRunnerClient(runnerInfo.host, runnerInfo.port);
       await this.waitForReady(params.modelName, runnerClient);
 
+      // Route inference to the engine port so the proxy reaches the OpenAI server, not the shim.
       const endpoint: RunnerEndpoint = {
         host: runnerInfo.host,
-        port: runnerInfo.port,
+        port: enginePort,
         weight: 1,
         healthy: true,
         runnerId: runnerInfo.runnerId,
@@ -97,6 +105,7 @@ export class DeployOrchestrationService {
       await this.lifecycle.transition(params.modelName, ModelLifecycleState.ACTIVE, {
         runnerHost: runnerInfo.host,
         runnerPort: runnerInfo.port,
+        runnerEnginePort: enginePort,
         runnerId: runnerInfo.runnerId,
       });
       await this.routingMap.setModelState(params.modelName, ModelState.ACTIVE);
