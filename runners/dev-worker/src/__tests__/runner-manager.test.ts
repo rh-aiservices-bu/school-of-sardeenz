@@ -13,6 +13,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     workerPort: 19300,
     advertiseHost: 'localhost',
     runnerPortStart: 19301,
+    maxRunners: 32,
     deviceCount: 2,
     deviceType: 'CUDA',
     deviceMemoryBytes: 24 * 1024 * 1024 * 1024,
@@ -423,5 +424,139 @@ describe('RunnerManager', () => {
     // it must no-op rather than free memory a second time for a record that's already gone.
     fireExit(runnerId);
     expect(freeMemorySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses released port after stop', async () => {
+    const a = await manager.startRunner({
+      modelName: 'port-reuse-a',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(a.port).toBe(19301);
+
+    await manager.stopRunner(a.runnerId);
+
+    const b = await manager.startRunner({
+      modelName: 'port-reuse-b',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-b',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
+  });
+
+  it('reuses released port after unexpected exit', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+
+    const a = await mgr.startRunner({
+      modelName: 'port-reuse-exit-a',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-exit-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(a.port).toBe(19301);
+
+    fireExit(a.runnerId);
+
+    const b = await mgr.startRunner({
+      modelName: 'port-reuse-exit-b',
+      runnerType: 'vllm',
+      modelPath: '/models/port-reuse-exit-b',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
+  });
+
+  it('range exhaustion produces clear error', async () => {
+    const mgr = new RunnerManager(makeConfig({ maxRunners: 1 }), makeRegistration());
+
+    await mgr.startRunner({
+      modelName: 'exhaust-a',
+      runnerType: 'vllm',
+      modelPath: '/models/exhaust-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'exhaust-b',
+        runnerType: 'vllm',
+        modelPath: '/models/exhaust-b',
+        requiredMemory: 1024 * 1024 * 1024,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow(/port range exhausted/i);
+  });
+
+  it('workerPort is never allocated', async () => {
+    const mgr = new RunnerManager(
+      makeConfig({ workerPort: 19301, runnerPortStart: 19301, maxRunners: 3 }),
+      makeRegistration(),
+    );
+
+    const a = await mgr.startRunner({
+      modelName: 'skip-worker-port',
+      runnerType: 'vllm',
+      modelPath: '/models/skip-worker-port',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(a.port).toBe(19303);
+  });
+
+  it('port released on failed launch', async () => {
+    let attempt = 0;
+    const failing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> => {
+        attempt++;
+        if (attempt === 1) {
+          return Promise.reject(new Error('cold-start boom'));
+        }
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const mgr = new RunnerManager(makeConfig({ maxRunners: 1 }), makeRegistration(), failing);
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'released-on-failure-a',
+        runnerType: 'vllm',
+        modelPath: '/models/released-on-failure-a',
+        requiredMemory: 1,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow('cold-start boom');
+
+    const b = await mgr.startRunner({
+      modelName: 'released-on-failure-b',
+      runnerType: 'vllm',
+      modelPath: '/models/released-on-failure-b',
+      requiredMemory: 1,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
   });
 });

@@ -4,6 +4,19 @@ import type { LaunchHandle, LogSink, RunnerLauncher } from './launcher.js';
 import { StubLauncher } from './stub-launcher.js';
 import { RunnerLogBuffer } from './runner-log-buffer.js';
 import { randomUUID } from 'node:crypto';
+import { createServer as netCreateServer } from 'node:net';
+
+// Tries to bind 127.0.0.1:port; resolves true if the port is free, false if already in use.
+export function probePortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = netCreateServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
 
 export interface RunnerRecord {
   runnerId: string;
@@ -35,7 +48,8 @@ export class RunnerManager {
   private readonly modelToRunner = new Map<string, string>();
   private readonly launcher: RunnerLauncher;
   private readonly logBuffer: RunnerLogBuffer;
-  private nextPort: number;
+  private readonly usedPorts = new Set<number>();
+  private readonly probePort?: (port: number) => Promise<boolean>;
   // Serializes cold-starts when the launcher requires it (real engine cold-starts spike host RAM
   // and OOM a peer if run concurrently — spike Gate 9c). A promise chain acts as an async mutex.
   private coldStartChain: Promise<void> = Promise.resolve();
@@ -45,10 +59,11 @@ export class RunnerManager {
     private readonly registration: WorkerRegistration,
     launcher?: RunnerLauncher,
     logBuffer?: RunnerLogBuffer,
+    probePort?: (port: number) => Promise<boolean>,
   ) {
-    this.nextPort = config.runnerPortStart;
     this.launcher = launcher ?? new StubLauncher(config);
     this.logBuffer = logBuffer ?? new RunnerLogBuffer();
+    this.probePort = probePort;
   }
 
   getLogBuffer(): RunnerLogBuffer {
@@ -63,7 +78,7 @@ export class RunnerManager {
     }
 
     const runnerId = `runner-${randomUUID().slice(0, 8)}`;
-    const { port, enginePort } = this.allocatePorts();
+    const { port, enginePort } = await this.allocatePorts();
 
     // Reserve the model slot up-front so concurrent starts of the same model race to ConflictError
     // rather than both proceeding.
@@ -82,6 +97,7 @@ export class RunnerManager {
         this.registration.freeMemory(device.deviceIndex, perDeviceMemory);
       }
       this.runners.delete(runnerId);
+      this.usedPorts.delete(record.port);
       this.modelToRunner.delete(record.modelName);
       this.logBuffer.markEnded(runnerId);
       this.logBuffer.retain(runnerId);
@@ -140,6 +156,7 @@ export class RunnerManager {
       return { runnerId, host: handle.host, port: handle.port, enginePort: handle.enginePort };
     } catch (err) {
       // Roll back the reserved model slot so a failed start doesn't permanently block the model.
+      this.usedPorts.delete(port);
       this.modelToRunner.delete(params.modelName);
       // Seal the launch-log stream (any SSE client attached mid-launch gets its `end` frame) and
       // schedule the buffer for later cleanup — there's no stopRunner() call for a failed launch to
@@ -182,6 +199,7 @@ export class RunnerManager {
     // (handleUnexpectedExit in startRunner), which guards on `this.runners.has(runnerId)` — clearing
     // the record here first makes that guard a no-op so a deliberate stop doesn't double-free memory.
     this.runners.delete(runnerId);
+    this.usedPorts.delete(record.port);
     this.modelToRunner.delete(record.modelName);
 
     for (const device of record.devices) {
@@ -227,11 +245,29 @@ export class RunnerManager {
   // on `management + 1`, so allocating one port per runner would let a second runner's management
   // port collide with the first runner's engine port. Pairing avoids that regardless of launcher;
   // single-server launchers (the stub) simply leave the engine port of the pair unused.
-  private allocatePorts(): { port: number; enginePort: number } {
-    const port = this.nextPort;
-    const enginePort = this.nextPort + 1;
-    this.nextPort += 2;
-    return { port, enginePort };
+  //
+  // Scans for the lowest free pair in [runnerPortStart, runnerPortStart + maxRunners * 2) rather
+  // than a monotonic counter, so ports released by stopRunner()/crash cleanup get reused instead of
+  // exhausting the range over a worker's lifetime.
+  private async allocatePorts(): Promise<{ port: number; enginePort: number }> {
+    const rangeEnd = this.config.runnerPortStart + this.config.maxRunners * 2;
+    for (let base = this.config.runnerPortStart; base < rangeEnd; base += 2) {
+      if (this.usedPorts.has(base)) continue;
+      if (base === this.config.workerPort || base + 1 === this.config.workerPort) continue;
+      this.usedPorts.add(base);
+      if (this.probePort) {
+        const free = (await this.probePort(base)) && (await this.probePort(base + 1));
+        if (!free) {
+          this.usedPorts.delete(base);
+          continue;
+        }
+      }
+      return { port: base, enginePort: base + 1 };
+    }
+    throw new Error(
+      `Port range exhausted: all ${this.config.maxRunners} runner slots in ` +
+        `[${this.config.runnerPortStart}, ${rangeEnd}) are in use`,
+    );
   }
 }
 

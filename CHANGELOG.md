@@ -72,6 +72,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dev worker: runner ports were allocated monotonically and never reclaimed.** `RunnerManager`
+  tracked ports with an ever-incrementing counter, so a long-lived worker cycling models through
+  start/stop (or crash/restart) would eventually walk past `runnerPortStart + <range>` and hand out
+  an out-of-range port. Port allocation now scans a bounded range
+  (`[runnerPortStart, runnerPortStart + maxRunners * 2)`, new `SARDEENZ_MAX_RUNNERS` config,
+  default 32) for the lowest free `(management, engine)` pair, tracked in a `usedPorts` set that's
+  released on `stopRunner()`, on unexpected-exit cleanup, and when a launch fails — so a stopped or
+  crashed runner's ports are reused by the next start instead of leaking. The scan also skips
+  `config.workerPort` so a runner can never collide with the worker's own listener, and an injectable
+  `probePortAvailable` (real TCP bind check in production, `undefined` in tests) double-checks a
+  candidate pair is actually free before handing it out. Range exhaustion now throws a clear error
+  naming the configured range instead of silently returning an out-of-range port. (#114)
 - **Dev worker: signal-killed runners were never reaped, and a runner exiting on its own after
   startup left a phantom VRAM reservation.** (#109)
   - `ApptainerLauncher.stopChild()` treated `exitCode !== null` as the only "already exited"

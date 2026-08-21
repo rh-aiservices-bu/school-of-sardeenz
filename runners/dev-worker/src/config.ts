@@ -25,6 +25,7 @@ export interface DevWorkerConfig {
   workerPort: number;
   advertiseHost: string;
   runnerPortStart: number;
+  maxRunners: number;
   deviceCount: number;
   deviceType: string;
   deviceMemoryBytes: number;
@@ -99,6 +100,7 @@ export function loadConfig(): DevWorkerConfig {
     workerPort: envInt('SARDEENZ_WORKER_PORT', 9100),
     advertiseHost: envStr('SARDEENZ_WORKER_ADVERTISE_HOST', 'localhost'),
     runnerPortStart: envInt('SARDEENZ_RUNNER_PORT_START', 9101),
+    maxRunners: envInt('SARDEENZ_MAX_RUNNERS', 32),
     deviceCount: envInt('SARDEENZ_DEVICE_COUNT', 2),
     deviceType: envStr('SARDEENZ_DEVICE_TYPE', 'CUDA'),
     deviceMemoryBytes: envInt('SARDEENZ_DEVICE_MEMORY_GB', 24) * GIB,

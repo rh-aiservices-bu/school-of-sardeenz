@@ -13,6 +13,7 @@ function makeConfig(): DevWorkerConfig {
     workerPort: 0,
     advertiseHost: 'localhost',
     runnerPortStart: 19400,
+    maxRunners: 32,
     deviceCount: 2,
     deviceType: 'CUDA',
     deviceMemoryBytes: 24 * 1024 * 1024 * 1024,

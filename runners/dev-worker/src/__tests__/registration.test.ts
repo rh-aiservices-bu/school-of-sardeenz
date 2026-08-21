@@ -11,6 +11,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     workerPort: 9100,
     advertiseHost: 'localhost',
     runnerPortStart: 9101,
+    maxRunners: 32,
     deviceCount: 2,
     deviceType: 'CUDA',
     deviceMemoryBytes: 24 * 1024 * 1024 * 1024,
