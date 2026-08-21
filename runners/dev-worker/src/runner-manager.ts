@@ -119,6 +119,11 @@ export class RunnerManager {
     } catch (err) {
       // Roll back the reserved model slot so a failed start doesn't permanently block the model.
       this.modelToRunner.delete(params.modelName);
+      // Seal the launch-log stream (any SSE client attached mid-launch gets its `end` frame) and
+      // schedule the buffer for later cleanup — there's no stopRunner() call for a failed launch to
+      // drop() it, so without retain() the failure logs (and their listeners) would leak forever.
+      this.logBuffer.markEnded(runnerId);
+      this.logBuffer.retain(runnerId);
       throw err;
     }
   }

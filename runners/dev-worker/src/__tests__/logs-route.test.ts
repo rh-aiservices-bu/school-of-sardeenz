@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import { RunnerManager } from '../runner-manager.js';
 import { registerLogRoutes } from '../routes/logs.js';
@@ -194,5 +194,99 @@ describe('GET /runners/:runnerId/logs', () => {
     expect(received).toContain('event: end');
 
     await reader.cancel();
+  });
+
+  it('sends an end frame to a client attached during a failing launch', async () => {
+    let rejectLaunch!: (err: Error) => void;
+    const deferredLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: () =>
+        new Promise((_resolve, reject) => {
+          rejectLaunch = reject;
+        }),
+    };
+    const failConfig = makeConfig();
+    const failManager = new RunnerManager(failConfig, makeRegistration(), deferredLauncher);
+    const failServer = Fastify({ logger: false });
+    registerLogRoutes(failServer, failManager);
+    const failBaseUrl = await failServer.listen({ port: 0, host: '127.0.0.1' });
+
+    try {
+      const startPromise = failManager.startRunner({
+        modelName: 'failing-launch-model',
+        runnerType: 'vllm',
+        modelPath: '/models/failing-launch',
+        requiredMemory: 1024 * 1024 * 1024,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      });
+      // Attached mid-launch, before the rejection below — this is the "cold-starting runner"
+      // route, resolvable since modelToRunner is set the instant startRunner() is entered.
+      const res = await fetch(`${failBaseUrl}/runners/by-model/failing-launch-model/logs`);
+      expect(res.status).toBe(200);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+
+      rejectLaunch(new Error('deferred launch boom'));
+      await expect(startPromise).rejects.toThrow('deferred launch boom');
+
+      const received = await readUntil(reader, decoder, (r) => r.includes('event: end'));
+      expect(received).toContain('event: end');
+
+      await reader.cancel();
+    } finally {
+      await failServer.close();
+    }
+  });
+
+  it('keeps failure logs retrievable by runnerId after the launch fails', async () => {
+    const failingLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (_spec, onLog) => {
+        onLog?.('stdout', 'loading weights...\n');
+        return Promise.reject(new Error('launch boom'));
+      },
+    };
+    const failConfig = makeConfig();
+    const failManager = new RunnerManager(failConfig, makeRegistration(), failingLauncher);
+    const logBuffer = failManager.getLogBuffer();
+    const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+    const failServer = Fastify({ logger: false });
+    registerLogRoutes(failServer, failManager);
+    const failBaseUrl = await failServer.listen({ port: 0, host: '127.0.0.1' });
+
+    try {
+      await expect(
+        failManager.startRunner({
+          modelName: 'failure-logs-model',
+          runnerType: 'vllm',
+          modelPath: '/models/failure-logs',
+          requiredMemory: 1024 * 1024 * 1024,
+          tensorParallel: 1,
+          devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        }),
+      ).rejects.toThrow('launch boom');
+
+      // The model slot was rolled back on failure, so the runnerId can only be recovered from the
+      // markEnded call the manager makes before rethrowing — mirroring what a real caller (the
+      // control plane, which learns the runnerId when the start command is issued) would already
+      // have on hand.
+      expect(markEndedSpy).toHaveBeenCalledTimes(1);
+      const runnerId = markEndedSpy.mock.calls[0][0];
+
+      const res = await fetch(`${failBaseUrl}/runners/${runnerId}/logs`);
+      expect(res.status).toBe(200);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      const received = await readUntil(reader, decoder, (r) => r.includes('event: end'));
+      expect(received).toContain('loading weights...');
+      expect(received).toContain('event: end');
+
+      await reader.cancel();
+    } finally {
+      await failServer.close();
+    }
   });
 });

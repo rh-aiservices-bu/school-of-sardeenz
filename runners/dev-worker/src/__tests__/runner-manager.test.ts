@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RunnerManager, ConflictError, NotFoundError } from '../runner-manager.js';
+import { RunnerLogBuffer, RETAIN_TTL_MS } from '../runner-log-buffer.js';
 import type { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
 import type { LaunchHandle, LaunchSpec, RunnerLauncher } from '../launcher.js';
@@ -251,6 +252,66 @@ describe('RunnerManager', () => {
 
     expect(maxConcurrent).toBe(1);
     expect(mgr.getAllRunners()).toHaveLength(3);
+  });
+
+  it('marks log stream ended and retains buffer when launch fails', async () => {
+    const logBuffer = new RunnerLogBuffer();
+    const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+    const retainSpy = vi.spyOn(logBuffer, 'retain');
+    const failing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: () => Promise.reject(new Error('launch boom')),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), failing, logBuffer);
+
+    await expect(
+      mgr.startRunner({
+        modelName: 'fails-to-launch',
+        runnerType: 'vllm',
+        modelPath: '/models/fail',
+        requiredMemory: 1,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    ).rejects.toThrow('launch boom');
+
+    expect(markEndedSpy).toHaveBeenCalledTimes(1);
+    expect(retainSpy).toHaveBeenCalledTimes(1);
+    const runnerId = markEndedSpy.mock.calls[0][0];
+    expect(retainSpy.mock.calls[0][0]).toBe(runnerId);
+  });
+
+  it('buffer dropped after retain TTL on failed launch', async () => {
+    vi.useFakeTimers();
+    try {
+      const logBuffer = new RunnerLogBuffer();
+      const markEndedSpy = vi.spyOn(logBuffer, 'markEnded');
+      const failing: RunnerLauncher = {
+        serializeColdStarts: false,
+        start: () => Promise.reject(new Error('launch boom')),
+      };
+      const mgr = new RunnerManager(makeConfig(), makeRegistration(), failing, logBuffer);
+
+      await expect(
+        mgr.startRunner({
+          modelName: 'fails-then-expires',
+          runnerType: 'vllm',
+          modelPath: '/models/fail-expires',
+          requiredMemory: 1,
+          tensorParallel: 1,
+          devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        }),
+      ).rejects.toThrow('launch boom');
+
+      const runnerId = markEndedSpy.mock.calls[0][0];
+      logBuffer.append(runnerId, 'stdout', 'failure log\n');
+
+      expect(logBuffer.has(runnerId)).toBe(true);
+      vi.advanceTimersByTime(RETAIN_TTL_MS);
+      expect(logBuffer.has(runnerId)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('allows starting a model after it was stopped', async () => {

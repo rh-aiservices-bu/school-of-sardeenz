@@ -72,6 +72,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dev worker: failed launch leaked log buffers, hung SSE log clients, and discarded failure
+  logs.** `startRunner`'s catch block rolled back the reserved model slot but never sealed or
+  retained the runner's log stream, so a client attached mid-launch (`GET
+  /runners/by-model/{modelName}/logs`) hung forever waiting for an `end` frame, the log buffer and
+  its listeners stayed in memory indefinitely since there's no `stopRunner()` call to `drop()`
+  them, and the failure logs became unreachable once the model slot was rolled back. `RunnerManager`
+  now calls `logBuffer.markEnded(runnerId)` and the new `logBuffer.retain(runnerId)` in the catch
+  block; `retain()` schedules an automatic `drop()` after a 5-minute TTL (capped at 20 retained
+  buffers, evicting oldest-first) so failure logs stay retrievable via `GET
+  /runners/{runnerId}/logs` for a window without leaking forever. The SSE route's `stream()` was
+  also hardened: `cleanup()` is now idempotent and closes the response (`reply.raw.end()`) once the
+  stream ends, instead of only clearing listeners and leaving the socket open. (#112)
 - **`sleepModel` now honors `SARDEENZ_SLEEP_TIMEOUT_SECS` on the runner's `/sleep` call.**
   `RunnerClient.sleep()` previously always used the client's instance-level default (30 s),
   ignoring `SleepWakeService.sleepTimeoutMs` — a model whose offload takes longer than 30 s (e.g.
