@@ -61,6 +61,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Background model deletion no longer risks crashing the control plane on an unhandled promise
+  rejection.** `DELETE /api/v1/models/:modelName` kicks off `sleepWake.stopModel` →
+  `lifecycle.removeModel` → `modelRepository.delete` in the background after replying `202`; the
+  `.then(onFulfilled, onRejected)` form used an async `onFulfilled` callback whose own rejections
+  (from `removeModel`/`delete`) were never passed to `onRejected`, so a failure partway through
+  produced an unhandled rejection. Replaced with a `try`/`catch` async IIFE so every step's failure
+  is caught and logged, and added a `process.on('unhandledRejection', ...)` safety net in
+  `index.ts` that logs fatally and exits rather than leaving the process in an undefined state.
+  (#84)
 - **Parked requests now fail fast on mid-wake rollback and inspect the wake response instead of
   hanging or leaking.** A request parked waiting for a sleeping model to wake had three gaps: (1) if
   the model rolled **back** to `SLEEPING` after starting to wake, or (2) transitioned to `DRAINING`

@@ -188,6 +188,11 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
+  process.on('unhandledRejection', (reason: unknown) => {
+    app.log.fatal({ err: reason }, 'Unhandled promise rejection — exiting');
+    process.exit(1);
+  });
+
   await app.listen({ host: config.listenAddr, port: config.listenPort });
   app.log.info(
     {

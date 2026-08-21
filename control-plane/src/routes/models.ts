@@ -322,16 +322,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           app.log.debug({ err, modelName }, 'Failed to create delete notification');
         });
 
-      deps.sleepWake.stopModel(modelName, runnerClient).then(
-        async () => {
+      void (async () => {
+        try {
+          await deps.sleepWake.stopModel(modelName, runnerClient);
           await deps.lifecycle.removeModel(modelName);
           await deps.modelRepository.delete(modelName);
           app.log.info({ modelName }, 'Model removed');
-        },
-        (err: unknown) => {
+        } catch (err: unknown) {
           app.log.error({ err, modelName }, 'Background model deletion failed');
-        },
-      );
+        }
+      })();
 
       return reply.code(202).send({
         modelName,
