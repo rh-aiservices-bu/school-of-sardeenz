@@ -59,6 +59,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (default `/weights`) and must have that directory mounted to browse it. Contracts add the
   `WeightsListing` / `WeightsEntry` schemas.
 
+### Removed
+
+- **Consumer-less `GET /api/v1/events` SSE route.** The control plane's cluster-events SSE endpoint
+  had no consumer anywhere in the repo (the dashboard BFF has its own separate `/api/events` SSE
+  route) and leaked a Redis subscriber connection per request that outlived client disconnects on
+  some code paths. Rather than fix the leak in dead code, the route, its handler
+  (`control-plane/src/routes/events.ts`), and the `/api/v1/events` path and `Events` tag in the
+  OpenAPI contract are deleted. `ClusterEvent`/`ClusterEventType`/`RunnerLogLine` schemas are
+  unaffected — they're still used by model-logs, the BFF's events route, and the catalog event
+  emitter. (#90)
+
 ### Fixed
 
 - **Background model deletion no longer risks crashing the control plane on an unhandled promise

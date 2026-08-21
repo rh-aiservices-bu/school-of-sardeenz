@@ -32,11 +32,9 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   const redis = createRedisClient(config);
-  const subscriber = createRedisClient(config);
   const db = createDatabasePool(config);
 
   await redis.connect();
-  await subscriber.connect();
 
   const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
   const applied = await runMigrations(db, migrationsDir);
@@ -123,7 +121,6 @@ async function main(): Promise<void> {
   const app = await buildServer({
     config,
     redis,
-    subscriber,
     db,
     routes: {
       config,
@@ -180,7 +177,6 @@ async function main(): Promise<void> {
     await leaderElection.stop();
     await app.close();
     redis.disconnect();
-    subscriber.disconnect();
     await db.end();
     process.exit(0);
   };
