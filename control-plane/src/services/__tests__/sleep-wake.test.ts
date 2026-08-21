@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import { ModelLifecycleState, RunnerState, SleepLevel } from '@sardeenz/types';
 
 import { SleepWakeService } from '../sleep-wake.js';
 import type { ModelLifecycleService, ModelState } from '../model-lifecycle.js';
@@ -201,5 +201,27 @@ describe('SleepWakeService — VRAM reservation release (#87)', () => {
     await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.memoryBudget.releaseModelReservations).not.toHaveBeenCalled();
+  });
+});
+
+describe('SleepWakeService — timeout threading (#89)', () => {
+  let mocks: Mocks;
+  let service: SleepWakeService;
+
+  beforeEach(() => {
+    mocks = createMocks();
+    service = createService(mocks);
+  });
+
+  it('sleepModel passes sleepTimeoutMs to runnerClient.sleep()', async () => {
+    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+
+    expect(mocks.runnerClient.sleep).toHaveBeenCalledWith(SleepLevel.L1_HOST_RAM, 5_000);
+  });
+
+  it('wakeModel does not pass a custom timeout to runnerClient.wake()', async () => {
+    await service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+
+    expect(mocks.runnerClient.wake).toHaveBeenCalledWith();
   });
 });

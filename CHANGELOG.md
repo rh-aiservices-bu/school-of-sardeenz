@@ -72,6 +72,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`sleepModel` now honors `SARDEENZ_SLEEP_TIMEOUT_SECS` on the runner's `/sleep` call.**
+  `RunnerClient.sleep()` previously always used the client's instance-level default (30 s),
+  ignoring `SleepWakeService.sleepTimeoutMs` — a model whose offload takes longer than 30 s (e.g.
+  large weights being written to host RAM) would have its `/sleep` request aborted mid-offload
+  even though the configured sleep timeout was higher. `RunnerClient.post()`/`sleep()` now accept
+  an optional per-call `timeoutMs` (falling back to the instance default), and `sleepModel` passes
+  `sleepTimeoutMs` through explicitly. `wake()` is unaffected — it returns as soon as the runner
+  begins reloading, and `waitForReady` (not the `/wake` call itself) enforces `wakeTimeoutMs`.
+  (#89)
 - **`DELETE /api/v1/models/:modelName` no longer 404s or 409s on evicted/stopped models.** Eviction
   clears a model's Redis lifecycle state but intentionally keeps its DB record (a tombstone, so the
   model reappears in `GET /api/v1/models` as `STOPPED` and can be redeployed). The delete route,

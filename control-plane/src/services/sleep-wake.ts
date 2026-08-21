@@ -76,7 +76,7 @@ export class SleepWakeService {
 
       // Send sleep command. The runner's /sleep call is synchronous — it blocks until
       // offload is complete, so we apply the sleep timeout to this call directly.
-      await runnerClient.sleep(SleepLevel.L1_HOST_RAM);
+      await runnerClient.sleep(SleepLevel.L1_HOST_RAM, this.sleepTimeoutMs);
 
       // Clear the endpoint so the proxy stops routing to this model. Match on the same
       // (host, engine port) pair the endpoint was registered under.
