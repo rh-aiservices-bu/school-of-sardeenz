@@ -9,6 +9,7 @@ import {
 import { ControlPlaneError } from '../errors.js';
 import { delay } from '../utils.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
+import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 
 /** Maps a ModelLifecycleState to the ModelState exposed in the routing map. */
@@ -41,6 +42,7 @@ export class SleepWakeService {
   constructor(
     private readonly lifecycle: ModelLifecycleService,
     private readonly routingMap: RoutingMapService,
+    private readonly memoryBudget: MemoryBudgetService,
     private readonly sleepTimeoutMs: number,
     private readonly wakeTimeoutMs: number,
     private readonly healthCheckIntervalMs: number,
@@ -216,6 +218,7 @@ export class SleepWakeService {
 
       // Remove from routing map entirely.
       await this.routingMap.removeModel(modelName);
+      this.memoryBudget.releaseModelReservations(modelName);
     } catch (err) {
       await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
       throw err;

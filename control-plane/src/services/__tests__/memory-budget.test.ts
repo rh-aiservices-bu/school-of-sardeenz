@@ -68,55 +68,19 @@ function workerKey(workerId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #34 regression: in-flight reservations must survive refreshAll
+// Issue #87: reservations must survive refreshAll/refreshWorkerBudget regardless
+// of what usedBytes the worker reports — they are only ever cleared explicitly via
+// releaseModelReservations or clearWorkerReservations, never inferred from usage.
 // ---------------------------------------------------------------------------
 
-describe('MemoryBudgetService — refreshAll preserves in-flight reservations', () => {
-  it('preserves a reservation when the worker report has not yet reflected the allocation', async () => {
+describe('MemoryBudgetService — reservations survive refreshes', () => {
+  it('preserves a reservation across refreshAll even once the worker report reflects the usage', async () => {
     const workerId = 'w1';
     const deviceIndex = 0;
     const reservedBytes = 8_000_000_000; // 8 GB
-    // Worker reports only 1 GB used — the reserved 8 GB is in-flight
-    const reportedUsedBytes = 1_000_000_000;
     const totalBytes = 24_000_000_000;
 
     const report = workerMemoryReport([
-      {
-        deviceIndex,
-        deviceType: 'CUDA',
-        memoryUsedBytes: reportedUsedBytes,
-        memoryTotalBytes: totalBytes,
-      },
-    ]);
-    const { redis } = makeMockRedis({ [workerKey(workerId)]: report });
-    const service = makeService(redis);
-
-    // Place a reservation simulating an in-flight deploy
-    // We need a prior budget in the map first so reserveCapacity can recompute
-    await service.refreshAll();
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
-
-    // Run refreshAll — this was the bug: reservations.clear() wiped the reservation
-    await service.refreshAll();
-
-    const budget = service.getWorkerBudget(workerId);
-    expect(budget).not.toBeNull();
-    const device = budget?.devices[0];
-    expect(device).not.toBeUndefined();
-    // The reservation must still be present (worker hasn't caught up yet)
-    expect(device?.reservedBytes).toBe(reservedBytes);
-    // Available capacity must be reduced by the reservation
-    expect(device?.availableBytes).toBeLessThan(totalBytes - reportedUsedBytes);
-  });
-
-  it('clears a reservation when the worker report reflects the allocated memory', async () => {
-    const workerId = 'w1';
-    const deviceIndex = 0;
-    const reservedBytes = 8_000_000_000; // 8 GB
-    const totalBytes = 24_000_000_000;
-
-    // Fresh service with the updated worker report (usedBytes now covers the reservation)
-    const updatedReport = workerMemoryReport([
       {
         deviceIndex,
         deviceType: 'CUDA',
@@ -124,135 +88,30 @@ describe('MemoryBudgetService — refreshAll preserves in-flight reservations', 
         memoryTotalBytes: totalBytes,
       },
     ]);
-    const { redis } = makeMockRedis({ [workerKey(workerId)]: updatedReport });
+    const { redis } = makeMockRedis({ [workerKey(workerId)]: report });
     const service = makeService(redis);
 
-    // Populate the budget map, then place an in-flight reservation
     await service.refreshAll();
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
 
-    // refreshAll: worker now reports usage >= reserved — reservation must be cleared
+    // refreshAll must not infer satisfaction from usedBytes — only explicit release does.
+    await service.refreshAll();
     await service.refreshAll();
 
     const budget = service.getWorkerBudget(workerId);
     expect(budget).not.toBeNull();
     const device = budget?.devices[0];
-    expect(device).not.toBeUndefined();
-    // Reservation is satisfied — must be cleared
-    expect(device?.reservedBytes).toBe(0);
-    // Available capacity equals total minus used (reservation no longer double-counts)
-    expect(device?.availableBytes).toBe(totalBytes - reservedBytes);
-  });
-
-  it('double-placement scenario: second deploy must not be placed on reserved capacity', async () => {
-    // This is the exact scenario from the bug report:
-    // 1. Deploy A reserves W's capacity
-    // 2. Reconciliation fires
-    // 3. refreshAll must NOT clear the reservation
-    // 4. A second placement attempt must see the reserved bytes
-    const workerId = 'w1';
-    const deviceIndex = 0;
-    const totalBytes = 16_000_000_000; // 16 GB
-    const modelABytes = 10_000_000_000; // 10 GB — almost fills the worker
-    const modelBBytes = 8_000_000_000; // 8 GB — should not fit after A is reserved
-
-    const report = workerMemoryReport([
-      { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-    ]);
-    const { redis } = makeMockRedis({ [workerKey(workerId)]: report });
-    const service = makeService(redis);
-    await service.refreshAll();
-
-    // Deploy A places a reservation
-    service.reserveCapacity(workerId, deviceIndex, modelABytes);
-
-    // Reconciliation tick fires — must not clear the reservation
-    await service.refreshAll();
-
-    const budget = service.getWorkerBudget(workerId);
-    expect(budget).not.toBeNull();
-    const device = budget?.devices[0];
-    expect(device).not.toBeUndefined();
-
-    // After the fix: reserved bytes should still be modelABytes
-    expect(device?.reservedBytes).toBe(modelABytes);
-    // Available must be less than modelBBytes — prevents double placement
-    expect(device?.availableBytes).toBeLessThan(modelBBytes);
-  });
-
-  it('preserves reservations across multiple reconciliation ticks while worker is slow to report', async () => {
-    const workerId = 'w1';
-    const deviceIndex = 0;
-    const reservedBytes = 8_000_000_000;
-    const totalBytes = 24_000_000_000;
-
-    const report = workerMemoryReport([
-      { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-    ]);
-    const { redis } = makeMockRedis({ [workerKey(workerId)]: report });
-    const service = makeService(redis);
-    await service.refreshAll();
-
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
-
-    // Multiple reconciliation ticks fire before worker reports (worker is slow)
-    await service.refreshAll();
-    await service.refreshAll();
-    await service.refreshAll();
-
-    const budget = service.getWorkerBudget(workerId);
-    const device = budget?.devices[0];
     expect(device?.reservedBytes).toBe(reservedBytes);
-    expect(device?.availableBytes).toBe(totalBytes - reservedBytes);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Issue #34 regression: refreshWorkerBudget preserves in-flight reservations
-// ---------------------------------------------------------------------------
-
-describe('MemoryBudgetService — refreshWorkerBudget preserves in-flight reservations', () => {
-  it('preserves a reservation when the single-worker report has not caught up', async () => {
-    const workerId = 'w1';
-    const deviceIndex = 0;
-    const reservedBytes = 8_000_000_000;
-    const reportedUsedBytes = 0;
-    const totalBytes = 24_000_000_000;
-
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        {
-          deviceIndex,
-          deviceType: 'CUDA',
-          memoryUsedBytes: reportedUsedBytes,
-          memoryTotalBytes: totalBytes,
-        },
-      ]),
-    );
-    const redis = { get } as unknown as Redis;
-    const service = makeService(redis);
-
-    // Initial refresh to populate the budget map
-    await service.refreshWorkerBudget(workerId);
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
-
-    // Single-worker refresh — must preserve reservation (worker still at 0 used)
-    await service.refreshWorkerBudget(workerId);
-
-    const budget = service.getWorkerBudget(workerId);
-    const device = budget?.devices[0];
-    expect(device?.reservedBytes).toBe(reservedBytes);
-    expect(device?.availableBytes).toBe(totalBytes - reservedBytes);
+    // total - used - reserved = 24GB - 8GB - 8GB = 8GB
+    expect(device?.availableBytes).toBe(totalBytes - reservedBytes - reservedBytes);
   });
 
-  it('clears a reservation when the single-worker report has caught up', async () => {
+  it('preserves a reservation across refreshWorkerBudget regardless of reported usage', async () => {
     const workerId = 'w1';
     const deviceIndex = 0;
     const reservedBytes = 8_000_000_000;
     const totalBytes = 24_000_000_000;
 
-    // First call: no usage (pre-deploy snapshot)
-    // Second call: usage equals reservation (worker caught up)
     const get = vi
       .fn()
       .mockResolvedValueOnce(
@@ -274,15 +133,14 @@ describe('MemoryBudgetService — refreshWorkerBudget preserves in-flight reserv
     const service = makeService(redis);
 
     await service.refreshWorkerBudget(workerId);
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
 
-    // Worker now reports updated usage — reservation should be cleared
     await service.refreshWorkerBudget(workerId);
 
     const budget = service.getWorkerBudget(workerId);
     const device = budget?.devices[0];
-    expect(device?.reservedBytes).toBe(0);
-    expect(device?.availableBytes).toBe(totalBytes - reservedBytes);
+    expect(device?.reservedBytes).toBe(reservedBytes);
+    expect(device?.availableBytes).toBe(totalBytes - reservedBytes - reservedBytes);
   });
 
   it('removes the budget but not reservations for other workers when one worker disappears', async () => {
@@ -305,12 +163,9 @@ describe('MemoryBudgetService — refreshWorkerBudget preserves in-flight reserv
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
-    // Populate both workers
     await service.refreshWorkerBudget(liveWorker);
-    // Reserve capacity on the live worker (simulate in-flight deploy)
-    service.reserveCapacity(liveWorker, deviceIndex, reservedBytes);
+    service.reserveCapacity(liveWorker, deviceIndex, 'model-a', reservedBytes);
 
-    // Dead worker refresh removes its budget but live worker's reservation stays
     await service.refreshWorkerBudget(deadWorker);
 
     const liveBudget = service.getWorkerBudget(liveWorker);
@@ -319,7 +174,44 @@ describe('MemoryBudgetService — refreshWorkerBudget preserves in-flight reserv
 });
 
 // ---------------------------------------------------------------------------
-// Existing reservation mechanics (non-regression)
+// Issue #87: vanished worker (refreshAll) clears its reservations
+// ---------------------------------------------------------------------------
+
+describe('MemoryBudgetService — vanished worker clears reservations', () => {
+  it('clears reservations when a worker key disappears from refreshAll, so a rejoining worker starts clean', async () => {
+    const workerId = 'w1';
+    const deviceIndex = 0;
+    const totalBytes = 16_000_000_000;
+    const reservedBytes = 4_000_000_000;
+
+    const report = workerMemoryReport([
+      { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+    ]);
+    const { redis, scan, pipeline, get } = makeMockRedis({ [workerKey(workerId)]: report });
+    const service = makeService(redis);
+
+    await service.refreshAll();
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+    expect(service.getWorkerBudget(workerId)?.devices[0]?.reservedBytes).toBe(reservedBytes);
+
+    // Worker's memory key vanishes from Redis (no longer scanned).
+    scan.mockResolvedValue(['0', []]);
+    pipeline.mockReturnValue({ get: vi.fn().mockReturnThis(), exec: vi.fn().mockResolvedValue([]) });
+
+    await service.refreshAll();
+
+    expect(service.getWorkerBudget(workerId)).toBeNull();
+
+    // Worker rejoins and reports the same key — its old reservation must not resurface.
+    get.mockResolvedValue(report);
+    const rejoined = await service.refreshWorkerBudget(workerId);
+    expect(rejoined?.devices[0]?.reservedBytes).toBe(0);
+    expect(rejoined?.devices[0]?.availableBytes).toBe(totalBytes);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reservation mechanics
 // ---------------------------------------------------------------------------
 
 describe('MemoryBudgetService — reservation mechanics', () => {
@@ -340,7 +232,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const service = makeService(redis);
 
     await service.refreshWorkerBudget(workerId);
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
 
     const budget = service.getWorkerBudget(workerId);
     const device = budget?.devices[0];
@@ -348,7 +240,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     expect(device?.availableBytes).toBe(totalBytes - reservedBytes);
   });
 
-  it('releaseCapacity restores availableBytes', async () => {
+  it('reserveCapacity is idempotent for the same model — repeated calls do not accumulate', async () => {
     const workerId = 'w1';
     const deviceIndex = 0;
     const totalBytes = 16_000_000_000;
@@ -365,8 +257,120 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const service = makeService(redis);
 
     await service.refreshWorkerBudget(workerId);
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
-    service.releaseCapacity(workerId, deviceIndex, reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+
+    const budget = service.getWorkerBudget(workerId);
+    const device = budget?.devices[0];
+    expect(device?.reservedBytes).toBe(reservedBytes);
+    expect(device?.availableBytes).toBe(totalBytes - reservedBytes);
+  });
+
+  it('co-located models on the same device sum their reservations for availableBytes', async () => {
+    const workerId = 'w1';
+    const deviceIndex = 0;
+    const totalBytes = 16_000_000_000;
+    const modelABytes = 4_000_000_000;
+    const modelBBytes = 3_000_000_000;
+
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', modelABytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-b', modelBBytes);
+
+    const budget = service.getWorkerBudget(workerId);
+    const device = budget?.devices[0];
+    expect(device?.reservedBytes).toBe(modelABytes + modelBBytes);
+    expect(device?.availableBytes).toBe(totalBytes - modelABytes - modelBBytes);
+  });
+
+  it('releaseModelReservations restores availableBytes for the released model only', async () => {
+    const workerId = 'w1';
+    const deviceIndex = 0;
+    const totalBytes = 16_000_000_000;
+    const modelABytes = 6_000_000_000;
+    const modelBBytes = 3_000_000_000;
+
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', modelABytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-b', modelBBytes);
+
+    service.releaseModelReservations('model-a');
+
+    const budget = service.getWorkerBudget(workerId);
+    const device = budget?.devices[0];
+    expect(device?.reservedBytes).toBe(modelBBytes);
+    expect(device?.availableBytes).toBe(totalBytes - modelBBytes);
+  });
+
+  it('releaseModelReservations removes the model from every device it reserved on', async () => {
+    const workerId = 'w1';
+    const totalBytes = 16_000_000_000;
+    const bytesPerDevice = 4_000_000_000;
+
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport([
+        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        { deviceIndex: 1, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+      ]),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+    service.reserveCapacity(workerId, 0, 'model-a', bytesPerDevice);
+    service.reserveCapacity(workerId, 1, 'model-a', bytesPerDevice);
+
+    service.releaseModelReservations('model-a');
+
+    const budget = service.getWorkerBudget(workerId);
+    expect(budget?.devices[0]?.reservedBytes).toBe(0);
+    expect(budget?.devices[1]?.reservedBytes).toBe(0);
+    expect(budget?.devices[0]?.availableBytes).toBe(totalBytes);
+    expect(budget?.devices[1]?.availableBytes).toBe(totalBytes);
+  });
+
+  it('releaseModelReservations is idempotent — releasing twice is a no-op', async () => {
+    const workerId = 'w1';
+    const deviceIndex = 0;
+    const totalBytes = 16_000_000_000;
+    const reservedBytes = 6_000_000_000;
+
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        ]),
+      );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+
+    service.releaseModelReservations('model-a');
+    service.releaseModelReservations('model-a'); // double release — should not throw or misbehave
 
     const budget = service.getWorkerBudget(workerId);
     const device = budget?.devices[0];
@@ -374,31 +378,29 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     expect(device?.availableBytes).toBe(totalBytes);
   });
 
-  it('releaseCapacity clamps to zero on double release', async () => {
+  it('clearWorkerReservations removes all reservations for a worker across devices', async () => {
     const workerId = 'w1';
-    const deviceIndex = 0;
     const totalBytes = 16_000_000_000;
-    const reservedBytes = 6_000_000_000;
+    const bytesPerDevice = 4_000_000_000;
 
-    const get = vi
-      .fn()
-      .mockResolvedValue(
-        workerMemoryReport([
-          { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
-        ]),
-      );
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport([
+        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+        { deviceIndex: 1, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: totalBytes },
+      ]),
+    );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
     await service.refreshWorkerBudget(workerId);
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
-    service.releaseCapacity(workerId, deviceIndex, reservedBytes);
-    service.releaseCapacity(workerId, deviceIndex, reservedBytes); // double release
+    service.reserveCapacity(workerId, 0, 'model-a', bytesPerDevice);
+    service.reserveCapacity(workerId, 1, 'model-b', bytesPerDevice);
+
+    service.clearWorkerReservations(workerId);
 
     const budget = service.getWorkerBudget(workerId);
-    const device = budget?.devices[0];
-    expect(device?.reservedBytes).toBe(0);
-    expect(device?.availableBytes).toBe(totalBytes);
+    expect(budget?.devices[0]?.reservedBytes).toBe(0);
+    expect(budget?.devices[1]?.reservedBytes).toBe(0);
   });
 
   it('getClusterSummary includes reserved bytes', async () => {
@@ -418,10 +420,61 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     const service = makeService(redis);
 
     await service.refreshWorkerBudget(workerId);
-    service.reserveCapacity(workerId, deviceIndex, reservedBytes);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
 
     const summary = service.getClusterSummary();
     expect(summary.reservedBytes).toBe(reservedBytes);
     expect(summary.availableBytes).toBe(totalBytes - reservedBytes);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// availableBytes formula: total - used - reserved (not max(used, reserved))
+// ---------------------------------------------------------------------------
+
+describe('MemoryBudgetService — availableBytes formula', () => {
+  it('subtracts both used and reserved bytes rather than taking the max', async () => {
+    const workerId = 'w1';
+    const deviceIndex = 0;
+    const totalBytes = 24_000_000_000;
+    const usedBytes = 10_000_000_000;
+    const reservedBytes = 5_000_000_000;
+
+    const report = workerMemoryReport([
+      { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: usedBytes, memoryTotalBytes: totalBytes },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+
+    const budget = service.getWorkerBudget(workerId);
+    const device = budget?.devices[0];
+    // Old (buggy) formula: total - max(used, reserved) = 24 - 10 = 14GB
+    // New formula: total - used - reserved = 24 - 10 - 5 = 9GB
+    expect(device?.availableBytes).toBe(totalBytes - usedBytes - reservedBytes);
+  });
+
+  it('clamps availableBytes to zero when used + reserved exceeds total', async () => {
+    const workerId = 'w1';
+    const deviceIndex = 0;
+    const totalBytes = 16_000_000_000;
+    const usedBytes = 10_000_000_000;
+    const reservedBytes = 10_000_000_000;
+
+    const report = workerMemoryReport([
+      { deviceIndex, deviceType: 'CUDA', memoryUsedBytes: usedBytes, memoryTotalBytes: totalBytes },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+    service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
+
+    const budget = service.getWorkerBudget(workerId);
+    expect(budget?.devices[0]?.availableBytes).toBe(0);
   });
 });

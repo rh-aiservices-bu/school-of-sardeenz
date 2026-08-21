@@ -55,6 +55,7 @@ interface MockDeps {
   memoryBudget: {
     refreshAll: ReturnType<typeof vi.fn>;
     getAllBudgets: ReturnType<typeof vi.fn>;
+    clearWorkerReservations: ReturnType<typeof vi.fn>;
   };
   routingMap: {
     removeModel: ReturnType<typeof vi.fn>;
@@ -96,6 +97,7 @@ function createMocks(): MockDeps {
     memoryBudget: {
       refreshAll: vi.fn().mockResolvedValue(undefined),
       getAllBudgets: vi.fn().mockReturnValue([]),
+      clearWorkerReservations: vi.fn(),
     },
     routingMap: {
       removeModel: vi.fn().mockResolvedValue(undefined),
@@ -241,6 +243,15 @@ describe('ReconciliationService', () => {
       await service.tick();
 
       expect(mocks.workerPool.removeWorker).toHaveBeenCalledWith('w1');
+    });
+
+    it('clears VRAM reservations for dead workers so their capacity is not leaked (#87)', async () => {
+      mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
+      mocks.lifecycle.getAllStates.mockResolvedValue([]);
+
+      await service.tick();
+
+      expect(mocks.memoryBudget.clearWorkerReservations).toHaveBeenCalledWith('w1');
     });
 
     it('skips models in STOPPED or ERROR state on dead workers', async () => {

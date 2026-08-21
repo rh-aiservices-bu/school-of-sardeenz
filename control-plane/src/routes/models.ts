@@ -102,6 +102,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           deps.memoryBudget.reserveCapacity(
             result.workerId,
             device.deviceIndex,
+            body.modelName,
             body.requiredMemory / (body.tensorParallel ?? 1),
           );
         }
@@ -207,6 +208,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             deps.memoryBudget.reserveCapacity(
               reclaimed.workerId,
               device.deviceIndex,
+              body.modelName,
               body.requiredMemory / (body.tensorParallel ?? 1),
             );
           }

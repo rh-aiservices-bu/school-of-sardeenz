@@ -4,6 +4,7 @@ import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
 import { SleepWakeService } from '../sleep-wake.js';
 import type { ModelLifecycleService, ModelState } from '../model-lifecycle.js';
 import type { RoutingMapService } from '../routing-map.js';
+import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RunnerClient } from '../../clients/runner.js';
 
 // These tests pin the add/remove-endpoint symmetry that the engine-port split (issue #77) hinges on:
@@ -38,6 +39,9 @@ interface Mocks {
     removeEndpoint: ReturnType<typeof vi.fn>;
     removeModel: ReturnType<typeof vi.fn>;
   };
+  memoryBudget: {
+    releaseModelReservations: ReturnType<typeof vi.fn>;
+  };
   runnerClient: {
     getHealth: ReturnType<typeof vi.fn>;
     sleep: ReturnType<typeof vi.fn>;
@@ -57,6 +61,9 @@ function createMocks(): Mocks {
       removeEndpoint: vi.fn().mockResolvedValue(undefined),
       removeModel: vi.fn().mockResolvedValue(undefined),
     },
+    memoryBudget: {
+      releaseModelReservations: vi.fn(),
+    },
     runnerClient: {
       // READY with no in-flight requests → drain and wake complete on the first poll.
       getHealth: vi.fn().mockResolvedValue({ state: RunnerState.READY, activeRequests: 0 }),
@@ -70,6 +77,7 @@ function createService(mocks: Mocks): SleepWakeService {
   return new SleepWakeService(
     mocks.lifecycle as unknown as ModelLifecycleService,
     mocks.routingMap as unknown as RoutingMapService,
+    mocks.memoryBudget as unknown as MemoryBudgetService,
     5_000,
     5_000,
     10,
@@ -171,5 +179,27 @@ describe('SleepWakeService — activeRequests unknown handling (#116)', () => {
 
     expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(2);
     expect(mocks.runnerClient.sleep).toHaveBeenCalled();
+  });
+});
+
+describe('SleepWakeService — VRAM reservation release (#87)', () => {
+  let mocks: Mocks;
+  let service: SleepWakeService;
+
+  beforeEach(() => {
+    mocks = createMocks();
+    service = createService(mocks);
+  });
+
+  it('stopModel releases the model reservation once the model is fully stopped', async () => {
+    await service.stopModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+
+    expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+  });
+
+  it('sleepModel does NOT release the reservation — a sleeping model keeps its VRAM budget', async () => {
+    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+
+    expect(mocks.memoryBudget.releaseModelReservations).not.toHaveBeenCalled();
   });
 });

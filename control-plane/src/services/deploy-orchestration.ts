@@ -109,6 +109,7 @@ export class DeployOrchestrationService {
         runnerId: runnerInfo.runnerId,
       });
       await this.routingMap.setModelState(params.modelName, ModelState.ACTIVE);
+      this.memoryBudget.releaseModelReservations(params.modelName);
 
       this.notifications
         ?.createNotification({
@@ -195,9 +196,6 @@ export class DeployOrchestrationService {
   }
 
   private releaseReservations(params: DeployModelParams): void {
-    const perDevice = params.requiredMemory / params.tensorParallel;
-    for (const device of params.devices) {
-      this.memoryBudget.releaseCapacity(params.workerId, device.deviceIndex, perDevice);
-    }
+    this.memoryBudget.releaseModelReservations(params.modelName);
   }
 }

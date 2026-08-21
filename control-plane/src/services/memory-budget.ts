@@ -7,7 +7,7 @@ export interface DeviceBudget {
   totalBytes: number;
   usedBytes: number;
   reservedBytes: number;
-  availableBytes: number; // totalBytes - max(usedBytes, reservedBytes)
+  availableBytes: number; // totalBytes - usedBytes - reservedBytes
 }
 
 export interface WorkerBudget {
@@ -53,10 +53,12 @@ export class MemoryBudgetService {
   private readonly budgets: Map<string, WorkerBudget> = new Map();
 
   /**
-   * per-device reservations that have been committed locally but may not yet
-   * be reflected in the next Redis report.  Keyed as `${workerId}:${deviceIndex}`.
+   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (modelName -> bytes).
+   * Reservations are held per-model so that co-located models on the same device do not
+   * clobber each other's reservation, and so a model's reservation can be released
+   * explicitly (on stop/evict/worker loss) without affecting other models on that device.
    */
-  private readonly reservations: Map<string, number> = new Map();
+  private readonly reservations: Map<string, Map<string, number>> = new Map();
 
   constructor(
     private readonly redis: Redis,
@@ -73,7 +75,13 @@ export class MemoryBudgetService {
   }
 
   private getReservation(workerId: string, deviceIndex: number): number {
-    return this.reservations.get(this.reservationKey(workerId, deviceIndex)) ?? 0;
+    const perModel = this.reservations.get(this.reservationKey(workerId, deviceIndex));
+    if (!perModel) return 0;
+    let total = 0;
+    for (const bytes of perModel.values()) {
+      total += bytes;
+    }
+    return total;
   }
 
   private isStale(lastReportAt: string): boolean {
@@ -96,7 +104,7 @@ export class MemoryBudgetService {
 
     const devices: DeviceBudget[] = report.devices.map((d) => {
       const reservedBytes = this.getReservation(workerId, d.deviceIndex);
-      const availableBytes = d.memoryTotalBytes - Math.max(d.memoryUsedBytes, reservedBytes);
+      const availableBytes = d.memoryTotalBytes - d.memoryUsedBytes - reservedBytes;
       return {
         deviceIndex: d.deviceIndex,
         deviceType: d.deviceType,
@@ -121,9 +129,8 @@ export class MemoryBudgetService {
 
   /**
    * Read the memory report for a single worker from Redis and update the local
-   * budget.  Clears only the reservations whose bytes are already reflected in
-   * the fresh report (usedBytes >= reservedBytes), preserving any reservation
-   * that belongs to an in-flight deploy not yet reported by the worker.
+   * budget. Reservations are preserved across refreshes — they are only cleared
+   * explicitly via releaseModelReservations or clearWorkerReservations.
    * Returns the refreshed WorkerBudget, or null if no report exists.
    */
   async refreshWorkerBudget(workerId: string): Promise<WorkerBudget | null> {
@@ -142,16 +149,13 @@ export class MemoryBudgetService {
     }
 
     this.budgets.set(workerId, budget);
-    this.clearSatisfiedReservations(workerId, budget);
     return budget;
   }
 
   /**
    * Scan Redis for all worker memory keys and refresh every worker in one
-   * pipeline round-trip.  Clears only reservations whose bytes are already
-   * reflected in the worker's fresh report, so that in-flight deploy
-   * reservations (runner starting, report not yet updated) are preserved and
-   * continue to protect capacity against double-placement.
+   * pipeline round-trip. Reservations are preserved across refreshes — they are
+   * only cleared explicitly via releaseModelReservations or clearWorkerReservations.
    *
    * After refreshing, writes a per-device memory snapshot to
    * `{prefix}:cluster:memory` so the dashboard BFF can serve stale data
@@ -194,15 +198,16 @@ export class MemoryBudgetService {
       const budget = this.parseReport(raw, workerId);
       if (budget) {
         this.budgets.set(workerId, budget);
-        this.clearSatisfiedReservations(workerId, budget);
         seenWorkers.add(workerId);
       }
     }
 
-    // Remove budgets for workers no longer present in Redis
+    // Remove budgets for workers no longer present in Redis, and clear their reservations —
+    // a vanished worker can no longer report usage that would ever satisfy them.
     for (const workerId of this.budgets.keys()) {
       if (!seenWorkers.has(workerId)) {
         this.budgets.delete(workerId);
+        this.clearWorkerReservations(workerId);
       }
     }
 
@@ -252,15 +257,22 @@ export class MemoryBudgetService {
   }
 
   /**
-   * Reserve capacity on a specific device.  The reservation is held in-memory
-   * and applied on top of the Redis-reported usedBytes so that subsequent
-   * placement decisions account for in-flight allocations before the worker
-   * has had a chance to report updated usage.
+   * Reserve capacity on a specific device for a specific model. Idempotent: calling
+   * this again for the same (workerId, deviceIndex, modelName) sets the reservation
+   * to `bytes` rather than accumulating it.
+   *
+   * The reservation is held in-memory and applied on top of the Redis-reported
+   * usedBytes so that subsequent placement decisions account for in-flight
+   * allocations before the worker has had a chance to report updated usage.
    */
-  reserveCapacity(workerId: string, deviceIndex: number, bytes: number): void {
+  reserveCapacity(workerId: string, deviceIndex: number, modelName: string, bytes: number): void {
     const rk = this.reservationKey(workerId, deviceIndex);
-    const current = this.reservations.get(rk) ?? 0;
-    this.reservations.set(rk, current + bytes);
+    let perModel = this.reservations.get(rk);
+    if (!perModel) {
+      perModel = new Map();
+      this.reservations.set(rk, perModel);
+    }
+    perModel.set(modelName, bytes);
 
     // Recompute the in-memory device budget immediately so callers see the
     // updated availableBytes without waiting for the next refreshWorkerBudget.
@@ -268,21 +280,23 @@ export class MemoryBudgetService {
   }
 
   /**
-   * Release a previously reserved capacity block.  Clamps to zero so stale
-   * double-releases cannot produce a negative reservation.
+   * Release all reservations held by a model, across every device on every worker.
+   * Called on terminal lifecycle transitions (stop, evict) so a model's reserved
+   * capacity is never leaked once it is no longer running or about to run.
    */
-  releaseCapacity(workerId: string, deviceIndex: number, bytes: number): void {
-    const rk = this.reservationKey(workerId, deviceIndex);
-    const current = this.reservations.get(rk) ?? 0;
-    const updated = Math.max(0, current - bytes);
+  releaseModelReservations(modelName: string): void {
+    for (const [rk, perModel] of this.reservations) {
+      if (!perModel.has(modelName)) continue;
+      perModel.delete(modelName);
+      if (perModel.size === 0) {
+        this.reservations.delete(rk);
+      }
 
-    if (updated === 0) {
-      this.reservations.delete(rk);
-    } else {
-      this.reservations.set(rk, updated);
+      const sepIndex = rk.lastIndexOf(':');
+      const workerId = rk.slice(0, sepIndex);
+      const deviceIndex = Number(rk.slice(sepIndex + 1));
+      this.recomputeDeviceBudget(workerId, deviceIndex);
     }
-
-    this.recomputeDeviceBudget(workerId, deviceIndex);
   }
 
   /** Aggregate memory figures across every non-stale worker and device. */
@@ -309,10 +323,6 @@ export class MemoryBudgetService {
   // Private mutators
   // ---------------------------------------------------------------------------
 
-  /**
-   * After a reservation change, patch the affected DeviceBudget in-place so
-   * the Map stays consistent without requiring a full Redis round-trip.
-   */
   private async scanKeys(pattern: string): Promise<string[]> {
     const keys: string[] = [];
     let cursor = '0';
@@ -324,32 +334,19 @@ export class MemoryBudgetService {
     return keys;
   }
 
-  private clearWorkerReservations(workerId: string): void {
+  /**
+   * Clear every reservation held on any device for the given worker. Called when a
+   * worker is removed (heartbeat lost, report vanished) so its reservations don't
+   * linger and block placement forever.
+   */
+  clearWorkerReservations(workerId: string): void {
     const prefix = `${workerId}:`;
     for (const key of this.reservations.keys()) {
-      if (key.startsWith(prefix)) {
-        this.reservations.delete(key);
-      }
-    }
-  }
+      if (!key.startsWith(prefix)) continue;
+      this.reservations.delete(key);
 
-  /**
-   * Clear only the reservations for a worker whose fresh report already
-   * accounts for the reserved bytes (usedBytes >= reservedBytes on that
-   * device).  Reservations for devices whose usedBytes is still below the
-   * reserved amount — indicating the runner has not yet updated its report —
-   * are left intact so that the capacity remains protected.
-   */
-  private clearSatisfiedReservations(workerId: string, budget: WorkerBudget): void {
-    for (const device of budget.devices) {
-      const rk = this.reservationKey(workerId, device.deviceIndex);
-      const reserved = this.reservations.get(rk);
-      if (reserved === undefined) continue;
-      if (device.usedBytes >= reserved) {
-        this.reservations.delete(rk);
-        // Recompute so availableBytes reflects the now-zero reservation.
-        this.recomputeDeviceBudget(workerId, device.deviceIndex);
-      }
+      const deviceIndex = Number(key.slice(prefix.length));
+      this.recomputeDeviceBudget(workerId, deviceIndex);
     }
   }
 
@@ -362,9 +359,6 @@ export class MemoryBudgetService {
 
     const reservedBytes = this.getReservation(workerId, deviceIndex);
     device.reservedBytes = reservedBytes;
-    device.availableBytes = Math.max(
-      0,
-      device.totalBytes - Math.max(device.usedBytes, reservedBytes),
-    );
+    device.availableBytes = Math.max(0, device.totalBytes - device.usedBytes - reservedBytes);
   }
 }

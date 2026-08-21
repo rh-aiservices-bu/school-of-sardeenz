@@ -224,6 +224,7 @@ export class ReconciliationService {
         })
         .catch(() => {});
       this.workerPool.removeWorker(worker.workerId);
+      this.memoryBudget.clearWorkerReservations(worker.workerId);
     }
   }
 

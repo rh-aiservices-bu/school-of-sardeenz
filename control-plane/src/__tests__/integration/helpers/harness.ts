@@ -181,7 +181,7 @@ export function createHarness(): TestHarness {
     circuitBreakerThreshold: 10,
     circuitBreakerWindowSecs: 60,
   });
-  const sleepWake = new SleepWakeService(lifecycle, routingMap, 3000, 3000, 100);
+  const sleepWake = new SleepWakeService(lifecycle, routingMap, memoryBudget, 3000, 3000, 100);
   const deployOrchestration = new DeployOrchestrationService(
     lifecycle,
     routingMap,

@@ -65,6 +65,7 @@ async function main(): Promise<void> {
   const sleepWake = new SleepWakeService(
     lifecycle,
     routingMap,
+    memoryBudget,
     config.sleepTimeoutSecs * 1000,
     config.wakeTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,

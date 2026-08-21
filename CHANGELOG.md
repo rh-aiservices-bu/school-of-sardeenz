@@ -82,6 +82,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   404; no state but a DB record is a tombstone, deleted synchronously with a `202`/`STOPPED`
   response; and only `STOPPING` still 409s, so `STOPPED` models fall through to the normal
   stop/remove/delete background flow. (#85)
+- **VRAM reservations are no longer cleared prematurely or leaked on stop/evict/worker loss.**
+  `MemoryBudgetService` used to track one reservation per device (`workerId:deviceIndex`) and
+  auto-clear it whenever a worker's next memory report showed `usedBytes >= reservedBytes` — an
+  unrelated model reporting usage on the same device, or a report arriving in an unlucky order,
+  could satisfy and wipe another model's in-flight reservation, letting a second deploy be placed
+  on capacity that was still spoken for. Conversely, a model's reservation was never released when
+  it stopped, was evicted, or its worker died, permanently shrinking `availableBytes` for that
+  device until the control plane restarted. Reservations are now tracked per `(workerId,
+  deviceIndex, modelName)`, `availableBytes` is `total - used - reserved` (co-located models'
+  reservations sum rather than being collapsed via `max(used, reserved)`), and reservations are
+  only ever cleared explicitly: `DeployOrchestrationService` releases a model's reservation once it
+  reaches `ACTIVE` (actual usage takes over) or fails, `SleepWakeService.stopModel` releases it on
+  full stop (but not on sleep, which must keep holding its budget), and
+  `ReconciliationService.handleDeadWorkers` clears every reservation for a worker the moment it's
+  declared dead. `MemoryBudgetService.reserveCapacity` gained a `modelName` parameter (idempotent —
+  repeated calls set rather than accumulate), `releaseCapacity` was replaced by
+  `releaseModelReservations(modelName)`, and the periodic `clearSatisfiedReservations` inference
+  was removed entirely. (#87)
 - **Deploy-path eviction no longer selects victims cluster-wide, and eviction/re-placement no longer
   block the deploy request.** `POST /api/v1/models` used to call `eviction.selectVictims` with no
   worker scope on a placement miss, so a model could be evicted from a worker that could never have

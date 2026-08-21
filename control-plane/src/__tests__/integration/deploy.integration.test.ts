@@ -74,7 +74,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     expect(result).not.toBeNull();
     expect(result!.workerId).toBe(WORKER_ID);
 
-    harness.memoryBudget.reserveCapacity(WORKER_ID, 0, MEM);
+    harness.memoryBudget.reserveCapacity(WORKER_ID, 0, MODEL, MEM);
     await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING);
 
     // Runner becomes READY after a short delay
