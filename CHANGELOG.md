@@ -81,6 +81,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is caught and logged, and added a `process.on('unhandledRejection', ...)` safety net in
   `index.ts` that logs fatally and exits rather than leaving the process in an undefined state.
   (#84)
+- **Leader election no longer self-elects silently outside Kubernetes or swallows lease
+  failures.** Off-cluster (no `KUBERNETES_SERVICE_HOST`), the control plane used to become "leader"
+  unconditionally with no warning, which is only safe for a genuine single-instance deployment and
+  silently masked a misconfigured multi-replica setup. Startup now requires
+  `SARDEENZ_SINGLE_INSTANCE=true` (or `1`) to run without a Kubernetes Lease, throwing a clear error
+  otherwise, and logs a `warn` plus the new `leadershipMode` (`'kubernetes-lease' | 'single-instance'`)
+  field on the startup line. Lease acquire/renew failures — previously caught and discarded with no
+  trace — are now logged (throttled to the first failure and every 10th thereafter, via the new
+  `sardeenz_control_plane_leader_lease_failures_total` counter), with routine 409 lease contention
+  logged at `debug` instead of `warn` to avoid alert noise. `/readyz` now also reports
+  `consecutiveLeaseFailures` in the `lease_failures` check, so an operator can distinguish an
+  ordinary (elected) follower from a follower actively failing to renew. (#91)
 - **Parked requests now fail fast on mid-wake rollback and inspect the wake response instead of
   hanging or leaking.** A request parked waiting for a sleeping model to wake had three gaps: (1) if
   the model rolled **back** to `SLEEPING` after starting to wake, or (2) transitioned to `DRAINING`

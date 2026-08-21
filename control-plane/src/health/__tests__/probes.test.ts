@@ -25,14 +25,18 @@ async function buildApp(deps: ProbesDeps) {
 
 describe('/healthz', () => {
   it('returns 200 for the leader', async () => {
-    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: true } }));
+    const app = await buildApp(
+      makeHealthyDeps({ leaderElection: { isLeader: true, consecutiveLeaseFailures: 0 } }),
+    );
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
     await app.close();
   });
 
   it('returns 200 for a follower — liveness is independent of leadership', async () => {
-    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: false } }));
+    const app = await buildApp(
+      makeHealthyDeps({ leaderElection: { isLeader: false, consecutiveLeaseFailures: 0 } }),
+    );
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
     await app.close();
@@ -52,17 +56,22 @@ describe('/readyz', () => {
   });
 
   it('returns 200 when leader and infra is healthy', async () => {
-    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: true } }));
+    const app = await buildApp(
+      makeHealthyDeps({ leaderElection: { isLeader: true, consecutiveLeaseFailures: 0 } }),
+    );
     const res = await app.inject({ method: 'GET', url: '/readyz' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body) as { status: string; checks: Record<string, string> };
     expect(body.status).toBe('ready');
     expect(body.checks['leader']).toBe('leader');
+    expect(body.checks['lease_failures']).toBe('0');
     await app.close();
   });
 
   it('returns 503 for a follower even when infra is healthy (regression for #36)', async () => {
-    const app = await buildApp(makeHealthyDeps({ leaderElection: { isLeader: false } }));
+    const app = await buildApp(
+      makeHealthyDeps({ leaderElection: { isLeader: false, consecutiveLeaseFailures: 0 } }),
+    );
     const res = await app.inject({ method: 'GET', url: '/readyz' });
     expect(res.statusCode).toBe(503);
     const body = JSON.parse(res.body) as { status: string; checks: Record<string, string> };
@@ -71,6 +80,17 @@ describe('/readyz', () => {
     // Infra is still healthy — only leadership failed
     expect(body.checks['redis']).toBe('ok');
     expect(body.checks['postgres']).toBe('ok');
+    await app.close();
+  });
+
+  it('exposes the consecutive lease failure count distinct from leader/follower status', async () => {
+    const app = await buildApp(
+      makeHealthyDeps({ leaderElection: { isLeader: false, consecutiveLeaseFailures: 7 } }),
+    );
+    const res = await app.inject({ method: 'GET', url: '/readyz' });
+    const body = JSON.parse(res.body) as { checks: Record<string, string> };
+    expect(body.checks['leader']).toBe('follower');
+    expect(body.checks['lease_failures']).toBe('7');
     await app.close();
   });
 

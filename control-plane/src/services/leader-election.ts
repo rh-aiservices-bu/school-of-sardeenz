@@ -1,29 +1,64 @@
 import { readFileSync } from 'node:fs';
 
-import { leaderIsLeader } from '../health/metrics.js';
+import { leaderIsLeader, leaderLeaseFailuresTotal } from '../health/metrics.js';
+
+export interface LeaderElectionLogger {
+  info(obj: Record<string, unknown>, msg: string): void;
+  warn(obj: Record<string, unknown>, msg: string): void;
+  error(obj: Record<string, unknown>, msg: string): void;
+  debug(obj: Record<string, unknown>, msg: string): void;
+}
+
+export type LeadershipMode = 'kubernetes-lease' | 'single-instance';
 
 export interface LeaderElectionOptions {
   leaseName: string;
   leaseNamespace: string;
   renewIntervalMs: number;
   leaseDurationMs: number;
+  logger: LeaderElectionLogger;
 }
 
 export class LeaderElectionService {
   private _isLeader = false;
   private renewTimer: ReturnType<typeof setInterval> | null = null;
   private readonly kubeAvailable: boolean;
+  private _consecutiveLeaseFailures = 0;
+  private _leadershipMode: LeadershipMode;
+  private readonly logger: LeaderElectionLogger;
+  private static readonly FAILURE_LOG_INTERVAL = 10;
 
   constructor(private readonly options: LeaderElectionOptions) {
     this.kubeAvailable = this.detectKubernetes();
+    this.logger = options.logger;
+    this._leadershipMode = this.kubeAvailable ? 'kubernetes-lease' : 'single-instance';
   }
 
   get isLeader(): boolean {
     return this._isLeader;
   }
 
+  get consecutiveLeaseFailures(): number {
+    return this._consecutiveLeaseFailures;
+  }
+
+  get leadershipMode(): LeadershipMode {
+    return this._leadershipMode;
+  }
+
   async start(): Promise<void> {
     if (!this.kubeAvailable) {
+      const singleInstance = process.env['SARDEENZ_SINGLE_INSTANCE'];
+      if (singleInstance !== 'true' && singleInstance !== '1') {
+        throw new Error(
+          'Not running on Kubernetes and SARDEENZ_SINGLE_INSTANCE is not set. ' +
+            'Set SARDEENZ_SINGLE_INSTANCE=true to run as a single instance without leader election.',
+        );
+      }
+      this.logger.warn(
+        {},
+        'Running in single-instance mode — self-electing as leader without Kubernetes lease',
+      );
       this._isLeader = true;
       leaderIsLeader.set(1);
       return;
@@ -44,6 +79,7 @@ export class LeaderElectionService {
       await this.releaseLease();
     }
     this._isLeader = false;
+    this._consecutiveLeaseFailures = 0;
     leaderIsLeader.set(0);
   }
 
@@ -64,9 +100,11 @@ export class LeaderElectionService {
         this._isLeader = true;
         leaderIsLeader.set(1);
       }
-    } catch {
+      this._consecutiveLeaseFailures = 0;
+    } catch (err) {
       this._isLeader = false;
       leaderIsLeader.set(0);
+      this.recordLeaseFailure(err, 'acquire');
     }
   }
 
@@ -78,10 +116,47 @@ export class LeaderElectionService {
 
     try {
       await this.renewLease();
-    } catch {
+      this._consecutiveLeaseFailures = 0;
+    } catch (err) {
       this._isLeader = false;
       leaderIsLeader.set(0);
+      this.recordLeaseFailure(err, 'renew');
     }
+  }
+
+  private recordLeaseFailure(err: unknown, operation: 'acquire' | 'renew'): void {
+    this._consecutiveLeaseFailures += 1;
+    const isConflict = this.isConflictError(err);
+    const reason = isConflict ? 'conflict' : operation;
+    leaderLeaseFailuresTotal.labels(reason).inc();
+
+    const message = err instanceof Error ? err.message : String(err);
+    const logObj = {
+      operation,
+      consecutiveFailures: this._consecutiveLeaseFailures,
+      error: message,
+    };
+
+    // 409s are normal contention between replicas racing for the same lease — expected, not
+    // actionable, so they're logged at debug rather than warn to avoid alert fatigue.
+    if (isConflict) {
+      this.logger.debug(logObj, 'Leader lease conflict — another instance holds the lease');
+      return;
+    }
+
+    // Throttle to the first failure plus every Nth after that, so a sustained outage doesn't
+    // spam the log at one line per renew interval while still surfacing the ongoing problem.
+    if (
+      this._consecutiveLeaseFailures === 1 ||
+      this._consecutiveLeaseFailures % LeaderElectionService.FAILURE_LOG_INTERVAL === 0
+    ) {
+      this.logger.warn(logObj, 'Leader lease operation failed');
+    }
+  }
+
+  private isConflictError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    return err.message.includes('409') || err.message.toLowerCase().includes('conflict');
   }
 
   private async getLease(): Promise<KubeLease | null> {
@@ -177,6 +252,10 @@ export class LeaderElectionService {
 
   private isLeaseExpired(lease: KubeLease): boolean {
     if (!lease.spec?.renewTime || !lease.spec.leaseDurationSeconds) return true;
+    // Compares the lease's renewTime against this process's own clock rather than the API
+    // server's, so meaningful clock skew between nodes can cause a lease to be judged expired
+    // (or valid) earlier/later than the true bound — the leaseDurationSeconds margin is the
+    // tolerance for that skew, not just for missed renew intervals.
     const renewTime = new Date(lease.spec.renewTime).getTime();
     const expiresAt = renewTime + lease.spec.leaseDurationSeconds * 1000;
     return Date.now() > expiresAt;

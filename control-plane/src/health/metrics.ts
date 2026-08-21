@@ -93,6 +93,13 @@ export const leaderIsLeader = new Gauge({
   registers: [registry],
 });
 
+export const leaderLeaseFailuresTotal = new Counter({
+  name: 'sardeenz_control_plane_leader_lease_failures_total',
+  help: 'Leader lease acquisition/renewal failures',
+  labelNames: ['reason'] as const,
+  registers: [registry],
+});
+
 export const runnerHealthCheckErrorsTotal = new Counter({
   name: 'sardeenz_control_plane_runner_health_check_errors_total',
   help: 'Failed runner health checks',

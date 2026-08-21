@@ -73,6 +73,7 @@ async function main(): Promise<void> {
     info: (obj: Record<string, unknown>, msg: string) => console.log(msg, obj),
     warn: (obj: Record<string, unknown>, msg: string) => console.warn(msg, obj),
     error: (obj: Record<string, unknown>, msg: string) => console.error(msg, obj),
+    debug: (obj: Record<string, unknown>, msg: string) => console.debug(msg, obj),
   };
   const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
 
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
     leaseNamespace: config.leaseNamespace,
     renewIntervalMs: 10_000,
     leaseDurationMs: 30_000,
+    logger: notificationLogger,
   });
 
   const app = await buildServer({
@@ -196,6 +198,7 @@ async function main(): Promise<void> {
       redisUrl: redactUrl(config.redisUrl),
       databaseUrl: redactUrl(config.databaseUrl),
       isLeader: leaderElection.isLeader,
+      leadershipMode: leaderElection.leadershipMode,
     },
     'Control plane started',
   );
