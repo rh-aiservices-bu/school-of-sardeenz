@@ -2,6 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import type { RouteDeps } from '../routes/deps.js';
 
 export function registerProbes(app: FastifyInstance, deps: RouteDeps): void {
+  app.get('/api/health', async (_req, reply) => {
+    return reply.code(200).send({ status: 'ok' });
+  });
+
   app.get('/healthz', async (_req, reply) => {
     return reply.code(200).send({ status: 'ok' });
   });

@@ -86,6 +86,7 @@ endif
 
 typecheck: ## tsc --build (+ cargo check if Rust available)
 	npx tsc --build
+	npm run typecheck:e2e -w @sardeenz/dashboard
 ifdef CARGO
 	cd proxy && cargo check
 endif

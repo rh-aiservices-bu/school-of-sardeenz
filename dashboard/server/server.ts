@@ -68,11 +68,16 @@ export async function buildServer(deps: ServerDeps) {
   registerCatalogRoutes(app, deps.routes);
   registerWeightsRoutes(app, deps.routes);
 
-  // In production, serve the frontend SPA from dist/client/
+  // In production, serve the frontend SPA from dist/client/. SARDEENZ_CLIENT_DIR overrides the
+  // resolved path — needed by e2e, which spawns this server from TS source (not the compiled
+  // dist/server/ layout this default assumes), so the default `../client` guess doesn't resolve.
   const serverDir = dirname(fileURLToPath(import.meta.url));
-  const clientDir = join(serverDir, '..', 'client');
+  const clientDir = process.env['SARDEENZ_CLIENT_DIR'] ?? join(serverDir, '..', 'client');
 
-  if (process.env['NODE_ENV'] === 'production' && existsSync(clientDir)) {
+  const serveStatic =
+    process.env['NODE_ENV'] === 'production' || process.env['SARDEENZ_SERVE_STATIC'] === '1';
+
+  if (serveStatic && existsSync(clientDir)) {
     await app.register(fastifyStatic, {
       root: clientDir,
       prefix: '/',

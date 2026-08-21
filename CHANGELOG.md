@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **CI workflow (GitHub Actions).** A `quality` job (`.github/workflows/ci.yml`) runs on pull
+  requests to `dev`/`main` and pushes to both, enforcing every gate that previously ran only
+  manually: `make all` (typecheck + ESLint + clippy + Redocly spec validation), `make test`
+  (vitest + `cargo test`), and a contract-codegen drift gate (`npm run codegen -w @sardeenz/types`
+  then `git diff --exit-code packages/types/src/generated/`). Rust is installed explicitly with an
+  "assert Rust steps actually ran" check so the Makefile's `ifdef CARGO` guards cannot silently
+  degrade CI to the TypeScript half. Playwright e2e (pending #102), `format-check` (Prettier
+  backlog), and integration tests (service containers) are deliberately deferred — documented in
+  the workflow. (#82)
 - **`/implement-milestone` skill.** Project skill (`.claude/skills/implement-milestone/`) that
   executes a GitHub milestone (M1–M9) issue by issue: an Opus session orchestrates; Opus subagents
   plan, blueprint, review, verify, and accept; Sonnet subagents implement. Each issue runs in an
@@ -52,6 +61,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard Playwright e2e suite is now runnable, enforced, and lint/typechecked.** The suite was
+  entirely non-functional — every test that used the `bffPort` fixture failed before its body ran,
+  because (a) the BFF only served the SPA under `NODE_ENV=production` while the fixture set
+  `NODE_ENV=test`, and (b) the readiness probe polled `/api/health`, a route that was allowlisted but
+  never registered. Static serving is now decoupled from `NODE_ENV` via `SARDEENZ_SERVE_STATIC=1`
+  (set by the fixture), a real liveness `GET /api/health` is registered (making the auth allowlist
+  entry truthful), and `SARDEENZ_CLIENT_DIR` lets the fixture point the tsx-spawned server at the
+  built `dist/client` bundle (unset in production, where the default resolves the same path). The
+  suite is now covered by ESLint (`dashboard/e2e/` un-ignored, with a type-aware override) and by a
+  new `typecheck:e2e` wired into `make typecheck`, and `test:e2e` builds the client before running.
+  Two vacuous `auth.spec.ts` assertions (a `x || !x` tautology and a not-401/not-403 check) were
+  replaced with a concrete redirect-URL assertion and an explicit `200`. The nine specs now run to
+  real pass/fail; pre-existing PatternFly-6 selector drift surfaced by the newly-runnable suite is
+  tracked as a follow-up. (#102)
+- **Phase-4 spike-gate suite (`tests/gates/run-gates.sh`) no longer reports false results.**
+  Gate 5 (SIGTERM shutdown) used `kill -0` to check survival, which counts a zombie/defunct process
+  as "alive" — it now records the runner PIDs before signalling and asserts no matching process
+  remains after the grace period (treating `Z*` state as exited). Gate 4 (weights `--bind`) writes a
+  unique `mktemp` probe under the weights volume instead of a fixed filename and cleans it up inline.
+  Gate 9 (kvcached co-location) now captures each runner's `runnerId`, polls `/memory-report` until
+  the runner is READY (a `STARTING` runner returns 409 with no `.devices` — previously a false
+  failure), asserts co-location on GPU 0 for both, and always cleans up the runners it created via an
+  EXIT trap. Gates 3/7/8 guard on the tiny-SIF actually existing, Gate 8 also compares PID
+  namespaces, and `main()` distinguishes "no SIF built" from "no GPU present" when skipping GPU-gated
+  checks. The script keeps `set -uo pipefail` (no `-e`) so one gate's failure never aborts the run.
+  (#117)
 - **The model-launch log modal no longer closes itself mid-startup, and startup logs stay
   viewable.** The deploy modal auto-closed ~2s after the model first reported `ACTIVE`, which — for
   engines whose startup is still in progress — yanked it away while weights were barely loading. The

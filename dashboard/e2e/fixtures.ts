@@ -87,6 +87,8 @@ async function startBff(
     AUTH_MODE: 'none',
     SARDEENZ_LOG_LEVEL: 'error',
     NODE_ENV: 'test',
+    SARDEENZ_SERVE_STATIC: '1',
+    SARDEENZ_CLIENT_DIR: join(ROOT, 'dist', 'client'),
   };
 
   const bffProc = spawn('node', ['--import', 'tsx', join(ROOT, 'server', 'index.ts')], {
