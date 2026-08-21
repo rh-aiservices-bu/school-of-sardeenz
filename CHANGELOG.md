@@ -61,6 +61,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Phase-4 spike-gate suite (`tests/gates/run-gates.sh`) no longer reports false results.**
+  Gate 5 (SIGTERM shutdown) used `kill -0` to check survival, which counts a zombie/defunct process
+  as "alive" — it now records the runner PIDs before signalling and asserts no matching process
+  remains after the grace period (treating `Z*` state as exited). Gate 4 (weights `--bind`) writes a
+  unique `mktemp` probe under the weights volume instead of a fixed filename and cleans it up inline.
+  Gate 9 (kvcached co-location) now captures each runner's `runnerId`, polls `/memory-report` until
+  the runner is READY (a `STARTING` runner returns 409 with no `.devices` — previously a false
+  failure), asserts co-location on GPU 0 for both, and always cleans up the runners it created via an
+  EXIT trap. Gates 3/7/8 guard on the tiny-SIF actually existing, Gate 8 also compares PID
+  namespaces, and `main()` distinguishes "no SIF built" from "no GPU present" when skipping GPU-gated
+  checks. The script keeps `set -uo pipefail` (no `-e`) so one gate's failure never aborts the run.
+  (#117)
 - **The model-launch log modal no longer closes itself mid-startup, and startup logs stay
   viewable.** The deploy modal auto-closed ~2s after the model first reported `ACTIVE`, which — for
   engines whose startup is still in progress — yanked it away while weights were barely loading. The
