@@ -125,6 +125,12 @@ impl TestProxy {
         // for render(). Metrics macros in the proxy code will silently no-op.
         drop(recorder);
 
+        let upstream_timeout = Duration::from_secs(30);
+        // Mirror the production derivation in Config::from_env: a claimed
+        // probe is only "leaked" after the longer of recovery_timeout and
+        // upstream_timeout, so a slow-but-live probe is never reclaimed early.
+        let probe_timeout = std::cmp::max(cfg.cb_recovery_timeout, upstream_timeout);
+
         let config = Config {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             admin_addr: "127.0.0.1:0".parse().unwrap(),
@@ -137,11 +143,12 @@ impl TestProxy {
                 max_per_model: cfg.parking_max_per_model,
                 max_global: cfg.parking_max_global,
             },
-            upstream_timeout: Duration::from_secs(30),
+            upstream_timeout,
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: cfg.cb_failure_threshold,
                 failure_window: cfg.cb_failure_window,
                 recovery_timeout: cfg.cb_recovery_timeout,
+                probe_timeout,
             },
         };
 

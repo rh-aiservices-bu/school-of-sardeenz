@@ -317,6 +317,8 @@ stateDiagram-v2
 
 Failures outside the window are pruned on each `record_failure()` call. The state check is lazy — `Open → HalfOpen` transition is computed when `state()` or `is_allowed()` is called, not on a timer.
 
+A claimed `HalfOpen` probe is normally released the instant its outcome is recorded (or if the request is cancelled). As a leak backstop, a probe is also treated as re-claimable after `max(recovery_timeout, upstream_timeout)` elapses — deliberately not `recovery_timeout` alone, since a legitimate in-flight probe can run as long as `upstream_timeout`, and reclaiming it earlier would admit a second probe on top of a still-recovering endpoint. This window is derived internally and has no separate env var.
+
 ### When All Endpoints Are Open
 
 If every endpoint for a model has an open circuit breaker, `balancer.pick()` returns `None`. The proxy returns 503 (`all_endpoints_unhealthy`). The control plane's own health monitoring should detect this condition and update the routing map (e.g., marking the model `ERROR` or routing to a different worker).

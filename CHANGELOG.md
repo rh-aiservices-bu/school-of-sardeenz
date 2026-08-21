@@ -61,6 +61,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Circuit-breaker half-open probes no longer leak, permanently stranding a recovering endpoint.**
+  The half-open probe was tracked by a boolean set when a probe was admitted and cleared only when
+  that probe recorded an outcome — so a probe request cancelled by a client disconnect before it
+  returned left the flag stuck, and the endpoint sat in HalfOpen forever with no further probe ever
+  admitted, never recovering. The probe reservation is now claimed **after** load balancing (on the
+  endpoint actually chosen, not every candidate) and is RAII-guarded (`ProbeGuard`): a probe dropped
+  before recording an outcome releases immediately, while a probe that recorded an outcome disarms
+  its guard so it cannot clear a claim a different task has since taken. A leak-backstop expiry
+  (`probe_timeout`, derived as `max(recovery_timeout, upstream_timeout)` so a legitimate long probe
+  is never mistaken for a leaked one) re-admits a probe even if a release is somehow missed.
+  Candidate selection uses a new non-mutating `is_available`, so building the candidate set no longer
+  claims probes on endpoints the balancer won't pick. The circuits map was switched from an async to
+  a blocking (`std::sync::Mutex`) lock so the guard's `Drop` can release without awaiting (same
+  pattern as #92), and upstream forwarding failures now return a generic error to the client with the
+  underlying cause logged server-side (internal endpoint URLs no longer leak in error bodies). (#93)
 - **Redis sync no longer silently drops routing entries it can't parse, and reconnects with backoff.**
   When the proxy's Redis sync encountered an unparseable routing-map entry, it silently dropped that
   model from the routing map — a single malformed write could deregister a live model with no signal.

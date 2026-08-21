@@ -26,10 +26,28 @@ pub struct CircuitBreakerConfig {
     pub failure_threshold: u32,
     pub failure_window: Duration,
     pub recovery_timeout: Duration,
+    /// Window after which a claimed HalfOpen probe is considered leaked and
+    /// re-claimable. Deliberately NOT a separate env var: it is derived as
+    /// `max(recovery_timeout, upstream_timeout)` so an operator cannot set it
+    /// below `upstream_timeout` and reintroduce the bug where a still-running
+    /// legitimate probe (up to `upstream_timeout` long) gets treated as
+    /// stranded and a new probe is admitted on top of it. The RAII
+    /// `ProbeGuard` still clears cancelled/completed probes instantly, so
+    /// half-open concurrency stays at 1 in the common case.
+    pub probe_timeout: Duration,
 }
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
+        let upstream_timeout =
+            Duration::from_secs(parse_env("SARDEENZ_UPSTREAM_TIMEOUT_SECS", "300")?);
+        let cb_recovery_timeout =
+            Duration::from_secs(parse_env("SARDEENZ_CB_RECOVERY_TIMEOUT_SECS", "15")?);
+        // A claimed probe is only "leaked" after the maximum time a legitimate
+        // request could take (upstream_timeout), never before recovery_timeout
+        // either — see CircuitBreakerConfig::probe_timeout doc comment.
+        let probe_timeout = std::cmp::max(cb_recovery_timeout, upstream_timeout);
+
         Ok(Self {
             // Renamed from SARDEENZ_LISTEN_ADDR (which the control plane also reads) so a single
             // shared .env can set both ports independently; legacy name still honored as fallback.
@@ -44,10 +62,7 @@ impl Config {
             control_plane_url: std::env::var("SARDEENZ_CONTROL_PLANE_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string()),
             log_level: std::env::var("SARDEENZ_LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
-            upstream_timeout: Duration::from_secs(parse_env(
-                "SARDEENZ_UPSTREAM_TIMEOUT_SECS",
-                "300",
-            )?),
+            upstream_timeout,
             redis_key_prefix: std::env::var("SARDEENZ_REDIS_KEY_PREFIX")
                 .unwrap_or_else(|_| "sardeenz".to_string()),
             parking: ParkingConfig {
@@ -61,10 +76,8 @@ impl Config {
                     "SARDEENZ_CB_FAILURE_WINDOW_SECS",
                     "30",
                 )?),
-                recovery_timeout: Duration::from_secs(parse_env(
-                    "SARDEENZ_CB_RECOVERY_TIMEOUT_SECS",
-                    "15",
-                )?),
+                recovery_timeout: cb_recovery_timeout,
+                probe_timeout,
             },
         })
     }
