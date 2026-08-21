@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **CI workflow (GitHub Actions).** A `quality` job (`.github/workflows/ci.yml`) runs on pull
+  requests to `dev`/`main` and pushes to both, enforcing every gate that previously ran only
+  manually: `make all` (typecheck + ESLint + clippy + Redocly spec validation), `make test`
+  (vitest + `cargo test`), and a contract-codegen drift gate (`npm run codegen -w @sardeenz/types`
+  then `git diff --exit-code packages/types/src/generated/`). Rust is installed explicitly with an
+  "assert Rust steps actually ran" check so the Makefile's `ifdef CARGO` guards cannot silently
+  degrade CI to the TypeScript half. Playwright e2e (pending #102), `format-check` (Prettier
+  backlog), and integration tests (service containers) are deliberately deferred — documented in
+  the workflow. (#82)
 - **`/implement-milestone` skill.** Project skill (`.claude/skills/implement-milestone/`) that
   executes a GitHub milestone (M1–M9) issue by issue: an Opus session orchestrates; Opus subagents
   plan, blueprint, review, verify, and accept; Sonnet subagents implement. Each issue runs in an

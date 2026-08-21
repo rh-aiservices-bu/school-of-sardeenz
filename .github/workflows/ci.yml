@@ -1,0 +1,66 @@
+name: CI
+
+# No CI existed before this workflow (#82). It enforces every quality gate that
+# previously ran only manually: typecheck, ESLint, clippy, OpenAPI spec
+# validation (redocly), unit tests (vitest + cargo test), and contract-codegen
+# drift.
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+# Cancel superseded runs on the same ref so only the latest commit's CI matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: typecheck / lint / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # The Makefile guards its Rust recipes with `ifdef CARGO` (Makefile:1,
+      # 68/89/95). If cargo is absent, `make all`/`make test` SILENTLY degrade
+      # to the TypeScript half — clippy/check/test never run. We install Rust
+      # explicitly so those recipes actually execute, and assert it below.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: proxy
+
+      - run: npm ci
+
+      - run: make all   # typecheck (tsc --build + cargo check) + lint (eslint + clippy + redocly)
+
+      - run: make test  # vitest run + cargo test
+
+      - name: Codegen drift
+        run: |
+          npm run codegen -w @sardeenz/types
+          git diff --exit-code packages/types/src/generated/
+
+      # Because `ifdef CARGO` makes a cargo-less runner pass make targets while
+      # skipping all Rust gates, explicitly prove cargo/clippy were present so a
+      # regression in Rust setup fails loudly instead of silently green.
+      - name: Assert Rust steps actually ran
+        if: always()
+        run: cargo --version && cd proxy && cargo clippy --version
+
+# Deliberately NOT gated here (tracked separately, not part of #82):
+#   - `make format-check`: `npx prettier --check .` fails on 34 files today; it
+#     is not in `make all`, so excluding it does not weaken this pipeline.
+#   - Playwright e2e: blocked on #102 — do not add until it closes.
+#   - `make test-integration`: needs Redis + Postgres service containers —
+#     belongs in a separate job later.
+#   - index-completeness check (#81).
