@@ -12,6 +12,7 @@ mod test_circuit_breaker;
 mod test_health;
 mod test_model_states;
 mod test_models_endpoint;
+mod test_parking_leak;
 mod test_parking_limits;
 mod test_parking_timeout;
 mod test_sleeping_model;

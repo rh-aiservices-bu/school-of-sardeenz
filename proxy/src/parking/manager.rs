@@ -34,8 +34,49 @@ pub struct ParkingManager {
 }
 
 struct ParkedCount {
-    per_model: Mutex<HashMap<String, usize>>,
+    per_model: std::sync::Mutex<HashMap<String, usize>>,
     global: std::sync::atomic::AtomicUsize,
+}
+
+/// RAII guard for a reserved parking slot. All release accounting — the
+/// global + per-model counters, the parked-connections gauge, and the
+/// parking-duration histogram — runs in `Drop`, so a slot is reclaimed even
+/// when the handler future is cancelled mid-park.
+///
+/// Extension point: #94 will fold `pending_wakes` cleanup into this guard.
+struct ParkingSlotGuard {
+    parked_count: Arc<ParkedCount>,
+    model_name: String,
+    park_start: std::time::Instant,
+}
+
+impl ParkingSlotGuard {
+    /// Call ONLY after the slot has been reserved (counters incremented).
+    fn new(parked_count: Arc<ParkedCount>, model_name: String) -> Self {
+        gauge!("sardeenz_proxy_parked_connections", "model" => model_name.clone()).increment(1);
+        Self { parked_count, model_name, park_start: std::time::Instant::now() }
+    }
+}
+
+impl Drop for ParkingSlotGuard {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+
+        self.parked_count.global.fetch_sub(1, Ordering::SeqCst);
+        {
+            let mut per_model = self.parked_count.per_model.lock().unwrap();
+            if let Some(count) = per_model.get_mut(&self.model_name) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    per_model.remove(&self.model_name);
+                }
+            }
+        }
+        gauge!("sardeenz_proxy_parked_connections", "model" => self.model_name.clone())
+            .decrement(1);
+        histogram!("sardeenz_proxy_parking_duration_seconds")
+            .record(self.park_start.elapsed().as_secs_f64());
+    }
 }
 
 impl ParkingManager {
@@ -51,7 +92,7 @@ impl ParkingManager {
             pending_wakes: Arc::new(Mutex::new(HashMap::new())),
             parked_count: Arc::new(ParkedCount {
                 global: std::sync::atomic::AtomicUsize::new(0),
-                per_model: Mutex::new(HashMap::new()),
+                per_model: std::sync::Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -61,19 +102,8 @@ impl ParkingManager {
     ///
     /// Returns Ok(()) when the model is active and the caller can forward.
     pub async fn park(&self, model_name: &str, fire_wake: bool) -> Result<(), ProxyError> {
-        self.reserve_slot(model_name).await?;
-
-        let park_start = std::time::Instant::now();
-        gauge!("sardeenz_proxy_parked_connections", "model" => model_name.to_string()).increment(1);
-
-        let result = self.do_park(model_name, fire_wake).await;
-
-        gauge!("sardeenz_proxy_parked_connections", "model" => model_name.to_string()).decrement(1);
-        histogram!("sardeenz_proxy_parking_duration_seconds")
-            .record(park_start.elapsed().as_secs_f64());
-
-        self.release_slot(model_name).await;
-        result
+        let _guard = self.reserve_slot(model_name)?;
+        self.do_park(model_name, fire_wake).await
     }
 
     async fn do_park(&self, model_name: &str, fire_wake: bool) -> Result<(), ProxyError> {
@@ -151,22 +181,29 @@ impl ParkingManager {
     /// Remove the pending_wakes entry if no other requests are parked for
     /// this model (so the next request can fire a fresh wake trigger).
     async fn cleanup_pending_wakes_if_last(&self, model_name: &str) {
-        let per_model = self.parked_count.per_model.lock().await;
-        let count = per_model.get(model_name).copied().unwrap_or(0);
+        // Scope the std::sync::MutexGuard to this block so it is provably
+        // dropped before the `.await` below — std::sync::MutexGuard is
+        // !Send, and an explicit `drop()` inside the `if` isn't enough to
+        // convince the generator liveness analysis it doesn't span the
+        // await point.
+        let count = {
+            let per_model = self.parked_count.per_model.lock().unwrap();
+            per_model.get(model_name).copied().unwrap_or(0)
+        };
         // count includes this request (not yet decremented). If count <= 1,
         // this is the last parked request — clean up.
         if count <= 1 {
-            drop(per_model);
             self.pending_wakes.lock().await.remove(model_name);
         }
     }
 
     /// Atomically check limits and reserve a slot. Returns Err if either
-    /// limit is exceeded.
-    async fn reserve_slot(&self, model_name: &str) -> Result<(), ProxyError> {
+    /// limit is exceeded. On success, returns a guard that releases the slot
+    /// (counters + gauge + histogram) on drop — including on cancellation.
+    fn reserve_slot(&self, model_name: &str) -> Result<ParkingSlotGuard, ProxyError> {
         use std::sync::atomic::Ordering;
 
-        let mut per_model = self.parked_count.per_model.lock().await;
+        let mut per_model = self.parked_count.per_model.lock().unwrap();
 
         // Check per-model limit
         let model_count = per_model.get(model_name).copied().unwrap_or(0);
@@ -186,26 +223,54 @@ impl ParkingManager {
 
         // Increment per-model (under the same lock as the check)
         *per_model.entry(model_name.to_string()).or_insert(0) += 1;
+        drop(per_model);
 
-        Ok(())
+        Ok(ParkingSlotGuard::new(self.parked_count.clone(), model_name.to_string()))
     }
 
-    async fn release_slot(&self, model_name: &str) {
-        use std::sync::atomic::Ordering;
-
-        self.parked_count.global.fetch_sub(1, Ordering::SeqCst);
-        let mut per_model = self.parked_count.per_model.lock().await;
-        if let Some(count) = per_model.get_mut(model_name) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                per_model.remove(model_name);
-            }
-        }
-    }
-
+    // NOTE: kept #[allow(dead_code)] despite blueprint A7 — main.rs
+    // duplicates this module tree as a separate `bin` crate compilation
+    // (it doesn't depend on the `sardeenz_proxy` lib crate), so this method
+    // is genuinely unreachable from that target even though the lib crate's
+    // unit test and the integration test suite both call it. See PR report.
     #[allow(dead_code)]
     pub fn global_parked_count(&self) -> usize {
         use std::sync::atomic::Ordering;
         self.parked_count.global.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_manager() -> ParkingManager {
+        ParkingManager::new(
+            ParkingConfig {
+                timeout: std::time::Duration::from_secs(30),
+                max_per_model: 10,
+                max_global: 100,
+            },
+            RoutingMapCache::new(),
+            WakeTriggerClient::new("http://127.0.0.1:1"),
+        )
+    }
+
+    #[test]
+    fn park_slot_guard_releases_on_drop() {
+        let manager = test_manager();
+
+        let guard = manager.reserve_slot("model-a").expect("slot reserved");
+        assert_eq!(manager.global_parked_count(), 1);
+        drop(guard);
+        assert_eq!(manager.global_parked_count(), 0);
+
+        let guard_a = manager.reserve_slot("model-a").expect("slot reserved");
+        let guard_b = manager.reserve_slot("model-a").expect("slot reserved");
+        assert_eq!(manager.global_parked_count(), 2);
+        drop(guard_a);
+        assert_eq!(manager.global_parked_count(), 1);
+        drop(guard_b);
+        assert_eq!(manager.global_parked_count(), 0);
     }
 }

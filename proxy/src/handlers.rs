@@ -9,9 +9,26 @@ use crate::generated::proxy_control_plane::ModelState;
 use crate::routing::resolver::Resolution;
 use crate::state::AppState;
 
+/// RAII guard that decrements `sardeenz_proxy_active_connections` on drop,
+/// so the gauge is balanced even if the handler future is cancelled.
+struct ActiveConnectionGuard;
+
+impl ActiveConnectionGuard {
+    fn new() -> Self {
+        gauge!("sardeenz_proxy_active_connections").increment(1);
+        Self
+    }
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        gauge!("sardeenz_proxy_active_connections").decrement(1);
+    }
+}
+
 pub async fn handle_inference(State(state): State<AppState>, request: Request<Body>) -> Response {
     let start = std::time::Instant::now();
-    gauge!("sardeenz_proxy_active_connections").increment(1);
+    let _active_guard = ActiveConnectionGuard::new();
 
     let response = match handle_inference_inner(state, request).await {
         Ok(resp) => resp,
@@ -20,7 +37,6 @@ pub async fn handle_inference(State(state): State<AppState>, request: Request<Bo
 
     let elapsed = start.elapsed().as_secs_f64();
     let status = response.status().as_u16().to_string();
-    gauge!("sardeenz_proxy_active_connections").decrement(1);
     counter!("sardeenz_proxy_requests_total", "status" => status).increment(1);
     histogram!("sardeenz_proxy_request_duration_seconds").record(elapsed);
 

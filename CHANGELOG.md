@@ -61,6 +61,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Parking slots and connection gauges no longer leak when a client disconnects mid-park.** When a
+  client dropped its connection while its request was parked waiting for a model to wake, the parking
+  slot counters (global and per-model) and the `sardeenz_proxy_parked_connections` gauge were never
+  released — because release happened on an explicit code path that request cancellation skipped —
+  slowly exhausting the parking capacity. Release is now cancel-safe via an RAII guard
+  (`ParkingSlotGuard`) whose `Drop` reclaims the global/per-model counters, decrements the parked
+  gauge, and records the park-duration histogram, so a dropped (cancelled) request future always
+  releases its slot; the per-model counter's mutex was switched from an async to a blocking
+  (`std::sync::Mutex`) lock so the guard's `Drop` can release without awaiting. The active-connection
+  gauge is likewise now released via an RAII guard. (#92)
 - **Sleeping a model no longer corrupts its routing entry.** The control plane's routing-map Lua
   scripts encoded the `endpoints` array with `cjson.encode`, which serializes an empty Lua table as
   `{}` (a JSON object) rather than `[]` (a JSON array) — so removing the last endpoint (e.g. when a

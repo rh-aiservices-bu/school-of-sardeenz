@@ -22,6 +22,7 @@ use tokio::net::TcpListener;
 
 use sardeenz_proxy::config::{CircuitBreakerConfig, Config, ParkingConfig};
 use sardeenz_proxy::handlers;
+use sardeenz_proxy::parking::ParkingManager;
 use sardeenz_proxy::routing::RoutingMapCache;
 use sardeenz_proxy::state::AppState;
 
@@ -30,6 +31,7 @@ pub struct TestProxy {
     pub proxy_addr: std::net::SocketAddr,
     pub admin_addr: std::net::SocketAddr,
     pub routing_cache: RoutingMapCache,
+    pub parking: ParkingManager,
 }
 
 /// Configuration knobs for the test proxy.
@@ -153,6 +155,7 @@ impl TestProxy {
         );
 
         let routing_cache = state.routing_cache.clone();
+        let parking = state.parking.clone();
 
         let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_addr = proxy_listener.local_addr().unwrap();
@@ -179,7 +182,7 @@ impl TestProxy {
             axum::serve(admin_listener, admin_app).await.unwrap();
         });
 
-        TestProxy { proxy_addr, admin_addr, routing_cache }
+        TestProxy { proxy_addr, admin_addr, routing_cache, parking }
     }
 
     pub fn proxy_url(&self) -> String {
