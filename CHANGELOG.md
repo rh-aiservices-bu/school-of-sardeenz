@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`/implement-milestone` skill.** Project skill (`.claude/skills/implement-milestone/`) that
+  executes a GitHub milestone (M1–M9) issue by issue: an Opus session orchestrates; Opus subagents
+  plan, blueprint, review, verify, and accept; Sonnet subagents implement. Each issue runs in an
+  isolated worktree off a `milestone-M<N>` branch, treats decision/implementation-guidance comments
+  as the authoritative spec, enforces the ADR-005 contract flow, and leaves push/PR/close decisions
+  to the user.
 - **Real-time model-launch log streaming.** Deploying a model now opens a modal that streams the
   runner's live stdout/stderr over SSE (real vLLM output in production, realistic simulated lines in
   dev-worker stub mode), and flips to success (auto-closing) or failure as the model reaches
