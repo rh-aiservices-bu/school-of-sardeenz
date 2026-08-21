@@ -32,8 +32,14 @@ The worker imports the SIF signing **public** key so `apptainer verify` trusts S
 Deployment mounts an optional ConfigMap `sardeenz-sif-signing-pubkey` at
 `/etc/sardeenz/keys/sardeenz-sif-signing.pub`. That ConfigMap is produced by the librarian key
 setup — see [`../librarian/`](../librarian/) (Task 7). Until it exists the mount is skipped
-(`optional: true`) and, with `SARDEENZ_VERIFY_SIF=true`, `apptainer verify` will refuse unsigned
-SIFs — so distribute the key before serving real modules.
+(`optional: true`).
+
+The container's entrypoint **fails fast** instead of silently running unverified: with
+`SARDEENZ_VERIFY_SIF=true` (the default), after attempting the key import it checks
+`apptainer key list` for at least one key and exits 1 with a clear error if the keyring is empty
+— a Pod that would otherwise start serving with `apptainer verify` disabled by omission never
+comes up. Distribute the ConfigMap before serving real modules, or set `SARDEENZ_VERIFY_SIF=false`
+for environments (e.g. dev) that intentionally run unsigned SIFs.
 
 ## Prerequisites & caveats
 

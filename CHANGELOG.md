@@ -84,6 +84,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `probePortAvailable` (real TCP bind check in production, `undefined` in tests) double-checks a
   candidate pair is actually free before handing it out. Range exhaustion now throws a clear error
   naming the configured range instead of silently returning an out-of-range port. (#114)
+- **Worker Deployment: signing-key import silently no-oped, no liveness/readiness probes, and the
+  heartbeat kept advertising a wedged worker.** (#118)
+  - `deployment/sif-runner/worker-deployment.yaml`'s entrypoint imported the SIF signing public key
+    with `|| true`, so a missing/invalid ConfigMap left the keyring empty and the worker started
+    anyway with `apptainer verify` silently unable to trust anything. The script now checks
+    `apptainer key list` after import when `SARDEENZ_VERIFY_SIF` is true (the default) and exits 1
+    with a clear error if the keyring is empty, instead of serving unverifiable SIFs.
+  - The Deployment had no liveness/readiness/startup probes, so Kubernetes had no way to detect a
+    wedged worker or hold traffic until it was ready. Added a `management` container port (9100)
+    plus `startupProbe`/`livenessProbe`/`readinessProbe` against `GET /healthz`.
+  - `WorkerRegistration.startHeartbeat()` refreshed the Redis heartbeat key unconditionally on a
+    timer, so a hung worker (event loop blocked, health endpoint unresponsive) kept looking alive to
+    the control plane indefinitely. The heartbeat write is now gated on a successful `GET /healthz`
+    (skipped on non-200 or a fetch failure) and sets the key with a TTL
+    (`redis.set(key, value, 'PX', heartbeatIntervalMs * 4)`) so a worker that stops refreshing
+    expires instead of lingering forever.
 - **Dev worker: signal-killed runners were never reaped, and a runner exiting on its own after
   startup left a phantom VRAM reservation.** (#109)
   - `ApptainerLauncher.stopChild()` treated `exitCode !== null` as the only "already exited"

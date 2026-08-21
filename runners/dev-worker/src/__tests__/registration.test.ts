@@ -68,7 +68,8 @@ function makeMockRedis() {
       pipelineCalls.length = 0;
       return pipeline;
     }),
-    set: vi.fn((key: string, value: string) => {
+    set: vi.fn((...args: unknown[]) => {
+      const [key, value] = args as [string, string];
       setHistory.push({ key, value });
       return 'OK';
     }),
@@ -76,6 +77,10 @@ function makeMockRedis() {
     _setHistory: setHistory,
     _pipeline: pipeline,
   };
+}
+
+function makeFetchFn(ok = true): typeof fetch {
+  return vi.fn(() => Promise.resolve({ ok }) as unknown as Promise<Response>);
 }
 
 describe('WorkerRegistration', () => {
@@ -158,6 +163,7 @@ describe('WorkerRegistration', () => {
 
   describe('heartbeat', () => {
     it('updates heartbeat key on interval', async () => {
+      registration = new WorkerRegistration(mockRedis as never, config, undefined, makeFetchFn());
       registration.startHeartbeat();
 
       await new Promise((r) => setTimeout(r, 350));
@@ -176,6 +182,52 @@ describe('WorkerRegistration', () => {
       registration.startHeartbeat();
       registration.startHeartbeat();
       registration.stopHeartbeat();
+    });
+
+    it('writes heartbeat with TTL when healthz is healthy', async () => {
+      const fetchFn = makeFetchFn(true);
+      registration = new WorkerRegistration(mockRedis as never, config, undefined, fetchFn);
+
+      registration.startHeartbeat();
+      await new Promise((r) => setTimeout(r, 350));
+      registration.stopHeartbeat();
+
+      expect(fetchFn).toHaveBeenCalledWith('http://127.0.0.1:9100/healthz');
+
+      const hbCalls = mockRedis.set.mock.calls.filter(
+        (c) => (c[0] as string).endsWith(':heartbeat'),
+      );
+      expect(hbCalls.length).toBeGreaterThanOrEqual(2);
+      for (const call of hbCalls) {
+        expect(call[2]).toBe('PX');
+        expect(call[3]).toBe(config.heartbeatIntervalMs * 4);
+      }
+    });
+
+    it('skips heartbeat write when healthz returns non-200', async () => {
+      const fetchFn = makeFetchFn(false);
+      registration = new WorkerRegistration(mockRedis as never, config, undefined, fetchFn);
+
+      registration.startHeartbeat();
+      await new Promise((r) => setTimeout(r, 350));
+      registration.stopHeartbeat();
+
+      expect(fetchFn).toHaveBeenCalled();
+      const hbCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':heartbeat'));
+      expect(hbCalls.length).toBe(0);
+    });
+
+    it('skips heartbeat write when healthz fetch throws', async () => {
+      const fetchFn = vi.fn(() => Promise.reject(new Error('connection refused'))) as unknown as typeof fetch;
+      registration = new WorkerRegistration(mockRedis as never, config, undefined, fetchFn);
+
+      registration.startHeartbeat();
+      await new Promise((r) => setTimeout(r, 350));
+      registration.stopHeartbeat();
+
+      expect(fetchFn).toHaveBeenCalled();
+      const hbCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':heartbeat'));
+      expect(hbCalls.length).toBe(0);
     });
   });
 
