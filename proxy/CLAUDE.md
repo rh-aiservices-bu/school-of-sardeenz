@@ -104,6 +104,8 @@ All env vars read at startup by `Config::from_env()`.
 | `SARDEENZ_CB_FAILURE_THRESHOLD`     | `5`                      | Failures to trip circuit breaker                                            |
 | `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | `30`                     | Circuit breaker failure window                                              |
 | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `15`                     | Open → HalfOpen transition time                                             |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` | `0` (unlimited)     | Max concurrently forwarded (in-flight upstream) requests, all models        |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `0` (unlimited)    | Max concurrently forwarded requests, per model                             |
 
 ## Conventions
 

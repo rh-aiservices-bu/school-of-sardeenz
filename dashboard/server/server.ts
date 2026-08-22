@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
+import fastifyHelmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 
 import type { Config } from './config.js';
@@ -37,6 +38,7 @@ export async function buildServer(deps: ServerDeps) {
     },
     requestIdHeader: 'x-request-id',
     genReqId: () => crypto.randomUUID(),
+    trustProxy: true,
   });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -52,6 +54,23 @@ export async function buildServer(deps: ServerDeps) {
   });
 
   await app.register(fastifyCookie);
+
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+      },
+    },
+  });
 
   // Auth plugin MUST be registered before routes
   await app.register(authPlugin, { config: deps.config });

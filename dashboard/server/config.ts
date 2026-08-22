@@ -8,7 +8,6 @@ export interface Config {
   readonly redisUrl: string;
   readonly redisKeyPrefix: string;
   readonly prometheusUrl: string;
-  readonly corsOrigin: string;
   readonly authMode: AuthMode;
   readonly adminUsername: string;
   readonly adminPassword: string;
@@ -19,6 +18,8 @@ export interface Config {
   readonly oauthIssuerUrl: string;
   readonly k8sApiUrl: string;
   readonly namespace: string;
+  readonly controlPlaneApiToken: string;
+  readonly publicUrl: string;
 }
 
 function optionalEnv(name: string, fallback: string): string {
@@ -47,7 +48,6 @@ export function loadConfig(): Config {
     redisUrl: optionalEnv('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
     redisKeyPrefix: optionalEnv('SARDEENZ_REDIS_KEY_PREFIX', 'sardeenz'),
     prometheusUrl: optionalEnv('SARDEENZ_PROMETHEUS_URL', 'http://localhost:9090'),
-    corsOrigin: optionalEnv('SARDEENZ_CORS_ORIGIN', 'http://localhost:5173'),
     authMode,
     adminUsername: optionalEnv('ADMIN_USERNAME', 'admin'),
     adminPassword: optionalEnv('ADMIN_PASSWORD', ''),
@@ -58,6 +58,8 @@ export function loadConfig(): Config {
     oauthIssuerUrl: optionalEnv('OAUTH_ISSUER_URL', ''),
     k8sApiUrl: optionalEnv('K8S_API_URL', ''),
     namespace: optionalEnv('NAMESPACE', 'sardeenz'),
+    controlPlaneApiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
+    publicUrl: optionalEnv('SARDEENZ_PUBLIC_URL', ''),
   };
 }
 
@@ -97,6 +99,21 @@ export function validateAuthConfig(config: Config, logger?: AuthConfigLogger): v
       'ADMIN_PASSWORD must be explicitly set and non-empty when AUTH_MODE=simple. ' +
         'An empty password would allow unauthenticated admin access.',
     );
+  }
+
+  if (config.authMode === 'oauth') {
+    const missing: string[] = [];
+    if (!config.oauthClientId) missing.push('OAUTH_CLIENT_ID');
+    if (!config.oauthClientSecret) missing.push('OAUTH_CLIENT_SECRET');
+    if (!config.oauthIssuerUrl) missing.push('OAUTH_ISSUER_URL');
+    if (!config.publicUrl) missing.push('SARDEENZ_PUBLIC_URL');
+
+    if (missing.length > 0) {
+      throw new Error(
+        `AUTH_MODE=oauth requires the following environment variables to be set: ${missing.join(', ')}. ` +
+          'See docs/usage/deployment-security.md for details.',
+      );
+    }
   }
 }
 

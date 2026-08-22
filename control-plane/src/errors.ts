@@ -14,6 +14,7 @@ export type ErrorCode =
   | 'CATALOG_NOT_FOUND'
   | 'CATALOG_FETCH_FAILED'
   | 'MODULE_IN_USE'
+  | 'UNAUTHORIZED'
   | 'INTERNAL_ERROR';
 
 export interface ErrorDetail {
@@ -121,5 +122,9 @@ export class ControlPlaneError extends Error {
       `Module for ${id} is in use by a running runner; stop dependent models first`,
       { id },
     );
+  }
+
+  static unauthorized(): ControlPlaneError {
+    return new ControlPlaneError(401, 'UNAUTHORIZED', 'Missing or invalid API token');
   }
 }

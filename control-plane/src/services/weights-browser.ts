@@ -1,7 +1,8 @@
 import { readdir } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import type { ControlPlaneComponents } from '@sardeenz/types';
 import { ControlPlaneError } from '../errors.js';
+import { isContainedIn } from '../utils/path-containment.js';
 
 type WeightsListing = ControlPlaneComponents['schemas']['WeightsListing'];
 
@@ -30,7 +31,7 @@ export class WeightsBrowserService {
   // INVALID_REQUEST if the path escapes the root; a missing directory yields an empty listing.
   async list(relativePath = ''): Promise<WeightsListing> {
     const target = resolve(this.root, relativePath);
-    if (target !== this.root && !target.startsWith(this.root + sep)) {
+    if (target !== this.root && !isContainedIn(target, this.root)) {
       throw ControlPlaneError.invalidRequest(`Path escapes the weights root: ${relativePath}`);
     }
 

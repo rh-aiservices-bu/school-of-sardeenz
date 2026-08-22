@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import type { ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 
 import type { Config } from './config.js';
 import type { Redis } from './clients/redis.js';
@@ -61,6 +62,22 @@ export async function buildServer(deps: ServerDeps) {
       code: 'INTERNAL_ERROR',
     });
   });
+
+  if (deps.config.apiToken) {
+    const expectedBuf = Buffer.from(deps.config.apiToken);
+    app.addHook('onRequest', (request) => {
+      if (!request.url.startsWith('/api/v1/')) return Promise.resolve();
+      const authHeader = request.headers.authorization;
+      if (!authHeader?.startsWith('Bearer ')) {
+        throw ControlPlaneError.unauthorized();
+      }
+      const tokenBuf = Buffer.from(authHeader.slice(7));
+      if (tokenBuf.length !== expectedBuf.length || !timingSafeEqual(tokenBuf, expectedBuf)) {
+        throw ControlPlaneError.unauthorized();
+      }
+      return Promise.resolve();
+    });
+  }
 
   registerProbes(app, {
     redis: deps.redis,

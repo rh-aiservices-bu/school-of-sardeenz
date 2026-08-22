@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { createHash, timingSafeEqual, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { Config } from '../config.js';
@@ -6,24 +6,43 @@ import type { JwtPayload } from '../plugins/auth.js';
 
 const SSE_COOKIE_NAME = 'sardeenz_sse';
 
-function sseCookieOptions(expiresInSec: number, request: FastifyRequest): CookieSerializeOptions {
-  const isLocalhost = request.hostname === 'localhost' || request.hostname.startsWith('127.');
+function isSecureRequest(config: Config, request: FastifyRequest): boolean {
+  if (config.publicUrl) {
+    return config.publicUrl.startsWith('https');
+  }
+  return !(request.hostname === 'localhost' || request.hostname.startsWith('127.'));
+}
+
+/**
+ * Behind a reverse proxy, request.protocol/hostname reflect forwarded headers which are
+ * spoofable unless the proxy is trusted and strips them from client input. SARDEENZ_PUBLIC_URL
+ * pins the redirect_uri to the operator-configured origin; falls back to the request for dev.
+ */
+function oauthRedirectUri(config: Config, request: FastifyRequest): string {
+  const origin = config.publicUrl || `${request.protocol}://${request.hostname}`;
+  return `${origin}/api/auth/callback`;
+}
+
+function sseCookieOptions(
+  expiresInSec: number,
+  config: Config,
+  request: FastifyRequest,
+): CookieSerializeOptions {
   return {
-    path: '/api/events',
+    path: '/api',
     httpOnly: true,
     sameSite: 'strict',
-    secure: !isLocalhost,
+    secure: isSecureRequest(config, request),
     maxAge: expiresInSec,
   };
 }
 
-function clearSseCookieOptions(request: FastifyRequest): CookieSerializeOptions {
-  const isLocalhost = request.hostname === 'localhost' || request.hostname.startsWith('127.');
+function clearSseCookieOptions(config: Config, request: FastifyRequest): CookieSerializeOptions {
   return {
-    path: '/api/events',
+    path: '/api',
     httpOnly: true,
     sameSite: 'strict',
-    secure: !isLocalhost,
+    secure: isSecureRequest(config, request),
     maxAge: 0,
   };
 }
@@ -45,15 +64,19 @@ export function _resetRateLimiter(): void {
   loginAttempts.clear();
 }
 
-function isRateLimited(ip: string): boolean {
+function isRateLimited(key: string): boolean {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  const entry = loginAttempts.get(key);
   if (!entry || now >= entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    loginAttempts.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     return false;
   }
   entry.count++;
   return entry.count > RATE_LIMIT_MAX;
+}
+
+function clearRateLimit(key: string): void {
+  loginAttempts.delete(key);
 }
 
 // Periodic cleanup so the map doesn't grow unbounded
@@ -89,14 +112,9 @@ function consumeState(state: string): boolean {
 /* Timing-safe string comparison                                      */
 /* ------------------------------------------------------------------ */
 function safeCompare(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) {
-    // Still do a comparison to keep timing constant
-    timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return timingSafeEqual(bufA, bufB);
+  const ha = createHash('sha256').update(a, 'utf8').digest();
+  const hb = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(ha, hb);
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,14 +132,14 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
   // ------ Simple-mode login ------
   if (config.authMode === 'simple') {
     app.post('/api/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
-      const ip = request.ip;
-      if (isRateLimited(ip)) {
-        return reply.code(429).send({ error: 'Too many login attempts', code: 'RATE_LIMITED' });
-      }
-
       const body = request.body as { username?: string; password?: string } | undefined;
       const username = body?.username ?? '';
       const password = body?.password ?? '';
+
+      const rateLimitKey = `${request.ip}:${username}`;
+      if (isRateLimited(rateLimitKey)) {
+        return reply.code(429).send({ error: 'Too many login attempts', code: 'RATE_LIMITED' });
+      }
 
       const usernameOk = safeCompare(username, config.adminUsername);
       const passwordOk = safeCompare(password, config.adminPassword);
@@ -129,6 +147,8 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       if (!usernameOk || !passwordOk) {
         return reply.code(401).send({ error: 'Invalid credentials', code: 'UNAUTHORIZED' });
       }
+
+      clearRateLimit(rateLimitKey);
 
       const payload: JwtPayload = {
         username: config.adminUsername,
@@ -138,7 +158,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
 
       const token = app.jwt.sign(payload, { expiresIn: expiresInSec });
 
-      void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, request));
+      void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, config, request));
       return reply.send({
         token,
         expiresIn: expiresInSec,
@@ -150,12 +170,12 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
   // ------ OAuth-mode routes ------
   if (config.authMode === 'oauth') {
     // GET /api/auth/login — redirect to OAuth provider
-    app.get('/api/auth/login', async (_request: FastifyRequest, reply: FastifyReply) => {
+    app.get('/api/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
       const state = createState();
       const params = new URLSearchParams({
         response_type: 'code',
         client_id: config.oauthClientId,
-        redirect_uri: `${_request.protocol}://${_request.hostname}/api/auth/callback`,
+        redirect_uri: oauthRedirectUri(config, request),
         state,
         scope: 'user:info',
       });
@@ -188,7 +208,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
           code,
           client_id: config.oauthClientId,
           client_secret: config.oauthClientSecret,
-          redirect_uri: `${request.protocol}://${request.hostname}/api/auth/callback`,
+          redirect_uri: oauthRedirectUri(config, request),
         }),
       });
 
@@ -254,7 +274,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       const payload: JwtPayload = { username, roles, authMode: 'oauth' };
       const token = app.jwt.sign(payload, { expiresIn: expiresInSec });
 
-      void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, request));
+      void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, config, request));
       return reply.redirect(`/oauth/callback#token=${token}`);
     });
   }
@@ -283,7 +303,7 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
   // ------ POST /api/auth/logout ------
   // Clears the SSE auth cookie.
   app.post('/api/auth/logout', async (request: FastifyRequest, reply: FastifyReply) => {
-    void reply.clearCookie(SSE_COOKIE_NAME, clearSseCookieOptions(request));
+    void reply.clearCookie(SSE_COOKIE_NAME, clearSseCookieOptions(config, request));
     return reply.send({ ok: true });
   });
 }

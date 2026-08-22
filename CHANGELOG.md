@@ -8,6 +8,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Dev/deploy hardening.** The dev-worker's `ApptainerLauncher` now strips `APPTAINERENV_*` and
+  `SINGULARITYENV_*` keys from the spawned process env before `apptainer exec` — Apptainer injects
+  these into the guest regardless of `--cleanenv`, so a value set in the worker process's
+  environment could otherwise leak into the engine container. `compose.yaml` now binds the dev
+  Redis and Postgres ports to `127.0.0.1` instead of all interfaces. `containers/control-plane/` and
+  `containers/dashboard/` `.dockerignore` now exclude `.env*` (except `.env.example`), `logs`,
+  `weights`, `modules`, and `scratch` from build contexts. (#119)
+- **Proxy forwarding concurrency limits.** New `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` (global) and
+  `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` (per-model) env vars cap in-flight *forwarded* requests,
+  returning `503 overloaded` once reached (both default to `0`/unlimited). The permit is acquired
+  after parking resolves and before endpoint selection — a parked request never holds one, so a
+  sleep/wake pile-up cannot exhaust the limit and deadlock the proxy. Documents ingress-level rate
+  limiting and per-tenant quotas as mandatory, ingress-owned deployment requirements the proxy
+  itself does not and cannot enforce. (#19)
+- **Proxy configurable body cap and parking byte budget.** Parked requests hold their fully-buffered
+  body in memory for the duration of the park, so an unbounded body size combined with many parked
+  connections could exhaust proxy memory. The hardcoded 10 MiB request-body cap is now configurable
+  via `SARDEENZ_PROXY_MAX_BODY_BYTES` (default `1048576`, i.e. 1 MiB), enforced both at the `axum`
+  body-buffering step and via a `tower_http::limit::RequestBodyLimitLayer` on the inference router.
+  `ParkingManager` now also tracks the total bytes currently parked and rejects new parks once a
+  configurable budget (`SARDEENZ_PARKING_MAX_BYTES`, default `1073741824`, i.e. 1 GiB) would be
+  exceeded, returning `503 parking_limit_reached` alongside the existing per-model/global count
+  limits. (#95)
+- **Dashboard BFF security headers.** The BFF now registers `@fastify/helmet` with a restrictive
+  Content-Security-Policy (`default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, no
+  inline scripts) plus helmet's other default hardening headers. Removed the dead `corsOrigin`
+  config field and `SARDEENZ_CORS_ORIGIN` env var — the BFF only ever served same-origin, so no
+  `@fastify/cors` registration ever consumed it. (#104)
+- **Worker agent authentication + NetworkPolicy.** Mirrors the control-plane pattern (#88) for the
+  worker agent: an optional shared-secret `SARDEENZ_WORKER_TOKEN` gates every dev-worker route
+  except `/healthz` (checked with `timingSafeEqual`), logging a startup warning when left unset.
+  The control plane's `WorkerClient` reads the same env var and attaches the `Authorization:
+  Bearer <token>` header on `startRunner`, `stopRunner`, and both SSE log-stream methods. Adds
+  `deployment/sif-runner/networkpolicy.yaml`, restricting ingress to the worker Service to the
+  control-plane pod on port 9100. Documented in `docs/usage/deployment-security.md`. (#108)
+- **Control plane API authentication + NetworkPolicy.** The control plane now supports an optional
+  shared-secret `SARDEENZ_API_TOKEN`: when set, every `/api/v1/*` request must carry a matching
+  `Authorization: Bearer <token>` header (checked with `timingSafeEqual`, `/healthz`/`/readyz`
+  exempt), and a startup warning is logged when it is left unset. The proxy's wake-trigger client
+  and the dashboard BFF's control-plane client both read the same env var and attach the header
+  automatically. Documents the `401 UNAUTHORIZED` response on every `/api/v1/*` operation in the
+  OpenAPI contract. Adds `deployment/control-plane/networkpolicy.yaml`, restricting ingress to the
+  control-plane Service to the proxy and dashboard pods on port 3000 — defense in depth alongside
+  the token, per `docs/usage/deployment-security.md`. (#88)
+- **SIF supply-chain hardening.** `scripts/build-sif.sh` now refuses to build a SIF unless
+  `--image` is pinned to a `@sha256:<digest>` (a mutable tag could be repointed after review,
+  silently changing what gets signed and published). The runner catalog (`CatalogService`) applies
+  the same digest requirement to `oras://` image refs — entries without a digest are skipped
+  (logged) rather than imported — and now refuses to fetch a remote catalog over plaintext
+  `http://` unless the operator opts in via the new `SARDEENZ_ALLOW_INSECURE_CATALOG` env var.
+  `containers/control-plane/Dockerfile` verifies the Apptainer `.deb`'s sha256
+  (`APPTAINER_DEB_SHA256`) before installing it. `runners.yaml` and the librarian
+  `deployment/librarian/job.yaml` example are updated to show digest-pinned refs. (#115)
 - **CI workflow (GitHub Actions).** A `quality` job (`.github/workflows/ci.yml`) runs on pull
   requests to `dev`/`main` and pushes to both, enforcing every gate that previously ran only
   manually: `make all` (typecheck + ESLint + clippy + Redocly spec validation), `make test`
@@ -59,6 +112,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (default `/weights`) and must have that directory mounted to browse it. Contracts add the
   `WeightsListing` / `WeightsEntry` schemas.
 
+### Changed
+
+- **CI workflow hardening.** The GitHub Actions workflow now declares explicit least-privilege
+  `permissions: { contents: read }`, all four third-party actions are SHA-pinned (not tag-pinned)
+  to prevent supply-chain tag-mutation attacks, and the Rust-assert step's rationale comment no
+  longer hard-codes Makefile line numbers that drift on every edit. (#127)
+
 ### Removed
 
 - **Consumer-less `GET /api/v1/events` SSE route.** The control plane's cluster-events SSE endpoint
@@ -72,6 +132,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard low-severity hardening bundle: SSE write-after-end race, credential-length leak,
+  auto-logout timer races, and untranslated strings.** The BFF's `/api/events` route now guards
+  every `reply.raw.write()` call (message handler and ping timer) with `writableEnded` before
+  writing, matching the existing `model-logs.ts` pattern, so a client disconnect racing an in-flight
+  Redis pub/sub message or ping tick can no longer throw. `safeCompare` in `auth.ts` now hashes both
+  inputs with SHA-256 before `timingSafeEqual` instead of branching on buffer length, removing the
+  side channel that leaked the configured username/password length. `AuthContext`'s
+  `scheduleAutoLogout` now clears any existing timer before scheduling a new one and unmounts
+  cleanly, preventing two auto-logout timers from racing after a token refresh. `formatRelativeTime`
+  now uses `Intl.RelativeTimeFormat` instead of hardcoded English strings, and the `App.tsx` 404
+  page, error boundary, and loading spinners now pull their copy from the `common` i18n namespace
+  instead of inline English literals. (#107)
+- **Dashboard BFF was not proxy-aware: rate limiter collapsed behind a shared proxy IP, OAuth
+  `redirect_uri` trusted spoofable request headers, and OAuth env vars weren't validated at
+  startup.** Fastify now runs with `trustProxy: true` so `request.ip`/`protocol`/`hostname` reflect
+  `X-Forwarded-*` headers from a trusted reverse proxy/ingress instead of always resolving to the
+  proxy's own address. The login rate limiter keys on `${ip}:${username}` instead of `ip` alone (so
+  one bad actor behind a shared NAT/proxy IP can no longer lock out every other user sharing it) and
+  clears its bucket on a successful login. The OAuth `redirect_uri` (authorize + token exchange) and
+  the SSE cookie's `Secure` flag are now derived from a new `SARDEENZ_PUBLIC_URL` config value
+  instead of the request's `protocol`/`hostname`, which are otherwise attacker-controllable unless
+  the fronting proxy is trusted to strip client-supplied forwarded headers. `validateAuthConfig` now
+  fails startup when `AUTH_MODE=oauth` and any of `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`,
+  `OAUTH_ISSUER_URL`, or `SARDEENZ_PUBLIC_URL` is empty. Documented in
+  `docs/usage/deployment-security.md`. (#105)
+- **Dashboard BFF: read-only role could delete notification state.** Both `DELETE /api/notifications/:id`
+  and `DELETE /api/notifications` were gated at `admin-readonly` instead of `admin`, so any
+  authenticated user (the default OAuth role) could wipe notification history. Fixed to require
+  `admin`. Mark-as-read routes stay `admin-readonly` (non-destructive). (#103)
+- **Proxy: wake-trigger transport errors leaked the control-plane URL to clients.** The non-2xx
+  response path was already masked (#93), but a transport-level failure (connection refused, DNS
+  failure, timeout) reaching the control plane still propagated reqwest's raw error — which embeds
+  the request URL, e.g. `error sending request for url (http://127.0.0.1:.../api/v1/wake)` — into
+  the client-facing `model_unavailable` error message. `WakeTriggerClient::trigger_wake` now maps
+  the transport error to a generic `"wake trigger transport error"` message and logs the original
+  error server-side via `tracing::warn!`. (#97)
+- **Module-store write-protection VAP matched the wrong identity.** The `matchConditions` in the
+  ValidatingAdmissionPolicy compared `request.userInfo.username`, which is the controller manager
+  for Pods created by Jobs/Deployments — not the workload SA. Both exemptions were dead: the policy
+  blocked the librarian and control-plane writers it was meant to allow. Fixed to check
+  `object.spec.serviceAccountName` instead. Also added `pods/ephemeralcontainers` to the resource
+  rules so `kubectl debug` ephemeral containers are validated too. (#110)
+- **Dashboard: launch-log SSE stream 401'd whenever auth was enabled.** The `sardeenz_sse` cookie
+  set on login/OAuth-callback was scoped to `Path=/api/events`, so `EventSource` connections to
+  `GET /api/models/:name/logs` (the model launch-log stream) never sent it, forcing a hard 401 in
+  any deployment with `AUTH_MODE=simple`/`oauth`. The cookie path is now `/api` — still narrower
+  than the whole origin, but wide enough to cover every cookie-authenticated SSE endpoint.
+  `useModelLogs` also now surfaces a `failed` state (instead of retrying forever) once reconnects
+  hit the same failure threshold as the app-wide event stream, and `LogViewer` renders a red
+  "unavailable" label in that case. (#101)
 - **Dev worker: runner ports were allocated monotonically and never reclaimed.** `RunnerManager`
   tracked ports with an ever-incrementing counter, so a long-lived worker cycling models through
   start/stop (or crash/restart) would eventually walk past `runnerPortStart + <range>` and hand out
@@ -86,6 +196,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   naming the configured range instead of silently returning an out-of-range port. (#114)
 - **Worker Deployment: signing-key import silently no-oped, no liveness/readiness probes, and the
   heartbeat kept advertising a wedged worker.** (#118)
+- **`modelPath` was never validated against the weights root.** A deploy request could point
+  `modelPath` anywhere on the control plane's filesystem (`../../etc`, a relative path, or a
+  string that merely shared a prefix with the weights dir, e.g. `/weights-evil`), and the worker
+  agent's `ApptainerLauncher` would `--bind`/exec it as-is. `POST /api/v1/models` now rejects any
+  `modelPath` that doesn't resolve to a path strictly inside `config.weightsDir`, via a shared
+  `isContainedIn` helper (`control-plane/src/utils/path-containment.ts`, also now used by
+  `WeightsBrowserService`). The worker agent adds its own independent check — `ApptainerLauncher`
+  rejects non-absolute paths, syntactic escapes, and (via `fs.realpath`) a symlink planted inside
+  the weights dir that resolves back outside it — since it cannot assume every request reaching it
+  passed through the control-plane check. (#113)
   - `deployment/sif-runner/worker-deployment.yaml`'s entrypoint imported the SIF signing public key
     with `|| true`, so a missing/invalid ConfigMap left the keyring empty and the worker started
     anyway with `apptainer verify` silently unable to trust anything. The script now checks

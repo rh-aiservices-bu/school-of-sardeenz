@@ -5,13 +5,15 @@ use crate::generated::proxy_control_plane::{WakeTriggerRequest, WakeTriggerRespo
 pub struct WakeTriggerClient {
     client: reqwest::Client,
     base_url: String,
+    api_token: Option<String>,
 }
 
 impl WakeTriggerClient {
-    pub fn new(control_plane_url: &str) -> Self {
+    pub fn new(control_plane_url: &str, api_token: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url: control_plane_url.trim_end_matches('/').to_string(),
+            api_token,
         }
     }
 
@@ -19,13 +21,22 @@ impl WakeTriggerClient {
         let url = format!("{}/api/v1/wake", self.base_url);
         let request = WakeTriggerRequest { model_name: model_name.to_string(), request_id: None };
 
-        let response = self
+        let mut req_builder = self
             .client
             .post(&url)
             .json(&request)
-            .timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(5));
+        if let Some(ref token) = self.api_token {
+            req_builder = req_builder.header("Authorization", format!("Bearer {token}"));
+        }
+
+        let response = req_builder
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::warn!(model_name, error = %e, "wake trigger transport error");
+                anyhow::anyhow!("wake trigger transport error")
+            })?;
 
         let status = response.status();
         if status.is_success() {

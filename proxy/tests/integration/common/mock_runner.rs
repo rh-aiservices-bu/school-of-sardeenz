@@ -36,6 +36,12 @@ pub struct RunnerState {
     /// Notify that fires after each request (useful in tests that need to
     /// await the request arriving).
     pub received: Arc<Notify>,
+    /// Gate the handler waits on before responding. Defaults to an
+    /// effectively-unlimited pool of permits so ordinary tests never block.
+    /// Tests that need to hold a request in flight (e.g. forwarding
+    /// concurrency limit tests) construct one with zero permits via
+    /// `RunnerState::new_gated` and release it with `gate.add_permits(..)`.
+    pub gate: Arc<tokio::sync::Semaphore>,
 }
 
 impl RunnerState {
@@ -45,6 +51,7 @@ impl RunnerState {
             request_count: Arc::new(AtomicUsize::new(0)),
             fail_count: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Notify::new()),
+            gate: Arc::new(tokio::sync::Semaphore::new(tokio::sync::Semaphore::MAX_PERMITS)),
         }
     }
 
@@ -52,6 +59,15 @@ impl RunnerState {
     pub fn with_failures(model_name: &str, failures: usize) -> Self {
         let s = Self::new(model_name);
         s.fail_count.store(failures, Ordering::SeqCst);
+        s
+    }
+
+    /// A runner state whose handler blocks on `gate` (zero permits to start)
+    /// until the test calls `gate.add_permits(..)`.
+    #[allow(dead_code)]
+    pub fn new_gated(model_name: &str) -> Self {
+        let mut s = Self::new(model_name);
+        s.gate = Arc::new(tokio::sync::Semaphore::new(0));
         s
     }
 }
@@ -102,6 +118,10 @@ async fn handle_inference(
 ) -> impl IntoResponse {
     state.request_count.fetch_add(1, Ordering::SeqCst);
     state.received.notify_waiters();
+
+    // Held while `gate` has no permits — lets tests keep a "forwarded"
+    // request in flight to exercise the forwarding concurrency limiter.
+    let _permit = state.gate.acquire().await.unwrap();
 
     // Fail the first N requests.
     let remaining = state.fail_count.load(Ordering::SeqCst);

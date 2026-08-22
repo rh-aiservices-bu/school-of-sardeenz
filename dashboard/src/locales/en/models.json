@@ -176,6 +176,7 @@
     "connected": "Connected",
     "reconnecting": "Reconnecting…",
     "waiting": "Waiting for logs…",
+    "unavailable": "Log stream unavailable — connection failed.",
     "startingProgress": "Starting model…",
     "successTitle": "Model started successfully",
     "successBody": "The model is now active.",

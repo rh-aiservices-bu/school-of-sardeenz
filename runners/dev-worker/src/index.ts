@@ -37,7 +37,7 @@ const runnerManager = new RunnerManager(
   probePortAvailable,
 );
 
-const server = createServer(runnerManager);
+const server = createServer(runnerManager, config.workerToken);
 
 // Human-readable one-liner for the fleet, e.g. "1x CUDA @ 8 GiB" (or a per-device list if mixed).
 function summarizeFleet(report: DeviceReport): string {
@@ -57,6 +57,9 @@ async function start(): Promise<void> {
   registration.startHeartbeat();
 
   await server.listen({ port: config.workerPort, host: '0.0.0.0' });
+  if (!config.workerToken) {
+    console.warn('[dev-worker] SARDEENZ_WORKER_TOKEN is not set — worker API authentication is disabled');
+  }
   // Be explicit about where the fleet came from so fabricated numbers aren't read as real hardware:
   //   detected   — real GPUs from nvidia-smi (apptainer mode)
   //   simulating — fabricated from SARDEENZ_DEVICE_* (stub mode)

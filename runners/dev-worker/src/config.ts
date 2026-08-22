@@ -36,6 +36,7 @@ export interface DevWorkerConfig {
   inferenceDelayMs: number;
   heartbeatIntervalMs: number;
   apptainer: ApptainerConfig;
+  workerToken: string;
 }
 
 function envInt(key: string, fallback: number): number {
@@ -132,5 +133,6 @@ export function loadConfig(): DevWorkerConfig {
       stopGraceMs: envInt('SARDEENZ_STOP_GRACE_MS', 30000),
       advertiseHost: envStr('SARDEENZ_WORKER_ADVERTISE_HOST', 'localhost'),
     },
+    workerToken: envStr('SARDEENZ_WORKER_TOKEN', ''),
   };
 }

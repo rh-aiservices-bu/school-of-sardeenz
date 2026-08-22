@@ -38,7 +38,7 @@ export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalP
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
   const { data: model } = useModel(modelName);
-  const { logs, isConnected } = useModelLogs(modelName, isOpen);
+  const { logs, isConnected, failed } = useModelLogs(modelName, isOpen);
 
   const isActive = model?.state === ModelLifecycleState.ACTIVE;
   const isError = model?.state === ModelLifecycleState.ERROR;
@@ -100,7 +100,7 @@ export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalP
           </Alert>
         )}
 
-        <LogViewer logs={logs} isConnected={isConnected} />
+        <LogViewer logs={logs} isConnected={isConnected} failed={failed} />
       </ModalBody>
       <ModalFooter>
         <Button variant={isActive || isError ? 'primary' : 'secondary'} onClick={onClose}>

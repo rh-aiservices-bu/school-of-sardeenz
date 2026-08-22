@@ -46,6 +46,13 @@ if ! [[ "$NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
   exit 2
 fi
 
+# Require a digest-pinned image ref — mutable tags can be repointed after review, silently
+# swapping what gets built into a signed SIF.
+if ! [[ "$IMAGE" =~ @sha256:[a-fA-F0-9]{64}$ ]]; then
+  echo "IMAGE must include a @sha256:<digest> suffix (mutable tags are not allowed)" >&2
+  exit 2
+fi
+
 : "${APPTAINER_TMPDIR:?APPTAINER_TMPDIR must point at node-local scratch}"
 : "${APPTAINER_CACHEDIR:?APPTAINER_CACHEDIR must point at node-local scratch}"
 

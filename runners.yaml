@@ -15,7 +15,8 @@
 #       engine:      engine family (e.g. "vLLM", "Triton")
 #       runnerType:  runner type identifier (e.g. "vllm") — matches the runner contract
 #       version:     engine/build version string
-#       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>)
+#       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>@sha256:<digest> — the
+#                    digest is required so a repointed tag can't silently change what gets pulled)
 #       sifName:     module filename stem, [A-Za-z0-9_.-]+ → /modules/<sifName>.sif == runtimeModule
 #       tags:        optional list of free-form labels for filtering
 #       minVRAMGiB:  optional minimum device memory hint (GiB)
@@ -32,7 +33,7 @@ runners:
     engine: vLLM
     runnerType: vllm
     version: "0.21"
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21@sha256:0000000000000000000000000000000000000000000000000000000000000000
     sifName: vllm-0.21
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16
@@ -45,7 +46,7 @@ runners:
     engine: vLLM
     runnerType: vllm
     version: "0.20"
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20@sha256:0000000000000000000000000000000000000000000000000000000000000000
     sifName: vllm-0.20
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16

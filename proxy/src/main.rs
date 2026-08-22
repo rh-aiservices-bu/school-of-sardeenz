@@ -15,6 +15,7 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::watch;
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -136,6 +137,7 @@ async fn main() -> anyhow::Result<()> {
                     },
                 ),
         )
+        .layer(RequestBodyLimitLayer::new(config.max_body_bytes))
         .with_state(state.clone());
 
     // Admin routes (health + metrics, separate port)

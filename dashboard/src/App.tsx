@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Bullseye, EmptyState, EmptyStateBody, PageSection, Spinner } from '@patternfly/react-core';
+import { useTranslation, withTranslation, type WithTranslation } from 'react-i18next';
 import { useAuth } from './contexts/AuthContext';
 import { DegradedProvider } from './contexts/DegradedContext';
 import { DegradedBanner } from './components/DegradedBanner';
@@ -18,12 +19,11 @@ import { Login } from './pages/Login/Login';
 import { OAuthCallback } from './pages/Login/OAuthCallback';
 
 function NotFoundPage() {
+  const { t } = useTranslation('common');
   return (
     <PageSection>
-      <EmptyState titleText="Page not found" headingLevel="h1" variant="full">
-        <EmptyStateBody>
-          The requested page does not exist. Use the sidebar to navigate to a valid page.
-        </EmptyStateBody>
+      <EmptyState titleText={t('pageNotFound')} headingLevel="h1" variant="full">
+        <EmptyStateBody>{t('pageNotFoundBody')}</EmptyStateBody>
       </EmptyState>
     </PageSection>
   );
@@ -34,7 +34,10 @@ interface ErrorBoundaryState {
   error?: Error;
 }
 
-class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+class ErrorBoundaryBase extends Component<
+  { children: ReactNode } & WithTranslation,
+  ErrorBoundaryState
+> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -43,12 +46,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
   render() {
     if (this.state.hasError) {
+      const { t } = this.props;
       return (
         <PageSection>
-          <EmptyState titleText="Something went wrong" headingLevel="h1" variant="full">
-            <EmptyStateBody>
-              {this.state.error?.message ?? 'An unexpected error occurred.'}
-            </EmptyStateBody>
+          <EmptyState titleText={t('errors.somethingWrong')} headingLevel="h1" variant="full">
+            <EmptyStateBody>{this.state.error?.message ?? t('errors.unexpected')}</EmptyStateBody>
           </EmptyState>
         </PageSection>
       );
@@ -57,9 +59,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   }
 }
 
+const ErrorBoundary = withTranslation('common')(ErrorBoundaryBase);
+
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, authMode } = useAuth();
   const location = useLocation();
+  const { t } = useTranslation('common');
 
   // Auth disabled — always pass
   if (authMode === 'none') return <>{children}</>;
@@ -68,7 +73,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   if (isLoading) {
     return (
       <Bullseye>
-        <Spinner size="xl" aria-label="Loading..." />
+        <Spinner size="xl" aria-label={t('loading')} />
       </Bullseye>
     );
   }
@@ -83,11 +88,12 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 /** Restricts a route to users with the `admin` role. Read-only users are redirected to `/models`. */
 function AdminRoute({ children }: { children: ReactNode }) {
   const { isAdmin, isLoading } = useAuth();
+  const { t } = useTranslation('common');
 
   if (isLoading) {
     return (
       <Bullseye>
-        <Spinner size="xl" aria-label="Loading..." />
+        <Spinner size="xl" aria-label={t('loading')} />
       </Bullseye>
     );
   }

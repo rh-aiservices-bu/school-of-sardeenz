@@ -1111,6 +1111,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1149,6 +1158,15 @@ export interface operations {
             };
             /** @description Invalid deployment request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1209,6 +1227,15 @@ export interface operations {
                     "application/json": components["schemas"]["ModelDetail"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Model not found */
             404: {
                 headers: {
@@ -1248,6 +1275,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Model not found */
@@ -1300,6 +1336,15 @@ export interface operations {
                     "text/event-stream": components["schemas"]["RunnerLogLine"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Model not found */
             404: {
                 headers: {
@@ -1339,6 +1384,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Model not found */
@@ -1389,6 +1443,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Model not found */
@@ -1449,6 +1512,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1479,6 +1551,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkerDetail"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Worker not found */
@@ -1528,6 +1609,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1566,6 +1656,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1595,6 +1694,15 @@ export interface operations {
                     "application/json": components["schemas"]["RunnerCatalogView"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1622,6 +1730,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunnerCatalogView"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -1665,6 +1782,15 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogItemStatus"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description No catalog entry with that id */
             404: {
                 headers: {
@@ -1703,6 +1829,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description No such catalog entry or the SIF is not imported */
             404: {
@@ -1766,6 +1901,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1809,6 +1953,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1838,6 +1991,15 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1884,6 +2046,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
                 headers: {
@@ -1913,6 +2084,15 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1952,6 +2132,15 @@ export interface operations {
             };
             /** @description Invalid notification ID */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,0 +1,25 @@
+# Restricts ingress to the worker agent Service to the control plane only (see
+# docs/usage/deployment-security.md — the worker agent has no authentication of its own beyond
+# the optional SARDEENZ_WORKER_TOKEN shared secret, so network isolation is the primary boundary).
+# Any other pod in the namespace is denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-worker
+  labels:
+    app.kubernetes.io/name: sardeenz-worker
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-control-plane
+      ports:
+        - protocol: TCP
+          port: 9100

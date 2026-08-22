@@ -13,17 +13,25 @@ export interface WorkerClientOptions {
    * `timeoutMs` when unset.
    */
   startTimeoutMs?: number;
+  /** Shared-secret bearer token for the worker agent's `SARDEENZ_WORKER_TOKEN` auth hook. */
+  token?: string;
 }
 
 export class WorkerClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly startTimeoutMs: number;
+  private readonly token: string;
 
   constructor(options: WorkerClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.startTimeoutMs = options.startTimeoutMs ?? this.timeoutMs;
+    this.token = options.token ?? '';
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.token ? { Authorization: `Bearer ${this.token}` } : {};
   }
 
   async startRunner(request: StartRunnerRequest): Promise<StartRunnerResponse> {
@@ -39,7 +47,7 @@ export class WorkerClient {
    */
   async streamRunnerLogs(runnerId: string, signal?: AbortSignal): Promise<Response> {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}/logs`, {
-      headers: { Accept: 'text/event-stream' },
+      headers: { Accept: 'text/event-stream', ...this.authHeaders() },
       signal,
     });
     if (!response.ok) {
@@ -60,7 +68,7 @@ export class WorkerClient {
    */
   async streamRunnerLogsByModel(modelName: string, signal?: AbortSignal): Promise<Response> {
     return fetch(`${this.baseUrl}/runners/by-model/${encodeURIComponent(modelName)}/logs`, {
-      headers: { Accept: 'text/event-stream' },
+      headers: { Accept: 'text/event-stream', ...this.authHeaders() },
       signal,
     });
   }
@@ -68,6 +76,7 @@ export class WorkerClient {
   async stopRunner(runnerId: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}`, {
       method: 'DELETE',
+      headers: { ...this.authHeaders() },
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) {
@@ -79,7 +88,7 @@ export class WorkerClient {
   private async post<T>(path: string, body: unknown, timeoutMs: number = this.timeoutMs): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });

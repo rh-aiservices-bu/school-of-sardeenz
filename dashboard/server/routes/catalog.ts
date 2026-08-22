@@ -14,6 +14,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
   );
 
   // POST /api/catalog/refresh — force a re-fetch of the catalog source (read-ish).
+  // admin-readonly: refresh re-fetches the catalog source — a read-ish operation, not a write
   app.post(
     '/api/catalog/refresh',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },

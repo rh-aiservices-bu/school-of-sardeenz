@@ -5,6 +5,7 @@ import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance } from 'fastify';
 import { registerModelLogRoutes } from '../../routes/model-logs.js';
 import { authPlugin } from '../../plugins/auth.js';
+import { registerAuthRoutes } from '../../routes/auth.js';
 import { BffError } from '../../errors.js';
 import type { RouteDeps } from '../../routes/deps.js';
 import type { Config } from '../../config.js';
@@ -18,7 +19,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://prom.test',
-    corsOrigin: 'http://localhost:5173',
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: 'secret123',
@@ -29,6 +29,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     oauthIssuerUrl: '',
     k8sApiUrl: '',
     namespace: 'sardeenz',
+    controlPlaneApiToken: '',
+    publicUrl: '',
     ...overrides,
   };
 }
@@ -82,6 +84,24 @@ async function buildApp(config: Config): Promise<FastifyInstance> {
 
   await app.register(fastifyCookie);
   await app.register(authPlugin, { config });
+  registerModelLogRoutes(app, buildDeps(config));
+  await app.ready();
+  return app;
+}
+
+/** Builds an app with both auth routes and model-log routes registered, for cookie-flow tests. */
+async function buildAppWithAuth(config: Config): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  app.setErrorHandler((error, _req, reply) => {
+    if (error instanceof BffError) {
+      return reply.code(error.statusCode).send(error.toResponse());
+    }
+    return reply.code(500).send({ error: 'Internal error', code: 'INTERNAL_ERROR' });
+  });
+
+  await app.register(fastifyCookie);
+  await app.register(authPlugin, { config });
+  registerAuthRoutes(app, config);
   registerModelLogRoutes(app, buildDeps(config));
   await app.ready();
   return app;
@@ -183,6 +203,36 @@ describe('GET /api/models/:name/logs', () => {
         { username: 'admin', roles: ['admin'], authMode: 'simple' },
         { expiresIn: 3600 },
       );
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/models/llama-3/logs',
+        cookies: { sardeenz_sse: token },
+      });
+      await app.close();
+
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('accepts the login-issued sardeenz_sse cookie, scoped to Path=/api', async () => {
+      proxyRequestFn.mockResolvedValue(makeUpstreamResponse(['event: end\ndata: {}\n\n']));
+      const config = makeConfig({ authMode: 'simple' });
+      const app = await buildAppWithAuth(config);
+
+      const loginRes = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'admin', password: 'secret123' },
+      });
+      const setCookieHeader = loginRes.headers['set-cookie'];
+      const cookieStr = Array.isArray(setCookieHeader)
+        ? setCookieHeader.join('; ')
+        : (setCookieHeader ?? '');
+      expect(cookieStr).toContain('Path=/api');
+      expect(cookieStr).not.toContain('Path=/api/events');
+
+      const cookieMatch = /sardeenz_sse=([^;]+)/.exec(cookieStr);
+      const token = cookieMatch?.[1] ?? '';
 
       const res = await app.inject({
         method: 'GET',

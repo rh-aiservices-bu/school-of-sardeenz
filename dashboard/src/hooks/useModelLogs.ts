@@ -5,7 +5,6 @@ import { BASE_URL } from '../api/client';
 type RunnerLogLine = ControlPlaneComponents['schemas']['RunnerLogLine'];
 
 const RECONNECT_INTERVAL_NORMAL = 5_000;
-const RECONNECT_INTERVAL_DEGRADED = 30_000;
 const FAILURE_THRESHOLD = 5;
 const MAX_LOG_LINES = 1_000;
 
@@ -13,6 +12,7 @@ export interface UseModelLogsResult {
   logs: RunnerLogLine[];
   isConnected: boolean;
   ended: boolean;
+  failed: boolean;
   reconnect: () => void;
   clear: () => void;
 }
@@ -29,6 +29,7 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
   const [logs, setLogs] = useState<RunnerLogLine[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [ended, setEnded] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -90,11 +91,11 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
       if (endedRef.current) return;
 
       failureCountRef.current += 1;
-      const delay =
-        failureCountRef.current >= FAILURE_THRESHOLD
-          ? RECONNECT_INTERVAL_DEGRADED
-          : RECONNECT_INTERVAL_NORMAL;
-      reconnectTimeoutRef.current = setTimeout(connect, delay);
+      if (failureCountRef.current >= FAILURE_THRESHOLD) {
+        setFailed(true);
+        return;
+      }
+      reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL_NORMAL);
     };
   }, [modelName, disconnect]);
 
@@ -106,6 +107,7 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
     failureCountRef.current = 0;
     endedRef.current = false;
     setEnded(false);
+    setFailed(false);
     connect();
   }, [connect]);
 
@@ -118,6 +120,7 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
     failureCountRef.current = 0;
     endedRef.current = false;
     setEnded(false);
+    setFailed(false);
     setLogs([]);
     connect();
 
@@ -126,5 +129,5 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
     };
   }, [enabled, modelName, connect, disconnect]);
 
-  return { logs, isConnected, ended, reconnect, clear };
+  return { logs, isConnected, ended, failed, reconnect, clear };
 }

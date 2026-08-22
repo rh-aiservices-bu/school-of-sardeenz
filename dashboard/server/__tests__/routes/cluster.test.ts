@@ -16,7 +16,6 @@ const mockConfig: Config = {
   redisUrl: 'redis://localhost:6379',
   redisKeyPrefix: 'sardeenz',
   prometheusUrl: 'http://prom.test',
-  corsOrigin: 'http://localhost:5173',
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -27,6 +26,8 @@ const mockConfig: Config = {
   oauthIssuerUrl: '',
   k8sApiUrl: '',
   namespace: 'sardeenz',
+  controlPlaneApiToken: '',
+  publicUrl: '',
 };
 
 const getClusterStatusFn = vi.fn();

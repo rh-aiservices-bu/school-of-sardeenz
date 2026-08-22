@@ -14,7 +14,7 @@ runners:
     engine: vLLM
     runnerType: vllm
     version: "0.21"
-    image: oras://quay.io/x/vllm:0.21
+    image: oras://quay.io/x/vllm:0.21@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     sifName: vllm-0.21
     tags: [llm, cuda]
     minVRAMGiB: 16
@@ -44,7 +44,7 @@ runners:
     description: d
     runnerType: vllm
     version: "1"
-    image: oras://x/y:1
+    image: oras://x/y:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     sifName: good
   - id: bad
     title: Missing fields
@@ -62,7 +62,7 @@ runners:
     description: d
     runnerType: vllm
     version: "1"
-    image: oras://x/y:1
+    image: oras://x/y:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     sifName: ../../etc/x
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
@@ -73,8 +73,8 @@ runners:
   it('deduplicates entries by id', async () => {
     const yaml = `
 runners:
-  - { id: dup, title: A, description: d, runnerType: vllm, version: "1", image: oras://x:1, sifName: dup }
-  - { id: dup, title: B, description: d, runnerType: vllm, version: "2", image: oras://x:2, sifName: dup }
+  - { id: dup, title: A, description: d, runnerType: vllm, version: "1", image: "oras://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: dup }
+  - { id: dup, title: B, description: d, runnerType: vllm, version: "2", image: "oras://x:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: dup }
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
     const snap = await svc.load();
@@ -84,8 +84,8 @@ runners:
   it('deduplicates entries by sifName (aliasing the same module file)', async () => {
     const yaml = `
 runners:
-  - { id: a, title: A, description: d, runnerType: vllm, version: "1", image: oras://x:1, sifName: shared }
-  - { id: b, title: B, description: d, runnerType: vllm, version: "2", image: oras://x:2, sifName: shared }
+  - { id: a, title: A, description: d, runnerType: vllm, version: "1", image: "oras://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: shared }
+  - { id: b, title: B, description: d, runnerType: vllm, version: "2", image: "oras://x:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: shared }
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
     const snap = await svc.load();
@@ -97,6 +97,56 @@ runners:
       readFile: () => Promise.resolve('apiVersion: x'),
     });
     await expect(svc.load()).rejects.toThrow(/runners/);
+  });
+});
+
+describe('CatalogService ORAS image digest pinning', () => {
+  it('rejects an ORAS image without an @sha256: digest', async () => {
+    const yaml = `
+runners:
+  - id: nodigest
+    title: No Digest
+    description: d
+    runnerType: vllm
+    version: "1"
+    image: oras://quay.io/x/vllm:0.21
+    sifName: nodigest
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(0);
+  });
+
+  it('accepts an ORAS image with an @sha256: digest', async () => {
+    const yaml = `
+runners:
+  - id: digest
+    title: Digest
+    description: d
+    runnerType: vllm
+    version: "1"
+    image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
+    sifName: digest
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries.map((e) => e.id)).toEqual(['digest']);
+  });
+
+  it('accepts a non-ORAS image without a digest (local dev)', async () => {
+    const yaml = `
+runners:
+  - id: local
+    title: Local
+    description: d
+    runnerType: vllm
+    version: "1"
+    image: /modules/vllm-0.21.sif
+    sifName: local
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries.map((e) => e.id)).toEqual(['local']);
   });
 });
 
@@ -125,5 +175,27 @@ describe('CatalogService http source', () => {
       fetch: fetchImpl,
     });
     await expect(svc.load()).rejects.toThrow(/404/);
+  });
+
+  it('throws on an http:// catalog source without allowInsecureCatalog', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const svc = new CatalogService('http://example.com/runners.yaml', logger, {
+      fetch: fetchImpl,
+    });
+    await expect(svc.load()).rejects.toThrow(/http:\/\//);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('allows an http:// catalog source with allowInsecureCatalog opted in', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(VALID, { status: 200 })),
+    ) as unknown as typeof fetch;
+    const svc = new CatalogService('http://example.com/runners.yaml', logger, {
+      fetch: fetchImpl,
+      allowInsecureCatalog: true,
+    });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

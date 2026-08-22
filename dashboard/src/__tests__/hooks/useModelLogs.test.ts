@@ -8,7 +8,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const RECONNECT_INTERVAL_NORMAL = 5_000;
-const RECONNECT_INTERVAL_DEGRADED = 30_000;
 const FAILURE_THRESHOLD = 5;
 const MAX_LOG_LINES = 1_000;
 
@@ -67,11 +66,12 @@ interface LogsState {
   logs: RunnerLogLine[];
   isConnected: boolean;
   ended: boolean;
+  failed: boolean;
   failureCount: number;
 }
 
 function initialState(): LogsState {
-  return { logs: [], isConnected: false, ended: false, failureCount: 0 };
+  return { logs: [], isConnected: false, ended: false, failed: false, failureCount: 0 };
 }
 
 function appendLog(state: LogsState, line: RunnerLogLine): LogsState {
@@ -97,9 +97,14 @@ function onError(state: LogsState): { state: LogsState; reconnectDelayMs: number
     return { state: disconnected, reconnectDelayMs: null };
   }
   const failureCount = disconnected.failureCount + 1;
-  const reconnectDelayMs =
-    failureCount >= FAILURE_THRESHOLD ? RECONNECT_INTERVAL_DEGRADED : RECONNECT_INTERVAL_NORMAL;
-  return { state: { ...disconnected, failureCount }, reconnectDelayMs };
+  if (failureCount >= FAILURE_THRESHOLD) {
+    // Too many consecutive failures — stop reconnecting and surface a permanent failure.
+    return { state: { ...disconnected, failureCount, failed: true }, reconnectDelayMs: null };
+  }
+  return {
+    state: { ...disconnected, failureCount },
+    reconnectDelayMs: RECONNECT_INTERVAL_NORMAL,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +129,6 @@ describe('useModelLogs constants', () => {
   it('shares the app-wide reconnect backoff thresholds', () => {
     expect(FAILURE_THRESHOLD).toBe(5);
     expect(RECONNECT_INTERVAL_NORMAL).toBe(5_000);
-    expect(RECONNECT_INTERVAL_DEGRADED).toBe(30_000);
   });
 });
 
@@ -207,7 +211,7 @@ describe('connection state machine', () => {
     expect(result.state.failureCount).toBe(1);
   });
 
-  it('5th consecutive failure schedules a degraded-interval reconnect', () => {
+  it('5th consecutive failure marks the stream failed and stops reconnecting', () => {
     let state = initialState();
     let delay: number | null = null;
     for (let i = 0; i < FAILURE_THRESHOLD; i++) {
@@ -217,7 +221,8 @@ describe('connection state machine', () => {
     }
 
     expect(state.failureCount).toBe(FAILURE_THRESHOLD);
-    expect(delay).toBe(RECONNECT_INTERVAL_DEGRADED);
+    expect(state.failed).toBe(true);
+    expect(delay).toBeNull();
   });
 });
 

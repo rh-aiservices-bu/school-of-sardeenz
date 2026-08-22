@@ -224,7 +224,6 @@ Set up the backend-for-frontend service that aggregates data from the control pl
 - `SARDEENZ_REDIS_KEY_PREFIX` — prefix for Redis keys (default `sardeenz`)
 - `SARDEENZ_PROMETHEUS_URL` — Prometheus query API base URL
 - `SARDEENZ_LOG_LEVEL` — log level (default `info`)
-- `SARDEENZ_CORS_ORIGIN` — allowed CORS origin for the frontend (default `http://localhost:5173`)
 - `AUTH_MODE` — authentication mode: `none` (default), `simple`, or `oauth`
 - `ADMIN_USERNAME` — admin username for simple auth mode (default `admin`)
 - `ADMIN_PASSWORD` — admin password for simple auth mode

@@ -329,6 +329,32 @@ If every endpoint for a model has an open circuit breaker, `balancer.pick()` ret
 
 Circuit breaker state is per-replica and not shared across proxy replicas. A failing runner appears independently broken to each replica.
 
+## Forwarding Concurrency Limits
+
+The proxy applies an optional cap on concurrently **forwarded** (in-flight upstream) requests, both
+globally (`SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`) and per-model
+(`SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL`). A request over the limit is rejected immediately with
+`503 Service Unavailable` (`overloaded`). Both default to `0` (unlimited).
+
+This is a last-resort admission control backstop on the proxy itself, protecting runners from being
+driven past their real concurrency capacity when upstream traffic bursts faster than autoscaling or
+eviction can react. It is **not** a substitute for rate limiting — see
+[Deployment Requirements](#deployment-requirements) below.
+
+**Why this lives at the forwarding step, not the router.** The permit is acquired *after* parking
+resolves (i.e. after a sleeping/starting model's request has already waited for `ACTIVE`) and
+*before* endpoint selection. A limit checked earlier — e.g. at model resolution, before parking —
+would let a parked request hold a forwarding permit for the entire wake duration (up to
+`SARDEENZ_PARKING_TIMEOUT_SECS`). Under load, that permit would never free up fast enough, and the
+forwarding limiter would effectively cap the number of models that can wake concurrently instead of
+the number of requests actually hitting a runner — a self-inflicted deadlock. Parked requests hold no
+forwarding permit; they contend only with the parking limits (`SARDEENZ_PARKING_MAX_PER_MODEL`,
+`SARDEENZ_PARKING_MAX_GLOBAL`, `SARDEENZ_PARKING_MAX_BYTES`), which are independent from and enforced
+much earlier than the forwarding permit.
+
+Like the circuit breaker, the limiter is per-replica, in-memory state — it is not shared across proxy
+replicas.
+
 ## Configuration Reference
 
 All configuration is read from environment variables at startup via `Config::from_env()`.
@@ -348,6 +374,8 @@ All configuration is read from environment variables at startup via `Config::fro
 | `SARDEENZ_CB_FAILURE_THRESHOLD`     | `u32`        | `5`                      | Failures within window to trip a circuit breaker                         |
 | `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                      |
 | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `u64`        | `15`                     | Time before an open circuit transitions to half-open                     |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` | `usize` | `0` (unlimited)        | Max concurrently forwarded (in-flight upstream) requests, across all models |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `usize` | `0` (unlimited)       | Max concurrently forwarded requests for a single model                   |
 
 All socket address and numeric values are validated at startup; a parse failure causes the process to exit immediately.
 
@@ -453,6 +481,12 @@ The proxy trusts the routing map completely. It forwards requests to whatever `h
 A Phase 1 deployment **must** include at minimum:
 
 - **Authenticated ingress/gateway** in front of the proxy — the proxy does not authenticate clients
+- **Ingress-level rate limiting and admission control** in front of the proxy — the proxy has no
+  concept of client identity, tenants, or API keys, so it cannot enforce per-tenant quotas or fair
+  sharing. Per-tenant/per-client rate limiting is the ingress's responsibility, not the proxy's. The
+  proxy's own `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS[_PER_MODEL]` (see
+  [Forwarding Concurrency Limits](#forwarding-concurrency-limits)) is a coarse, identity-blind
+  backstop against runner overload — it complements ingress rate limiting, it does not replace it.
 - **Network policy** isolating proxy, control plane, Redis, and runners into a trusted mesh
 - **Redis AUTH** or ACLs preventing unauthorized routing-map access
 - **Admin port isolation** — port 9099 must not be exposed to untrusted networks

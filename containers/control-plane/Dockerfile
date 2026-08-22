@@ -36,12 +36,14 @@ ENV NODE_ENV=production
 # Apptainer CLI for the runner-catalog import path (SARDEENZ_SIF_IMPORTER=oras runs
 # `apptainer pull oras://…` + `apptainer verify`). Pull/verify are download-only and need no
 # setuid/fuse/userns, so the unprivileged package suffices. Skip this layer if you only ever run
-# the 'stub' importer. Pinned; bump deliberately. For stronger supply-chain guarantees, also pin
-# and verify the .deb sha256 (fetch the release checksums) before installing.
+# the 'stub' importer. Pinned; bump deliberately, and update APPTAINER_DEB_SHA256 to match (sha256
+# of the .deb asset on the GitHub release page for the new version).
 ARG APPTAINER_VERSION=1.3.6
+ARG APPTAINER_DEB_SHA256=2723b2928cfc30edf687723c49556ec4e013f0bf7cdb43a5a76bca7bd3c70792
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates wget && \
     wget -q "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb" -O /tmp/apptainer.deb && \
+    echo "${APPTAINER_DEB_SHA256}  /tmp/apptainer.deb" | sha256sum -c - && \
     apt-get install -y --no-install-recommends /tmp/apptainer.deb && \
     rm -f /tmp/apptainer.deb && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

@@ -19,7 +19,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://prom.test',
-    corsOrigin: 'http://localhost:5173',
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: 'secret123',
@@ -30,6 +29,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     oauthIssuerUrl: '',
     k8sApiUrl: '',
     namespace: 'sardeenz',
+    controlPlaneApiToken: '',
+    publicUrl: '',
     ...overrides,
   };
 }
@@ -71,7 +72,7 @@ function buildDeps(config: Config): RouteDeps {
 }
 
 async function buildApp(config: Config): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, trustProxy: true });
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof BffError) {
       return reply.code(error.statusCode).send(error.toResponse());
@@ -189,6 +190,107 @@ describe('POST /api/auth/login (simple mode)', () => {
     await app.close();
 
     expect(res.statusCode).toBe(401);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Rate limiter hardening (issue #105)                                 */
+/* ------------------------------------------------------------------ */
+describe('POST /api/auth/login rate limiter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetRateLimiter();
+  });
+
+  it('does not share a rate-limit bucket across different IPs', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    // Exhaust the limit for one IP with wrong credentials.
+    for (let i = 0; i < 10; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'admin', password: 'wrong' },
+        headers: { 'x-forwarded-for': '10.0.0.1' },
+      });
+    }
+    const blockedRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'wrong' },
+      headers: { 'x-forwarded-for': '10.0.0.1' },
+    });
+    expect(blockedRes.statusCode).toBe(429);
+
+    // A different IP attempting the same username must not be blocked.
+    const otherIpRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'secret123' },
+      headers: { 'x-forwarded-for': '10.0.0.2' },
+    });
+    await app.close();
+
+    expect(otherIpRes.statusCode).toBe(200);
+  });
+
+  it('does not share a rate-limit bucket across different usernames on the same IP', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    for (let i = 0; i < 10; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'admin', password: 'wrong' },
+      });
+    }
+    const blockedRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'wrong' },
+    });
+    expect(blockedRes.statusCode).toBe(429);
+
+    const otherUserRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'someone-else', password: 'wrong' },
+    });
+    await app.close();
+
+    expect(otherUserRes.statusCode).toBe(401);
+  });
+
+  it('clears the rate-limit bucket on successful login', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    for (let i = 0; i < 9; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'admin', password: 'wrong' },
+      });
+    }
+
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'secret123' },
+    });
+    expect(loginRes.statusCode).toBe(200);
+
+    // Bucket was cleared, so a fresh set of attempts should not be immediately blocked.
+    const nextRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'secret123' },
+    });
+    await app.close();
+
+    expect(nextRes.statusCode).toBe(200);
   });
 });
 
@@ -395,7 +497,7 @@ describe('Route protection', () => {
       : (setCookieHeader ?? '');
     expect(cookieStr).toContain('sardeenz_sse=');
     expect(cookieStr).toContain('HttpOnly');
-    expect(cookieStr).toContain('Path=/api/events');
+    expect(cookieStr).toContain('Path=/api');
     expect(cookieStr).toContain('SameSite=Strict');
   });
 });

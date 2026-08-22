@@ -89,6 +89,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
   const logError = vi.fn();
 
   const deps = {
+    config: { weightsDir: '/weights' },
     leaderElection: { isLeader: true },
     modelRepository: {
       create: over.createModelRecord ?? vi.fn(() => Promise.resolve()),
@@ -145,7 +146,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
 const DEPLOY_BODY = {
   modelName: 'm1',
   runnerType: 'vllm',
-  modelPath: '/models/m1',
+  modelPath: '/weights/m1',
   requiredMemory: 8e9,
 };
 
@@ -261,6 +262,25 @@ describe('POST /api/v1/models modelName validation', () => {
       method: 'POST',
       url: '/api/v1/models',
       payload: { ...DEPLOY_BODY, modelName },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+});
+
+describe('POST /api/v1/models modelPath containment', () => {
+  it.each([
+    ['is outside the weights root', '/etc/passwd'],
+    ['is relative', 'weights/m1'],
+    ['traverses out of the weights root', '/weights/../etc/passwd'],
+  ])('rejects modelPath that %s', async (_desc, modelPath) => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, modelPath },
     });
 
     expect(res.statusCode).toBe(400);
