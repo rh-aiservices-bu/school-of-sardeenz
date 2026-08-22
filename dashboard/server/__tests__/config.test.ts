@@ -27,6 +27,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     k8sApiUrl: '',
     namespace: 'sardeenz',
     controlPlaneApiToken: '',
+    publicUrl: '',
     ...overrides,
   };
 }
@@ -145,21 +146,69 @@ describe('validateAuthConfig', () => {
 
   // ---- AUTH_MODE=oauth ----
 
-  it('passes when AUTH_MODE=oauth in production', () => {
+  function makeOauthConfig(overrides: Partial<Config> = {}): Config {
+    return makeConfig({
+      authMode: 'oauth',
+      oauthClientId: 'sardeenz',
+      oauthClientSecret: 'oauth-secret',
+      oauthIssuerUrl: 'https://issuer.example.com',
+      publicUrl: 'https://dashboard.example.com',
+      ...overrides,
+    });
+  }
+
+  it('passes when AUTH_MODE=oauth in production with all required vars set', () => {
     process.env['NODE_ENV'] = 'production';
-    const config = makeConfig({ authMode: 'oauth' });
+    const config = makeOauthConfig();
 
     expect(() => validateAuthConfig(config)).not.toThrow();
   });
 
-  it('does not log warnings when AUTH_MODE=oauth', () => {
+  it('does not log warnings when AUTH_MODE=oauth with all required vars set', () => {
     process.env['NODE_ENV'] = 'development';
-    const config = makeConfig({ authMode: 'oauth' });
+    const config = makeOauthConfig();
     const logger = makeLogger();
 
     validateAuthConfig(config, logger);
 
     expect(logger.calls).toHaveLength(0);
+  });
+
+  it('throws when AUTH_MODE=oauth and OAUTH_CLIENT_ID is empty', () => {
+    const config = makeOauthConfig({ oauthClientId: '' });
+
+    expect(() => validateAuthConfig(config)).toThrow('OAUTH_CLIENT_ID');
+  });
+
+  it('throws when AUTH_MODE=oauth and OAUTH_CLIENT_SECRET is empty', () => {
+    const config = makeOauthConfig({ oauthClientSecret: '' });
+
+    expect(() => validateAuthConfig(config)).toThrow('OAUTH_CLIENT_SECRET');
+  });
+
+  it('throws when AUTH_MODE=oauth and OAUTH_ISSUER_URL is empty', () => {
+    const config = makeOauthConfig({ oauthIssuerUrl: '' });
+
+    expect(() => validateAuthConfig(config)).toThrow('OAUTH_ISSUER_URL');
+  });
+
+  it('throws when AUTH_MODE=oauth and SARDEENZ_PUBLIC_URL is empty', () => {
+    const config = makeOauthConfig({ publicUrl: '' });
+
+    expect(() => validateAuthConfig(config)).toThrow('SARDEENZ_PUBLIC_URL');
+  });
+
+  it('lists all missing oauth variables in a single error', () => {
+    const config = makeOauthConfig({
+      oauthClientId: '',
+      oauthClientSecret: '',
+      oauthIssuerUrl: '',
+      publicUrl: '',
+    });
+
+    expect(() => validateAuthConfig(config)).toThrow(
+      /OAUTH_CLIENT_ID.*OAUTH_CLIENT_SECRET.*OAUTH_ISSUER_URL.*SARDEENZ_PUBLIC_URL/,
+    );
   });
 });
 
@@ -169,7 +218,7 @@ describe('validateAuthConfig', () => {
 
 describe('loadConfig auth defaults', () => {
   const savedEnv: Record<string, string | undefined> = {};
-  const envVars = ['AUTH_MODE', 'ADMIN_PASSWORD', 'JWT_SECRET'];
+  const envVars = ['AUTH_MODE', 'ADMIN_PASSWORD', 'JWT_SECRET', 'SARDEENZ_PUBLIC_URL'];
 
   beforeEach(() => {
     for (const key of envVars) {
@@ -208,6 +257,17 @@ describe('loadConfig auth defaults', () => {
     process.env['ADMIN_PASSWORD'] = 'hunter2';
     const config = loadConfig();
     expect(config.adminPassword).toBe('hunter2');
+  });
+
+  it('defaults SARDEENZ_PUBLIC_URL to empty string', () => {
+    const config = loadConfig();
+    expect(config.publicUrl).toBe('');
+  });
+
+  it('reads SARDEENZ_PUBLIC_URL from environment', () => {
+    process.env['SARDEENZ_PUBLIC_URL'] = 'https://dashboard.example.com';
+    const config = loadConfig();
+    expect(config.publicUrl).toBe('https://dashboard.example.com');
   });
 
   it('rejects invalid AUTH_MODE values', () => {

@@ -10,11 +10,11 @@ The dashboard BFF enforces secure authentication defaults at startup:
 
 ### Required environment variables by auth mode
 
-| Auth Mode | Required Variables                                                                                        |
-| --------- | --------------------------------------------------------------------------------------------------------- |
-| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                |
-| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `JWT_SECRET=<non-empty>` |
-| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                    |
+| Auth Mode | Required Variables                                                                                                                     |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                                              |
+| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `SARDEENZ_PUBLIC_URL`, `JWT_SECRET=<non-empty>`         |
+| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                                                  |
 
 ### Example production configuration
 
@@ -23,7 +23,25 @@ AUTH_MODE=simple
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=<strong-random-password>
 JWT_SECRET=<random-256-bit-hex>
+SARDEENZ_PUBLIC_URL=https://sardeenz.example.com
 ```
+
+### Running behind a reverse proxy or ingress
+
+The BFF sets Fastify's `trustProxy: true`, so `X-Forwarded-For`/`X-Forwarded-Proto`/`X-Forwarded-Host`
+from the proxy are honored for client IP (used by the login rate limiter) and request scheme/host.
+Since those headers only reflect the truth when a trusted proxy sits in front of the BFF and strips
+any client-supplied values, always deploy the BFF behind a proxy/ingress that overwrites (not
+appends) these headers on the way in.
+
+Set `SARDEENZ_PUBLIC_URL` to the externally-visible origin (scheme + host, no trailing slash) of the
+dashboard, e.g. `https://sardeenz.example.com`. It is used to:
+
+- Build the OAuth `redirect_uri` sent to the identity provider — required so the value doesn't
+  depend on spoofable request headers when `AUTH_MODE=oauth`. `validateAuthConfig` refuses to start
+  in `oauth` mode without it.
+- Decide whether the SSE auth cookie is issued with `Secure` — derived from the `https:` scheme of
+  `SARDEENZ_PUBLIC_URL` when set, falling back to a localhost heuristic in local dev.
 
 ## Control Plane Network Isolation
 

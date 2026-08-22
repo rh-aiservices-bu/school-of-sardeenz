@@ -38,6 +38,7 @@ export async function buildServer(deps: ServerDeps) {
     },
     requestIdHeader: 'x-request-id',
     genReqId: () => crypto.randomUUID(),
+    trustProxy: true,
   });
 
   app.setErrorHandler((error, _request, reply) => {

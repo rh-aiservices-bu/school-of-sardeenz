@@ -30,6 +30,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     k8sApiUrl: '',
     namespace: 'sardeenz',
     controlPlaneApiToken: '',
+    publicUrl: '',
     ...overrides,
   };
 }

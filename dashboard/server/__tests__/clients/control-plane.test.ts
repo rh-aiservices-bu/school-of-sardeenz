@@ -23,6 +23,7 @@ const mockConfig: Config = {
   k8sApiUrl: '',
   namespace: 'sardeenz',
   controlPlaneApiToken: '',
+  publicUrl: '',
 };
 
 function makeFetchResponse(status: number, body: unknown): Response {

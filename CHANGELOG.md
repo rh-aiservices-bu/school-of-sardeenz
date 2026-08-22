@@ -125,6 +125,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard BFF was not proxy-aware: rate limiter collapsed behind a shared proxy IP, OAuth
+  `redirect_uri` trusted spoofable request headers, and OAuth env vars weren't validated at
+  startup.** Fastify now runs with `trustProxy: true` so `request.ip`/`protocol`/`hostname` reflect
+  `X-Forwarded-*` headers from a trusted reverse proxy/ingress instead of always resolving to the
+  proxy's own address. The login rate limiter keys on `${ip}:${username}` instead of `ip` alone (so
+  one bad actor behind a shared NAT/proxy IP can no longer lock out every other user sharing it) and
+  clears its bucket on a successful login. The OAuth `redirect_uri` (authorize + token exchange) and
+  the SSE cookie's `Secure` flag are now derived from a new `SARDEENZ_PUBLIC_URL` config value
+  instead of the request's `protocol`/`hostname`, which are otherwise attacker-controllable unless
+  the fronting proxy is trusted to strip client-supplied forwarded headers. `validateAuthConfig` now
+  fails startup when `AUTH_MODE=oauth` and any of `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`,
+  `OAUTH_ISSUER_URL`, or `SARDEENZ_PUBLIC_URL` is empty. Documented in
+  `docs/usage/deployment-security.md`. (#105)
 - **Dashboard BFF: read-only role could delete notification state.** Both `DELETE /api/notifications/:id`
   and `DELETE /api/notifications` were gated at `admin-readonly` instead of `admin`, so any
   authenticated user (the default OAuth role) could wipe notification history. Fixed to require

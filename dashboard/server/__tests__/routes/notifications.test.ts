@@ -27,6 +27,7 @@ const mockConfig: Config = {
   k8sApiUrl: '',
   namespace: 'sardeenz',
   controlPlaneApiToken: '',
+  publicUrl: '',
 };
 
 const listNotificationsFn = vi.fn();
