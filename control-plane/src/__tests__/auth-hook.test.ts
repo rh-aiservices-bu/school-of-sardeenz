@@ -30,6 +30,7 @@ function makeConfig(apiToken: string): Config {
     sifImporter: 'stub',
     apptainerBin: 'apptainer',
     verifySif: false,
+    allowInsecureCatalog: false,
     apiToken,
   };
 }
