@@ -73,7 +73,13 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
     let routing_map = parse_routing_map(raw, &previous);
 
     tracing::info!(models = routing_map.len(), "loaded routing map");
+    let all_endpoints: std::collections::HashSet<String> = routing_map
+        .values()
+        .flat_map(|entry| entry.endpoints.iter())
+        .map(|ep| format!("{}:{}", ep.host, ep.port))
+        .collect();
     state.routing_cache.replace(routing_map).await;
+    state.circuit_breaker.prune(&all_endpoints);
     // Deliberately latched: this flag means "process has a usable routing
     // map", not "routing map is fresh". The cache retains the last-known-good
     // map across a Redis outage (see the reconnect loop in main.rs), so once
@@ -107,7 +113,13 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
 
         let previous = state.routing_cache.get_all().await;
         let routing_map = parse_routing_map(raw, &previous);
+        let all_endpoints: std::collections::HashSet<String> = routing_map
+            .values()
+            .flat_map(|entry| entry.endpoints.iter())
+            .map(|ep| format!("{}:{}", ep.host, ep.port))
+            .collect();
         state.routing_cache.replace(routing_map).await;
+        state.circuit_breaker.prune(&all_endpoints);
     }
 
     tracing::warn!("Redis pub/sub stream ended");

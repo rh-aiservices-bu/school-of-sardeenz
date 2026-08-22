@@ -6,6 +6,7 @@ use crate::generated::proxy_control_plane::RunnerEndpoint;
 
 const HOP_BY_HOP_HEADERS: &[&str] = &[
     "connection",
+    "content-length",
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",

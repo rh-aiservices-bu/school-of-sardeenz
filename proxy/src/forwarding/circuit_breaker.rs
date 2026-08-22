@@ -179,6 +179,20 @@ impl CircuitBreaker {
         }
     }
 
+    /// Remove circuits for endpoints no longer present in the routing map,
+    /// zeroing their gauge so stale endpoints don't linger in `/metrics`.
+    pub fn prune(&self, active_endpoints: &std::collections::HashSet<String>) {
+        let mut circuits = self.circuits.lock().unwrap();
+        circuits.retain(|key, _| {
+            if active_endpoints.contains(key) {
+                true
+            } else {
+                gauge!("sardeenz_proxy_circuit_breaker_state", "endpoint" => key.clone()).set(0.0);
+                false
+            }
+        });
+    }
+
     fn emit_state_gauge(key: &str, state: CircuitState) {
         let value = match state {
             CircuitState::Closed => 0.0,
@@ -352,6 +366,26 @@ mod tests {
             cb.try_acquire_probe("ep1").is_some(),
             "dropping an armed guard must release the probe immediately, not strand it"
         );
+    }
+
+    #[tokio::test]
+    async fn prune_removes_inactive_endpoints_and_keeps_active() {
+        let cb = CircuitBreaker::new(test_config());
+        for _ in 0..3 {
+            cb.record_failure("ep-stale");
+            cb.record_failure("ep-active");
+        }
+        assert_eq!(cb.current_state("ep-stale"), CircuitState::Open);
+        assert_eq!(cb.current_state("ep-active"), CircuitState::Open);
+
+        let active: std::collections::HashSet<String> = ["ep-active".to_string()].into();
+        cb.prune(&active);
+
+        // Pruned circuit was removed entirely, so it reads back as a fresh
+        // (never-seen) endpoint: default Closed state.
+        assert_eq!(cb.current_state("ep-stale"), CircuitState::Closed);
+        // Endpoint still in the active set is untouched.
+        assert_eq!(cb.current_state("ep-active"), CircuitState::Open);
     }
 
     #[tokio::test]

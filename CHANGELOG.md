@@ -149,6 +149,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Proxy contract drift and forwarding hardening.** `ForwardingClient` now strips `content-length`
+  as a hop-by-hop header, since reqwest recomputes it from the forwarded body. `RunnerEndpoint`
+  deserialization now rejects empty/malformed hosts (slashes, `@`, `?`, `#`, whitespace) and port
+  `0`. `weight` is no longer a required field in the `proxy-control-plane.yaml` `RunnerEndpoint`
+  schema, matching the Rust side's existing `#[serde(default)]`. `sardeenz_proxy_requests_total` is
+  now labeled with `model` and `endpoint` in addition to `status` — including on late upstream
+  errors, so failed forwards are still attributable to a model/endpoint — and its duration histogram
+  is measured from after parking resolves rather than from request start, so parking wait time no
+  longer inflates forwarding latency. `CircuitBreaker` now prunes circuits for endpoints no longer
+  present in the routing map (zeroing their gauge) on every Redis sync. `WeightedRoundRobin`'s
+  counter-to-index conversion no longer truncates through `u32` before the modulo, which could pick
+  the wrong endpoint once the internal counter exceeded `u32::MAX`. Removed the unused
+  `engine_runner.rs` generated types (superseded by `proxy_control_plane.rs`; tracked further under
+  #99). (#100)
 - **Dashboard low-severity hardening bundle: SSE write-after-end race, credential-length leak,
   auto-logout timer races, and untranslated strings.** The BFF's `/api/events` route now guards
   every `reply.raw.write()` call (message handler and ping timer) with `writableEnded` before
