@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`updatedAt` description corrected in proxy-control-plane contract.** The `RoutingEntry.updatedAt`
+  field description previously claimed "Used by the proxy to detect stale entries," which was false —
+  the proxy never consults this field for routing or staleness. Updated to state the field is
+  informational: written by the control plane for operator diagnostics and dashboard display,
+  deserialized by the proxy for round-trip fidelity only. `docs/architecture/components/proxy.md`
+  updated to match. (#17)
 - **runner-contract.md accuracy corrections.** The BUSY → weight-0 routing mechanism, weight
   restoration, and all-replicas-BUSY 503 behavior are now clearly labelled as target design (not
   implemented). Health polling interval corrected from "~2s continuous" to "10s, deploy/wake-scoped

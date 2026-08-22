@@ -240,6 +240,8 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
 
 A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. The metadata block is optional and passed through to `/v1/models` responses without interpretation.
 
+The `updatedAt` timestamp is written by the control plane for operator diagnostics and dashboard display. The proxy deserializes it for round-trip fidelity but does not consult it for routing or staleness decisions — cache freshness is determined entirely by Redis pub/sub notifications (see [Cache Invalidation](#cache-invalidation) below).
+
 The `port` in each endpoint is the runner's **engine (inference) port** — where the engine's `/v1/*` server listens — not the runner's management port. The control plane registers this port (a two-port engine like vLLM serves the runner contract on a separate management port it never publishes to the routing map; a single-server runner reports the same value for both). The proxy forwards to whatever `host:port` the entry names and needs no knowledge of the distinction.
 
 ### Model States
