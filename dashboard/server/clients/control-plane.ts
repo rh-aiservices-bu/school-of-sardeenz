@@ -8,9 +8,11 @@ export interface ProxyResult {
 
 export class ControlPlaneClient {
   private readonly baseUrl: string;
+  private readonly token: string;
 
   constructor(config: Config) {
     this.baseUrl = config.controlPlaneUrl;
+    this.token = config.controlPlaneApiToken;
   }
 
   async proxyRequest(method: string, path: string, body?: unknown): Promise<Response> {
@@ -22,6 +24,11 @@ export class ControlPlaneClient {
     if (body !== undefined) {
       init.headers = { 'Content-Type': 'application/json' };
       init.body = JSON.stringify(body);
+    }
+    if (this.token) {
+      const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+      headers['Authorization'] = `Bearer ${this.token}`;
+      init.headers = headers;
     }
     return fetch(url, init);
   }

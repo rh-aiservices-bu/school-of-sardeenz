@@ -107,6 +107,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
     get:
       operationId: listModels
@@ -150,6 +156,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/models/{modelName}:
     get:
@@ -183,6 +195,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -231,6 +249,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -285,6 +309,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/models/{modelName}/sleep:
     post:
@@ -327,6 +357,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -377,6 +413,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # ---------------------------------------------------------------------------
   # Workers
@@ -417,6 +459,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/workers/{workerId}:
     get:
@@ -449,6 +497,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -486,6 +540,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/cluster/memory:
     get:
@@ -511,6 +571,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -548,6 +614,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/catalog/refresh:
     post:
@@ -574,6 +646,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -622,6 +700,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/catalog/{id}:
     delete:
@@ -657,6 +741,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -705,6 +795,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -760,6 +856,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
     delete:
       operationId: clearAllNotifications
@@ -779,6 +881,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -813,6 +921,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/notifications/read-all:
     post:
@@ -831,6 +945,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:
@@ -861,6 +981,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
           content:
             application/json:
               schema:

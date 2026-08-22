@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Control plane API authentication + NetworkPolicy.** The control plane now supports an optional
+  shared-secret `SARDEENZ_API_TOKEN`: when set, every `/api/v1/*` request must carry a matching
+  `Authorization: Bearer <token>` header (checked with `timingSafeEqual`, `/healthz`/`/readyz`
+  exempt), and a startup warning is logged when it is left unset. The proxy's wake-trigger client
+  and the dashboard BFF's control-plane client both read the same env var and attach the header
+  automatically. Documents the `401 UNAUTHORIZED` response on every `/api/v1/*` operation in the
+  OpenAPI contract. Adds `deployment/control-plane/networkpolicy.yaml`, restricting ingress to the
+  control-plane Service to the proxy and dashboard pods on port 3000 — defense in depth alongside
+  the token, per `docs/usage/deployment-security.md`. (#88)
 - **CI workflow (GitHub Actions).** A `quality` job (`.github/workflows/ci.yml`) runs on pull
   requests to `dev`/`main` and pushes to both, enforcing every gate that previously ran only
   manually: `make all` (typecheck + ESLint + clippy + Redocly spec validation), `make test`

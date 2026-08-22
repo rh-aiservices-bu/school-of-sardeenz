@@ -12,6 +12,7 @@ pub struct Config {
     pub redis_key_prefix: String,
     pub parking: ParkingConfig,
     pub circuit_breaker: CircuitBreakerConfig,
+    pub api_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +80,7 @@ impl Config {
                 recovery_timeout: cb_recovery_timeout,
                 probe_timeout,
             },
+            api_token: std::env::var("SARDEENZ_API_TOKEN").ok().filter(|s| !s.is_empty()),
         })
     }
 }
@@ -119,6 +121,7 @@ mod tests {
             "SARDEENZ_ADMIN_ADDR",
             "SARDEENZ_REDIS_URL",
             "SARDEENZ_CONTROL_PLANE_URL",
+            "SARDEENZ_API_TOKEN",
         ] {
             std::env::remove_var(key);
         }
@@ -129,5 +132,6 @@ mod tests {
         assert_eq!(config.parking.max_per_model, 1000);
         assert_eq!(config.upstream_timeout, Duration::from_secs(300));
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
+        assert_eq!(config.api_token, None);
     }
 }

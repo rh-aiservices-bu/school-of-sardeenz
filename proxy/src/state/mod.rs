@@ -46,7 +46,8 @@ impl AppState {
     ) -> Self {
         let has_existing_cache = existing_cache.is_some();
         let routing_cache = existing_cache.unwrap_or_default();
-        let wake_client = WakeTriggerClient::new(&config.control_plane_url);
+        let wake_client =
+            WakeTriggerClient::new(&config.control_plane_url, config.api_token.clone());
         let resolver = Arc::new(ModelResolver::new(routing_cache.clone()));
         let parking =
             ParkingManager::new(config.parking.clone(), routing_cache.clone(), wake_client);

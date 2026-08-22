@@ -23,6 +23,7 @@ export interface Config {
   readonly sifImporter: 'stub' | 'oras';
   readonly apptainerBin: string;
   readonly verifySif: boolean;
+  readonly apiToken: string;
 }
 
 export function requiredEnv(name: string): string {
@@ -106,6 +107,7 @@ export function loadConfig(): Config {
     sifImporter: optionalEnv('SARDEENZ_SIF_IMPORTER', 'stub') === 'oras' ? 'oras' : 'stub',
     apptainerBin: optionalEnv('SARDEENZ_APPTAINER_BIN', 'apptainer'),
     verifySif: boolEnv('SARDEENZ_VERIFY_SIF', true),
+    apiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
   };
 }
 

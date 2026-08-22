@@ -19,6 +19,7 @@ export interface Config {
   readonly oauthIssuerUrl: string;
   readonly k8sApiUrl: string;
   readonly namespace: string;
+  readonly controlPlaneApiToken: string;
 }
 
 function optionalEnv(name: string, fallback: string): string {
@@ -58,6 +59,7 @@ export function loadConfig(): Config {
     oauthIssuerUrl: optionalEnv('OAUTH_ISSUER_URL', ''),
     k8sApiUrl: optionalEnv('K8S_API_URL', ''),
     namespace: optionalEnv('NAMESPACE', 'sardeenz'),
+    controlPlaneApiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
   };
 }
 

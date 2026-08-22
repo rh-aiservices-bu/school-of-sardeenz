@@ -32,6 +32,7 @@ const mockConfig: Config = {
   oauthIssuerUrl: '',
   k8sApiUrl: '',
   namespace: 'sardeenz',
+  controlPlaneApiToken: '',
 };
 
 const sampleWorkerInfo: WorkerInfo = {

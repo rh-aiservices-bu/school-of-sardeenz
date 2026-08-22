@@ -296,7 +296,7 @@ mod tests {
                 max_global: 100,
             },
             RoutingMapCache::new(),
-            WakeTriggerClient::new("http://127.0.0.1:1"),
+            WakeTriggerClient::new("http://127.0.0.1:1", None),
         )
     }
 

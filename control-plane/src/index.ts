@@ -213,6 +213,9 @@ async function main(): Promise<void> {
     },
     'Control plane started',
   );
+  if (!config.apiToken) {
+    app.log.warn('SARDEENZ_API_TOKEN is not set — API authentication is disabled');
+  }
 }
 
 main().catch((err: unknown) => {

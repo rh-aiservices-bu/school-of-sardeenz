@@ -25,6 +25,7 @@ const mockConfig: Config = {
   oauthIssuerUrl: '',
   k8sApiUrl: '',
   namespace: 'sardeenz',
+  controlPlaneApiToken: '',
 };
 
 const cpIsHealthyFn = vi.fn<() => Promise<boolean>>();

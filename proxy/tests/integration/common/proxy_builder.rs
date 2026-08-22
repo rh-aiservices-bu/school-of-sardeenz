@@ -150,6 +150,7 @@ impl TestProxy {
                 recovery_timeout: cfg.cb_recovery_timeout,
                 probe_timeout,
             },
+            api_token: None,
         };
 
         // Use AppState directly — the production state type.
