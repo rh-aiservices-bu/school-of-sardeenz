@@ -61,29 +61,29 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime('')).toBe('Never');
   });
 
-  it('returns "Just now" for a future date', () => {
+  it('returns "now" for a future date', () => {
     const future = new Date(Date.now() + 10_000).toISOString();
-    expect(formatRelativeTime(future)).toBe('Just now');
+    expect(formatRelativeTime(future)).toBe('now');
   });
 
   it('returns seconds ago for recent times', () => {
     const recent = new Date(Date.now() - 30_000).toISOString();
-    expect(formatRelativeTime(recent)).toBe('30s ago');
+    expect(formatRelativeTime(recent)).toBe('30 seconds ago');
   });
 
   it('returns minutes ago', () => {
     const recent = new Date(Date.now() - 5 * 60_000).toISOString();
-    expect(formatRelativeTime(recent)).toBe('5m ago');
+    expect(formatRelativeTime(recent)).toBe('5 minutes ago');
   });
 
   it('returns hours ago', () => {
     const recent = new Date(Date.now() - 2 * 3_600_000).toISOString();
-    expect(formatRelativeTime(recent)).toBe('2h ago');
+    expect(formatRelativeTime(recent)).toBe('2 hours ago');
   });
 
   it('returns days ago', () => {
     const recent = new Date(Date.now() - 3 * 86_400_000).toISOString();
-    expect(formatRelativeTime(recent)).toBe('3d ago');
+    expect(formatRelativeTime(recent)).toBe('3 days ago');
   });
 });
 

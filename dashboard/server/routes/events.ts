@@ -77,10 +77,14 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
             if (chan === routingChannel) {
               const update = JSON.parse(message) as RoutingMapUpdate;
               const event = toClusterEvent(update);
-              reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+              if (!reply.raw.writableEnded) {
+                reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+              }
             } else if (chan === clusterChannel) {
               const event = JSON.parse(message) as ClusterEvent;
-              reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+              if (!reply.raw.writableEnded) {
+                reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+              }
             } else if (chan === notificationsChannel) {
               const notification = JSON.parse(message) as Record<string, unknown>;
               const event: ClusterEvent = {
@@ -88,7 +92,9 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
                 timestamp: (notification.timestamp as string) || new Date().toISOString(),
                 data: notification,
               };
-              reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+              if (!reply.raw.writableEnded) {
+                reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+              }
             }
           } catch {
             app.log.warn({ message }, 'Received non-JSON event from Redis pub/sub — skipping');
@@ -119,7 +125,9 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const pingTimer = setInterval(() => {
         try {
-          reply.raw.write(': ping\n\n');
+          if (!reply.raw.writableEnded) {
+            reply.raw.write(': ping\n\n');
+          }
         } catch {
           // Client already disconnected — cleanup will run on the 'close' event
         }

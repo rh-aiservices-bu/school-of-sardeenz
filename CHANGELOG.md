@@ -132,6 +132,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard low-severity hardening bundle: SSE write-after-end race, credential-length leak,
+  auto-logout timer races, and untranslated strings.** The BFF's `/api/events` route now guards
+  every `reply.raw.write()` call (message handler and ping timer) with `writableEnded` before
+  writing, matching the existing `model-logs.ts` pattern, so a client disconnect racing an in-flight
+  Redis pub/sub message or ping tick can no longer throw. `safeCompare` in `auth.ts` now hashes both
+  inputs with SHA-256 before `timingSafeEqual` instead of branching on buffer length, removing the
+  side channel that leaked the configured username/password length. `AuthContext`'s
+  `scheduleAutoLogout` now clears any existing timer before scheduling a new one and unmounts
+  cleanly, preventing two auto-logout timers from racing after a token refresh. `formatRelativeTime`
+  now uses `Intl.RelativeTimeFormat` instead of hardcoded English strings, and the `App.tsx` 404
+  page, error boundary, and loading spinners now pull their copy from the `common` i18n namespace
+  instead of inline English literals. (#107)
 - **Dashboard BFF was not proxy-aware: rate limiter collapsed behind a shared proxy IP, OAuth
   `redirect_uri` trusted spoofable request headers, and OAuth env vars weren't validated at
   startup.** Fastify now runs with `trustProxy: true` so `request.ip`/`protocol`/`hostname` reflect

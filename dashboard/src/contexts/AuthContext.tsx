@@ -93,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     if (logoutTimerRef.current) {
       clearTimeout(logoutTimerRef.current);
+      logoutTimerRef.current = null;
     }
     const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
     void fetch(`${baseUrl}/auth/logout`, { method: 'POST' });
@@ -108,6 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Set auto-logout timer based on JWT exp
   const scheduleAutoLogout = useCallback(
     (token: string) => {
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
+      }
       const payload = decodeJwtPayload(token);
       if (!payload || typeof payload['exp'] !== 'number') return;
       const expiresAt = payload['exp'] * 1000;
@@ -118,6 +123,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [logout],
   );
+
+  // Clear the pending auto-logout timer on unmount to avoid a stray logout() call.
+  useEffect(() => {
+    return () => {
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+      }
+    };
+  }, []);
 
   // Extract user info from JWT
   const setUserFromToken = useCallback(

@@ -32,9 +32,13 @@
   "loading": "Loading...",
   "error": "Error",
   "noData": "No data",
+  "never": "Never",
   "errors": {
-    "unexpected": "An unexpected error occurred."
+    "unexpected": "An unexpected error occurred.",
+    "somethingWrong": "Something went wrong"
   },
+  "pageNotFound": "Page not found",
+  "pageNotFoundBody": "The requested page does not exist. Use the sidebar to navigate to a valid page.",
   "auth": {
     "readOnly": "You have read-only access. Contact your administrator to request write access.",
     "readOnlyAction": "Read-only users cannot perform this action."

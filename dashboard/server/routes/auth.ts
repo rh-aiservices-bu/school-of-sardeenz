@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { createHash, timingSafeEqual, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { Config } from '../config.js';
@@ -112,14 +112,9 @@ function consumeState(state: string): boolean {
 /* Timing-safe string comparison                                      */
 /* ------------------------------------------------------------------ */
 function safeCompare(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) {
-    // Still do a comparison to keep timing constant
-    timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return timingSafeEqual(bufA, bufB);
+  const ha = createHash('sha256').update(a, 'utf8').digest();
+  const hb = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(ha, hb);
 }
 
 /* ------------------------------------------------------------------ */
