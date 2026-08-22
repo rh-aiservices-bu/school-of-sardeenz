@@ -72,6 +72,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Module-store write-protection VAP matched the wrong identity.** The `matchConditions` in the
+  ValidatingAdmissionPolicy compared `request.userInfo.username`, which is the controller manager
+  for Pods created by Jobs/Deployments — not the workload SA. Both exemptions were dead: the policy
+  blocked the librarian and control-plane writers it was meant to allow. Fixed to check
+  `object.spec.serviceAccountName` instead. Also added `pods/ephemeralcontainers` to the resource
+  rules so `kubectl debug` ephemeral containers are validated too. (#110)
 - **Dev worker: runner ports were allocated monotonically and never reclaimed.** `RunnerManager`
   tracked ports with an ever-incrementing counter, so a long-lived worker cycling models through
   start/stop (or crash/restart) would eventually walk past `runnerPortStart + <range>` and hand out

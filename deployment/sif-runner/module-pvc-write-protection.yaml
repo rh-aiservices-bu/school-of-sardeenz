@@ -7,8 +7,11 @@
 #
 # CHOSEN: a native ValidatingAdmissionPolicy (no extra operator; requires OCP 4.17+/k8s 1.30+,
 # satisfied by the 4.21 target) that DENIES any Pod mounting the `sardeenz-modules` PVC read-write,
-# except the two legitimate writers: the librarian SA (builds/signs SIFs — Task 7) and the control
-# plane SA (imports catalog SIFs via `apptainer pull oras://…` — runner-catalog feature).
+# unless its spec.serviceAccountName is one of the two legitimate writers: the librarian SA
+# (builds/signs SIFs — Task 7) or the control-plane SA (imports catalog SIFs via
+# `apptainer pull oras://…` — runner-catalog feature). The exemption checks
+# object.spec.serviceAccountName (not the admission request's caller identity) because Pods
+# created by Job or Deployment controllers have a controller-manager identity, not the workload SA.
 #
 # FALLBACK (if VAP is unavailable, e.g. older cluster or Kyverno-only shop): the two-PVC split —
 # a librarian-only build/staging PVC that only the librarian namespace/SA can bind, and a separate
@@ -25,15 +28,11 @@ spec:
       - apiGroups: ['']
         apiVersions: ['v1']
         operations: ['CREATE', 'UPDATE']
-        resources: ['pods']
+        resources: ['pods', 'pods/ephemeralcontainers']
   matchConditions:
-    # The librarian and control-plane SAs are the only writers of the module store.
-    - name: exclude-librarian
+    - name: exclude-module-writers
       expression: >-
-        request.userInfo.username != 'system:serviceaccount:' + object.metadata.namespace + ':sardeenz-librarian'
-    - name: exclude-control-plane
-      expression: >-
-        request.userInfo.username != 'system:serviceaccount:' + object.metadata.namespace + ':sardeenz-control-plane'
+        !(object.spec.serviceAccountName in ['sardeenz-librarian', 'sardeenz-control-plane'])
   variables:
     - name: moduleVolumeNames
       # Guard has(object.spec.volumes) — a volumeless Pod would otherwise error the expression and,
