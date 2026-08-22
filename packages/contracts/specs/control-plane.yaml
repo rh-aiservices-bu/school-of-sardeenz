@@ -75,7 +75,7 @@ paths:
       responses:
         "202":
           description: |
-            Deployment accepted. The model is now in `PENDING` state and
+            Deployment accepted. The model is now in `STARTING` state and
             the placement pipeline is running.
           content:
             application/json:

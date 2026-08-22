@@ -40,6 +40,8 @@ sardeenz/
 │   └── runner-<engine>/    # Runner images that become SIFs (e.g. runner-vllm/ = vLLM + kvcached)
 ├── deployment/             # K8s manifests
 ├── docs/                   # Project documentation
+├── scripts/                # Build and dev helper scripts
+├── tests/                  # Integration and gate tests
 └── Makefile                # Build, dev, test across all components
 ```
 

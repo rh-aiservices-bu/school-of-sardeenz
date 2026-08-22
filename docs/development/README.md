@@ -4,3 +4,5 @@
 - [`coding-standards.md`](coding-standards.md) — TypeScript, Rust, and cross-language conventions
 - [`contracts.md`](contracts.md) — OpenAPI contract workflow (edit, validate, codegen, fix)
 - [`patternfly.md`](patternfly.md) — PatternFly 6 guidelines for the dashboard
+- [`i18n.md`](i18n.md) — Internationalisation guide: namespaces, adding strings, adding a language
+- [`accessibility-audit.md`](accessibility-audit.md) — Accessibility audit findings and remediation tracking

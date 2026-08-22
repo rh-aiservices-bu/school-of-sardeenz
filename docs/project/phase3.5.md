@@ -134,7 +134,7 @@ Add notification schemas and endpoints to the control plane OpenAPI spec.
   - `DELETE /api/v1/notifications` — clear all
 - Add `NOTIFICATION` to `ClusterEventType` enum (for SSE push)
 
-**Then regenerate types:** `npm run generate -w @sardeenz/types`
+**Then regenerate types:** `npm run codegen -w @sardeenz/types`
 
 ### Task 2: Control plane — NotificationService
 

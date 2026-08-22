@@ -155,7 +155,7 @@ Formalize the worker agent management API as an OpenAPI 3.1 spec. This contract 
 - `WorkerInfo` — the JSON structure pushed to `{prefix}:workers:{workerId}:info` (capabilities, devices, managementUrl)
 - `WorkerMemoryReport` — the JSON structure pushed to `{prefix}:workers:{workerId}:memory`
 
-**Then regenerate types:** `npm run generate -w @sardeenz/types`
+**Then regenerate types:** `npm run codegen -w @sardeenz/types`
 
 **Validation:** `npm run validate -w @sardeenz/contracts`
 
@@ -558,5 +558,5 @@ Proxy routes inference traffic to runner stub ports.
 - [WorkerClient](../../control-plane/src/clients/worker.ts) — current implicit worker agent API
 - [RunnerClient](../../control-plane/src/clients/runner.ts) — control plane → runner HTTP client
 - [WorkerPoolService](../../control-plane/src/services/worker-pool.ts) — worker discovery and heartbeat detection
-- [Worker/runner architecture doc](../architecture/components/worker-agent-architecture.md) — worker agent process model
+- [Worker agent contract](../../packages/contracts/specs/worker-agent.yaml) — worker agent process model
 - [Coding standards](../development/coding-standards.md) — TypeScript and OpenAPI conventions

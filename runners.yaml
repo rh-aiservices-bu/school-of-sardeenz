@@ -12,7 +12,7 @@
 #     - id:          stable unique id, [A-Za-z0-9_.-]+ (usually == sifName)
 #       title:       human-readable name shown in the catalog
 #       description: one-paragraph summary
-#       engine:      engine family (e.g. "vLLM", "Triton")
+#       engine:      optional engine family (e.g. "vLLM", "Triton")
 #       runnerType:  runner type identifier (e.g. "vllm") — matches the runner contract
 #       version:     engine/build version string
 #       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>@sha256:<digest> — the

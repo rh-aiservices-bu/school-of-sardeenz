@@ -1226,7 +1226,7 @@ export interface operations {
         };
         responses: {
             /**
-             * @description Deployment accepted. The model is now in `PENDING` state and
+             * @description Deployment accepted. The model is now in `STARTING` state and
              *     the placement pipeline is running.
              */
             202: {

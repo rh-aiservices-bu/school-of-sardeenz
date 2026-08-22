@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docs accuracy sweep.** Corrected the stale contract file index in `docs/development/contracts.md`
+  (`specs/control-plane.yaml` replaces the non-existent `dashboard-control-plane.yaml`, and
+  `specs/worker-agent.yaml` was missing entirely); fixed `npm run generate` → `npm run codegen`
+  script-name typos in `docs/project/phase3.5.md` and `phase3.6.md`; fixed the PatternFly chart
+  import path to `@patternfly/react-charts/victory`; added the missing ADR-018 entry (and its
+  ADR-017 amendment note) to `docs/architecture/adrs/README.md`; corrected the proxy's
+  `SARDEENZ_LISTEN_ADDR` env var to `SARDEENZ_PROXY_LISTEN_ADDR` (with legacy fallback noted) and
+  the control plane's to `SARDEENZ_CONTROL_PLANE_LISTEN_ADDR`; documented that `/readyz` requires
+  both an active Redis connection and a completed routing-map load (`routing_map_loaded`), not just
+  Redis; corrected the weighted round-robin balancer description from an expanded endpoint list to
+  cumulative weight bands with an allocation-free O(n) scan; fixed a dead relative link in
+  `structured-output-compatibility.md`; added the missing `catalog` i18n namespace row; rewrote
+  `docs/project/README.md`, `docs/development/README.md`, `docs/usage/README.md`, and
+  `docs/architecture/components/README.md` to list all orphaned docs in their directories; documented
+  previously-undocumented `SARDEENZ_RUNNER_ENTRYPOINT`, `SARDEENZ_HEALTH_TIMEOUT_MS`,
+  `SARDEENZ_HEALTH_INTERVAL_MS`, `SARDEENZ_STOP_GRACE_MS`, `SARDEENZ_DEPLOY_TIMEOUT_SECS`, and
+  `SARDEENZ_RECONCILIATION_INTERVAL_SECS` in `.env.example`; marked `runners.yaml`'s `engine` field
+  as optional; added `scripts/` and `tests/` to the repository tree in `CLAUDE.md`; annotated the
+  not-yet-implemented `SARDEENZ_CP_API_KEY`/`SARDEENZ_DB_PASSWORD` rows in
+  `adr-013-secrets-management.md`; corrected `PENDING` → `STARTING` in the deploy-model 202 response
+  description in `packages/contracts/specs/control-plane.yaml` (regenerated types); and softened
+  `runner-catalog.md`'s `sifName` naming guidance from "must be" to "by convention follows" for the
+  `<engine>-<version>` shape. (#81)
+
 ### Changed
 
 - **`updatedAt` description corrected in proxy-control-plane contract.** The `RoutingEntry.updatedAt`

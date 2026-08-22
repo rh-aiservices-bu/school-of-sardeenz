@@ -45,9 +45,9 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
 1. Build + sign the runner SIF (see [`containers/runner-vllm`](../../containers/runner-vllm) and the
    [librarian pipeline](../../deployment/librarian/), or `apptainer build` + `apptainer sign`).
 2. Push it via ORAS: `apptainer push <engine>-<version>.sif oras://quay.io/<ns>/<repo>:<tag>`.
-3. Add an entry to the catalog `runners.yaml` (schema in the repo-root sample). `sifName` must be
-   `<engine>-<version>` and match `^[A-Za-z0-9_.-]+$` (it becomes the `runtimeModule` a worker
-   execs).
+3. Add an entry to the catalog `runners.yaml` (schema in the repo-root sample). `sifName` by
+   convention follows the `<engine>-<version>` shape and must match `^[A-Za-z0-9_.-]+$` (it becomes
+   the `runtimeModule` a worker execs).
 4. Sign SIFs with the key whose **public** half is distributed to workers and the control plane, so
    `apptainer verify` trusts them at import and exec.
 

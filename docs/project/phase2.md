@@ -155,7 +155,7 @@ Set up the Fastify application with the foundational infrastructure that all sub
 
 - `SARDEENZ_REDIS_URL` — Redis/Valkey connection string
 - `SARDEENZ_DATABASE_URL` — PostgreSQL connection string
-- `SARDEENZ_LISTEN_ADDR` — control plane listen address (default `0.0.0.0:3000`)
+- `SARDEENZ_CONTROL_PLANE_LISTEN_ADDR` — control plane listen address (default `0.0.0.0:3000`; the legacy `SARDEENZ_LISTEN_ADDR` name is still read as a fallback)
 - `SARDEENZ_LOG_LEVEL` — log level (default `info`)
 - `SARDEENZ_LEASE_NAME` — K8s Lease name for leader election (default `sardeenz-control-plane`)
 - `SARDEENZ_LEASE_NAMESPACE` — K8s namespace for Lease (default from downward API)
