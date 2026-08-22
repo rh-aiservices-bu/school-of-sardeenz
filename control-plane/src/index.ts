@@ -81,7 +81,9 @@ async function main(): Promise<void> {
   // Runner catalog + SIF import. The importer is pluggable so the control plane stays
   // runtime-agnostic: 'oras' runs `apptainer pull oras://…` (real), 'stub' writes a placeholder
   // (dev/CI, no apptainer). Import progress is published on the shared cluster-events channel.
-  const catalogService = new CatalogService(config.runnerCatalogUrl, notificationLogger);
+  const catalogService = new CatalogService(config.runnerCatalogUrl, notificationLogger, {
+    allowInsecureCatalog: config.allowInsecureCatalog,
+  });
   const sifImporter: SifImporter =
     config.sifImporter === 'oras'
       ? new OrasImporter({ apptainerBin: config.apptainerBin, verifySif: config.verifySif })

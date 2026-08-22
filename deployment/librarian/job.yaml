@@ -41,15 +41,18 @@ spec:
               drop: ['ALL']
           env:
             # EDIT THESE per build:
-            - { name: IMAGE_REF, value: 'quay.io/REPLACE_ME/sardeenz-runner-vllm:0.21' }
+            - {
+                name: IMAGE_REF,
+                value: 'quay.io/REPLACE_ME/sardeenz-runner-vllm:0.21@sha256:0000000000000000000000000000000000000000000000000000000000000000',
+              }
             - { name: SIF_NAME, value: 'vllm-0.21' }
             # Scratch MUST be node-local (see build-sif.sh header).
             - { name: APPTAINER_TMPDIR, value: /scratch }
             - { name: APPTAINER_CACHEDIR, value: /scratch/cache }
             - { name: HOME, value: /scratch/home }
             - { name: SIF_SIGNING_KEY, value: /etc/sardeenz/signing/private.asc }
-            # Empty for a passphraseless librarian key; else source from the Secret.
-            - { name: APPTAINER_PASSPHRASE, value: '' }
+            # The librarian key is passphraseless (fully unattended CI); if a passphrase is ever
+            # required, source it from the Secret rather than setting it inline here.
           resources:
             requests:
               memory: 8Gi

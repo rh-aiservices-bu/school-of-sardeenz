@@ -17,6 +17,7 @@ export interface Config {
   readonly reconciliationIntervalSecs: number;
   // Runner catalog + SIF import
   readonly runnerCatalogUrl: string;
+  readonly allowInsecureCatalog: boolean;
   readonly modulesDir: string;
   // Shared model-weights directory, browsed by the dashboard model-path picker.
   readonly weightsDir: string;
@@ -100,6 +101,9 @@ export function loadConfig(): Config {
     deployTimeoutSecs: intEnv('SARDEENZ_DEPLOY_TIMEOUT_SECS', 900),
     reconciliationIntervalSecs: intEnv('SARDEENZ_RECONCILIATION_INTERVAL_SECS', 30),
     runnerCatalogUrl: optionalEnv('SARDEENZ_RUNNER_CATALOG_URL', DEFAULT_CATALOG_URL),
+    // Plaintext http:// catalog sources are rejected by default (see CatalogService); this is an
+    // explicit opt-in for trusted-network / dev setups that can't use https.
+    allowInsecureCatalog: boolEnv('SARDEENZ_ALLOW_INSECURE_CATALOG', false),
     modulesDir: optionalEnv('SARDEENZ_MODULES_DIR', '/modules'),
     // Same var the worker reads; the control plane must have the weights volume mounted to browse it.
     weightsDir: optionalEnv('SARDEENZ_WEIGHTS_DIR', '/weights'),

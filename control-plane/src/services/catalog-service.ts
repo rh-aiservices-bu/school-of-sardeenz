@@ -31,6 +31,7 @@ export class CatalogService {
     private readonly deps: {
       fetch?: typeof fetch;
       readFile?: (path: string) => Promise<string>;
+      allowInsecureCatalog?: boolean;
     } = {},
   ) {}
 
@@ -54,6 +55,14 @@ export class CatalogService {
 
   private async fetchRaw(): Promise<string> {
     if (/^https?:\/\//i.test(this.source)) {
+      // Plaintext http:// lets a network attacker rewrite the catalog in transit (spoofed images,
+      // rewritten ORAS refs). Require https unless the operator explicitly opts in.
+      if (/^http:\/\//i.test(this.source) && !this.deps.allowInsecureCatalog) {
+        throw new Error(
+          `Refusing to fetch catalog over http:// (${this.source}) — use https:// or set ` +
+            'SARDEENZ_ALLOW_INSECURE_CATALOG=true to opt in',
+        );
+      }
       const fetchImpl = this.deps.fetch ?? fetch;
       const res = await fetchImpl(this.source, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       if (!res.ok) {
@@ -125,6 +134,17 @@ export class CatalogService {
       this.logger.warn(
         { id: e.id, sifName: e.sifName },
         'Catalog entry id/sifName invalid — skipping',
+      );
+      return null;
+    }
+    // ORAS refs must be digest-pinned: a mutable tag can be repointed after the catalog entry was
+    // reviewed, silently changing what gets pulled onto the module store. Local/dev image refs
+    // (used outside ORAS import) are unaffected.
+    const image = e.image as string;
+    if (image.startsWith('oras://') && !/@sha256:[a-fA-F0-9]{64}$/.test(image)) {
+      this.logger.warn(
+        { id: e.id, image },
+        'Catalog entry ORAS image missing @sha256: digest — skipping',
       );
       return null;
     }

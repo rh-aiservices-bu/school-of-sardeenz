@@ -17,6 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   OpenAPI contract. Adds `deployment/control-plane/networkpolicy.yaml`, restricting ingress to the
   control-plane Service to the proxy and dashboard pods on port 3000 — defense in depth alongside
   the token, per `docs/usage/deployment-security.md`. (#88)
+- **SIF supply-chain hardening.** `scripts/build-sif.sh` now refuses to build a SIF unless
+  `--image` is pinned to a `@sha256:<digest>` (a mutable tag could be repointed after review,
+  silently changing what gets signed and published). The runner catalog (`CatalogService`) applies
+  the same digest requirement to `oras://` image refs — entries without a digest are skipped
+  (logged) rather than imported — and now refuses to fetch a remote catalog over plaintext
+  `http://` unless the operator opts in via the new `SARDEENZ_ALLOW_INSECURE_CATALOG` env var.
+  `containers/control-plane/Dockerfile` verifies the Apptainer `.deb`'s sha256
+  (`APPTAINER_DEB_SHA256`) before installing it. `runners.yaml` and the librarian
+  `deployment/librarian/job.yaml` example are updated to show digest-pinned refs. (#115)
 - **CI workflow (GitHub Actions).** A `quality` job (`.github/workflows/ci.yml`) runs on pull
   requests to `dev`/`main` and pushes to both, enforcing every gate that previously ran only
   manually: `make all` (typecheck + ESLint + clippy + Redocly spec validation), `make test`
