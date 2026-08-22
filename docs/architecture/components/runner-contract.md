@@ -63,7 +63,7 @@ stateDiagram-v2
 
 ### Key Transitions
 
-- **READY ↔ BUSY:** Self-reported by the runner based on its own capacity assessment (e.g., request queue depth, KV cache pressure). The control plane does not command this transition — it reads it and adjusts routing accordingly.
+- **READY ↔ BUSY:** Self-reported by the runner based on its own capacity assessment (e.g., request queue depth, KV cache pressure). The control plane does not command this transition. Currently, the control plane treats `BUSY` as equivalent to `READY` and does not adjust routing (see [ADR-014](../adrs/adr-014-inference-recency-tracking.md)).
 - **READY → SLEEPING:** The control plane sends `POST /sleep` with a level. Only valid from `READY` — a `BUSY` runner must return to `READY` (no in-flight requests) before it can be slept. The call is synchronous — the response returns after the offload completes. The control plane sets an appropriate HTTP timeout based on the model size.
 - **→ [*] (stopped):** The control plane removes the runner from the routing map (stopping new traffic), monitors `activeRequests` in `GET /health` until in-flight work completes, then tells the worker to send SIGTERM. The runner does not receive an HTTP command to stop — process lifecycle is a worker concern.
 - **→ ERROR:** Self-reported by the runner. Can occur from any active state. The control plane detects it via health polling and decides whether to restart or escalate.
@@ -73,6 +73,8 @@ stateDiagram-v2
 The runner contract defines per-runner states (`RunnerState`), while the proxy routing map operates on per-model states (`ModelState`) with per-endpoint fields (`healthy`, `weight`). The control plane translates between the two.
 
 #### BUSY → weight: 0
+
+> **Status — target design, not implemented.** The control plane currently treats `BUSY` the same as `READY` and does not adjust endpoint weights. Health polling is deploy/wake-scoped, not continuous (see [ADR-014](../adrs/adr-014-inference-recency-tracking.md)), so real-time BUSY detection is not available. The routing behavior described in this subsection and "All replicas BUSY" below is the intended future design.
 
 When a runner reports `BUSY`, the control plane sets `weight: 0` on that runner's endpoint in the routing map. The endpoint remains in the list with `healthy: true` and the model stays in `ACTIVE` state.
 
@@ -93,8 +95,8 @@ If all endpoints for a model reach `weight: 0`, the proxy has no routable endpoi
 | RunnerState | ModelState | Endpoint healthy      | Endpoint weight   | Proxy behavior                      |
 | ----------- | ---------- | --------------------- | ----------------- | ----------------------------------- |
 | `STARTING`  | `STARTING` | N/A (no endpoint yet) | N/A               | Park connections, no wake trigger   |
-| `READY`     | `ACTIVE`   | `true`                | configured weight | Forward requests (round-robin)      |
-| `BUSY`      | `ACTIVE`   | `true`                | `0`               | Skip this endpoint in round-robin   |
+| `READY`     | `ACTIVE`   | `true`                | `1`                | Forward requests (round-robin)      |
+| `BUSY`      | `ACTIVE`   | `true`                | `0`               | Target design — not implemented     |
 | `SLEEPING`  | `SLEEPING` | N/A (no endpoint)     | N/A               | Park connections, fire wake trigger |
 | `ERROR`     | `ERROR`    | N/A (no endpoint)     | N/A               | Return 503                          |
 
@@ -108,10 +110,10 @@ The `DRAINING` model state is set explicitly by the control plane before sleep o
 
 Returns a `HealthStatus` with the current `RunnerState`, an optional human-readable `message`, loading `progress` (when `STARTING`), and `activeRequests` count.
 
-The control plane polls this endpoint on a regular interval (configurable, around 2s) to:
+The control plane polls this endpoint during deploy and wake operations (`SARDEENZ_HEALTH_CHECK_INTERVAL_SECS`, default 10s) to:
 
 - Detect when a `STARTING` runner becomes `READY`
-- Monitor `BUSY` ↔ `READY` transitions for routing updates
+- Monitor `BUSY` ↔ `READY` transitions for routing updates *(target design — not implemented)*
 - Track in-flight request count before stopping a runner
 - Detect `ERROR` states
 

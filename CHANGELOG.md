@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **runner-contract.md accuracy corrections.** The BUSY → weight-0 routing mechanism, weight
+  restoration, and all-replicas-BUSY 503 behavior are now clearly labelled as target design (not
+  implemented). Health polling interval corrected from "~2s continuous" to "10s, deploy/wake-scoped
+  only" per `SARDEENZ_HEALTH_CHECK_INTERVAL_SECS`. READY endpoint weight corrected from "configured"
+  to `1`. All changes reference ADR-014 for consistency. (#80)
+
 ### Added
 
 - **Capability contract hardening.** `kvCacheElasticSharing` is now a first-class boolean on
