@@ -18,6 +18,9 @@ pub enum ProxyError {
     #[error("all endpoints unhealthy for model: {0}")]
     AllEndpointsUnhealthy(String),
 
+    #[error("proxy overloaded: {0}")]
+    Overloaded(String),
+
     #[error("bad request: {0}")]
     BadRequest(String),
 
@@ -38,7 +41,8 @@ impl ProxyError {
             ProxyError::ModelUnavailable(_)
             | ProxyError::ParkingTimeout(_)
             | ProxyError::ParkingLimitReached(_)
-            | ProxyError::AllEndpointsUnhealthy(_) => StatusCode::SERVICE_UNAVAILABLE,
+            | ProxyError::AllEndpointsUnhealthy(_)
+            | ProxyError::Overloaded(_) => StatusCode::SERVICE_UNAVAILABLE,
             ProxyError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ProxyError::Upstream(_) => StatusCode::BAD_GATEWAY,
             ProxyError::Redis(_) | ProxyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -72,6 +76,7 @@ fn error_type(err: &ProxyError) -> &'static str {
         ProxyError::ParkingTimeout(_) => "parking_timeout",
         ProxyError::ParkingLimitReached(_) => "parking_limit_reached",
         ProxyError::AllEndpointsUnhealthy(_) => "all_endpoints_unhealthy",
+        ProxyError::Overloaded(_) => "overloaded",
         ProxyError::BadRequest(_) => "invalid_request_error",
         ProxyError::Upstream(_) => "upstream_error",
         ProxyError::Redis(_) => "internal_error",

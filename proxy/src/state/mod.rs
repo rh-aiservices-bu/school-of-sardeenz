@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::forwarding::{CircuitBreaker, ForwardingClient, WeightedRoundRobin};
+use crate::forwarding::{CircuitBreaker, ForwardingClient, ForwardingLimiter, WeightedRoundRobin};
 use crate::inference_tracker::InferenceTracker;
 use crate::parking::ParkingManager;
 use crate::parking::WakeTriggerClient;
@@ -22,6 +22,7 @@ pub struct AppState {
     pub balancer: Arc<WeightedRoundRobin>,
     pub circuit_breaker: CircuitBreaker,
     pub forwarding_client: ForwardingClient,
+    pub forwarding_limiter: ForwardingLimiter,
     pub inference_tracker: InferenceTracker,
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     redis_connected: Arc<AtomicBool>,
@@ -53,6 +54,10 @@ impl AppState {
             ParkingManager::new(config.parking.clone(), routing_cache.clone(), wake_client);
         let circuit_breaker = CircuitBreaker::new(config.circuit_breaker.clone());
         let forwarding_client = ForwardingClient::new(config.upstream_timeout);
+        let forwarding_limiter = ForwardingLimiter::new(
+            config.max_concurrent_forwards,
+            config.max_concurrent_forwards_per_model,
+        );
         let inference_tracker =
             InferenceTracker::new(config.redis_url.clone(), config.redis_key_prefix.clone());
 
@@ -64,6 +69,7 @@ impl AppState {
             balancer: Arc::new(WeightedRoundRobin::new()),
             circuit_breaker,
             forwarding_client,
+            forwarding_limiter,
             inference_tracker,
             metrics_handle,
             redis_connected: Arc::new(AtomicBool::new(redis_connected)),

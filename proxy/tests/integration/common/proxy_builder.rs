@@ -45,6 +45,8 @@ pub struct TestProxyConfig {
     pub cb_failure_window: Duration,
     pub cb_recovery_timeout: Duration,
     pub max_body_bytes: usize,
+    pub max_concurrent_forwards: usize,
+    pub max_concurrent_forwards_per_model: usize,
 }
 
 impl Default for TestProxyConfig {
@@ -59,6 +61,8 @@ impl Default for TestProxyConfig {
             cb_failure_window: Duration::from_secs(30),
             cb_recovery_timeout: Duration::from_secs(15),
             max_body_bytes: 1_048_576,
+            max_concurrent_forwards: 0,
+            max_concurrent_forwards_per_model: 0,
         }
     }
 }
@@ -157,6 +161,8 @@ impl TestProxy {
             },
             api_token: None,
             max_body_bytes: cfg.max_body_bytes,
+            max_concurrent_forwards: cfg.max_concurrent_forwards,
+            max_concurrent_forwards_per_model: cfg.max_concurrent_forwards_per_model,
         };
 
         // Use AppState directly — the production state type.

@@ -15,6 +15,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Redis and Postgres ports to `127.0.0.1` instead of all interfaces. `containers/control-plane/` and
   `containers/dashboard/` `.dockerignore` now exclude `.env*` (except `.env.example`), `logs`,
   `weights`, `modules`, and `scratch` from build contexts. (#119)
+- **Proxy forwarding concurrency limits.** New `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` (global) and
+  `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` (per-model) env vars cap in-flight *forwarded* requests,
+  returning `503 overloaded` once reached (both default to `0`/unlimited). The permit is acquired
+  after parking resolves and before endpoint selection — a parked request never holds one, so a
+  sleep/wake pile-up cannot exhaust the limit and deadlock the proxy. Documents ingress-level rate
+  limiting and per-tenant quotas as mandatory, ingress-owned deployment requirements the proxy
+  itself does not and cannot enforce. (#19)
 - **Proxy configurable body cap and parking byte budget.** Parked requests hold their fully-buffered
   body in memory for the duration of the park, so an unbounded body size combined with many parked
   connections could exhaust proxy memory. The hardcoded 10 MiB request-body cap is now configurable

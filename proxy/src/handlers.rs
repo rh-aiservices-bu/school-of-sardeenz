@@ -85,6 +85,13 @@ async fn handle_inference_inner(
         )));
     }
 
+    // Reserve a forwarding permit AFTER parking resolves (so a parked request
+    // never holds one while it waits for a sleeping model to wake — see
+    // ForwardingLimiter docs) and BEFORE endpoint selection/forwarding. Held
+    // until this function returns, releasing the permit on every exit path
+    // including cancellation.
+    let _forward_guard = state.forwarding_limiter.try_acquire(&model_name)?;
+
     // Build candidates with a NON-mutating availability check, so we do not
     // strand a probe on any endpoint the balancer won't select (#93).
     let mut candidates: Vec<_> = entry

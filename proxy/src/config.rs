@@ -14,6 +14,13 @@ pub struct Config {
     pub circuit_breaker: CircuitBreakerConfig,
     pub api_token: Option<String>,
     pub max_body_bytes: usize,
+    /// Max concurrently *forwarded* (in-flight upstream) requests across all
+    /// models. `0` = unlimited. Deliberately independent of the parking
+    /// limits — a request parked waiting for a sleeping model to wake holds
+    /// no forwarding permit, so this cap cannot deadlock against parking.
+    pub max_concurrent_forwards: usize,
+    /// Max concurrently forwarded requests for a single model. `0` = unlimited.
+    pub max_concurrent_forwards_per_model: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +92,11 @@ impl Config {
             },
             api_token: std::env::var("SARDEENZ_API_TOKEN").ok().filter(|s| !s.is_empty()),
             max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "1048576")?,
+            max_concurrent_forwards: parse_env("SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS", "0")?,
+            max_concurrent_forwards_per_model: parse_env(
+                "SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL",
+                "0",
+            )?,
         })
     }
 }
@@ -139,5 +151,7 @@ mod tests {
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
         assert_eq!(config.api_token, None);
         assert_eq!(config.max_body_bytes, 1_048_576);
+        assert_eq!(config.max_concurrent_forwards, 0);
+        assert_eq!(config.max_concurrent_forwards_per_model, 0);
     }
 }
