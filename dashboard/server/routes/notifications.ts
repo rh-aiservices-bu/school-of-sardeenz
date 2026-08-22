@@ -14,6 +14,7 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: RouteDeps
     },
   );
 
+  // admin-readonly: marking as read is a personal UI state change, not a destructive op
   app.post<{ Params: { id: string } }>(
     '/api/notifications/:id/read',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
@@ -23,6 +24,7 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: RouteDeps
     },
   );
 
+  // admin-readonly: marking as read is a personal UI state change, not a destructive op
   app.post(
     '/api/notifications/read-all',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
@@ -34,7 +36,7 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: RouteDeps
 
   app.delete<{ Params: { id: string } }>(
     '/api/notifications/:id',
-    { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
       const { status, data } = await deps.controlPlane.removeNotification(request.params.id);
       return reply.code(status).send(data);
@@ -43,7 +45,7 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: RouteDeps
 
   app.delete(
     '/api/notifications',
-    { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
       const { status, data } = await deps.controlPlane.clearAllNotifications();
       return reply.code(status).send(data);

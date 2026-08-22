@@ -79,6 +79,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard BFF: read-only role could delete notification state.** Both `DELETE /api/notifications/:id`
+  and `DELETE /api/notifications` were gated at `admin-readonly` instead of `admin`, so any
+  authenticated user (the default OAuth role) could wipe notification history. Fixed to require
+  `admin`. Mark-as-read routes stay `admin-readonly` (non-destructive). (#103)
 - **Proxy: wake-trigger transport errors leaked the control-plane URL to clients.** The non-2xx
   response path was already masked (#93), but a transport-level failure (connection refused, DNS
   failure, timeout) reaching the control plane still propagated reqwest's raw error — which embeds

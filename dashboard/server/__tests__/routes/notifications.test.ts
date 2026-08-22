@@ -90,6 +90,20 @@ async function buildApp(deps: RouteDeps): Promise<FastifyInstance> {
   return app;
 }
 
+async function buildAppWithConfig(config: Config, deps: RouteDeps): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  app.setErrorHandler((error, _req, reply) => {
+    if (error instanceof BffError) {
+      return reply.code(error.statusCode).send(error.toResponse());
+    }
+    return reply.code(500).send({ error: 'Internal error', code: 'INTERNAL_ERROR' });
+  });
+  await app.register(authPlugin, { config });
+  registerNotificationRoutes(app, deps);
+  await app.ready();
+  return app;
+}
+
 describe('GET /api/notifications', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -194,6 +208,142 @@ describe('DELETE /api/notifications', () => {
 
     const app = await buildApp(buildDeps());
     const res = await app.inject({ method: 'DELETE', url: '/api/notifications' });
+    await app.close();
+
+    expect(res.statusCode).toBe(204);
+    expect(clearAllNotificationsFn).toHaveBeenCalled();
+  });
+});
+
+describe('notification route role enforcement', () => {
+  const simpleConfig: Config = { ...mockConfig, authMode: 'simple', jwtSecret: 'test-jwt-secret-that-is-long-enough' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin-readonly can GET /api/notifications', async () => {
+    listNotificationsFn.mockResolvedValue({ status: 200, data: { notifications: [] } });
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'viewer', roles: ['admin-readonly'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/notifications',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('admin-readonly can POST mark-as-read', async () => {
+    markNotificationReadFn.mockResolvedValue({ status: 204, data: undefined });
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'viewer', roles: ['admin-readonly'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/notifications/n1/read',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('admin-readonly can POST read-all', async () => {
+    markAllNotificationsReadFn.mockResolvedValue({ status: 204, data: undefined });
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'viewer', roles: ['admin-readonly'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/notifications/read-all',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('admin-readonly gets 403 on DELETE /api/notifications/:id', async () => {
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'viewer', roles: ['admin-readonly'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/notifications/n1',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(403);
+    expect(removeNotificationFn).not.toHaveBeenCalled();
+  });
+
+  it('admin-readonly gets 403 on DELETE /api/notifications', async () => {
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'viewer', roles: ['admin-readonly'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/notifications',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(403);
+    expect(clearAllNotificationsFn).not.toHaveBeenCalled();
+  });
+
+  it('admin can DELETE /api/notifications/:id', async () => {
+    removeNotificationFn.mockResolvedValue({ status: 204, data: undefined });
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'admin', roles: ['admin'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/notifications/n1',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(204);
+    expect(removeNotificationFn).toHaveBeenCalledWith('n1');
+  });
+
+  it('admin can DELETE /api/notifications', async () => {
+    clearAllNotificationsFn.mockResolvedValue({ status: 204, data: undefined });
+    const app = await buildAppWithConfig(simpleConfig, buildDeps());
+    const token = app.jwt.sign(
+      { username: 'admin', roles: ['admin'], authMode: 'simple' },
+      { expiresIn: 3600 },
+    );
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/notifications',
+      headers: { authorization: `Bearer ${token}` },
+    });
     await app.close();
 
     expect(res.statusCode).toBe(204);
