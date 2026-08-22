@@ -14,7 +14,7 @@ services:
   redis:
     image: docker.io/valkey/valkey:8
     ports:
-      - '${SARDEENZ_REDIS_HOST_PORT:-6379}:6379'
+      - '127.0.0.1:${SARDEENZ_REDIS_HOST_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     healthcheck:
@@ -26,7 +26,7 @@ services:
   postgres:
     image: docker.io/postgres:16
     ports:
-      - '${SARDEENZ_POSTGRES_HOST_PORT:-5432}:5432'
+      - '127.0.0.1:${SARDEENZ_POSTGRES_HOST_PORT:-5432}:5432'
     environment:
       POSTGRES_USER: ${SARDEENZ_POSTGRES_USER:-sardeenz}
       POSTGRES_PASSWORD: ${SARDEENZ_POSTGRES_PASSWORD:-sardeenz}

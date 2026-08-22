@@ -223,6 +223,8 @@ export class ApptainerLauncher implements RunnerLauncher {
     // --cleanenv: do NOT leak the worker agent's environment (Redis URL, other config) into the
     // engine, and avoid host PATH/PYTHONPATH/LD_LIBRARY_PATH bleeding into the guest. Everything
     // the runner needs is passed explicitly via --env below (HOME is handled by Apptainer itself).
+    // Note: --cleanenv does NOT block APPTAINERENV_*/SINGULARITYENV_* — Apptainer injects those
+    // into the guest regardless, so they are stripped from the spawned process's env below.
     const args: string[] = ['exec', '--cleanenv'];
     const useNv = spec.deviceType?.toUpperCase() === 'CUDA';
     if (useNv) args.push('--nv');
@@ -262,11 +264,14 @@ export class ApptainerLauncher implements RunnerLauncher {
     // goes to vLLM.
     args.push('--', '--served-model-name', spec.modelName);
 
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      HOME: this.config.home,
-      APPTAINER_HOME: `${this.config.home}:${this.config.home}`,
-    };
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const key of Object.keys(env)) {
+      if (key.startsWith('APPTAINERENV_') || key.startsWith('SINGULARITYENV_')) {
+        delete env[key];
+      }
+    }
+    env.HOME = this.config.home;
+    env.APPTAINER_HOME = `${this.config.home}:${this.config.home}`;
 
     return { command: this.config.apptainerBin, args, env, sifPath };
   }

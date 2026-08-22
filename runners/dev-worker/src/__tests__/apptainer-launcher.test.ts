@@ -155,6 +155,24 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     );
   });
 
+  it('strips APPTAINERENV_*/SINGULARITYENV_* from the spawned process env', async () => {
+    const originalFoo = process.env.APPTAINERENV_FOO;
+    const originalBar = process.env.SINGULARITYENV_BAR;
+    process.env.APPTAINERENV_FOO = 'leaked';
+    process.env.SINGULARITYENV_BAR = 'leaked';
+    try {
+      const { launcher } = makeLauncher();
+      const plan = await launcher.buildExecPlan(makeSpec());
+      expect(plan.env).not.toHaveProperty('APPTAINERENV_FOO');
+      expect(plan.env).not.toHaveProperty('SINGULARITYENV_BAR');
+    } finally {
+      if (originalFoo === undefined) delete process.env.APPTAINERENV_FOO;
+      else process.env.APPTAINERENV_FOO = originalFoo;
+      if (originalBar === undefined) delete process.env.SINGULARITYENV_BAR;
+      else process.env.SINGULARITYENV_BAR = originalBar;
+    }
+  });
+
   it('rejects a runtimeModule with path-traversal characters', async () => {
     const { launcher } = makeLauncher();
     await expect(

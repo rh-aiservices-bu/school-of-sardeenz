@@ -10,3 +10,10 @@ runners
 easyconfigs
 deployment
 containers
+.env
+.env.*
+!.env.example
+logs
+weights
+modules
+scratch

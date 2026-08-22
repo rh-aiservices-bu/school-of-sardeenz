@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Dev/deploy hardening.** The dev-worker's `ApptainerLauncher` now strips `APPTAINERENV_*` and
+  `SINGULARITYENV_*` keys from the spawned process env before `apptainer exec` — Apptainer injects
+  these into the guest regardless of `--cleanenv`, so a value set in the worker process's
+  environment could otherwise leak into the engine container. `compose.yaml` now binds the dev
+  Redis and Postgres ports to `127.0.0.1` instead of all interfaces. `containers/control-plane/` and
+  `containers/dashboard/` `.dockerignore` now exclude `.env*` (except `.env.example`), `logs`,
+  `weights`, `modules`, and `scratch` from build contexts. (#119)
 - **Proxy configurable body cap and parking byte budget.** Parked requests hold their fully-buffered
   body in memory for the duration of the park, so an unbounded body size combined with many parked
   connections could exhaust proxy memory. The hardcoded 10 MiB request-body cap is now configurable
