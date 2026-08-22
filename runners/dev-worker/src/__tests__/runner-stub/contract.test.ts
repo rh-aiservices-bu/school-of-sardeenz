@@ -102,6 +102,7 @@ describe('Runner Stub Contract Endpoints', () => {
       expect(data.supportedDeviceTypes).toEqual(['cuda']);
       expect(data.supportedSleepLevels).toEqual(['L1_HOST_RAM']);
       expect(data.maxTensorParallelism).toBe(1);
+      expect(data.kvCacheElasticSharing).toBe(false);
       expect(data.features).toEqual({ streamingInference: true });
     });
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { DeviceType } from '@sardeenz/types';
 
 import { WorkerClient } from '../worker.js';
 
@@ -34,7 +35,7 @@ describe('WorkerClient', () => {
         modelPath: '/models/llama',
         requiredMemory: 14_000_000_000,
         tensorParallel: 1,
-        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA }],
       });
 
       expect(result).toEqual(response);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { WorkerRegistration } from '../registration.js';
+import { WorkerRegistration, type CatalogCapabilityOverrides } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
 import type { WorkerInfo, WorkerMemoryReport } from './response-types.js';
 
@@ -37,6 +37,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
       advertiseHost: 'localhost',
     },
     workerToken: '',
+    catalogUrl: '',
     ...overrides,
   };
 }
@@ -159,6 +160,47 @@ describe('WorkerRegistration', () => {
         expect(dev.memoryUsedBytes).toBe(0);
         expect(dev.memoryTotalBytes).toBe(config.deviceMemoryBytes);
       }
+    });
+
+    it('registers with catalog-sourced capabilities', async () => {
+      const overrides: CatalogCapabilityOverrides = {
+        supportedModelTypes: ['LLM'],
+        supportedSleepLevels: ['L1_HOST_RAM'],
+        engineVersion: '0.21',
+        maxTensorParallelism: 8,
+        kvCacheElasticSharing: true,
+        features: { prefixCaching: true },
+      };
+      registration = new WorkerRegistration(mockRedis as never, config, undefined, undefined, overrides);
+
+      await registration.register();
+
+      const infoCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':info'),
+      );
+      const info = JSON.parse(infoCall!.args[1] as string) as WorkerInfo;
+      const capability = info.capabilities[0];
+
+      expect(capability.engineVersion).toBe('0.21');
+      expect(capability.maxTensorParallelism).toBe(8);
+      expect(capability.kvCacheElasticSharing).toBe(true);
+      expect(capability.features).toEqual({ prefixCaching: true });
+    });
+
+    it('defaults to fallback capabilities when no catalog overrides', async () => {
+      await registration.register();
+
+      const infoCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':info'),
+      );
+      const info = JSON.parse(infoCall!.args[1] as string) as WorkerInfo;
+      const capability = info.capabilities[0];
+
+      expect(capability.supportedModelTypes).toEqual(['LLM']);
+      expect(capability.engineVersion).toBe('0.0.1-dev');
+      expect(capability.maxTensorParallelism).toBe(1);
+      expect(capability.kvCacheElasticSharing).toBe(false);
+      expect(capability.features).toEqual({});
     });
   });
 

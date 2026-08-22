@@ -13,6 +13,10 @@ export interface WorkerInfoCapability {
   supportedModelTypes: string[];
   supportedDeviceTypes: string[];
   supportedSleepLevels: string[];
+  engineVersion?: string;
+  maxTensorParallelism?: number;
+  kvCacheElasticSharing?: boolean;
+  features?: Record<string, unknown>;
 }
 
 export interface WorkerInfoDevice {
@@ -64,6 +68,7 @@ export interface CapabilitiesResponse {
   supportedDeviceTypes: string[];
   supportedSleepLevels: string[];
   maxTensorParallelism: number;
+  kvCacheElasticSharing: boolean;
   features: { streamingInference: boolean };
 }
 

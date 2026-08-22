@@ -37,6 +37,7 @@ export interface DevWorkerConfig {
   heartbeatIntervalMs: number;
   apptainer: ApptainerConfig;
   workerToken: string;
+  catalogUrl: string;
 }
 
 function envInt(key: string, fallback: number): number {
@@ -134,5 +135,6 @@ export function loadConfig(): DevWorkerConfig {
       advertiseHost: envStr('SARDEENZ_WORKER_ADVERTISE_HOST', 'localhost'),
     },
     workerToken: envStr('SARDEENZ_WORKER_TOKEN', ''),
+    catalogUrl: envStr('SARDEENZ_RUNNER_CATALOG_URL', ''),
   };
 }

@@ -41,6 +41,7 @@ function makeConfig(): DevWorkerConfig {
       advertiseHost: 'localhost',
     },
     workerToken: '',
+    catalogUrl: '',
   };
 }
 

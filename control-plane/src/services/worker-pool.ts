@@ -12,6 +12,10 @@ export interface WorkerCapability {
   supportedModelTypes: string[];
   supportedDeviceTypes: string[];
   supportedSleepLevels: string[];
+  engineVersion?: string;
+  maxTensorParallelism?: number;
+  kvCacheElasticSharing?: boolean;
+  features?: Record<string, unknown>;
 }
 
 export interface WorkerDevice {

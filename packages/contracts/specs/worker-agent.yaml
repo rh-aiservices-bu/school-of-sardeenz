@@ -295,8 +295,7 @@ components:
           minimum: 0
           description: Zero-based device index on this worker.
         deviceType:
-          type: string
-          description: Device type (e.g., "CUDA", "ROCM", "CPU").
+          $ref: "engine-runner.yaml#/components/schemas/DeviceType"
 
     RunnerLogLine:
       type: object
@@ -410,18 +409,40 @@ components:
         supportedModelTypes:
           type: array
           items:
-            type: string
+            $ref: "engine-runner.yaml#/components/schemas/ModelType"
           description: Workload types this runner supports.
         supportedDeviceTypes:
           type: array
           items:
-            type: string
+            $ref: "engine-runner.yaml#/components/schemas/DeviceType"
           description: Device types this runner supports.
         supportedSleepLevels:
           type: array
           items:
-            type: string
+            $ref: "engine-runner.yaml#/components/schemas/SleepLevel"
           description: Sleep levels this runner supports.
+        engineVersion:
+          type: string
+          description: Version of the inference engine (e.g., "0.19.1").
+        maxTensorParallelism:
+          type: integer
+          minimum: 1
+          default: 1
+          description: |
+            Maximum number of devices this runner can span for tensor
+            parallelism.
+        kvCacheElasticSharing:
+          type: boolean
+          default: false
+          description: |
+            True when the runner supports elastic, reclaimable GPU-memory
+            sharing across co-located runners on one device.
+        features:
+          type: object
+          additionalProperties: true
+          description: |
+            Passthrough of engine-specific feature flags from the runner's
+            capability declaration. Informational only.
 
     WorkerDeviceInfo:
       type: object
@@ -436,8 +457,7 @@ components:
           minimum: 0
           description: Zero-based device index.
         deviceType:
-          type: string
-          description: Device type (e.g., "CUDA", "ROCM", "CPU").
+          $ref: "engine-runner.yaml#/components/schemas/DeviceType"
         memoryTotalBytes:
           type: integer
           format: int64
@@ -471,7 +491,7 @@ components:
           type: integer
           minimum: 0
         deviceType:
-          type: string
+          $ref: "engine-runner.yaml#/components/schemas/DeviceType"
         memoryUsedBytes:
           type: integer
           format: int64

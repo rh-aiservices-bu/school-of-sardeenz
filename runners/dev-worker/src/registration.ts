@@ -2,6 +2,16 @@ import type { Redis } from 'ioredis';
 import type { DevWorkerConfig } from './config.js';
 import type { DetectedDevice } from './gpu-detect.js';
 
+export interface CatalogCapabilityOverrides {
+  supportedModelTypes?: string[];
+  supportedDeviceTypes?: string[];
+  supportedSleepLevels?: string[];
+  engineVersion?: string;
+  maxTensorParallelism?: number;
+  kvCacheElasticSharing?: boolean;
+  features?: Record<string, unknown>;
+}
+
 export class WorkerRegistration {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly deviceMemoryUsed: number[];
@@ -14,6 +24,7 @@ export class WorkerRegistration {
     // deployments pass GPUs resolved via resolveDevices() (nvidia-smi in apptainer mode).
     devices?: DetectedDevice[],
     private readonly fetchFn: typeof fetch = globalThis.fetch,
+    private readonly catalogCapabilities?: CatalogCapabilityOverrides,
   ) {
     this.devices =
       devices ??
@@ -38,9 +49,14 @@ export class WorkerRegistration {
             this.config.mode === 'stub'
               ? `Dev Stub (${this.config.runnerType})`
               : `${this.config.runnerType} (apptainer)`,
-          supportedModelTypes: ['LLM'],
+          supportedModelTypes: this.catalogCapabilities?.supportedModelTypes ?? ['LLM'],
+          // Always derived from detected devices — catalog overrides intentionally ignored
           supportedDeviceTypes: [...new Set(this.devices.map((d) => d.deviceType))],
-          supportedSleepLevels: ['L1_HOST_RAM'],
+          supportedSleepLevels: this.catalogCapabilities?.supportedSleepLevels ?? ['L1_HOST_RAM'],
+          engineVersion: this.catalogCapabilities?.engineVersion ?? '0.0.1-dev',
+          maxTensorParallelism: this.catalogCapabilities?.maxTensorParallelism ?? 1,
+          kvCacheElasticSharing: this.catalogCapabilities?.kvCacheElasticSharing ?? false,
+          features: this.catalogCapabilities?.features ?? {},
         },
       ],
       devices: this.devices,

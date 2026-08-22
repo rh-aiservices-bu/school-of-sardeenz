@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Capability contract hardening.** `kvCacheElasticSharing` is now a first-class boolean on
+  `RunnerCapabilities` and `WorkerCapability` (was a `features` map key) — the control plane's
+  future oversubscription placement policy keys on this field directly. `WorkerCapability` gained
+  `engineVersion`, `maxTensorParallelism`, and a passthrough `features` map, and its
+  `supportedModelTypes`/`supportedDeviceTypes`/`supportedSleepLevels` now `$ref` the shared
+  `engine-runner.yaml` enums instead of plain strings, closing a type gap at the worker/control-plane
+  boundary. `CatalogEntry` gained the same optional capability fields so `runners.yaml` can advertise
+  them; the dev-worker reads them from `SARDEENZ_RUNNER_CATALOG_URL` at startup and registers with
+  catalog-sourced capabilities instead of hardcoded values. (#15)
 - **Dev/deploy hardening.** The dev-worker's `ApptainerLauncher` now strips `APPTAINERENV_*` and
   `SINGULARITYENV_*` keys from the spawned process env before `apptainer exec` — Apptainer injects
   these into the guest regardless of `--cleanenv`, so a value set in the worker process's
