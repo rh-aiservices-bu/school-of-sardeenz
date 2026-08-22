@@ -139,13 +139,10 @@ impl ParkingManager {
     }
 
     async fn do_park(&self, model_name: &str, fire_wake: bool) -> Result<(), ProxyError> {
-        // Thundering herd: only the first request fires the wake trigger.
-        // `is_first` is computed in a block scoped strictly to the lock
-        // guard's lifetime — std::sync::MutexGuard is !Send, and an
-        // explicit `drop()` mid-block isn't enough on its own to convince
-        // the async-fn liveness analysis the guard doesn't span the
-        // `trigger_wake(...).await` below; ending its declaring block
-        // before the await is what makes `do_park`'s future Send.
+        // Thundering herd prevention: the pending_wakes entry is inserted
+        // under the lock BEFORE the wake trigger HTTP call, and the lock is
+        // dropped BEFORE the await — so concurrent arrivals see the entry
+        // immediately and skip the trigger.
         let is_first = fire_wake
             && {
                 let mut pending = self.pending_wakes.lock().unwrap();

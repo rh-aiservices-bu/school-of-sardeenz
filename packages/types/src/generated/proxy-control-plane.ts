@@ -180,7 +180,9 @@ export type components = {
             /**
              * Format: date-time
              * @description ISO 8601 timestamp of the last routing map update for this model.
-             *     Used by the proxy to detect stale entries.
+             *     Written by the control plane for operator diagnostics and dashboard
+             *     display. The proxy deserializes this field for round-trip fidelity
+             *     but does not consult it for routing or staleness decisions.
              */
             updatedAt: string;
             /**

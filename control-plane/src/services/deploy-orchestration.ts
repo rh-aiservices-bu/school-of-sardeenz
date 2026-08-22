@@ -62,7 +62,7 @@ export class DeployOrchestrationService {
         tensorParallel: params.tensorParallel,
         engineConfig: params.engineConfig,
         runtimeModule: params.runtimeModule,
-        devices: params.devices,
+        devices: params.devices as StartRunnerRequest['devices'],
       };
       const runnerInfo = await workerClient.startRunner(startRequest);
 

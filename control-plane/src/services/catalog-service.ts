@@ -156,6 +156,8 @@ export class CatalogService {
       version: e.version as string,
       image: e.image as string,
       sifName: e.sifName as string,
+      maxTensorParallelism: 1,
+      kvCacheElasticSharing: false,
     };
     if (typeof e.engine === 'string') entry.engine = e.engine;
     if (typeof e.license === 'string') entry.license = e.license;
@@ -163,6 +165,30 @@ export class CatalogService {
     if (typeof e.minVRAMGiB === 'number') entry.minVRAMGiB = e.minVRAMGiB;
     if (Array.isArray(e.tags))
       entry.tags = e.tags.filter((t): t is string => typeof t === 'string');
+    if (Array.isArray(e.supportedModelTypes)) {
+      entry.supportedModelTypes = e.supportedModelTypes.filter(
+        (v): v is string => typeof v === 'string',
+      ) as CatalogEntry['supportedModelTypes'];
+    }
+    if (Array.isArray(e.supportedDeviceTypes)) {
+      entry.supportedDeviceTypes = e.supportedDeviceTypes.filter(
+        (v): v is string => typeof v === 'string',
+      ) as CatalogEntry['supportedDeviceTypes'];
+    }
+    if (Array.isArray(e.supportedSleepLevels)) {
+      entry.supportedSleepLevels = e.supportedSleepLevels.filter(
+        (v): v is string => typeof v === 'string',
+      ) as CatalogEntry['supportedSleepLevels'];
+    }
+    if (typeof e.maxTensorParallelism === 'number') {
+      entry.maxTensorParallelism = e.maxTensorParallelism;
+    }
+    if (typeof e.kvCacheElasticSharing === 'boolean') {
+      entry.kvCacheElasticSharing = e.kvCacheElasticSharing;
+    }
+    if (e.features && typeof e.features === 'object' && !Array.isArray(e.features)) {
+      entry.features = e.features as Record<string, unknown>;
+    }
     return entry;
   }
 }

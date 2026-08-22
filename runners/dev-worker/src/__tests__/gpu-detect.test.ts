@@ -39,6 +39,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
       advertiseHost: 'localhost',
     },
     workerToken: '',
+    catalogUrl: '',
     ...overrides,
   };
 }

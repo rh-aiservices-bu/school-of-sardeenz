@@ -131,20 +131,20 @@ sequenceDiagram
 
     Proxy->>Proxy: Filter through circuit breaker<br/>Both endpoints: Closed → both pass
 
-    Note over Proxy: Expanded list: [A, A, A, B]<br/>counter.fetch_add(1) % 4
+    Note over Proxy: Cumulative weight bands: A=[0,3), B=[3,4)<br/>counter.fetch_add(1) % 4 selects a band
 
-    Proxy->>Proxy: counter = 5 → 5 % 4 = 1 → pick A
+    Proxy->>Proxy: counter = 5 → 5 % 4 = 1 → falls in [0,3) → pick A
     Proxy->>R1: Forward request
     R1-->>Proxy: Response
     Proxy->>Proxy: record_success("A:8000")
     Proxy-->>Client: Response
 
-    Note over Client,Proxy: Next request: counter = 6 → 6 % 4 = 2 → pick A
-    Note over Client,Proxy: Next request: counter = 7 → 7 % 4 = 3 → pick A
-    Note over Client,Proxy: Next request: counter = 8 → 8 % 4 = 0 → pick B
+    Note over Client,Proxy: Next request: counter = 6 → 6 % 4 = 2 → falls in [0,3) → pick A
+    Note over Client,Proxy: Next request: counter = 7 → 7 % 4 = 3 → falls in [3,4) → pick B
+    Note over Client,Proxy: Next request: counter = 8 → 8 % 4 = 0 → falls in [0,3) → pick A
 ```
 
-The `WeightedRoundRobin` balancer builds an expanded endpoint list where each endpoint appears `weight` times, then uses a global atomic counter modulo the list length. Weight 0 effectively removes an endpoint from rotation — used for graceful drain.
+The `WeightedRoundRobin` balancer computes cumulative weight bands over the endpoint list (e.g. weights `[3, 1]` produce bands `A=[0,3)`, `B=[3,4)`) and uses a global atomic counter modulo the total weight to select a band via an O(n) scan — no expanded endpoint list is allocated. Weight 0 effectively removes an endpoint from rotation — used for graceful drain.
 
 ## Connection Parking Protocol
 
@@ -239,6 +239,8 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
 ```
 
 A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. The metadata block is optional and passed through to `/v1/models` responses without interpretation.
+
+The `updatedAt` timestamp is written by the control plane for operator diagnostics and dashboard display. The proxy deserializes it for round-trip fidelity but does not consult it for routing or staleness decisions — cache freshness is determined entirely by Redis pub/sub notifications (see [Cache Invalidation](#cache-invalidation) below).
 
 The `port` in each endpoint is the runner's **engine (inference) port** — where the engine's `/v1/*` server listens — not the runner's management port. The control plane registers this port (a two-port engine like vLLM serves the runner contract on a separate management port it never publishes to the routing map; a single-server runner reports the same value for both). The proxy forwards to whatever `host:port` the entry names and needs no knowledge of the distinction.
 
@@ -361,7 +363,7 @@ All configuration is read from environment variables at startup via `Config::fro
 
 | Variable                            | Type         | Default                  | Description                                                              |
 | ----------------------------------- | ------------ | ------------------------ | ------------------------------------------------------------------------ |
-| `SARDEENZ_LISTEN_ADDR`              | `SocketAddr` | `0.0.0.0:8080`           | Inference server bind address                                            |
+| `SARDEENZ_PROXY_LISTEN_ADDR`        | `SocketAddr` | `0.0.0.0:8080`           | Inference server bind address (the legacy `SARDEENZ_LISTEN_ADDR` name is still read as a fallback) |
 | `SARDEENZ_ADMIN_ADDR`               | `SocketAddr` | `0.0.0.0:9099`           | Admin server bind address (health + metrics)                             |
 | `SARDEENZ_REDIS_URL`                | `String`     | `redis://127.0.0.1:6379` | Redis/Valkey connection URL                                              |
 | `SARDEENZ_CONTROL_PLANE_URL`        | `String`     | `http://127.0.0.1:3000`  | Control plane base URL for wake triggers                                 |
@@ -404,9 +406,9 @@ Always returns `200 OK` with body `ok` if the process is running. This is a live
 
 ### `GET /readyz`
 
-Returns `200 OK` with body `ready` when the proxy has an active Redis connection. Returns `503 Service Unavailable` with body `not ready` when Redis is disconnected.
+Returns `200 OK` with body `ready` when the proxy has both an active Redis connection **and** a completed initial routing-map load (`routing_map_loaded`). Returns `503 Service Unavailable` with body `not ready` if either condition is not met.
 
-The readiness signal is set by `AppState::set_redis_connected(true)` at the start of `start_redis_sync()` and cleared to `false` when the Redis connection drops. Kubernetes should use this endpoint for readiness gates — a proxy with no Redis connection has a stale routing cache and should not receive traffic.
+The readiness signal is set by `AppState::set_redis_connected(true)` at the start of `start_redis_sync()` and cleared to `false` when the Redis connection drops. `routing_map_loaded` is set once the first `HGETALL sardeenz:routing-map` completes successfully. Kubernetes should use this endpoint for readiness gates — a proxy with no Redis connection or no routing map loaded yet has a stale or empty routing cache and should not receive traffic.
 
 ## Relationship to the Control Plane
 

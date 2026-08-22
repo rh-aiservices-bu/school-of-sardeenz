@@ -355,4 +355,4 @@ The admin dashboard should display structured output support status per model �
 - [GitHub issue #15236: Major issues with guided generation in vLLM up to v0.8.1](https://github.com/vllm-project/vllm/issues/15236)
 - [GitHub issue #16340: Missing "type":"function" in streaming tool calls](https://github.com/vllm-project/vllm/issues/16340)
 - [Runner contract specification](runner-contract.md)
-- [Phase 1 plan](../../docs/project/phase1.md) — Task 1.9
+- [Phase 1 plan](../../project/phase1.md) — Task 1.9

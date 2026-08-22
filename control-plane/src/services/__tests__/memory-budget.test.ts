@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { MemoryBudgetService } from '../memory-budget.js';
 import type { Redis } from '../../clients/redis.js';
@@ -476,5 +476,139 @@ describe('MemoryBudgetService — availableBytes formula', () => {
 
     const budget = service.getWorkerBudget(workerId);
     expect(budget?.devices[0]?.availableBytes).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #83: parseReport field-level validation at the Redis boundary
+// ---------------------------------------------------------------------------
+
+describe('MemoryBudgetService — parseReport validation', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('accepts a valid report', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport([
+      { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.devices).toHaveLength(1);
+  });
+
+  it('rejects a report with non-array devices', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ devices: 'not-an-array' }));
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('devices'));
+  });
+
+  it('rejects a report missing memoryUsedBytes (not treated as NaN)', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('memoryUsedBytes'));
+  });
+
+  it('rejects a report with a string byte count', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: '0',
+            memoryTotalBytes: 16_000_000_000,
+          },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('memoryUsedBytes'));
+  });
+
+  it('rejects a report with a negative byte count', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: -1, memoryTotalBytes: 16_000_000_000 },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('memoryUsedBytes'));
+  });
+
+  it('rejects a report with an invalid deviceType', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          { deviceIndex: 0, deviceType: 'BOGUS', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('deviceType'));
+  });
+
+  it('uses reportedAt when present, else falls back to the current time', async () => {
+    const workerId = 'w1';
+    const reportedAt = '2020-01-01T00:00:00.000Z';
+    const report = workerMemoryReport(
+      [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+      reportedAt,
+    );
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget?.lastReportAt).toBe(reportedAt);
   });
 });

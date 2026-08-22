@@ -37,7 +37,7 @@ impl WeightedRoundRobin {
             return None;
         }
 
-        let idx = (self.counter.fetch_add(1, Ordering::Relaxed) as u32) % total_weight;
+        let idx = (self.counter.fetch_add(1, Ordering::Relaxed) % (total_weight as usize)) as u32;
         let mut cumulative = 0u32;
         for ep in &healthy {
             cumulative += ep.weight.min(MAX_WEIGHT);

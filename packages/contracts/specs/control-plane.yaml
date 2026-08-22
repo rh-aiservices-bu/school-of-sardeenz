@@ -75,7 +75,7 @@ paths:
       responses:
         "202":
           description: |
-            Deployment accepted. The model is now in `PENDING` state and
+            Deployment accepted. The model is now in `STARTING` state and
             the placement pipeline is running.
           content:
             application/json:
@@ -610,6 +610,12 @@ paths:
                 $ref: "#/components/schemas/RunnerCatalogView"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Catalog source could not be fetched
           content:
             application/json:
               schema:
@@ -1527,18 +1533,40 @@ components:
         supportedModelTypes:
           type: array
           items:
-            type: string
+            $ref: "engine-runner.yaml#/components/schemas/ModelType"
           description: Workload types this runner can serve.
         supportedDeviceTypes:
           type: array
           items:
-            type: string
+            $ref: "engine-runner.yaml#/components/schemas/DeviceType"
           description: Device types this runner can use.
         supportedSleepLevels:
           type: array
           items:
-            type: string
+            $ref: "engine-runner.yaml#/components/schemas/SleepLevel"
           description: Sleep levels supported by this runner.
+        engineVersion:
+          type: string
+          description: Version of the inference engine (e.g., "0.19.1").
+        maxTensorParallelism:
+          type: integer
+          minimum: 1
+          default: 1
+          description: |
+            Maximum number of devices this runner can span for tensor
+            parallelism.
+        kvCacheElasticSharing:
+          type: boolean
+          default: false
+          description: |
+            True when the runner supports elastic, reclaimable GPU-memory
+            sharing across co-located runners on one device.
+        features:
+          type: object
+          additionalProperties: true
+          description: |
+            Passthrough of engine-specific feature flags from the runner's
+            capability declaration. Informational only.
 
     # -------------------------------------------------------------------------
     # Cluster
@@ -1737,6 +1765,41 @@ components:
         icon:
           type: string
           description: Optional URL to an icon.
+        supportedModelTypes:
+          type: array
+          items:
+            $ref: "engine-runner.yaml#/components/schemas/ModelType"
+          description: Optional workload types this runner can serve.
+        supportedDeviceTypes:
+          type: array
+          items:
+            $ref: "engine-runner.yaml#/components/schemas/DeviceType"
+          description: Optional device types this runner can use.
+        supportedSleepLevels:
+          type: array
+          items:
+            $ref: "engine-runner.yaml#/components/schemas/SleepLevel"
+          description: Optional sleep levels supported by this runner.
+        maxTensorParallelism:
+          type: integer
+          minimum: 1
+          default: 1
+          description: |
+            Optional maximum number of devices this runner can span for
+            tensor parallelism.
+        kvCacheElasticSharing:
+          type: boolean
+          default: false
+          description: |
+            Optional flag indicating the runner supports elastic,
+            reclaimable GPU-memory sharing across co-located runners on one
+            device.
+        features:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional passthrough of engine-specific feature flags.
+            Informational only.
 
     CatalogItemStatus:
       type: object

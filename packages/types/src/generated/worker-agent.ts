@@ -185,8 +185,7 @@ export type components = {
         DeviceAssignment: {
             /** @description Zero-based device index on this worker. */
             deviceIndex: number;
-            /** @description Device type (e.g., "CUDA", "ROCM", "CPU"). */
-            deviceType: string;
+            deviceType: components["schemas"]["DeviceType"];
         };
         /**
          * @description A single captured line of runner output, streamed as the `data` of a
@@ -255,18 +254,38 @@ export type components = {
             /** @description Human-readable engine name. */
             engineName: string;
             /** @description Workload types this runner supports. */
-            supportedModelTypes: string[];
+            supportedModelTypes: components["schemas"]["ModelType"][];
             /** @description Device types this runner supports. */
-            supportedDeviceTypes: string[];
+            supportedDeviceTypes: components["schemas"]["DeviceType"][];
             /** @description Sleep levels this runner supports. */
-            supportedSleepLevels: string[];
+            supportedSleepLevels: components["schemas"]["SleepLevel"][];
+            /** @description Version of the inference engine (e.g., "0.19.1"). */
+            engineVersion?: string;
+            /**
+             * @description Maximum number of devices this runner can span for tensor
+             *     parallelism.
+             * @default 1
+             */
+            maxTensorParallelism: number;
+            /**
+             * @description True when the runner supports elastic, reclaimable GPU-memory
+             *     sharing across co-located runners on one device.
+             * @default false
+             */
+            kvCacheElasticSharing: boolean;
+            /**
+             * @description Passthrough of engine-specific feature flags from the runner's
+             *     capability declaration. Informational only.
+             */
+            features?: {
+                [key: string]: unknown;
+            };
         };
         /** @description A compute device on the worker. */
         WorkerDeviceInfo: {
             /** @description Zero-based device index. */
             deviceIndex: number;
-            /** @description Device type (e.g., "CUDA", "ROCM", "CPU"). */
-            deviceType: string;
+            deviceType: components["schemas"]["DeviceType"];
             /**
              * Format: int64
              * @description Total device memory in bytes.
@@ -280,11 +299,18 @@ export type components = {
          */
         WorkerMemoryReport: {
             devices: components["schemas"]["WorkerDeviceMemory"][];
+            /**
+             * Format: date-time
+             * @description ISO-8601 timestamp of when the worker generated this report. Used
+             *     by the control plane to determine staleness. When absent, the
+             *     control plane falls back to the time it read the report.
+             */
+            reportedAt?: string;
         };
         /** @description Memory usage for a single device on the worker. */
         WorkerDeviceMemory: {
             deviceIndex: number;
-            deviceType: string;
+            deviceType: components["schemas"]["DeviceType"];
             /**
              * Format: int64
              * @description Total bytes used across all runners on this device.
@@ -307,6 +333,40 @@ export type components = {
                 [key: string]: unknown;
             };
         };
+        /**
+         * @description Type of compute device used by the runner.
+         *
+         *     - `CUDA` — NVIDIA GPU via CUDA
+         *     - `ROCM` — AMD GPU via ROCm
+         *     - `CPU` — CPU-only compute
+         *     - `OTHER` — other accelerator types (e.g., Intel Gaudi, custom ASICs)
+         * @enum {string}
+         */
+        DeviceType: DeviceType;
+        /**
+         * @description Category of workload the runner can serve. Used by the control plane
+         *     for runner type selection during workload placement.
+         *
+         *     - `LLM` — large language model inference (autoregressive text generation)
+         *     - `DIFFUSION` — diffusion model inference (image/video generation)
+         *     - `PREDICTIVE` — traditional ML model inference (classification, regression)
+         *     - `EMBEDDING` — embedding model inference (text/image embeddings)
+         *     - `OTHER` — workload types not covered by the above categories
+         * @enum {string}
+         */
+        ModelType: ModelType;
+        /**
+         * @description Level of memory offload during sleep.
+         *
+         *     - `L1_HOST_RAM` — offload model weights to host RAM. Device memory is
+         *       freed but host memory is consumed. Wake is fast (memory copy back to
+         *       device). This is the only level defined in v0.1 of the contract.
+         *
+         *     Future levels (e.g., L2 for disk offload) will be added as the enum
+         *     grows. Runners declare which levels they support in their capabilities.
+         * @enum {string}
+         */
+        SleepLevel: SleepLevel;
     };
     responses: never;
     parameters: never;
@@ -501,4 +561,20 @@ export interface operations {
 export enum RunnerLogLineStream {
     stdout = "stdout",
     stderr = "stderr"
+}
+export enum DeviceType {
+    CUDA = "CUDA",
+    ROCM = "ROCM",
+    CPU = "CPU",
+    OTHER = "OTHER"
+}
+export enum ModelType {
+    LLM = "LLM",
+    DIFFUSION = "DIFFUSION",
+    PREDICTIVE = "PREDICTIVE",
+    EMBEDDING = "EMBEDDING",
+    OTHER = "OTHER"
+}
+export enum SleepLevel {
+    L1_HOST_RAM = "L1_HOST_RAM"
 }

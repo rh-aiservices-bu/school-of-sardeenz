@@ -35,8 +35,8 @@ The suffix (`_URL`, `_KEY`, `_SECRET`, `_PASSWORD`, `_TOKEN`) marks a variable a
 | Variable               | Component             | Contains                               |
 | ---------------------- | --------------------- | -------------------------------------- |
 | `SARDEENZ_REDIS_URL`   | Proxy, Control Plane  | Connection URL (may embed credentials) |
-| `SARDEENZ_CP_API_KEY`  | Proxy → Control Plane | Inter-component auth token             |
-| `SARDEENZ_DB_PASSWORD` | Control Plane         | Database password (if applicable)      |
+| `SARDEENZ_CP_API_KEY`  | Proxy → Control Plane | Inter-component auth token (not yet implemented) |
+| `SARDEENZ_DB_PASSWORD` | Control Plane         | Database password (not yet implemented) |
 
 The suffix-based convention makes secrets greppable for auditing and CI checks.
 

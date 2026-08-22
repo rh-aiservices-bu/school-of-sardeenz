@@ -15,6 +15,7 @@ export function registerCapabilitiesRoutes(app: FastifyInstance, config: Capabil
       supportedDeviceTypes: [config.deviceType],
       supportedSleepLevels: ['L1_HOST_RAM'],
       maxTensorParallelism: 1,
+      kvCacheElasticSharing: false,
       features: {
         streamingInference: true,
       },

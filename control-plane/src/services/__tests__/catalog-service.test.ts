@@ -98,6 +98,69 @@ runners:
     });
     await expect(svc.load()).rejects.toThrow(/runners/);
   });
+
+  it('defaults maxTensorParallelism and kvCacheElasticSharing when absent', async () => {
+    const svc = new CatalogService('/catalog.yaml', logger, {
+      readFile: () => Promise.resolve(VALID),
+    });
+    const snap = await svc.load();
+    expect(snap.entries[0].maxTensorParallelism).toBe(1);
+    expect(snap.entries[0].kvCacheElasticSharing).toBe(false);
+    expect(snap.entries[0].supportedModelTypes).toBeUndefined();
+    expect(snap.entries[0].features).toBeUndefined();
+  });
+
+  it('parses capability fields when present', async () => {
+    const yaml = `
+runners:
+  - id: vllm-0.21
+    title: vLLM 0.21
+    description: desc
+    runnerType: vllm
+    version: "0.21"
+    image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
+    sifName: vllm-0.21
+    supportedModelTypes: [LLM]
+    supportedDeviceTypes: [CUDA]
+    supportedSleepLevels: [L1_HOST_RAM]
+    maxTensorParallelism: 8
+    kvCacheElasticSharing: true
+    features:
+      streamingInference: true
+      prefixCaching: false
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries[0]).toMatchObject({
+      supportedModelTypes: ['LLM'],
+      supportedDeviceTypes: ['CUDA'],
+      supportedSleepLevels: ['L1_HOST_RAM'],
+      maxTensorParallelism: 8,
+      kvCacheElasticSharing: true,
+      features: { streamingInference: true, prefixCaching: false },
+    });
+  });
+
+  it('ignores capability fields with the wrong type', async () => {
+    const yaml = `
+runners:
+  - id: vllm-0.21
+    title: vLLM 0.21
+    description: desc
+    runnerType: vllm
+    version: "0.21"
+    image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
+    sifName: vllm-0.21
+    maxTensorParallelism: "eight"
+    kvCacheElasticSharing: "yes"
+    features: [not, an, object]
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries[0].maxTensorParallelism).toBe(1);
+    expect(snap.entries[0].kvCacheElasticSharing).toBe(false);
+    expect(snap.entries[0].features).toBeUndefined();
+  });
 });
 
 describe('CatalogService ORAS image digest pinning', () => {

@@ -21,6 +21,8 @@ function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
     version: '0.21',
     image: 'oras://quay.io/x/vllm:0.21',
     sifName: 'vllm-0.21',
+    maxTensorParallelism: 1,
+    kvCacheElasticSharing: false,
     ...over,
   };
 }

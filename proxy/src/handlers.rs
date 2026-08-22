@@ -26,18 +26,42 @@ impl Drop for ActiveConnectionGuard {
     }
 }
 
+/// Outcome of the forwarding attempt, carrying the labels needed for metrics
+/// even when the upstream call itself failed (late errors still get
+/// model/endpoint labels; only early errors — before an endpoint was
+/// selected — go through `Err` without labels).
+struct InferenceOutcome {
+    response: Response,
+    model: Option<String>,
+    endpoint: Option<String>,
+    forward_start: std::time::Instant,
+}
+
 pub async fn handle_inference(State(state): State<AppState>, request: Request<Body>) -> Response {
-    let start = std::time::Instant::now();
     let _active_guard = ActiveConnectionGuard::new();
 
-    let response = match handle_inference_inner(state, request).await {
-        Ok(resp) => resp,
-        Err(err) => err.into_response(),
-    };
+    let (response, model_label, endpoint_label, elapsed) =
+        match handle_inference_inner(state, request).await {
+            Ok(outcome) => {
+                let elapsed = outcome.forward_start.elapsed().as_secs_f64();
+                (
+                    outcome.response,
+                    outcome.model.unwrap_or_default(),
+                    outcome.endpoint.unwrap_or_default(),
+                    elapsed,
+                )
+            }
+            Err(err) => (err.into_response(), String::new(), String::new(), 0.0),
+        };
 
-    let elapsed = start.elapsed().as_secs_f64();
     let status = response.status().as_u16().to_string();
-    counter!("sardeenz_proxy_requests_total", "status" => status).increment(1);
+    counter!(
+        "sardeenz_proxy_requests_total",
+        "model" => model_label,
+        "endpoint" => endpoint_label,
+        "status" => status
+    )
+    .increment(1);
     histogram!("sardeenz_proxy_request_duration_seconds").record(elapsed);
 
     response
@@ -46,7 +70,7 @@ pub async fn handle_inference(State(state): State<AppState>, request: Request<Bo
 async fn handle_inference_inner(
     state: AppState,
     request: Request<Body>,
-) -> Result<Response, ProxyError> {
+) -> Result<InferenceOutcome, ProxyError> {
     let (parts, body) = request.into_parts();
     let body_bytes = axum::body::to_bytes(body, state.config.max_body_bytes)
         .await
@@ -70,6 +94,10 @@ async fn handle_inference_inner(
         }
         Resolution::Active(_) => {}
     }
+
+    // Captured after parking resolves so the recorded duration excludes any
+    // time spent waiting for a sleeping/starting model to wake.
+    let forward_start = std::time::Instant::now();
 
     // Re-resolve after parking to verify the model is still Active.
     let entry = state
@@ -143,7 +171,12 @@ async fn handle_inference_inner(
                 state.circuit_breaker.record_success(&ep_key);
             }
             probe_guard.disarm();
-            Ok(response)
+            Ok(InferenceOutcome {
+                response,
+                model: Some(model_name),
+                endpoint: Some(ep_key),
+                forward_start,
+            })
         }
         Err(e) => {
             state.circuit_breaker.record_failure(&ep_key);
@@ -151,7 +184,13 @@ async fn handle_inference_inner(
             // Log the raw error (may embed the internal endpoint URL) server-side
             // only; the client-facing error must not disclose cluster topology.
             tracing::warn!(endpoint = %ep_key, error = %e, "upstream request failed");
-            Err(ProxyError::Upstream("upstream request failed".to_string()))
+            Ok(InferenceOutcome {
+                response: ProxyError::Upstream("upstream request failed".to_string())
+                    .into_response(),
+                model: Some(model_name),
+                endpoint: Some(ep_key),
+                forward_start,
+            })
         }
     }
 }

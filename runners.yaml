@@ -12,7 +12,7 @@
 #     - id:          stable unique id, [A-Za-z0-9_.-]+ (usually == sifName)
 #       title:       human-readable name shown in the catalog
 #       description: one-paragraph summary
-#       engine:      engine family (e.g. "vLLM", "Triton")
+#       engine:      optional engine family (e.g. "vLLM", "Triton")
 #       runnerType:  runner type identifier (e.g. "vllm") — matches the runner contract
 #       version:     engine/build version string
 #       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>@sha256:<digest> — the
@@ -22,6 +22,12 @@
 #       minVRAMGiB:  optional minimum device memory hint (GiB)
 #       license:     optional SPDX license id
 #       icon:        optional URL to an icon
+#       supportedModelTypes:    optional list of ModelType values (e.g. [LLM])
+#       supportedDeviceTypes:   optional list of DeviceType values (e.g. [CUDA])
+#       supportedSleepLevels:   optional list of SleepLevel values (e.g. [L1_HOST_RAM])
+#       maxTensorParallelism:   optional max devices this runner can span for tensor parallelism
+#       kvCacheElasticSharing:  optional bool — supports elastic, reclaimable KV-cache sharing
+#       features:               optional map of engine-specific feature flags
 apiVersion: sardeenz.io/v1
 kind: RunnerCatalog
 runners:
@@ -38,6 +44,17 @@ runners:
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16
     license: Apache-2.0
+    supportedModelTypes: [LLM]
+    supportedDeviceTypes: [CUDA]
+    supportedSleepLevels: [L1_HOST_RAM]
+    maxTensorParallelism: 8
+    kvCacheElasticSharing: true
+    features:
+      streamingInference: true
+      chatTemplate: true
+      toolUse: true
+      kvCacheOffload: false
+      prefixCaching: true
   - id: vllm-0.20
     title: vLLM 0.20 (+ kvcached)
     description: >-
@@ -51,3 +68,14 @@ runners:
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16
     license: Apache-2.0
+    supportedModelTypes: [LLM]
+    supportedDeviceTypes: [CUDA]
+    supportedSleepLevels: [L1_HOST_RAM]
+    maxTensorParallelism: 8
+    kvCacheElasticSharing: true
+    features:
+      streamingInference: true
+      chatTemplate: true
+      toolUse: true
+      kvCacheOffload: false
+      prefixCaching: true

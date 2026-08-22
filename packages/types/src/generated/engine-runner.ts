@@ -427,20 +427,24 @@ export type components = {
              */
             maxTensorParallelism: number;
             /**
+             * @description True when the runner supports elastic, reclaimable GPU-memory
+             *     sharing across co-located runners on one device (e.g. vLLM +
+             *     kvcached). The control plane uses this for oversubscription
+             *     placement policy.
+             * @default false
+             */
+            kvCacheElasticSharing: boolean;
+            /**
              * @description Optional feature flags for engine-specific capabilities. The
              *     control plane may use these for fine-grained placement or to
              *     enable engine-specific optimizations.
              *
+             *     A key that the control plane, proxy, or placement makes a
+             *     decision on MUST be promoted to a first-class field on this
+             *     schema; features is for informational engine flags only.
+             *
              *     Well-known keys (runners should use these when applicable):
              *     - `kvCacheOffload` (boolean) — supports KV cache offload to host
-             *     - `kvCacheElasticSharing` (boolean) — supports elastic, reclaimable
-             *       GPU-memory sharing across co-located runners on one device (e.g.
-             *       vLLM + kvcached). Distinct from `kvCacheOffload` (host-RAM
-             *       offload): this signals the runner's device-memory footprint can
-             *       grow and shrink so the control plane may oversubscribe a device
-             *       past naive byte-sum capacity. A future co-location/oversubscription
-             *       placement policy keys on this flag; runners without it must be
-             *       placed with exclusive byte-budget accounting.
              *     - `prefixCaching` (boolean) — supports prefix caching
              *     - `streamingInference` (boolean) — supports SSE streaming responses
              *     - `chatTemplate` (boolean) — supports chat template formatting

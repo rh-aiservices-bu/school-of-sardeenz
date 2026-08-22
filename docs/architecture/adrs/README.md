@@ -16,4 +16,5 @@
 - [ADR-014](adr-014-inference-recency-tracking.md) — Inference Recency Tracking for LRU Eviction
 - [ADR-015](adr-015-sif-runtime-packaging.md) — Engine Runtime Delivery via Apptainer SIF on Shared RWX Storage *(supersedes ADR-004)*
 - [ADR-016](adr-016-sif-worker-security-posture.md) — Worker Security Posture for SIF Execution
-- [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain
+- [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain *(amended by ADR-018)*
+- [ADR-018](adr-018-runner-catalog-oras-distribution.md) — Runner Catalog and ORAS Distribution *(amends ADR-017)*

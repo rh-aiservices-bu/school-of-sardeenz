@@ -6,8 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docs accuracy sweep.** Corrected the stale contract file index in `docs/development/contracts.md`
+  (`specs/control-plane.yaml` replaces the non-existent `dashboard-control-plane.yaml`, and
+  `specs/worker-agent.yaml` was missing entirely); fixed `npm run generate` → `npm run codegen`
+  script-name typos in `docs/project/phase3.5.md` and `phase3.6.md`; fixed the PatternFly chart
+  import path to `@patternfly/react-charts/victory`; added the missing ADR-018 entry (and its
+  ADR-017 amendment note) to `docs/architecture/adrs/README.md`; corrected the proxy's
+  `SARDEENZ_LISTEN_ADDR` env var to `SARDEENZ_PROXY_LISTEN_ADDR` (with legacy fallback noted) and
+  the control plane's to `SARDEENZ_CONTROL_PLANE_LISTEN_ADDR`; documented that `/readyz` requires
+  both an active Redis connection and a completed routing-map load (`routing_map_loaded`), not just
+  Redis; corrected the weighted round-robin balancer description from an expanded endpoint list to
+  cumulative weight bands with an allocation-free O(n) scan; fixed a dead relative link in
+  `structured-output-compatibility.md`; added the missing `catalog` i18n namespace row; rewrote
+  `docs/project/README.md`, `docs/development/README.md`, `docs/usage/README.md`, and
+  `docs/architecture/components/README.md` to list all orphaned docs in their directories; documented
+  previously-undocumented `SARDEENZ_RUNNER_ENTRYPOINT`, `SARDEENZ_HEALTH_TIMEOUT_MS`,
+  `SARDEENZ_HEALTH_INTERVAL_MS`, `SARDEENZ_STOP_GRACE_MS`, `SARDEENZ_DEPLOY_TIMEOUT_SECS`, and
+  `SARDEENZ_RECONCILIATION_INTERVAL_SECS` in `.env.example`; marked `runners.yaml`'s `engine` field
+  as optional; added `scripts/` and `tests/` to the repository tree in `CLAUDE.md`; annotated the
+  not-yet-implemented `SARDEENZ_CP_API_KEY`/`SARDEENZ_DB_PASSWORD` rows in
+  `adr-013-secrets-management.md`; corrected `PENDING` → `STARTING` in the deploy-model 202 response
+  description in `packages/contracts/specs/control-plane.yaml` (regenerated types); and softened
+  `runner-catalog.md`'s `sifName` naming guidance from "must be" to "by convention follows" for the
+  `<engine>-<version>` shape. (#81)
+
+### Changed
+
+- **`updatedAt` description corrected in proxy-control-plane contract.** The `RoutingEntry.updatedAt`
+  field description previously claimed "Used by the proxy to detect stale entries," which was false —
+  the proxy never consults this field for routing or staleness. Updated to state the field is
+  informational: written by the control plane for operator diagnostics and dashboard display,
+  deserialized by the proxy for round-trip fidelity only. `docs/architecture/components/proxy.md`
+  updated to match. (#17)
+- **runner-contract.md accuracy corrections.** The BUSY → weight-0 routing mechanism, weight
+  restoration, and all-replicas-BUSY 503 behavior are now clearly labelled as target design (not
+  implemented). Health polling interval corrected from "~2s continuous" to "10s, deploy/wake-scoped
+  only" per `SARDEENZ_HEALTH_CHECK_INTERVAL_SECS`. READY endpoint weight corrected from "configured"
+  to `1`. All changes reference ADR-014 for consistency. (#80)
+
 ### Added
 
+- **WorkerInfo/WorkerMemoryReport Redis schema enforcement.** `WorkerPoolService.parseWorkerInfo`
+  and `MemoryBudgetService.parseReport` now validate every field of the Redis-sourced worker
+  payloads by hand (no Ajv) instead of trusting the shape after a shallow `Array.isArray` check —
+  enum fields are checked against `Object.values()` of the generated `ModelType`/`DeviceType`/
+  `SleepLevel` enums, byte/index fields must be `Number.isInteger(v) && v >= 0`, and an empty
+  `capabilities` array is now rejected (`WorkerInfo.capabilities` gained `minItems: 1`) while an
+  empty `devices` array is accepted with a warning. Every rejection is logged with the offending
+  worker id and field. Both services now import their payload types as aliases of the generated
+  `WorkerAgentComponents` schemas instead of hand-written local interfaces. `WorkerMemoryReport`
+  gained an optional `reportedAt` timestamp, and `GET /api/v1/catalog` gained a documented `502`
+  response to match `POST /api/v1/catalog/refresh`. (#83)
+- **Capability contract hardening.** `kvCacheElasticSharing` is now a first-class boolean on
+  `RunnerCapabilities` and `WorkerCapability` (was a `features` map key) — the control plane's
+  future oversubscription placement policy keys on this field directly. `WorkerCapability` gained
+  `engineVersion`, `maxTensorParallelism`, and a passthrough `features` map, and its
+  `supportedModelTypes`/`supportedDeviceTypes`/`supportedSleepLevels` now `$ref` the shared
+  `engine-runner.yaml` enums instead of plain strings, closing a type gap at the worker/control-plane
+  boundary. `CatalogEntry` gained the same optional capability fields so `runners.yaml` can advertise
+  them; the dev-worker reads them from `SARDEENZ_RUNNER_CATALOG_URL` at startup and registers with
+  catalog-sourced capabilities instead of hardcoded values. (#15)
 - **Dev/deploy hardening.** The dev-worker's `ApptainerLauncher` now strips `APPTAINERENV_*` and
   `SINGULARITYENV_*` keys from the spawned process env before `apptainer exec` — Apptainer injects
   these into the guest regardless of `--cleanenv`, so a value set in the worker process's
@@ -132,6 +192,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Proxy contract drift and forwarding hardening.** `ForwardingClient` now strips `content-length`
+  as a hop-by-hop header, since reqwest recomputes it from the forwarded body. `RunnerEndpoint`
+  deserialization now rejects empty/malformed hosts (slashes, `@`, `?`, `#`, whitespace) and port
+  `0`. `weight` is no longer a required field in the `proxy-control-plane.yaml` `RunnerEndpoint`
+  schema, matching the Rust side's existing `#[serde(default)]`. `sardeenz_proxy_requests_total` is
+  now labeled with `model` and `endpoint` in addition to `status` — including on late upstream
+  errors, so failed forwards are still attributable to a model/endpoint — and its duration histogram
+  is measured from after parking resolves rather than from request start, so parking wait time no
+  longer inflates forwarding latency. `CircuitBreaker` now prunes circuits for endpoints no longer
+  present in the routing map (zeroing their gauge) on every Redis sync. `WeightedRoundRobin`'s
+  counter-to-index conversion no longer truncates through `u32` before the modulo, which could pick
+  the wrong endpoint once the internal counter exceeded `u32::MAX`. Removed the unused
+  `engine_runner.rs` generated types (superseded by `proxy_control_plane.rs`; tracked further under
+  #99). (#100)
 - **Dashboard low-severity hardening bundle: SSE write-after-end race, credential-length leak,
   auto-logout timer races, and untranslated strings.** The BFF's `/api/events` route now guards
   every `reply.raw.write()` call (message handler and ping timer) with `writableEnded` before
