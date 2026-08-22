@@ -17,7 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   configurable budget (`SARDEENZ_PARKING_MAX_BYTES`, default `1073741824`, i.e. 1 GiB) would be
   exceeded, returning `503 parking_limit_reached` alongside the existing per-model/global count
   limits. (#95)
-
+- **Dashboard BFF security headers.** The BFF now registers `@fastify/helmet` with a restrictive
+  Content-Security-Policy (`default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, no
+  inline scripts) plus helmet's other default hardening headers. Removed the dead `corsOrigin`
+  config field and `SARDEENZ_CORS_ORIGIN` env var — the BFF only ever served same-origin, so no
+  `@fastify/cors` registration ever consumed it. (#104)
 - **Control plane API authentication + NetworkPolicy.** The control plane now supports an optional
   shared-secret `SARDEENZ_API_TOKEN`: when set, every `/api/v1/*` request must carry a matching
   `Authorization: Bearer <token>` header (checked with `timingSafeEqual`, `/healthz`/`/readyz`

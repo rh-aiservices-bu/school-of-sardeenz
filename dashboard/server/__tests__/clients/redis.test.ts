@@ -114,7 +114,6 @@ const mockConfig: Config = {
   redisUrl: 'redis://localhost:6379',
   redisKeyPrefix: PREFIX,
   prometheusUrl: 'http://prom.test',
-  corsOrigin: 'http://localhost:5173',
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',

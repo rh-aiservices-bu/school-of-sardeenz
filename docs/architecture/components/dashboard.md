@@ -251,7 +251,6 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 | `SARDEENZ_REDIS_URL`         | `redis://localhost:6379` | Redis/Valkey connection string                                 |
 | `SARDEENZ_REDIS_KEY_PREFIX`  | `sardeenz`               | Prefix for all Redis keys                                      |
 | `SARDEENZ_PROMETHEUS_URL`    | `http://localhost:9090`  | Prometheus query API base URL                                  |
-| `SARDEENZ_CORS_ORIGIN`       | `http://localhost:5173`  | Allowed CORS origin (dev only)                                 |
 | `SARDEENZ_LOG_LEVEL`         | `info`                   | Pino log level                                                 |
 | `AUTH_MODE`                  | `none`                   | Authentication mode: `none`, `simple`, or `oauth`              |
 | `ADMIN_USERNAME`             | `admin`                  | Admin username for `simple` auth mode                          |
