@@ -59,6 +59,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (default `/weights`) and must have that directory mounted to browse it. Contracts add the
   `WeightsListing` / `WeightsEntry` schemas.
 
+### Changed
+
+- **CI workflow hardening.** The GitHub Actions workflow now declares explicit least-privilege
+  `permissions: { contents: read }`, all four third-party actions are SHA-pinned (not tag-pinned)
+  to prevent supply-chain tag-mutation attacks, and the Rust-assert step's rationale comment no
+  longer hard-codes Makefile line numbers that drift on every edit. (#127)
+
 ### Removed
 
 - **Consumer-less `GET /api/v1/events` SSE route.** The control plane's cluster-events SSE endpoint
