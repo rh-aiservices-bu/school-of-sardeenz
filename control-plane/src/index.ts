@@ -109,7 +109,11 @@ async function main(): Promise<void> {
     // minutes to load), so give it a start timeout matching the deploy budget plus a margin — the
     // worker's own health timeout should fire first with a clean error, not this abort.
     (baseUrl) =>
-      new WorkerClient({ baseUrl, startTimeoutMs: config.deployTimeoutSecs * 1000 + 60_000 }),
+      new WorkerClient({
+        baseUrl,
+        startTimeoutMs: config.deployTimeoutSecs * 1000 + 60_000,
+        token: config.workerToken,
+      }),
     (host, port) => new RunnerClient({ host, port }),
     config.deployTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
@@ -144,7 +148,7 @@ async function main(): Promise<void> {
       moduleStore,
       weightsBrowser,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
-      createWorkerClient: (baseUrl) => new WorkerClient({ baseUrl }),
+      createWorkerClient: (baseUrl) => new WorkerClient({ baseUrl, token: config.workerToken }),
     },
   });
 
@@ -217,6 +221,11 @@ async function main(): Promise<void> {
   );
   if (!config.apiToken) {
     app.log.warn('SARDEENZ_API_TOKEN is not set — API authentication is disabled');
+  }
+  if (!config.workerToken) {
+    app.log.warn(
+      'SARDEENZ_WORKER_TOKEN is not set — control plane will not authenticate to worker agents',
+    );
   }
 }
 

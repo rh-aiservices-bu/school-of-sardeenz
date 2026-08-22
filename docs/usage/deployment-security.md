@@ -49,3 +49,25 @@ Any caller with network access to the control plane can:
 2. **No public-facing Ingress**: Do not create an Ingress or Route for the control plane. It should only be reachable via cluster-internal DNS (`control-plane.namespace.svc`).
 
 3. **Service mesh mTLS** (optional): If running in a service mesh (Istio, Linkerd), enable strict mTLS between the control plane and its clients.
+
+## Worker Agent Network Isolation
+
+The worker agent's management API (`POST/DELETE /runners`, `GET /runners/*/logs`) is protected by an optional shared secret (`SARDEENZ_WORKER_TOKEN`), checked via `Authorization: Bearer <token>` on every route except `/healthz`. As with the control plane, this is a defense-in-depth measure, not a substitute for network isolation — the worker **must only be deployed within a trusted network boundary**.
+
+### What is exposed without network isolation
+
+Any caller with network access to a worker agent can:
+
+| Operation         | Endpoint                                | Impact                                 |
+| ------------------ | ---------------------------------------- | --------------------------------------- |
+| Start a runner      | `POST /runners`                          | Launches an engine process, consumes GPU memory |
+| Stop a runner       | `DELETE /runners/:runnerId`              | Kills an in-flight runner               |
+| Read runner logs    | `GET /runners/:runnerId/logs`, `GET /runners/by-model/:modelName/logs` | Reveals model/engine operational data |
+
+### Recommended deployment constraints
+
+1. **Set `SARDEENZ_WORKER_TOKEN`**: Configure the same value on the worker agent and the control plane (`SARDEENZ_WORKER_TOKEN`) so the control plane authenticates its `WorkerClient` requests. Leave unset for local dev only — a startup warning is logged on both sides when it is empty.
+
+2. **Kubernetes NetworkPolicy**: `deployment/sif-runner/networkpolicy.yaml` restricts ingress to the worker Service to the control plane only. Deny all other ingress.
+
+3. **No public-facing Ingress**: Do not create an Ingress or Route for the worker agent. It should only be reachable via cluster-internal DNS.

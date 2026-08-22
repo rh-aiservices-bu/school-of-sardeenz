@@ -25,6 +25,7 @@ export interface Config {
   readonly apptainerBin: string;
   readonly verifySif: boolean;
   readonly apiToken: string;
+  readonly workerToken: string;
 }
 
 export function requiredEnv(name: string): string {
@@ -112,6 +113,7 @@ export function loadConfig(): Config {
     apptainerBin: optionalEnv('SARDEENZ_APPTAINER_BIN', 'apptainer'),
     verifySif: boolEnv('SARDEENZ_VERIFY_SIF', true),
     apiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
+    workerToken: optionalEnv('SARDEENZ_WORKER_TOKEN', ''),
   };
 }
 

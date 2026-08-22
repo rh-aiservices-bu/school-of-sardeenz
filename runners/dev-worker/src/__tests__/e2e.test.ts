@@ -38,6 +38,7 @@ function makeConfig(): DevWorkerConfig {
       stopGraceMs: 15000,
       advertiseHost: 'localhost',
     },
+    workerToken: '',
   };
 }
 

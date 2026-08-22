@@ -32,6 +32,7 @@ function makeConfig(apiToken: string): Config {
     verifySif: false,
     allowInsecureCatalog: false,
     apiToken,
+    workerToken: '',
   };
 }
 

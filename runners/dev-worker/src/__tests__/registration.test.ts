@@ -36,6 +36,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
       stopGraceMs: 15000,
       advertiseHost: 'localhost',
     },
+    workerToken: '',
     ...overrides,
   };
 }

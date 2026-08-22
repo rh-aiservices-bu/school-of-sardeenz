@@ -22,6 +22,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   inline scripts) plus helmet's other default hardening headers. Removed the dead `corsOrigin`
   config field and `SARDEENZ_CORS_ORIGIN` env var — the BFF only ever served same-origin, so no
   `@fastify/cors` registration ever consumed it. (#104)
+- **Worker agent authentication + NetworkPolicy.** Mirrors the control-plane pattern (#88) for the
+  worker agent: an optional shared-secret `SARDEENZ_WORKER_TOKEN` gates every dev-worker route
+  except `/healthz` (checked with `timingSafeEqual`), logging a startup warning when left unset.
+  The control plane's `WorkerClient` reads the same env var and attaches the `Authorization:
+  Bearer <token>` header on `startRunner`, `stopRunner`, and both SSE log-stream methods. Adds
+  `deployment/sif-runner/networkpolicy.yaml`, restricting ingress to the worker Service to the
+  control-plane pod on port 9100. Documented in `docs/usage/deployment-security.md`. (#108)
 - **Control plane API authentication + NetworkPolicy.** The control plane now supports an optional
   shared-secret `SARDEENZ_API_TOKEN`: when set, every `/api/v1/*` request must carry a matching
   `Authorization: Bearer <token>` header (checked with `timingSafeEqual`, `/healthz`/`/readyz`
