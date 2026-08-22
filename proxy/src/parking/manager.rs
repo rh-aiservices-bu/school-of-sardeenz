@@ -35,6 +35,7 @@ pub struct ParkingManager {
 struct ParkedCount {
     per_model: std::sync::Mutex<HashMap<String, usize>>,
     global: std::sync::atomic::AtomicUsize,
+    parked_bytes: std::sync::atomic::AtomicUsize,
 }
 
 /// RAII guard for a reserved parking slot. All release accounting — the
@@ -48,6 +49,7 @@ struct ParkingSlotGuard {
     pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
     model_name: String,
     park_start: std::time::Instant,
+    body_len: usize,
 }
 
 impl ParkingSlotGuard {
@@ -56,9 +58,10 @@ impl ParkingSlotGuard {
         parked_count: Arc<ParkedCount>,
         pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
         model_name: String,
+        body_len: usize,
     ) -> Self {
         gauge!("sardeenz_proxy_parked_connections", "model" => model_name.clone()).increment(1);
-        Self { parked_count, pending_wakes, model_name, park_start: std::time::Instant::now() }
+        Self { parked_count, pending_wakes, model_name, park_start: std::time::Instant::now(), body_len }
     }
 }
 
@@ -67,6 +70,7 @@ impl Drop for ParkingSlotGuard {
         use std::sync::atomic::Ordering;
 
         self.parked_count.global.fetch_sub(1, Ordering::SeqCst);
+        self.parked_count.parked_bytes.fetch_sub(self.body_len, Ordering::SeqCst);
         let was_last = {
             let mut per_model = self.parked_count.per_model.lock().unwrap();
             match per_model.get_mut(&self.model_name) {
@@ -115,6 +119,7 @@ impl ParkingManager {
             parked_count: Arc::new(ParkedCount {
                 global: std::sync::atomic::AtomicUsize::new(0),
                 per_model: std::sync::Mutex::new(HashMap::new()),
+                parked_bytes: std::sync::atomic::AtomicUsize::new(0),
             }),
         }
     }
@@ -123,8 +128,13 @@ impl ParkingManager {
     /// the first request, then waits for the model to become active.
     ///
     /// Returns Ok(()) when the model is active and the caller can forward.
-    pub async fn park(&self, model_name: &str, fire_wake: bool) -> Result<(), ProxyError> {
-        let _guard = self.reserve_slot(model_name)?;
+    pub async fn park(
+        &self,
+        model_name: &str,
+        fire_wake: bool,
+        body_len: usize,
+    ) -> Result<(), ProxyError> {
+        let _guard = self.reserve_slot(model_name, body_len)?;
         self.do_park(model_name, fire_wake).await
     }
 
@@ -240,7 +250,11 @@ impl ParkingManager {
     /// Atomically check limits and reserve a slot. Returns Err if either
     /// limit is exceeded. On success, returns a guard that releases the slot
     /// (counters + gauge + histogram) on drop — including on cancellation.
-    fn reserve_slot(&self, model_name: &str) -> Result<ParkingSlotGuard, ProxyError> {
+    fn reserve_slot(
+        &self,
+        model_name: &str,
+        body_len: usize,
+    ) -> Result<ParkingSlotGuard, ProxyError> {
         use std::sync::atomic::Ordering;
 
         let mut per_model = self.parked_count.per_model.lock().unwrap();
@@ -251,11 +265,20 @@ impl ParkingManager {
             return Err(ProxyError::ParkingLimitReached(model_name.to_string()));
         }
 
+        // Atomically increment the byte budget and check
+        let prev_bytes = self.parked_count.parked_bytes.fetch_add(body_len, Ordering::SeqCst);
+        if prev_bytes + body_len > self.config.max_bytes {
+            // Roll back
+            self.parked_count.parked_bytes.fetch_sub(body_len, Ordering::SeqCst);
+            return Err(ProxyError::ParkingLimitReached("parking byte budget exceeded".to_string()));
+        }
+
         // Atomically increment global and check
         let prev_global = self.parked_count.global.fetch_add(1, Ordering::SeqCst);
         if prev_global >= self.config.max_global {
-            // Roll back
+            // Roll back both counters
             self.parked_count.global.fetch_sub(1, Ordering::SeqCst);
+            self.parked_count.parked_bytes.fetch_sub(body_len, Ordering::SeqCst);
             return Err(ProxyError::ParkingLimitReached(
                 "global parking limit reached".to_string(),
             ));
@@ -269,6 +292,7 @@ impl ParkingManager {
             self.parked_count.clone(),
             self.pending_wakes.clone(),
             model_name.to_string(),
+            body_len,
         ))
     }
 
@@ -294,6 +318,7 @@ mod tests {
                 timeout: std::time::Duration::from_secs(30),
                 max_per_model: 10,
                 max_global: 100,
+                max_bytes: 1_048_576,
             },
             RoutingMapCache::new(),
             WakeTriggerClient::new("http://127.0.0.1:1", None),
@@ -304,13 +329,13 @@ mod tests {
     fn park_slot_guard_releases_on_drop() {
         let manager = test_manager();
 
-        let guard = manager.reserve_slot("model-a").expect("slot reserved");
+        let guard = manager.reserve_slot("model-a", 0).expect("slot reserved");
         assert_eq!(manager.global_parked_count(), 1);
         drop(guard);
         assert_eq!(manager.global_parked_count(), 0);
 
-        let guard_a = manager.reserve_slot("model-a").expect("slot reserved");
-        let guard_b = manager.reserve_slot("model-a").expect("slot reserved");
+        let guard_a = manager.reserve_slot("model-a", 0).expect("slot reserved");
+        let guard_b = manager.reserve_slot("model-a", 0).expect("slot reserved");
         assert_eq!(manager.global_parked_count(), 2);
         drop(guard_a);
         assert_eq!(manager.global_parked_count(), 1);

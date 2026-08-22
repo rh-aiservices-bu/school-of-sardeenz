@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Proxy configurable body cap and parking byte budget.** Parked requests hold their fully-buffered
+  body in memory for the duration of the park, so an unbounded body size combined with many parked
+  connections could exhaust proxy memory. The hardcoded 10 MiB request-body cap is now configurable
+  via `SARDEENZ_PROXY_MAX_BODY_BYTES` (default `1048576`, i.e. 1 MiB), enforced both at the `axum`
+  body-buffering step and via a `tower_http::limit::RequestBodyLimitLayer` on the inference router.
+  `ParkingManager` now also tracks the total bytes currently parked and rejects new parks once a
+  configurable budget (`SARDEENZ_PARKING_MAX_BYTES`, default `1073741824`, i.e. 1 GiB) would be
+  exceeded, returning `503 parking_limit_reached` alongside the existing per-model/global count
+  limits. (#95)
+
 - **Control plane API authentication + NetworkPolicy.** The control plane now supports an optional
   shared-secret `SARDEENZ_API_TOKEN`: when set, every `/api/v1/*` request must carry a matching
   `Authorization: Bearer <token>` header (checked with `timingSafeEqual`, `/healthz`/`/readyz`

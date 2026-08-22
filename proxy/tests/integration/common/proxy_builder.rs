@@ -40,9 +40,11 @@ pub struct TestProxyConfig {
     pub parking_timeout: Duration,
     pub parking_max_per_model: usize,
     pub parking_max_global: usize,
+    pub parking_max_bytes: usize,
     pub cb_failure_threshold: u32,
     pub cb_failure_window: Duration,
     pub cb_recovery_timeout: Duration,
+    pub max_body_bytes: usize,
 }
 
 impl Default for TestProxyConfig {
@@ -52,9 +54,11 @@ impl Default for TestProxyConfig {
             parking_timeout: Duration::from_secs(10),
             parking_max_per_model: 1000,
             parking_max_global: 10000,
+            parking_max_bytes: 1_073_741_824,
             cb_failure_threshold: 5,
             cb_failure_window: Duration::from_secs(30),
             cb_recovery_timeout: Duration::from_secs(15),
+            max_body_bytes: 1_048_576,
         }
     }
 }
@@ -142,6 +146,7 @@ impl TestProxy {
                 timeout: cfg.parking_timeout,
                 max_per_model: cfg.parking_max_per_model,
                 max_global: cfg.parking_max_global,
+                max_bytes: cfg.parking_max_bytes,
             },
             upstream_timeout,
             circuit_breaker: CircuitBreakerConfig {
@@ -151,6 +156,7 @@ impl TestProxy {
                 probe_timeout,
             },
             api_token: None,
+            max_body_bytes: cfg.max_body_bytes,
         };
 
         // Use AppState directly — the production state type.

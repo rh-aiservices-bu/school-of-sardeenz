@@ -48,7 +48,7 @@ async fn handle_inference_inner(
     request: Request<Body>,
 ) -> Result<Response, ProxyError> {
     let (parts, body) = request.into_parts();
-    let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024)
+    let body_bytes = axum::body::to_bytes(body, state.config.max_body_bytes)
         .await
         .map_err(|e| ProxyError::BadRequest(format!("invalid request body: {e}")))?;
 
@@ -57,15 +57,16 @@ async fn handle_inference_inner(
 
     let model_name = crate::protocol::extract_model_name(&body_json)
         .ok_or_else(|| ProxyError::BadRequest("missing or invalid 'model' field".to_string()))?;
+    drop(body_json);
 
     let resolution = state.resolver.resolve(&model_name).await?;
 
     match &resolution {
         Resolution::Sleeping(_) => {
-            state.parking.park(&model_name, true).await?;
+            state.parking.park(&model_name, true, body_bytes.len()).await?;
         }
         Resolution::Starting(_) => {
-            state.parking.park(&model_name, false).await?;
+            state.parking.park(&model_name, false, body_bytes.len()).await?;
         }
         Resolution::Active(_) => {}
     }

@@ -13,6 +13,7 @@ pub struct Config {
     pub parking: ParkingConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     pub api_token: Option<String>,
+    pub max_body_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,7 @@ pub struct ParkingConfig {
     pub timeout: Duration,
     pub max_per_model: usize,
     pub max_global: usize,
+    pub max_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,7 @@ impl Config {
                 timeout: Duration::from_secs(parse_env("SARDEENZ_PARKING_TIMEOUT_SECS", "120")?),
                 max_per_model: parse_env("SARDEENZ_PARKING_MAX_PER_MODEL", "1000")?,
                 max_global: parse_env("SARDEENZ_PARKING_MAX_GLOBAL", "10000")?,
+                max_bytes: parse_env("SARDEENZ_PARKING_MAX_BYTES", "1073741824")?,
             },
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: parse_env("SARDEENZ_CB_FAILURE_THRESHOLD", "5")?,
@@ -81,6 +84,7 @@ impl Config {
                 probe_timeout,
             },
             api_token: std::env::var("SARDEENZ_API_TOKEN").ok().filter(|s| !s.is_empty()),
+            max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "1048576")?,
         })
     }
 }
@@ -130,8 +134,10 @@ mod tests {
         assert_eq!(config.admin_addr, "0.0.0.0:9099".parse().unwrap());
         assert_eq!(config.parking.timeout, Duration::from_secs(120));
         assert_eq!(config.parking.max_per_model, 1000);
+        assert_eq!(config.parking.max_bytes, 1_073_741_824);
         assert_eq!(config.upstream_timeout, Duration::from_secs(300));
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
         assert_eq!(config.api_token, None);
+        assert_eq!(config.max_body_bytes, 1_048_576);
     }
 }
