@@ -78,6 +78,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   blocked the librarian and control-plane writers it was meant to allow. Fixed to check
   `object.spec.serviceAccountName` instead. Also added `pods/ephemeralcontainers` to the resource
   rules so `kubectl debug` ephemeral containers are validated too. (#110)
+- **Dashboard: launch-log SSE stream 401'd whenever auth was enabled.** The `sardeenz_sse` cookie
+  set on login/OAuth-callback was scoped to `Path=/api/events`, so `EventSource` connections to
+  `GET /api/models/:name/logs` (the model launch-log stream) never sent it, forcing a hard 401 in
+  any deployment with `AUTH_MODE=simple`/`oauth`. The cookie path is now `/api` — still narrower
+  than the whole origin, but wide enough to cover every cookie-authenticated SSE endpoint.
+  `useModelLogs` also now surfaces a `failed` state (instead of retrying forever) once reconnects
+  hit the same failure threshold as the app-wide event stream, and `LogViewer` renders a red
+  "unavailable" label in that case. (#101)
 - **Dev worker: runner ports were allocated monotonically and never reclaimed.** `RunnerManager`
   tracked ports with an ever-incrementing counter, so a long-lived worker cycling models through
   start/stop (or crash/restart) would eventually walk past `runnerPortStart + <range>` and hand out

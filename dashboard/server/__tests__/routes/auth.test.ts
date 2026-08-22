@@ -395,7 +395,7 @@ describe('Route protection', () => {
       : (setCookieHeader ?? '');
     expect(cookieStr).toContain('sardeenz_sse=');
     expect(cookieStr).toContain('HttpOnly');
-    expect(cookieStr).toContain('Path=/api/events');
+    expect(cookieStr).toContain('Path=/api');
     expect(cookieStr).toContain('SameSite=Strict');
   });
 });

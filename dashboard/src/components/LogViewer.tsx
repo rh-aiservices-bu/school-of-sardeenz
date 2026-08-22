@@ -8,6 +8,7 @@ type RunnerLogLine = ControlPlaneComponents['schemas']['RunnerLogLine'];
 interface LogViewerProps {
   logs: RunnerLogLine[];
   isConnected: boolean;
+  failed?: boolean;
 }
 
 // How close to the bottom (in px) the pane must be for auto-scroll to keep tracking new lines.
@@ -19,7 +20,7 @@ const AUTO_SCROLL_THRESHOLD_PX = 24;
  * `@patternfly/react-log-viewer` is not a dependency of this project, so this is a plain
  * `<div>`-based viewer styled with PF6 semantic tokens rather than a new dependency.
  */
-export function LogViewer({ logs, isConnected }: LogViewerProps) {
+export function LogViewer({ logs, isConnected, failed }: LogViewerProps) {
   const { t } = useTranslation('models');
   const containerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -49,9 +50,15 @@ export function LogViewer({ logs, isConnected }: LogViewerProps) {
           <Content component="small">{t('logs.title')}</Content>
         </FlexItem>
         <FlexItem>
-          <Label color={isConnected ? 'green' : 'grey'} isCompact>
-            {isConnected ? t('logs.connected') : t('logs.reconnecting')}
-          </Label>
+          {failed ? (
+            <Label color="red" isCompact>
+              {t('logs.unavailable')}
+            </Label>
+          ) : (
+            <Label color={isConnected ? 'green' : 'grey'} isCompact>
+              {isConnected ? t('logs.connected') : t('logs.reconnecting')}
+            </Label>
+          )}
         </FlexItem>
       </Flex>
 

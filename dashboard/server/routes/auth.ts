@@ -9,7 +9,7 @@ const SSE_COOKIE_NAME = 'sardeenz_sse';
 function sseCookieOptions(expiresInSec: number, request: FastifyRequest): CookieSerializeOptions {
   const isLocalhost = request.hostname === 'localhost' || request.hostname.startsWith('127.');
   return {
-    path: '/api/events',
+    path: '/api',
     httpOnly: true,
     sameSite: 'strict',
     secure: !isLocalhost,
@@ -20,7 +20,7 @@ function sseCookieOptions(expiresInSec: number, request: FastifyRequest): Cookie
 function clearSseCookieOptions(request: FastifyRequest): CookieSerializeOptions {
   const isLocalhost = request.hostname === 'localhost' || request.hostname.startsWith('127.');
   return {
-    path: '/api/events',
+    path: '/api',
     httpOnly: true,
     sameSite: 'strict',
     secure: !isLocalhost,
