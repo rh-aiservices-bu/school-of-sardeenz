@@ -1,3 +1,5 @@
+import type { WorkerAgentComponents } from '@sardeenz/types';
+import { DeviceType } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 
@@ -25,20 +27,18 @@ interface ClusterSummary {
 }
 
 /** Shape of the JSON object workers push to Redis. */
-interface WorkerMemoryReport {
-  devices: Array<{
-    deviceIndex: number;
-    deviceType: string;
-    memoryUsedBytes: number;
-    memoryTotalBytes: number;
-  }>;
-  reportedAt?: string;
-}
+type WorkerMemoryReport = WorkerAgentComponents['schemas']['WorkerMemoryReport'];
+type WorkerDeviceMemory = WorkerAgentComponents['schemas']['WorkerDeviceMemory'];
 
 const WORKER_MEMORY_SUBKEY = 'memory';
 
 function workerMemoryKey(prefix: string, workerId: string): string {
   return redisKey(prefix, 'workers', workerId, WORKER_MEMORY_SUBKEY);
+}
+
+function isEnumValue<T extends string>(v: unknown, enumObj: Record<string, T>): v is T {
+  const values: string[] = Object.values(enumObj);
+  return typeof v === 'string' && values.includes(v);
 }
 
 /**
@@ -90,19 +90,100 @@ export class MemoryBudgetService {
     return nowMs - reportedMs > this.heartbeatTimeoutSecs * 1000;
   }
 
-  private parseReport(raw: string, workerId: string): WorkerBudget | null {
-    let report: WorkerMemoryReport;
-    try {
-      report = JSON.parse(raw) as WorkerMemoryReport;
-    } catch {
+  private validateDevice(raw: unknown, workerId: string, index: number): WorkerDeviceMemory | null {
+    const field = `devices[${index}]`;
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: ${field} — must be an object`,
+      );
+      return null;
+    }
+    const d = raw as Record<string, unknown>;
+
+    if (
+      !(typeof d.deviceIndex === 'number' && Number.isInteger(d.deviceIndex) && d.deviceIndex >= 0)
+    ) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.deviceIndex — must be an integer >= 0`,
+      );
+      return null;
+    }
+    if (!isEnumValue(d.deviceType, DeviceType)) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.deviceType — must be a valid DeviceType value`,
+      );
+      return null;
+    }
+    if (
+      !(
+        typeof d.memoryUsedBytes === 'number' &&
+        Number.isInteger(d.memoryUsedBytes) &&
+        d.memoryUsedBytes >= 0
+      )
+    ) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.memoryUsedBytes — must be an integer >= 0`,
+      );
+      return null;
+    }
+    if (
+      !(
+        typeof d.memoryTotalBytes === 'number' &&
+        Number.isInteger(d.memoryTotalBytes) &&
+        d.memoryTotalBytes >= 0
+      )
+    ) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.memoryTotalBytes — must be an integer >= 0`,
+      );
       return null;
     }
 
-    if (!Array.isArray(report.devices)) return null;
+    return {
+      deviceIndex: d.deviceIndex,
+      deviceType: d.deviceType,
+      memoryUsedBytes: d.memoryUsedBytes,
+      memoryTotalBytes: d.memoryTotalBytes,
+    };
+  }
 
-    const lastReportAt = report.reportedAt ?? new Date().toISOString();
+  private parseReport(raw: string, workerId: string): WorkerBudget | null {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: payload — invalid JSON`,
+      );
+      return null;
+    }
 
-    const devices: DeviceBudget[] = report.devices.map((d) => {
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: payload — must be an object`,
+      );
+      return null;
+    }
+    const report = parsed as Record<string, unknown> & Partial<WorkerMemoryReport>;
+
+    if (!Array.isArray(report.devices)) {
+      console.warn(
+        `[memory-budget] parseReport rejected workerId=${workerId}: devices — must be an array`,
+      );
+      return null;
+    }
+
+    const validatedDevices: WorkerDeviceMemory[] = [];
+    for (let i = 0; i < report.devices.length; i++) {
+      const device = this.validateDevice(report.devices[i], workerId, i);
+      if (!device) return null;
+      validatedDevices.push(device);
+    }
+
+    const lastReportAt =
+      typeof report.reportedAt === 'string' ? report.reportedAt : new Date().toISOString();
+
+    const devices: DeviceBudget[] = validatedDevices.map((d) => {
       const reservedBytes = this.getReservation(workerId, d.deviceIndex);
       const availableBytes = d.memoryTotalBytes - d.memoryUsedBytes - reservedBytes;
       return {

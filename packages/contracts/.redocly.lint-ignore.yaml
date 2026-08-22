@@ -1,5 +1,25 @@
-# Intentionally unused components — defined now for Phase 2 consumption.
-# Remove this file (or individual entries) once the schemas are referenced.
+# Warnings that are correct-by-design, not defects.
+#
+# RoutingMapUpdate — intentionally unused component, defined for Phase 2
+# consumption. Remove once the schema is referenced by an operation.
 specs/proxy-control-plane.yaml:
   no-unused-components:
     - '#/components/schemas/RoutingMapUpdate'
+
+# WorkerInfo / WorkerMemoryReport — reachable over Redis, not HTTP. Workers
+# publish them to `{prefix}:workers:{id}:{info,memory}` and the control plane
+# discovers them by scanning, so no path can $ref them. They are used at
+# runtime today; "never used" here means "never used by an operation".
+specs/worker-agent.yaml:
+  no-unused-components:
+    - '#/components/schemas/WorkerInfo'
+    - '#/components/schemas/WorkerMemoryReport'
+
+# Neither catalog operation accepts a path parameter, query parameter, or
+# request body, and neither handler has a 4XX code path (catalog.ts:19-38).
+# The only failure modes are 502 and 500. Inventing a 4XX to satisfy the rule
+# would make the spec less accurate.
+specs/control-plane.yaml:
+  operation-4xx-response:
+    - '#/paths/~1api~1v1~1catalog/get/responses'
+    - '#/paths/~1api~1v1~1catalog~1refresh/post/responses'

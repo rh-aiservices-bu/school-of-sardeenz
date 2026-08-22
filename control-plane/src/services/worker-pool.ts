@@ -1,4 +1,5 @@
-import { WorkerStatus } from '@sardeenz/types';
+import type { WorkerAgentComponents } from '@sardeenz/types';
+import { WorkerStatus, DeviceType, ModelType, SleepLevel } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 
@@ -6,23 +7,9 @@ import { redisKey } from '../clients/redis.js';
 // Interfaces
 // ---------------------------------------------------------------------------
 
-export interface WorkerCapability {
-  runnerType: string;
-  engineName: string;
-  supportedModelTypes: string[];
-  supportedDeviceTypes: string[];
-  supportedSleepLevels: string[];
-  engineVersion?: string;
-  maxTensorParallelism?: number;
-  kvCacheElasticSharing?: boolean;
-  features?: Record<string, unknown>;
-}
-
-export interface WorkerDevice {
-  deviceIndex: number;
-  deviceType: string;
-  memoryTotalBytes: number;
-}
+export type WorkerCapability = WorkerAgentComponents['schemas']['WorkerCapability'];
+export type WorkerDevice = WorkerAgentComponents['schemas']['WorkerDeviceInfo'];
+type WorkerInfoPayload = WorkerAgentComponents['schemas']['WorkerInfo'];
 
 export interface WorkerRecord {
   workerId: string;
@@ -31,16 +18,6 @@ export interface WorkerRecord {
   devices: WorkerDevice[];
   lastHeartbeatAt: string | null;
   joinedAt: string;
-  managementUrl: string;
-}
-
-// ---------------------------------------------------------------------------
-// Internal shape of the Redis worker info value
-// ---------------------------------------------------------------------------
-
-interface WorkerInfoPayload {
-  capabilities: WorkerCapability[];
-  devices: WorkerDevice[];
   managementUrl: string;
 }
 
@@ -69,25 +46,170 @@ function extractWorkerIdFromInfoKey(key: string): string | null {
   return parts.slice(2, parts.length - 1).join(':');
 }
 
-function parseWorkerInfo(raw: string): WorkerInfoPayload | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      parsed !== null &&
-      typeof parsed === 'object' &&
-      'capabilities' in parsed &&
-      'devices' in parsed &&
-      Array.isArray((parsed as Record<string, unknown>).capabilities) &&
-      Array.isArray((parsed as Record<string, unknown>).devices) &&
-      typeof (parsed as Record<string, unknown>).managementUrl === 'string' &&
-      ((parsed as Record<string, unknown>).managementUrl as string).length > 0
-    ) {
-      return parsed as WorkerInfoPayload;
-    }
-    return null;
-  } catch {
-    return null;
+function rejectWorkerInfo(workerId: string, field: string, reason: string): null {
+  console.warn(`[worker-pool] parseWorkerInfo rejected workerId=${workerId}: ${field} — ${reason}`);
+  return null;
+}
+
+function isNonNegativeInteger(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+function isEnumValue<T extends string>(v: unknown, enumObj: Record<string, T>): v is T {
+  const values: string[] = Object.values(enumObj);
+  return typeof v === 'string' && values.includes(v);
+}
+
+function isEnumArray<T extends string>(v: unknown, enumObj: Record<string, T>): v is T[] {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  return v.every((item) => isEnumValue(item, enumObj));
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function validateCapability(
+  raw: unknown,
+  workerId: string,
+  index: number,
+): WorkerCapability | null {
+  const field = `capabilities[${index}]`;
+  if (!isPlainObject(raw)) return rejectWorkerInfo(workerId, field, 'must be an object');
+
+  if (typeof raw.runnerType !== 'string' || raw.runnerType.length === 0) {
+    return rejectWorkerInfo(workerId, `${field}.runnerType`, 'must be a non-empty string');
   }
+  if (typeof raw.engineName !== 'string') {
+    return rejectWorkerInfo(workerId, `${field}.engineName`, 'must be a string');
+  }
+  if (!isEnumArray(raw.supportedModelTypes, ModelType)) {
+    return rejectWorkerInfo(
+      workerId,
+      `${field}.supportedModelTypes`,
+      'must be a non-empty array of valid ModelType values',
+    );
+  }
+  if (!isEnumArray(raw.supportedDeviceTypes, DeviceType)) {
+    return rejectWorkerInfo(
+      workerId,
+      `${field}.supportedDeviceTypes`,
+      'must be a non-empty array of valid DeviceType values',
+    );
+  }
+  if (!isEnumArray(raw.supportedSleepLevels, SleepLevel)) {
+    return rejectWorkerInfo(
+      workerId,
+      `${field}.supportedSleepLevels`,
+      'must be a non-empty array of valid SleepLevel values',
+    );
+  }
+  if (raw.engineVersion !== undefined && typeof raw.engineVersion !== 'string') {
+    return rejectWorkerInfo(workerId, `${field}.engineVersion`, 'must be a string if present');
+  }
+  if (
+    raw.maxTensorParallelism !== undefined &&
+    !(isNonNegativeInteger(raw.maxTensorParallelism) && raw.maxTensorParallelism >= 1)
+  ) {
+    return rejectWorkerInfo(
+      workerId,
+      `${field}.maxTensorParallelism`,
+      'must be an integer >= 1 if present',
+    );
+  }
+  if (raw.kvCacheElasticSharing !== undefined && typeof raw.kvCacheElasticSharing !== 'boolean') {
+    return rejectWorkerInfo(
+      workerId,
+      `${field}.kvCacheElasticSharing`,
+      'must be a boolean if present',
+    );
+  }
+  if (raw.features !== undefined && !isPlainObject(raw.features)) {
+    return rejectWorkerInfo(workerId, `${field}.features`, 'must be an object if present');
+  }
+
+  return {
+    runnerType: raw.runnerType,
+    engineName: raw.engineName,
+    supportedModelTypes: raw.supportedModelTypes,
+    supportedDeviceTypes: raw.supportedDeviceTypes,
+    supportedSleepLevels: raw.supportedSleepLevels,
+    engineVersion: raw.engineVersion,
+    maxTensorParallelism: isNonNegativeInteger(raw.maxTensorParallelism)
+      ? raw.maxTensorParallelism
+      : 1,
+    kvCacheElasticSharing:
+      typeof raw.kvCacheElasticSharing === 'boolean' ? raw.kvCacheElasticSharing : false,
+    features: raw.features,
+  };
+}
+
+function validateDevice(raw: unknown, workerId: string, index: number): WorkerDevice | null {
+  const field = `devices[${index}]`;
+  if (!isPlainObject(raw)) return rejectWorkerInfo(workerId, field, 'must be an object');
+
+  if (!isNonNegativeInteger(raw.deviceIndex)) {
+    return rejectWorkerInfo(workerId, `${field}.deviceIndex`, 'must be an integer >= 0');
+  }
+  if (!isEnumValue(raw.deviceType, DeviceType)) {
+    return rejectWorkerInfo(workerId, `${field}.deviceType`, 'must be a valid DeviceType value');
+  }
+  if (!isNonNegativeInteger(raw.memoryTotalBytes)) {
+    return rejectWorkerInfo(workerId, `${field}.memoryTotalBytes`, 'must be an integer >= 0');
+  }
+
+  return {
+    deviceIndex: raw.deviceIndex,
+    deviceType: raw.deviceType,
+    memoryTotalBytes: raw.memoryTotalBytes,
+  };
+}
+
+function parseWorkerInfo(raw: string, workerId: string): WorkerInfoPayload | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return rejectWorkerInfo(workerId, 'payload', 'invalid JSON');
+  }
+
+  if (!isPlainObject(parsed)) {
+    return rejectWorkerInfo(workerId, 'payload', 'must be an object');
+  }
+
+  if (typeof parsed.managementUrl !== 'string' || parsed.managementUrl.length === 0) {
+    return rejectWorkerInfo(workerId, 'managementUrl', 'must be a non-empty string');
+  }
+
+  if (!Array.isArray(parsed.capabilities) || parsed.capabilities.length === 0) {
+    return rejectWorkerInfo(workerId, 'capabilities', 'must be a non-empty array');
+  }
+
+  const capabilities: WorkerCapability[] = [];
+  for (let i = 0; i < parsed.capabilities.length; i++) {
+    const capability = validateCapability(parsed.capabilities[i], workerId, i);
+    if (!capability) return null;
+    capabilities.push(capability);
+  }
+
+  if (!Array.isArray(parsed.devices)) {
+    return rejectWorkerInfo(workerId, 'devices', 'must be an array');
+  }
+
+  if (parsed.devices.length === 0) {
+    console.warn(
+      `[worker-pool] parseWorkerInfo workerId=${workerId}: devices — empty array accepted`,
+    );
+  }
+
+  const devices: WorkerDevice[] = [];
+  for (let i = 0; i < parsed.devices.length; i++) {
+    const device = validateDevice(parsed.devices[i], workerId, i);
+    if (!device) return null;
+    devices.push(device);
+  }
+
+  return { capabilities, devices, managementUrl: parsed.managementUrl };
 }
 
 function parseHeartbeatTimestamp(raw: string): Date | null {
@@ -175,7 +297,7 @@ export class WorkerPoolService {
       const workerId = extractWorkerIdFromInfoKey(key);
       if (!workerId) continue;
 
-      const payload = parseWorkerInfo(raw);
+      const payload = parseWorkerInfo(raw, workerId);
       if (!payload) continue;
 
       const existing = this.workers.get(workerId);

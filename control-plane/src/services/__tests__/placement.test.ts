@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WorkerStatus } from '@sardeenz/types';
+import { WorkerStatus, DeviceType, ModelType, SleepLevel } from '@sardeenz/types';
 
 import { PlacementPipeline, MostAvailableCapacityStrategy } from '../placement.js';
 import type { WorkerRecord } from '../worker-pool.js';
@@ -7,8 +7,8 @@ import type { WorkerBudget, DeviceBudget } from '../memory-budget.js';
 
 function makeWorker(
   workerId: string,
-  capabilities: { runnerType: string; supportedDeviceTypes: string[] }[],
-  devices: { deviceIndex: number; deviceType: string; memoryTotalBytes: number }[],
+  capabilities: { runnerType: string; supportedDeviceTypes: DeviceType[] }[],
+  devices: { deviceIndex: number; deviceType: DeviceType; memoryTotalBytes: number }[],
 ): WorkerRecord {
   return {
     workerId,
@@ -16,9 +16,11 @@ function makeWorker(
     capabilities: capabilities.map((c) => ({
       runnerType: c.runnerType,
       engineName: c.runnerType,
-      supportedModelTypes: ['text-generation'],
+      supportedModelTypes: [ModelType.LLM],
       supportedDeviceTypes: c.supportedDeviceTypes,
-      supportedSleepLevels: ['L1_HOST_RAM'],
+      supportedSleepLevels: [SleepLevel.L1_HOST_RAM],
+      maxTensorParallelism: 1,
+      kvCacheElasticSharing: false,
     })),
     devices,
     lastHeartbeatAt: new Date().toISOString(),
@@ -29,7 +31,7 @@ function makeWorker(
 
 function makeBudget(
   workerId: string,
-  devices: { deviceIndex: number; deviceType: string; totalBytes: number; usedBytes: number }[],
+  devices: { deviceIndex: number; deviceType: DeviceType; totalBytes: number; usedBytes: number }[],
 ): WorkerBudget {
   return {
     workerId,
@@ -55,14 +57,16 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -81,14 +85,16 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'triton', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'triton', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -105,15 +111,15 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
     const budgets = new Map([
       [
         'w1',
         makeBudget('w1', [
-          { deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 15e9 },
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 15e9 },
         ]),
       ],
     ]);
@@ -131,23 +137,27 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
       makeWorker(
         'w2',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['ROCM'] }],
-        [{ deviceIndex: 0, deviceType: 'ROCM', memoryTotalBytes: 32e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.ROCM] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.ROCM, memoryTotalBytes: 32e9 }],
       ),
     ];
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
       [
         'w2',
-        makeBudget('w2', [{ deviceIndex: 0, deviceType: 'ROCM', totalBytes: 32e9, usedBytes: 0 }]),
+        makeBudget('w2', [
+          { deviceIndex: 0, deviceType: DeviceType.ROCM, totalBytes: 32e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -156,7 +166,7 @@ describe('PlacementPipeline', () => {
         modelName: 'test',
         runnerType: 'vllm',
         requiredMemory: 8e9,
-        deviceType: 'ROCM',
+        deviceType: DeviceType.ROCM,
         tensorParallel: 1,
       },
       workers,
@@ -171,23 +181,27 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
       makeWorker(
         'w2',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 32e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 32e9 }],
       ),
     ];
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
       [
         'w2',
-        makeBudget('w2', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 32e9, usedBytes: 0 }]),
+        makeBudget('w2', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 32e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -204,10 +218,10 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
         [
-          { deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 },
-          { deviceIndex: 1, deviceType: 'CUDA', memoryTotalBytes: 16e9 },
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
+          { deviceIndex: 1, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
         ],
       ),
     ];
@@ -215,8 +229,8 @@ describe('PlacementPipeline', () => {
       [
         'w1',
         makeBudget('w1', [
-          { deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 },
-          { deviceIndex: 1, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 },
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+          { deviceIndex: 1, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
         ]),
       ],
     ]);
@@ -237,8 +251,8 @@ describe('PlacementPipeline', () => {
       {
         ...makeWorker(
           'w1',
-          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+          [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+          [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
         ),
         status: WorkerStatus.DEGRADED,
       },
@@ -246,7 +260,9 @@ describe('PlacementPipeline', () => {
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -264,8 +280,8 @@ describe('PlacementPipeline', () => {
       {
         ...makeWorker(
           'w1',
-          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+          [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+          [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
         ),
         status: WorkerStatus.OFFLINE,
       },
@@ -273,7 +289,9 @@ describe('PlacementPipeline', () => {
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -291,37 +309,43 @@ describe('PlacementPipeline', () => {
       {
         ...makeWorker(
           'w1',
-          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+          [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+          [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
         ),
         status: WorkerStatus.DEGRADED,
       },
       {
         ...makeWorker(
           'w2',
-          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+          [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+          [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
         ),
         status: WorkerStatus.OFFLINE,
       },
       makeWorker(
         'w3',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
     const budgets = new Map([
       [
         'w1',
-        makeBudget('w1', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
       [
         'w2',
-        makeBudget('w2', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w2', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
       [
         'w3',
-        makeBudget('w3', [{ deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 }]),
+        makeBudget('w3', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+        ]),
       ],
     ]);
 
@@ -339,12 +363,12 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
     const staleBudget = makeBudget('w1', [
-      { deviceIndex: 0, deviceType: 'CUDA', totalBytes: 16e9, usedBytes: 0 },
+      { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
     ]);
     staleBudget.stale = true;
     const budgets = new Map([['w1', staleBudget]]);
@@ -366,13 +390,13 @@ describe('PlacementPipeline.eligibleWorkerIds', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
       makeWorker(
         'w2',
-        [{ runnerType: 'triton', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'triton', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
 
@@ -389,8 +413,8 @@ describe('PlacementPipeline.eligibleWorkerIds', () => {
       {
         ...makeWorker(
           'w1',
-          [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-          [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+          [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+          [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
         ),
         status: WorkerStatus.OFFLINE,
       },
@@ -408,13 +432,13 @@ describe('PlacementPipeline.eligibleWorkerIds', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
       makeWorker(
         'w2',
-        [{ runnerType: 'vllm', supportedDeviceTypes: ['ROCM'] }],
-        [{ deviceIndex: 0, deviceType: 'ROCM', memoryTotalBytes: 32e9 }],
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.ROCM] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.ROCM, memoryTotalBytes: 32e9 }],
       ),
     ];
 
@@ -423,7 +447,7 @@ describe('PlacementPipeline.eligibleWorkerIds', () => {
         modelName: 'test',
         runnerType: 'vllm',
         requiredMemory: 8e9,
-        deviceType: 'ROCM',
+        deviceType: DeviceType.ROCM,
         tensorParallel: 1,
       },
       workers,
@@ -436,8 +460,8 @@ describe('PlacementPipeline.eligibleWorkerIds', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'triton', supportedDeviceTypes: ['CUDA'] }],
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16e9 }],
+        [{ runnerType: 'triton', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 }],
       ),
     ];
 

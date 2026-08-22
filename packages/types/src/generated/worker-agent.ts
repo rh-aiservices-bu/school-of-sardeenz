@@ -299,6 +299,13 @@ export type components = {
          */
         WorkerMemoryReport: {
             devices: components["schemas"]["WorkerDeviceMemory"][];
+            /**
+             * Format: date-time
+             * @description ISO-8601 timestamp of when the worker generated this report. Used
+             *     by the control plane to determine staleness. When absent, the
+             *     control plane falls back to the time it read the report.
+             */
+            reportedAt?: string;
         };
         /** @description Memory usage for a single device on the worker. */
         WorkerDeviceMemory: {

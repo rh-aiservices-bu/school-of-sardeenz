@@ -1,4 +1,4 @@
-import { WorkerStatus } from '@sardeenz/types';
+import { WorkerStatus, DeviceType } from '@sardeenz/types';
 import type { WorkerRecord, WorkerCapability } from './worker-pool.js';
 import type { WorkerBudget, DeviceBudget } from './memory-budget.js';
 import { placementDuration } from '../health/metrics.js';
@@ -118,7 +118,9 @@ export class PlacementPipeline {
 
     return candidates.filter(({ worker, capability }) => {
       const hasDevice = worker.devices.some((d) => d.deviceType === request.deviceType);
-      const supportsDevice = capability.supportedDeviceTypes.includes(request.deviceType!);
+      const supportsDevice = capability.supportedDeviceTypes.includes(
+        request.deviceType as DeviceType,
+      );
       return hasDevice && supportsDevice;
     });
   }

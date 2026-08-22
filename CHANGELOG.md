@@ -16,6 +16,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **WorkerInfo/WorkerMemoryReport Redis schema enforcement.** `WorkerPoolService.parseWorkerInfo`
+  and `MemoryBudgetService.parseReport` now validate every field of the Redis-sourced worker
+  payloads by hand (no Ajv) instead of trusting the shape after a shallow `Array.isArray` check —
+  enum fields are checked against `Object.values()` of the generated `ModelType`/`DeviceType`/
+  `SleepLevel` enums, byte/index fields must be `Number.isInteger(v) && v >= 0`, and an empty
+  `capabilities` array is now rejected (`WorkerInfo.capabilities` gained `minItems: 1`) while an
+  empty `devices` array is accepted with a warning. Every rejection is logged with the offending
+  worker id and field. Both services now import their payload types as aliases of the generated
+  `WorkerAgentComponents` schemas instead of hand-written local interfaces. `WorkerMemoryReport`
+  gained an optional `reportedAt` timestamp, and `GET /api/v1/catalog` gained a documented `502`
+  response to match `POST /api/v1/catalog/refresh`. (#83)
 - **Capability contract hardening.** `kvCacheElasticSharing` is now a first-class boolean on
   `RunnerCapabilities` and `WorkerCapability` (was a `features` map key) — the control plane's
   future oversubscription placement policy keys on this field directly. `WorkerCapability` gained
