@@ -25,7 +25,11 @@ impl WakeTriggerClient {
             .json(&request)
             .timeout(std::time::Duration::from_secs(5))
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::warn!(model_name, error = %e, "wake trigger transport error");
+                anyhow::anyhow!("wake trigger transport error")
+            })?;
 
         let status = response.status();
         if status.is_success() {

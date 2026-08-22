@@ -79,6 +79,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Proxy: wake-trigger transport errors leaked the control-plane URL to clients.** The non-2xx
+  response path was already masked (#93), but a transport-level failure (connection refused, DNS
+  failure, timeout) reaching the control plane still propagated reqwest's raw error — which embeds
+  the request URL, e.g. `error sending request for url (http://127.0.0.1:.../api/v1/wake)` — into
+  the client-facing `model_unavailable` error message. `WakeTriggerClient::trigger_wake` now maps
+  the transport error to a generic `"wake trigger transport error"` message and logs the original
+  error server-side via `tracing::warn!`. (#97)
 - **Module-store write-protection VAP matched the wrong identity.** The `matchConditions` in the
   ValidatingAdmissionPolicy compared `request.userInfo.username`, which is the controller manager
   for Pods created by Jobs/Deployments — not the workload SA. Both exemptions were dead: the policy
