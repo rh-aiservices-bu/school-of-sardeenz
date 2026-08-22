@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     if (logoutTimerRef.current) {
       clearTimeout(logoutTimerRef.current);
-      logoutTimerRef.current = null;
+      logoutTimerRef.current = undefined;
     }
     const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
     void fetch(`${baseUrl}/auth/logout`, { method: 'POST' });
@@ -111,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (token: string) => {
       if (logoutTimerRef.current) {
         clearTimeout(logoutTimerRef.current);
-        logoutTimerRef.current = null;
+        logoutTimerRef.current = undefined;
       }
       const payload = decodeJwtPayload(token);
       if (!payload || typeof payload['exp'] !== 'number') return;
