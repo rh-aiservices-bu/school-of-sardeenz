@@ -3,6 +3,7 @@ import { ModelLifecycleState, ModelState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
+import { isContainedIn } from '../utils/path-containment.js';
 
 interface DeployBody {
   modelName: string;
@@ -46,6 +47,12 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
     if (!MODEL_NAME_PATTERN.test(body.modelName)) {
       throw ControlPlaneError.invalidRequest('modelName must match ^[A-Za-z0-9._/-]{1,200}$');
+    }
+
+    if (!isContainedIn(body.modelPath, deps.config.weightsDir)) {
+      throw ControlPlaneError.invalidRequest(
+        'modelPath must be an absolute path inside the weights directory',
+      );
     }
 
     if (

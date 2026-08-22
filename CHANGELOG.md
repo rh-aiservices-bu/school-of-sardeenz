@@ -118,6 +118,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   naming the configured range instead of silently returning an out-of-range port. (#114)
 - **Worker Deployment: signing-key import silently no-oped, no liveness/readiness probes, and the
   heartbeat kept advertising a wedged worker.** (#118)
+- **`modelPath` was never validated against the weights root.** A deploy request could point
+  `modelPath` anywhere on the control plane's filesystem (`../../etc`, a relative path, or a
+  string that merely shared a prefix with the weights dir, e.g. `/weights-evil`), and the worker
+  agent's `ApptainerLauncher` would `--bind`/exec it as-is. `POST /api/v1/models` now rejects any
+  `modelPath` that doesn't resolve to a path strictly inside `config.weightsDir`, via a shared
+  `isContainedIn` helper (`control-plane/src/utils/path-containment.ts`, also now used by
+  `WeightsBrowserService`). The worker agent adds its own independent check — `ApptainerLauncher`
+  rejects non-absolute paths, syntactic escapes, and (via `fs.realpath`) a symlink planted inside
+  the weights dir that resolves back outside it — since it cannot assume every request reaching it
+  passed through the control-plane check. (#113)
   - `deployment/sif-runner/worker-deployment.yaml`'s entrypoint imported the SIF signing public key
     with `|| true`, so a missing/invalid ConfigMap left the keyring empty and the worker started
     anyway with `apptainer verify` silently unable to trust anything. The script now checks

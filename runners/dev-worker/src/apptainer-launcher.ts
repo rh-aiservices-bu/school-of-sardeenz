@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { realpath as nodeRealpath } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 import type { LaunchHandle, LaunchSpec, LogSink, RunnerLauncher } from './launcher.js';
 
 // Production launcher: `apptainer exec`s an engine SIF from the shared module volume.
@@ -96,6 +98,8 @@ export interface ApptainerLauncherDeps {
   healthCheck?: HealthCheckFn;
   sleep?: SleepFn;
   now?: NowFn;
+  /** Resolves symlinks (used to catch symlink escapes in modelPath); injectable for tests. */
+  realpath?: RealpathFn;
 }
 
 export interface ExecPlan {
@@ -125,6 +129,10 @@ const defaultHealthCheck: HealthCheckFn = async (url) => {
 
 const defaultSleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export type RealpathFn = (path: string) => Promise<string>;
+
+const defaultRealpath: RealpathFn = (path) => nodeRealpath(path);
+
 export class ApptainerLauncher implements RunnerLauncher {
   readonly serializeColdStarts = true;
 
@@ -133,6 +141,7 @@ export class ApptainerLauncher implements RunnerLauncher {
   private readonly healthCheck: HealthCheckFn;
   private readonly sleep: SleepFn;
   private readonly now: NowFn;
+  private readonly realpath: RealpathFn;
 
   constructor(
     private readonly config: ApptainerLauncherConfig,
@@ -143,6 +152,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     this.healthCheck = deps.healthCheck ?? defaultHealthCheck;
     this.sleep = deps.sleep ?? defaultSleep;
     this.now = deps.now ?? (() => Date.now());
+    this.realpath = deps.realpath ?? defaultRealpath;
   }
 
   // Resolve which SIF to exec. Prefer the explicit runtimeModule; fall back to
@@ -173,8 +183,40 @@ export class ApptainerLauncher implements RunnerLauncher {
     return module;
   }
 
+  // Guards against a modelPath that escapes the configured weights directory — either
+  // syntactically (`..` traversal, a relative path) or via a symlink planted inside the weights
+  // dir that resolves outside it. The control plane validates modelPath at deploy time too, but
+  // the worker cannot trust that a request reaching it actually came through that check.
+  private async validateModelPath(modelPath: string): Promise<void> {
+    if (!modelPath.startsWith('/')) {
+      throw new Error(`modelPath must be an absolute path: ${modelPath}`);
+    }
+    const root = resolve(this.config.weightsDir);
+    const resolved = resolve(modelPath);
+    // Must be a strict child of the root — the bare root itself isn't a launchable model dir.
+    if (!resolved.startsWith(root + sep)) {
+      throw new Error(`modelPath escapes the weights root ${root}: ${modelPath}`);
+    }
+
+    let real: string;
+    try {
+      real = await this.realpath(resolved);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(`modelPath does not exist: ${modelPath}`);
+      }
+      throw err;
+    }
+    if (!real.startsWith(root + sep)) {
+      throw new Error(
+        `modelPath resolves outside the weights root ${root} via a symlink: ${modelPath}`,
+      );
+    }
+  }
+
   // Pure command construction — no side effects, unit-tested directly.
-  buildExecPlan(spec: LaunchSpec): ExecPlan {
+  async buildExecPlan(spec: LaunchSpec): Promise<ExecPlan> {
+    await this.validateModelPath(spec.modelPath);
     const sifPath = this.resolveSifPath(spec);
     const cacheDir = `${this.config.scratchDir}/cache`;
 
@@ -235,7 +277,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     onStartupComplete?: () => void,
     onExit?: () => void,
   ): Promise<LaunchHandle> {
-    const plan = this.buildExecPlan(spec);
+    const plan = await this.buildExecPlan(spec);
 
     // Trace the resolved SIF + exec so a stuck/failed cold-start is diagnosable (the two most
     // common failures — missing SIF and failed signature verify — both surface right here).

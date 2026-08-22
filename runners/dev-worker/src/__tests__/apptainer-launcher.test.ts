@@ -48,6 +48,9 @@ function makeLauncher(
       healthCheck: () => Promise.resolve({ state: 'READY' }),
       sleep: () => Promise.resolve(),
       now: () => 0,
+      // Default: modelPath resolves to itself (no symlink). Tests exercising symlink escapes
+      // override this.
+      realpath: (path: string) => Promise.resolve(path),
       ...deps,
     },
   );
@@ -55,9 +58,9 @@ function makeLauncher(
 }
 
 describe('ApptainerLauncher.buildExecPlan', () => {
-  it('constructs the apptainer exec command with --nv, binds, cache redirects and entrypoint', () => {
+  it('constructs the apptainer exec command with --nv, binds, cache redirects and entrypoint', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(makeSpec());
+    const plan = await launcher.buildExecPlan(makeSpec());
 
     expect(plan.command).toBe('apptainer');
     expect(plan.sifPath).toBe('/modules/vllm-0.21.sif');
@@ -91,42 +94,42 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
 
-  it('sets HOME as a process env var, never as an --env flag (Apptainer rejects --env HOME)', () => {
+  it('sets HOME as a process env var, never as an --env flag (Apptainer rejects --env HOME)', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(makeSpec());
+    const plan = await launcher.buildExecPlan(makeSpec());
 
     expect(plan.env.HOME).toBe('/scratch/home');
     expect(plan.args).not.toContain('HOME=/scratch/home');
     expect(plan.args.filter((a) => a.startsWith('HOME='))).toHaveLength(0);
   });
 
-  it('omits --nv and CUDA_VISIBLE_DEVICES for CPU runners', () => {
+  it('omits --nv and CUDA_VISIBLE_DEVICES for CPU runners', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(
+    const plan = await launcher.buildExecPlan(
       makeSpec({ deviceType: 'CPU', devices: [{ deviceIndex: 0, deviceType: 'CPU' }] }),
     );
     expect(plan.args).not.toContain('--nv');
     expect(plan.args.some((a) => a.startsWith('CUDA_VISIBLE_DEVICES='))).toBe(false);
   });
 
-  it('passes SARDEENZ_DEVICE_INDICES alongside CUDA_VISIBLE_DEVICES for CUDA runners', () => {
+  it('passes SARDEENZ_DEVICE_INDICES alongside CUDA_VISIBLE_DEVICES for CUDA runners', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(makeSpec());
+    const plan = await launcher.buildExecPlan(makeSpec());
     expect(plan.args).toContain('CUDA_VISIBLE_DEVICES=2');
     expect(plan.args).toContain('SARDEENZ_DEVICE_INDICES=2');
   });
 
-  it('omits SARDEENZ_DEVICE_INDICES for CPU runners', () => {
+  it('omits SARDEENZ_DEVICE_INDICES for CPU runners', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(
+    const plan = await launcher.buildExecPlan(
       makeSpec({ deviceType: 'CPU', devices: [{ deviceIndex: 0, deviceType: 'CPU' }] }),
     );
     expect(plan.args.some((a) => a.startsWith('SARDEENZ_DEVICE_INDICES='))).toBe(false);
   });
 
-  it('joins multiple assigned GPU indices into CUDA_VISIBLE_DEVICES', () => {
+  it('joins multiple assigned GPU indices into CUDA_VISIBLE_DEVICES', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(
+    const plan = await launcher.buildExecPlan(
       makeSpec({
         devices: [
           { deviceIndex: 0, deviceType: 'CUDA' },
@@ -137,29 +140,90 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(plan.args).toContain('CUDA_VISIBLE_DEVICES=0,3');
   });
 
-  it('falls back to <runnerType>-<engineConfig.version> when runtimeModule is absent', () => {
+  it('falls back to <runnerType>-<engineConfig.version> when runtimeModule is absent', async () => {
     const { launcher } = makeLauncher();
-    const plan = launcher.buildExecPlan(
+    const plan = await launcher.buildExecPlan(
       makeSpec({ runtimeModule: undefined, engineConfig: { version: '0.22' } }),
     );
     expect(plan.sifPath).toBe('/modules/vllm-0.22.sif');
   });
 
-  it('throws when no module can be resolved', () => {
+  it('throws when no module can be resolved', async () => {
     const { launcher } = makeLauncher();
-    expect(() => launcher.buildExecPlan(makeSpec({ runtimeModule: undefined }))).toThrow(
+    await expect(launcher.buildExecPlan(makeSpec({ runtimeModule: undefined }))).rejects.toThrow(
       /Cannot resolve a runtime module/,
     );
   });
 
-  it('rejects a runtimeModule with path-traversal characters', () => {
+  it('rejects a runtimeModule with path-traversal characters', async () => {
     const { launcher } = makeLauncher();
-    expect(() => launcher.buildExecPlan(makeSpec({ runtimeModule: '../../etc/evil' }))).toThrow(
-      /Invalid runtime module/,
+    await expect(
+      launcher.buildExecPlan(makeSpec({ runtimeModule: '../../etc/evil' })),
+    ).rejects.toThrow(/Invalid runtime module/);
+    await expect(
+      launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm/0.21' })),
+    ).rejects.toThrow(/Invalid runtime module/);
+  });
+});
+
+describe('ApptainerLauncher.buildExecPlan modelPath containment', () => {
+  it('accepts a modelPath that is a direct child of the weights root', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' }));
+    expect(plan.args[plan.args.indexOf('--model') + 1]).toBe('/weights/llama');
+  });
+
+  it('rejects a relative modelPath', async () => {
+    const { launcher } = makeLauncher();
+    await expect(
+      launcher.buildExecPlan(makeSpec({ modelPath: 'weights/llama' })),
+    ).rejects.toThrow(/absolute path/);
+  });
+
+  it('rejects a modelPath that traverses out of the weights root', async () => {
+    const { launcher } = makeLauncher();
+    await expect(
+      launcher.buildExecPlan(makeSpec({ modelPath: '/weights/../etc/passwd' })),
+    ).rejects.toThrow(/escapes the weights root/);
+  });
+
+  it('rejects a modelPath equal to the weights root itself', async () => {
+    const { launcher } = makeLauncher();
+    await expect(launcher.buildExecPlan(makeSpec({ modelPath: '/weights' }))).rejects.toThrow(
+      /escapes the weights root/,
     );
-    expect(() => launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm/0.21' }))).toThrow(
-      /Invalid runtime module/,
+  });
+
+  it('rejects a modelPath with a trailing separator equal to the root', async () => {
+    const { launcher } = makeLauncher();
+    await expect(launcher.buildExecPlan(makeSpec({ modelPath: '/weights/' }))).rejects.toThrow(
+      /escapes the weights root/,
     );
+  });
+
+  it('rejects a sibling directory that merely shares the root as a string prefix', async () => {
+    const { launcher } = makeLauncher();
+    await expect(
+      launcher.buildExecPlan(makeSpec({ modelPath: '/weights-evil/llama' })),
+    ).rejects.toThrow(/escapes the weights root/);
+  });
+
+  it('rejects a modelPath resolved via a symlink that escapes the weights root', async () => {
+    const { launcher } = makeLauncher(
+      {},
+      { realpath: () => Promise.resolve('/etc/passwd') },
+    );
+    await expect(
+      launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' })),
+    ).rejects.toThrow(/symlink/);
+  });
+
+  it('rejects a modelPath that does not exist on disk', async () => {
+    const err = Object.assign(new Error('no such file'), { code: 'ENOENT' });
+    const { launcher } = makeLauncher({}, { realpath: () => Promise.reject(err) });
+    await expect(
+      launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' })),
+    ).rejects.toThrow(/does not exist/);
   });
 });
 
