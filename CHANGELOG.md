@@ -21,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `STOPPED` as "configured but not running — record retained, can be started or deleted" instead of
   teardown framing. (#121)
 
+- **`make dev-full-logged` target.** Full dev stack (proxy, control plane, dashboard, BFF) via the
+  existing `:logged` scripts plus one dev worker tee'd to `logs/worker.log`. The worker invocation
+  defaults `SARDEENZ_RUNNER_CATALOG_URL` to `./runners.yaml` (correct for the repo-root cwd this
+  target runs from; a shell-exported value still wins), avoiding the `.env` control-plane-relative
+  path that breaks worker catalog loading when launched from the root.
+
 ### Fixed
 
 - **Integration harness worker fixture updated to the current WorkerInfo contract.** The M6
