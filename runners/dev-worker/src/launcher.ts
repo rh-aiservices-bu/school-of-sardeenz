@@ -28,6 +28,7 @@ export interface LaunchSpec {
   requiredMemory: number;
   tensorParallel: number;
   engineConfig?: Record<string, unknown>;
+  engineArgs?: string[];
   devices: DeviceRef[];
   /** Management port for the runner-contract API (health/sleep/wake/progress). */
   port: number;

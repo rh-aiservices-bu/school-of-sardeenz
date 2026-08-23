@@ -18,12 +18,18 @@ interface DeployBody {
   deviceType?: string;
   tensorParallel?: number;
   engineConfig?: Record<string, unknown>;
+  engineArgs?: string[];
   runtimeModule?: string;
   pinned?: boolean;
 }
 
 // Mirrors the worker-agent contract's runtimeModule pattern; it becomes a SIF filename segment.
 const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+// engineArgs sanity caps (#126 review) — generous enough for any real vLLM invocation while
+// bounding the payload the control plane accepts and forwards to a worker.
+const MAX_ENGINE_ARGS_COUNT = 128;
+const MAX_ENGINE_ARG_LENGTH = 512;
 
 // Stop is only valid from these settled states. Every other state (PENDING, STARTING, DRAINING,
 // STOPPING, and the synthetic STOPPED) is transient or already-terminal background work in
@@ -160,6 +166,7 @@ async function deployFromRecord(
           deviceType: record.deviceType ?? undefined,
           tensorParallel,
           engineConfig: record.engineConfig ?? undefined,
+          engineArgs: record.engineArgs ?? undefined,
           runtimeModule: record.runtimeModule ?? undefined,
           devices: result.devices,
         })
@@ -294,6 +301,7 @@ async function deployFromRecord(
             deviceType: record.deviceType ?? undefined,
             tensorParallel,
             engineConfig: record.engineConfig ?? undefined,
+            engineArgs: record.engineArgs ?? undefined,
             runtimeModule: record.runtimeModule ?? undefined,
             devices: reclaimed.devices,
           })
@@ -438,6 +446,28 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       );
     }
 
+    if (body.engineArgs !== undefined) {
+      if (
+        !Array.isArray(body.engineArgs) ||
+        body.engineArgs.some((a) => typeof a !== 'string')
+      ) {
+        throw ControlPlaneError.invalidRequest('engineArgs must be an array of strings');
+      }
+      // Sanity caps, not a real security boundary (the launcher's RESERVED_ENGINE_FLAGS check is)
+      // — just cheap defense-in-depth against a pathological payload reaching the worker (#126
+      // review).
+      if (body.engineArgs.length > MAX_ENGINE_ARGS_COUNT) {
+        throw ControlPlaneError.invalidRequest(
+          `engineArgs must contain at most ${MAX_ENGINE_ARGS_COUNT} elements`,
+        );
+      }
+      if (body.engineArgs.some((a) => a.length > MAX_ENGINE_ARG_LENGTH)) {
+        throw ControlPlaneError.invalidRequest(
+          `each engineArgs element must be at most ${MAX_ENGINE_ARG_LENGTH} characters`,
+        );
+      }
+    }
+
     let record: ModelRecord;
     try {
       record = await deps.modelRepository.create({
@@ -448,6 +478,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         deviceType: body.deviceType,
         tensorParallel: body.tensorParallel,
         engineConfig: body.engineConfig,
+        engineArgs: body.engineArgs,
         runtimeModule: body.runtimeModule,
         pinned: body.pinned,
       });
@@ -572,6 +603,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         deviceType: record?.deviceType ?? undefined,
         tensorParallel: record?.tensorParallel ?? 1,
         engineConfig: record?.engineConfig ?? undefined,
+        engineArgs: record?.engineArgs ?? undefined,
         runtimeModule: record?.runtimeModule ?? undefined,
         pinned: record?.pinned ?? false,
         instances: instances.map((instance) =>

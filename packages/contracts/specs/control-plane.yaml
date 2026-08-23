@@ -1533,11 +1533,27 @@ components:
             many devices on a single worker.
         engineConfig:
           type: object
+          deprecated: true
           description: |
+            DEPRECATED — use engineArgs for engine parameters and runtimeModule
+            for version selection. Retained for pre-existing rows; still stored
+            and forwarded unchanged. Removal tracked in #15.
             Engine-specific configuration passed through to the runner.
             The control plane does not interpret this — it is stored in
             PostgreSQL and forwarded when starting the runner.
           additionalProperties: true
+        engineArgs:
+          type: array
+          items:
+            type: string
+          description: |
+            Ordered CLI tokens passed verbatim to the engine, appended after the
+            runner shim's `--` separator (e.g.
+            ["--max-model-len=8192", "--enable-prefix-caching"]). Never
+            shell-interpreted — delivered as a spawn argv array. Flags the
+            platform controls (--port, --host, --model, --served-model-name,
+            --tensor-parallel-size, --engine-port) are reserved and rejected at
+            deploy time.
         runtimeModule:
           type: string
           pattern: "^[A-Za-z0-9_.-]+$"
@@ -1783,8 +1799,14 @@ components:
           description: Tensor parallelism degree.
         engineConfig:
           type: object
-          description: Engine-specific configuration.
+          deprecated: true
+          description: Engine-specific configuration (deprecated — see engineArgs).
           additionalProperties: true
+        engineArgs:
+          type: array
+          items:
+            type: string
+          description: Ordered CLI tokens passed verbatim to the engine.
         runtimeModule:
           type: string
           pattern: "^[A-Za-z0-9_.-]+$"

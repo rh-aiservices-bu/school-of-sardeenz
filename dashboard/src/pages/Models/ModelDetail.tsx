@@ -76,6 +76,7 @@ export function ModelDetail() {
   const [showStopModal, setShowStopModal] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [engineConfigExpanded, setEngineConfigExpanded] = useState(false);
+  const [engineArgsExpanded, setEngineArgsExpanded] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [deleteInstanceId, setDeleteInstanceId] = useState<string | null>(null);
   const [curlCopied, setCurlCopied] = useState(false);
@@ -214,6 +215,7 @@ export function ModelDetail() {
   const startingInstance = instances.find((i) => i.state === ModelLifecycleState.STARTING);
 
   const engineConfigJson = model.engineConfig ? JSON.stringify(model.engineConfig, null, 2) : null;
+  const engineArgsText = model.engineArgs?.length ? model.engineArgs.join('\n') : null;
 
   return (
     <PageSection>
@@ -633,6 +635,22 @@ export function ModelDetail() {
         >
           <CodeBlock>
             <CodeBlockCode>{engineConfigJson}</CodeBlockCode>
+          </CodeBlock>
+        </ExpandableSection>
+      )}
+
+      {/* Engine args expandable */}
+      {engineArgsText && (
+        <ExpandableSection
+          toggleText={
+            engineArgsExpanded ? t('detail.engineArgs.hide') : t('detail.engineArgs.show')
+          }
+          isExpanded={engineArgsExpanded}
+          onToggle={(_ev, expanded) => setEngineArgsExpanded(expanded)}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          <CodeBlock>
+            <CodeBlockCode>{engineArgsText}</CodeBlockCode>
           </CodeBlock>
         </ExpandableSection>
       )}

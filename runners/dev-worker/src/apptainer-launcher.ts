@@ -3,6 +3,18 @@ import { realpath as nodeRealpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import type { LaunchHandle, LaunchSpec, LogSink, RunnerLauncher } from './launcher.js';
 
+// Flags the platform owns via dedicated StartRunnerRequest fields / shim args. A user-supplied
+// copy in engineArgs would collide (last-flag-wins could move the engine to the wrong port, or
+// duplicate --tensor-parallel-size the shim already emits). Rejected before spawn (#126).
+const RESERVED_ENGINE_FLAGS = new Set([
+  '--port',
+  '--host',
+  '--model',
+  '--served-model-name',
+  '--tensor-parallel-size',
+  '--engine-port',
+]);
+
 // Production launcher: `apptainer exec`s an engine SIF from the shared module volume.
 //
 // Traceable to the Phase 4 spike:
@@ -256,6 +268,11 @@ export class ApptainerLauncher implements RunnerLauncher {
     // relying on the shim's `--port + 1` default — the RunnerManager allocates management/engine
     // ports in pairs and must know exactly where inference is served to report it to the proxy.
     args.push('--engine-port', String(spec.enginePort));
+    // Forward tensor-parallel to the shim (before `--`). The shim converts >1 to vLLM's
+    // --tensor-parallel-size; without this a tensorParallel:2 deploy silently ran single-GPU (#126).
+    if (spec.tensorParallel > 1) {
+      args.push('--tensor-parallel', String(spec.tensorParallel));
+    }
     // Forward `--served-model-name` to `vllm serve` via the shim's `--` passthrough so vLLM
     // registers the model under the routing name (not its weights path) and client `model` fields
     // resolve — otherwise inference that reaches the engine 404s with "model does not exist". Using
@@ -263,6 +280,42 @@ export class ApptainerLauncher implements RunnerLauncher {
     // whose baked-in shim CLI wouldn't recognise a new flag. Must come last: everything after `--`
     // goes to vLLM.
     args.push('--', '--served-model-name', spec.modelName);
+    // Verbatim user engine args, appended after --served-model-name so vllm serve receives them
+    // (cli.py forwards everything after `--`). Reject reserved flags the platform controls, matching
+    // on the key half so `--port=9999` can't slip past. Thrown here (before spawn) so the deploy
+    // fails with a clear message instead of a runner on a port the control plane can never reach.
+    if (spec.engineArgs?.length) {
+      for (const token of spec.engineArgs) {
+        if (!token.startsWith('--')) continue;
+        const key = token.split('=', 1)[0];
+        if (RESERVED_ENGINE_FLAGS.has(key)) {
+          throw new Error(
+            `Engine arg '${key}' is reserved and controlled by the platform; ` +
+              `remove it from engineArgs`,
+          );
+        }
+        // vLLM's CLI is argparse-derived with allow_abbrev=True: an unambiguous prefix of a
+        // reserved flag still expands to it (e.g. --hos -> --host, --tensor-parallel ->
+        // --tensor-parallel-size), and since engineArgs are appended after the shim's own
+        // --host/--port (last-flag-wins), an abbreviation would silently override them (#126
+        // review). Only reject when the USER key is a proper prefix of a reserved flag — the
+        // reverse (a reserved flag being a prefix of the user's longer, distinct flag, e.g.
+        // --model-impl) is never expanded onto the reserved flag by argparse and must stay
+        // allowed.
+        if (key.length > 2) {
+          const abbreviated = [...RESERVED_ENGINE_FLAGS].find(
+            (reserved) => reserved !== key && reserved.startsWith(key),
+          );
+          if (abbreviated) {
+            throw new Error(
+              `Engine arg '${key}' is an ambiguous abbreviation of reserved flag '${abbreviated}' ` +
+                `(vLLM's argparse expands unambiguous prefixes); remove it from engineArgs`,
+            );
+          }
+        }
+      }
+      args.push(...spec.engineArgs);
+    }
 
     const env: NodeJS.ProcessEnv = { ...process.env };
     for (const key of Object.keys(env)) {

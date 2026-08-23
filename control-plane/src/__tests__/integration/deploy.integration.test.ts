@@ -52,9 +52,15 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
       requiredMemory: MEM,
       deviceType: 'CUDA',
       runtimeModule: 'vllm-0.21',
+      engineArgs: ['--max-model-len=8192', '--enable-prefix-caching'],
     });
     // runtimeModule round-trips through Postgres (migration 002 column).
     expect(created.runtimeModule).toBe('vllm-0.21');
+    // engineArgs round-trips through Postgres as a native text[] (migration 004 column).
+    expect(created.engineArgs).toEqual(['--max-model-len=8192', '--enable-prefix-caching']);
+
+    const refetched = await harness.modelRepository.findByName(MODEL);
+    expect(refetched?.engineArgs).toEqual(['--max-model-len=8192', '--enable-prefix-caching']);
 
     await harness.lifecycle.createInstance(MODEL, INSTANCE_ID, WORKER_ID);
 

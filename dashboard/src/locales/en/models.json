@@ -13,6 +13,8 @@
       "runtimeModulePlaceholder": "Select a runtime module",
       "pinned": "Pinned",
       "engineConfig": "Engine Config (JSON)",
+      "engineArgs": "Engine Arguments",
+      "engineArgsPlaceholder": "--max-model-len=8192\n--gpu-memory-utilization=0.85\n--enable-prefix-caching",
       "deviceTypeAny": "Any"
     },
     "hints": {
@@ -24,6 +26,7 @@
       "runtimeModuleNone": "No runtime modules for this runner are installed. Import one from the Runner Catalog to deploy.",
       "pinned": "Pinned models cannot be evicted by the LRU eviction engine.",
       "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided.",
+      "engineArgs": "One engine CLI flag per line (--flag=value, --flag value, or --flag). Passed verbatim to the engine. Blank lines and # comments are ignored.",
       "runnerTypeFallback": "No worker capabilities are available yet — showing default runner types. The list will update once workers come online."
     },
     "validation": {
@@ -36,7 +39,10 @@
       "runtimeModuleRequired": "Runtime module is required. Import one from the Runner Catalog if the list is empty.",
       "runtimeModulePattern": "Runtime module may only contain letters, digits, and . _ - (e.g. vllm-0.21).",
       "engineConfigObject": "Engine config must be a JSON object.",
-      "engineConfigValidJson": "Engine config must be valid JSON."
+      "engineConfigValidJson": "Engine config must be valid JSON.",
+      "engineArgsFlagPrefix": "Line {{line}} must start with -- : {{content}}",
+      "engineArgsReserved": "{{flag}} is reserved and set by the platform — remove it.",
+      "engineArgsAbbreviatesReserved": "{{flag}} is an ambiguous abbreviation of the reserved flag {{reserved}} — remove it."
     },
     "browse": {
       "button": "Browse",
@@ -152,6 +158,10 @@
     "engineConfig": {
       "show": "Show engine config",
       "hide": "Hide engine config"
+    },
+    "engineArgs": {
+      "show": "Show engine arguments",
+      "hide": "Hide engine arguments"
     },
     "progress": {
       "phasePrefix": "Phase: ",

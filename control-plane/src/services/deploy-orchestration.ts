@@ -25,6 +25,7 @@ export interface DeployModelParams {
   deviceType?: string;
   tensorParallel: number;
   engineConfig?: Record<string, unknown>;
+  engineArgs?: string[];
   runtimeModule?: string;
   devices: { deviceIndex: number; deviceType: string }[];
 }
@@ -69,6 +70,7 @@ export class DeployOrchestrationService {
         deviceType: params.deviceType,
         tensorParallel: params.tensorParallel,
         engineConfig: params.engineConfig,
+        engineArgs: params.engineArgs,
         runtimeModule: params.runtimeModule,
         devices: params.devices as StartRunnerRequest['devices'],
       };

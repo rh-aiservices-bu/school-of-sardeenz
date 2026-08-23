@@ -37,6 +37,7 @@ import {
 import { WeightsBrowserModal } from './WeightsBrowserModal';
 import { DeployLogsModal } from '../../components/DeployLogsModal';
 import type { ModelDeploymentRequest } from '../../api/client';
+import { parseEngineArgs } from '../../utils/engineArgs';
 
 const GIB = 1024 ** 3;
 
@@ -53,7 +54,7 @@ interface FormState {
   tensorParallel: string;
   runtimeModule: string;
   pinned: boolean;
-  engineConfig: string;
+  engineArgs: string;
 }
 
 interface FormErrors {
@@ -63,7 +64,7 @@ interface FormErrors {
   requiredMemoryGib?: string;
   tensorParallel?: string;
   runtimeModule?: string;
-  engineConfig?: string;
+  engineArgs?: string;
 }
 
 function validate(form: FormState, t: TFunction<'models'>): FormErrors {
@@ -99,14 +100,21 @@ function validate(form: FormState, t: TFunction<'models'>): FormErrors {
     errors.runtimeModule = t('deploy.validation.runtimeModulePattern');
   }
 
-  if (form.engineConfig.trim()) {
-    try {
-      const parsed: unknown = JSON.parse(form.engineConfig);
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        errors.engineConfig = t('deploy.validation.engineConfigObject');
-      }
-    } catch {
-      errors.engineConfig = t('deploy.validation.engineConfigValidJson');
+  if (form.engineArgs.trim()) {
+    const result = parseEngineArgs(form.engineArgs);
+    if (!result.ok) {
+      errors.engineArgs =
+        result.kind === 'prefix'
+          ? t('deploy.validation.engineArgsFlagPrefix', {
+              line: result.line,
+              content: result.content,
+            })
+          : result.abbreviates
+            ? t('deploy.validation.engineArgsAbbreviatesReserved', {
+                flag: result.flag,
+                reserved: result.abbreviates,
+              })
+            : t('deploy.validation.engineArgsReserved', { flag: result.flag });
     }
   }
 
@@ -156,7 +164,7 @@ export function ModelDeploy() {
     tensorParallel: '1',
     runtimeModule: '',
     pinned: false,
-    engineConfig: '',
+    engineArgs: '',
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -251,8 +259,12 @@ export function ModelDeploy() {
       body.runtimeModule = form.runtimeModule.trim();
     }
 
-    if (form.engineConfig.trim()) {
-      body.engineConfig = JSON.parse(form.engineConfig) as Record<string, unknown>;
+    if (form.engineArgs.trim()) {
+      const result = parseEngineArgs(form.engineArgs);
+      // validate() already blocked submit on !result.ok; only push a non-empty parsed array.
+      if (result.ok && result.args.length > 0) {
+        body.engineArgs = result.args;
+      }
     }
 
     deployModel.mutate(body, {
@@ -462,22 +474,22 @@ export function ModelDeploy() {
               <FieldHelper hint={t('deploy.hints.pinned')} showError={false} fieldId="pinned" />
             </FormGroup>
 
-            <FormGroup label={t('deploy.fields.engineConfig')} fieldId="engine-config">
+            <FormGroup label={t('deploy.fields.engineArgs')} fieldId="engine-args">
               <TextArea
-                id="engine-config"
-                value={form.engineConfig}
-                onChange={(_ev, val) => set('engineConfig', val)}
-                aria-invalid={submitted && !!errors.engineConfig}
-                aria-describedby="engine-config-helper"
-                placeholder={'{\n  "max_model_len": 4096\n}'}
+                id="engine-args"
+                value={form.engineArgs}
+                onChange={(_ev, val) => set('engineArgs', val)}
+                aria-invalid={submitted && !!errors.engineArgs}
+                aria-describedby="engine-args-helper"
+                placeholder={t('deploy.fields.engineArgsPlaceholder')}
                 rows={5}
                 style={{ fontFamily: 'monospace' }}
               />
               <FieldHelper
-                hint={t('deploy.hints.engineConfig')}
-                error={errors.engineConfig}
+                hint={t('deploy.hints.engineArgs')}
+                error={errors.engineArgs}
                 showError={submitted}
-                fieldId="engine-config"
+                fieldId="engine-args"
               />
             </FormGroup>
 

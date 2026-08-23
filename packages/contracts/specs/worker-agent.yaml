@@ -332,10 +332,18 @@ components:
             the number of entries in `devices`.
         engineConfig:
           type: object
+          deprecated: true
           description: |
-            Engine-specific configuration passed through to the runner process.
-            The worker does not interpret this — it forwards it as-is.
+            DEPRECATED — see engineArgs. Engine-specific configuration passed
+            through to the runner process. The worker forwards it as-is.
           additionalProperties: true
+        engineArgs:
+          type: array
+          items:
+            type: string
+          description: |
+            Ordered CLI tokens the worker appends verbatim to the engine argv
+            after the shim's `--` separator. Never shell-interpreted.
         devices:
           type: array
           items:

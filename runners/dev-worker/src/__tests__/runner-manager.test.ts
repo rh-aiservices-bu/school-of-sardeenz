@@ -619,4 +619,34 @@ describe('RunnerManager', () => {
     });
     expect(b.port).toBe(19301);
   });
+
+  it('threads engineArgs through to the LaunchSpec passed to the launcher (#126)', async () => {
+    let capturedSpec: LaunchSpec | undefined;
+    const capturingLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> => {
+        capturedSpec = spec;
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), capturingLauncher);
+
+    await mgr.startRunner({
+      modelName: 'engine-args-model',
+      instanceId: 'inst-engine-args-model',
+      runnerType: 'vllm',
+      modelPath: '/models/engine-args-model',
+      requiredMemory: 1,
+      tensorParallel: 1,
+      engineArgs: ['--x=1'],
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(capturedSpec?.engineArgs).toEqual(['--x=1']);
+  });
 });
