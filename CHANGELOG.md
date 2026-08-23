@@ -6,25 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-
-- **Engine parameters are now actually delivered to the engine — and entered as `--flag value`
-  lines instead of JSON (#126).** `engineConfig` was stored but never reached the engine; the
-  contract now adds `engineArgs: string[]` (deploy request, model detail, worker-agent
-  StartRunnerRequest — `engineConfig` kept but marked deprecated), persisted in a new
-  `engine_args text[]` column (migration 004) and threaded deploy → record → orchestration →
-  worker → launcher, where the args are appended verbatim to the engine argv after the `--`
-  separator (argv array, never shell-interpreted). Reserved flags (`--port`, `--host`, `--model`,
-  `--served-model-name`, `--tensor-parallel-size`, `--engine-port`) are rejected in both the
-  dashboard form and the launcher — including argparse *abbreviations* of reserved flags
-  (e.g. `--hos=0.0.0.0`), closing a bypass where an abbreviation would expand and override the
-  shim's own binding; the control plane caps payloads (≤128 args, ≤512 chars each). The deploy
-  form replaces the JSON textarea with per-line flags (comments and quoting supported, raw text
-  preserved on validation errors) and the model detail page shows the configured args. Also fixes
-  the folded-in **tensorParallel wiring bug**: `--tensor-parallel` was never emitted to the shim,
-  so multi-GPU deployments silently ran single-GPU; it now precedes the `--` separator and maps to
-  vLLM's `--tensor-parallel-size`. No-args deployments produce a byte-identical engine command
-  line (regression-tested).
+### Added
 
 - **Home placement board with cluster inference URL (#124).** The cluster overview home page is now
   a v1-style Model Placement Management view: per-worker placement board composing the reusable
@@ -108,6 +90,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   path that breaks worker catalog loading when launched from the root.
 
 ### Fixed
+
+- **Engine parameters are now actually delivered to the engine — and entered as `--flag value`
+  lines instead of JSON (#126).** `engineConfig` was stored but never reached the engine; the
+  contract now adds `engineArgs: string[]` (deploy request, model detail, worker-agent
+  StartRunnerRequest — `engineConfig` kept but marked deprecated), persisted in a new
+  `engine_args text[]` column (migration 004) and threaded deploy → record → orchestration →
+  worker → launcher, where the args are appended verbatim to the engine argv after the `--`
+  separator (argv array, never shell-interpreted). Reserved flags (`--port`, `--host`, `--model`,
+  `--served-model-name`, `--tensor-parallel-size`, `--engine-port`) are rejected in both the
+  dashboard form and the launcher — including argparse *abbreviations* of reserved flags
+  (e.g. `--hos=0.0.0.0`), closing a bypass where an abbreviation would expand and override the
+  shim's own binding; the control plane caps payloads (≤128 args, ≤512 chars each). The deploy
+  form replaces the JSON textarea with per-line flags (comments and quoting supported, raw text
+  preserved on validation errors) and the model detail page shows the configured args. Also fixes
+  the folded-in **tensorParallel wiring bug**: `--tensor-parallel` was never emitted to the shim,
+  so multi-GPU deployments silently ran single-GPU; it now precedes the `--` separator and maps to
+  vLLM's `--tensor-parallel-size`. No-args deployments produce a byte-identical engine command
+  line (regression-tested).
 
 - **Dashboard: notification history now loads after login (#106).** `NotificationProvider` moved
   inside the auth gate (`ProtectedRoute`) so its history fetch fires only when authenticated and
