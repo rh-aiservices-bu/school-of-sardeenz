@@ -28,6 +28,7 @@ function toDeps(mockNotifications: MockNotifications): RouteDeps {
   return {
     config: {} as RouteDeps['config'],
     modelRepository: {} as RouteDeps['modelRepository'],
+    instanceRepository: {} as RouteDeps['instanceRepository'],
     lifecycle: {} as RouteDeps['lifecycle'],
     memoryBudget: {} as RouteDeps['memoryBudget'],
     workerPool: {} as RouteDeps['workerPool'],

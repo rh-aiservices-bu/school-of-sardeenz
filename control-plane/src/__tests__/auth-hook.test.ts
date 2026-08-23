@@ -41,7 +41,7 @@ function makeRouteDeps(config: Config): RouteDeps {
     config,
     modelRepository: { findAll: vi.fn(() => Promise.resolve([])) },
     lifecycle: {
-      getAllStates: vi.fn(() => Promise.resolve([])),
+      getAllInstances: vi.fn(() => Promise.resolve([])),
       getLastInferenceTimestamps: vi.fn(() => Promise.resolve(new Map())),
     },
     memoryBudget: {

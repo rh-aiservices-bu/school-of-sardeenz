@@ -32,7 +32,10 @@ paths:
         The worker allocates a port, starts the runner, waits for the runner's
         health endpoint to respond, and returns the runner's endpoint.
 
-        Returns `409` if a runner for the same model name is already running
+        Multiple runners for the same model name may run concurrently on one
+        worker (replicas) as long as each has a distinct `instanceId`.
+
+        Returns `409` if a runner for the same `instanceId` is already running
         on this worker. Returns `503` if the worker has no capacity to start
         another runner.
       tags:
@@ -57,7 +60,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: A runner for this model is already running
+          description: A runner for this instanceId is already running
           content:
             application/json:
               schema:
@@ -173,6 +176,11 @@ paths:
         start command is received, so keying by model name makes a runner's logs
         addressable throughout cold-start.
 
+        With replicas, more than one runner may serve the same model name on
+        this worker — this endpoint returns the **most-recently-started**
+        runner for the model; use `GET /runners/by-instance/{instanceId}/logs`
+        to address a specific replica unambiguously.
+
         Returns `404` until the worker has actually received the start command
         for this model (the control plane retries).
       tags:
@@ -193,6 +201,53 @@ paths:
                 $ref: "#/components/schemas/RunnerLogLine"
         "404":
           description: No runner for this model (not started yet)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal worker error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /runners/by-instance/{instanceId}/logs:
+    get:
+      operationId: streamRunnerLogsByInstance
+      summary: Stream a runner's captured logs, addressed by instance id
+      description: |
+        Same SSE stream as `GET /runners/{runnerId}/logs`, but addressed by
+        the control-plane-assigned `instanceId` instead of the worker-assigned
+        `runnerId`.
+
+        Unambiguous even when multiple runners serve the same model name on
+        this worker (replicas): unlike `GET /runners/by-model/{modelName}/logs`,
+        which resolves to the most-recently-started runner, this always
+        targets the one instance requested. The control plane mints
+        `instanceId` before calling `POST /runners`, so it is addressable
+        throughout cold-start, before the worker returns a `runnerId`.
+
+        Returns `404` until the worker has actually received the start command
+        for this instance (the control plane retries).
+      tags:
+        - Logs
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Instance identifier whose runner logs to stream.
+      responses:
+        "200":
+          description: SSE log stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/RunnerLogLine"
+        "404":
+          description: No runner for this instance (not started yet)
           content:
             application/json:
               schema:
@@ -231,6 +286,13 @@ components:
           description: |
             Runner type identifier (e.g., "vllm", "triton"). Determines which
             engine binary to launch.
+        instanceId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: |
+            Control-plane-assigned instance identity; disambiguates replicas
+            of one model on one worker. Optional/back-compat: when absent the
+            worker generates one.
         runtimeModule:
           type: string
           pattern: "^[A-Za-z0-9_.-]+$"

@@ -165,7 +165,12 @@ In degraded state, the `DegradedBanner` component shows a persistent warning: "R
 
 ### State color mapping
 
-Consistent across all views:
+Consistent across all views. These states are tracked **per instance** (a model may have several
+instances/replicas — see [ADR-019](../adrs/adr-019-logical-model-vs-instance-split.md)); the model
+list and detail pages show the logical model's **aggregate** state, derived from its instances by
+precedence `ACTIVE > STARTING > DRAINING > SLEEPING > PENDING > STOPPING > ERROR` (a model with no
+instances is `STOPPED`). `ACTIVE` outranks `ERROR` deliberately — one healthy replica masks a
+broken one. `ModelDetail` additionally renders each instance's own state in its instances table.
 
 | State      | PF6 Label color | Semantic meaning                                      |
 | ---------- | --------------- | ----------------------------------------------------- |

@@ -33,7 +33,10 @@ export type paths = {
          *     asynchronously. Monitor progress via the events stream or by
          *     polling `GET /api/v1/models/{modelName}`.
          *
-         *     Returns `409` if a model with the same name already exists.
+         *     Creates the logical model and its first instance. Returns `409` if
+         *     a model with the same name already exists — to add another instance
+         *     (replica) of a model that is already deployed, use
+         *     `POST /api/v1/models/{modelName}/instances` instead.
          */
         post: operations["deployModel"];
         delete?: never;
@@ -221,6 +224,124 @@ export type paths = {
          *     is reclaimed).
          */
         post: operations["startModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an additional instance (replica) of an existing model
+         * @description Create an additional instance (replica) of an existing model from its
+         *     stored config. Unlike `POST /api/v1/models`, this never 409s on an
+         *     already-deployed model — it is the way to add a second (or Nth)
+         *     replica of a model that is already running, including a replica on
+         *     the same worker as an existing one.
+         *
+         *     The control plane re-runs the placement pipeline exactly as it does
+         *     for `POST /api/v1/models/{modelName}/start`, but using a **freshly
+         *     minted instance id** rather than replacing any existing instance.
+         *     Both the new and any existing instances remain registered in the
+         *     routing map and receive traffic.
+         *
+         *     Returns `404` if no model record exists (deploy the model first via
+         *     `POST /api/v1/models`).
+         */
+        post: operations["createModelInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/instances/{instanceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Stop and remove a single instance (replica) of a model
+         * @description Stops and removes exactly one instance of a model, leaving any other
+         *     instances untouched and still serving. The routing map entry shrinks
+         *     to the surviving endpoints — inference continues uninterrupted
+         *     through them.
+         *
+         *     This is the "stop old instance" step of a scripted move: deploy a
+         *     new instance elsewhere, shift traffic (e.g. via the endpoint
+         *     weight), then delete this one.
+         *
+         *     The model's configuration record is unaffected — deleting the last
+         *     instance leaves a model with zero instances (equivalent to what
+         *     `POST /api/v1/models/{modelName}/stop` produces), not a deleted
+         *     model. Use `DELETE /api/v1/models/{modelName}` to remove the model
+         *     entirely.
+         *
+         *     Returns `202` immediately — the removal happens asynchronously.
+         */
+        delete: operations["deleteModelInstance"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/instances/{instanceId}/sleep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a single instance (replica) of a model to sleep
+         * @description Admin-initiated sleep, scoped to one instance. Transitions that
+         *     instance through `DRAINING` → `SLEEPING`. Other instances of the
+         *     same model are unaffected.
+         *
+         *     Only instances in `ACTIVE` state can be put to sleep. Returns `409`
+         *     for instances in other states.
+         */
+        post: operations["sleepModelInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/instances/{instanceId}/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wake a single sleeping instance (replica) of a model
+         * @description Admin-initiated wake, scoped to one instance. Transitions that
+         *     instance from `SLEEPING` → `STARTING` → `ACTIVE`. Other instances of
+         *     the same model are unaffected.
+         *
+         *     Only instances in `SLEEPING` state can be woken. Instances already
+         *     in `STARTING` state return `202` idempotently.
+         */
+        post: operations["wakeModelInstance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -636,29 +757,53 @@ export type components = {
         ModelDeploymentResponse: {
             /** @description The deployed model name. */
             modelName: string;
+            /** @description The identifier of the first instance created by this deployment. */
+            instanceId?: string;
             state: components["schemas"]["ModelLifecycleState"];
             /** @description Human-readable status message. */
             message?: string;
         };
-        /** @description Response for model lifecycle actions (stop, start, sleep, wake, delete). */
+        /**
+         * @description Response for model lifecycle actions (stop, start, sleep, wake, delete)
+         *     and their instance-scoped variants.
+         */
         ModelActionResponse: {
             /** @description The affected model name. */
             modelName: string;
+            /**
+             * @description The affected instance identifier. Present for instance-scoped
+             *     operations (`POST .../instances`, `DELETE .../instances/{id}`,
+             *     `POST .../instances/{id}/sleep`, `.../wake`); absent for
+             *     model-level operations that act on every instance.
+             */
+            instanceId?: string;
             state: components["schemas"]["ModelLifecycleState"];
             previousState?: components["schemas"]["ModelLifecycleState"];
             /** @description Human-readable status message. */
             message?: string;
         };
-        /** @description Summary information for a model in the list view. */
+        /**
+         * @description Summary information for a model in the list view. A model may have
+         *     zero or more instances (replicas); `state` is the **aggregate**
+         *     state derived from all of its instances, by precedence: `ACTIVE` >
+         *     `STARTING` > `DRAINING` > `SLEEPING` > `PENDING` > `STOPPING` >
+         *     `ERROR`. A model with zero instances is `STOPPED`. This means a
+         *     model reports `ACTIVE` as soon as at least one instance is healthy,
+         *     even if another instance of the same model is in `ERROR`.
+         */
         ModelInfo: {
             /** @description Model name (routing key). */
             modelName: string;
             state: components["schemas"]["ModelLifecycleState"];
             /** @description Runner type serving this model. */
             runnerType: string;
+            /** @description Number of instances (replicas) currently deployed for this model. */
+            instanceCount: number;
             /**
-             * @description Worker where the model is deployed. Null if not yet placed
-             *     or if the model is stopped.
+             * @description Worker where the model is deployed. Populated only when
+             *     `instanceCount == 1` (unambiguous); use
+             *     `GET /api/v1/models/{modelName}` for the per-instance breakdown
+             *     when there are multiple instances.
              */
             workerId?: string;
             /**
@@ -687,8 +832,61 @@ export type components = {
             createdAt: string;
         };
         /**
+         * @description A single instance (replica) of a model — one runner process on one
+         *     worker, with its own lifecycle state, placement, and endpoint.
+         */
+        InstanceDetail: {
+            /** @description Instance identifier (`inst-<hex>`), minted by the control plane. */
+            instanceId: string;
+            state: components["schemas"]["ModelLifecycleState"];
+            /** @description Worker this instance is placed on. */
+            workerId?: string;
+            /**
+             * @description Zero-based indices of the devices this instance is placed on.
+             *     Populated when the instance has an active placement.
+             */
+            deviceIndices?: number[];
+            /** @description Runner endpoint details (host, port). */
+            runnerEndpoint?: {
+                /** @description Runner hostname or IP. */
+                host?: string;
+                /** @description Runner port. */
+                port?: number;
+            };
+            /**
+             * Format: int64
+             * @description Actual device memory consumption in bytes, from the runner's
+             *     last memory report.
+             */
+            currentMemory?: number;
+            /** @description Loading progress when the instance is in `STARTING` state. */
+            progress?: {
+                /** @description Current loading phase. */
+                phase?: string;
+                /** @description Overall loading completion percentage. */
+                percentComplete?: number;
+                /** @description Human-readable progress message. */
+                message?: string;
+                /** @description Estimated seconds until loading completes. */
+                estimatedRemainingSeconds?: number;
+            };
+            /**
+             * Format: date-time
+             * @description When this instance last changed state.
+             */
+            stateChangedAt?: string;
+            /** @description Error details when this instance is in `ERROR` state. */
+            errorMessage?: string;
+            /**
+             * Format: date-time
+             * @description When this instance was created.
+             */
+            createdAt: string;
+        };
+        /**
          * @description Detailed information about a single model including deployment
-         *     configuration, runtime state, and placement details.
+         *     configuration and every instance (replica) currently deployed for
+         *     it. `state` is the aggregate across `instances` (see `ModelInfo`).
          */
         ModelDetail: {
             /** @description Model name (routing key). */
@@ -703,12 +901,6 @@ export type components = {
              * @description Configured device memory requirement in bytes.
              */
             requiredMemory: number;
-            /**
-             * Format: int64
-             * @description Actual device memory consumption in bytes, from the runner's
-             *     last memory report.
-             */
-            currentMemory?: number;
             /** @description Required device type. */
             deviceType?: string;
             /** @description Tensor parallelism degree. */
@@ -724,43 +916,18 @@ export type components = {
             runtimeModule?: string;
             /** @description Whether the model is pinned (non-evictable). */
             pinned?: boolean;
-            /** @description Assigned worker identifier. */
-            workerId?: string;
             /**
-             * @description Zero-based indices of the devices this model is placed on.
-             *     Populated when the model has an active placement.
+             * @description Every instance (replica) currently deployed for this model. May
+             *     be empty (a stopped model with a stored configuration record).
              */
-            deviceIndices?: number[];
-            /** @description Runner endpoint details (host, port). */
-            runnerEndpoint?: {
-                /** @description Runner hostname or IP. */
-                host?: string;
-                /** @description Runner port. */
-                port?: number;
-            };
-            /** @description Loading progress when the model is in `STARTING` state. */
-            progress?: {
-                /** @description Current loading phase. */
-                phase?: string;
-                /** @description Overall loading completion percentage. */
-                percentComplete?: number;
-                /** @description Human-readable progress message. */
-                message?: string;
-                /** @description Estimated seconds until loading completes. */
-                estimatedRemainingSeconds?: number;
-            };
+            instances: components["schemas"]["InstanceDetail"][];
             /**
              * Format: date-time
-             * @description Timestamp of the last inference request.
+             * @description Timestamp of the last inference request. Tracked per logical
+             *     model, not per instance — a hot model's recency reflects
+             *     inference against any of its replicas.
              */
             lastInferenceAt?: string;
-            /**
-             * Format: date-time
-             * @description When the model last changed state.
-             */
-            stateChangedAt?: string;
-            /** @description Error details when the model is in `ERROR` state. */
-            errorMessage?: string;
             /**
              * Format: date-time
              * @description When the model was deployed.
@@ -1774,6 +1941,242 @@ export interface operations {
              *     control plane cannot accept the request (not leader)
              */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createModelInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance creation accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No model record exists */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description No worker has sufficient capacity even after eviction, or the
+             *     control plane cannot accept the request (not leader)
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteModelInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+                /** @description The instance identifier (`inst-<hex>`) */
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Instance removal accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model or instance not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    sleepModelInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+                /** @description The instance identifier (`inst-<hex>`) */
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sleep request accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model or instance not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Instance is not in a state that can be put to sleep */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    wakeModelInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+                /** @description The instance identifier (`inst-<hex>`) */
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Wake request accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model or instance not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Instance is not in a wakeable state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

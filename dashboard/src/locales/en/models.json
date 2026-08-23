@@ -92,6 +92,13 @@
       "pinned": "Pinned",
       "actions": "Actions"
     },
+    "instances": {
+      "columnHeader": "Instances",
+      "count": "{{count}} instance(s)"
+    },
+    "addInstance": {
+      "menuItem": "Add instance"
+    },
     "sleep": {
       "menuItem": "Sleep",
       "confirmTitle": "Put model to sleep?",
@@ -127,16 +134,12 @@
       "state": "State",
       "runnerType": "Runner Type",
       "modelPath": "Model Path",
-      "worker": "Worker",
-      "runnerEndpoint": "Runner Endpoint",
       "requiredMemory": "Required Memory",
-      "currentMemory": "Current Memory",
       "deviceType": "Device Type",
       "tensorParallel": "Tensor Parallelism",
       "runtimeModule": "Runtime Module",
       "pinned": "Pinned",
       "lastInference": "Last Inference",
-      "stateChanged": "State Changed",
       "created": "Created"
     },
     "pinned": {
@@ -173,14 +176,37 @@
       "confirmTitle": "Delete model?",
       "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. This action cannot be undone."
     },
+    "addInstance": {
+      "button": "Add instance"
+    },
+    "instances": {
+      "title": "Instances",
+      "empty": "No instances — use Add instance or Start to deploy one.",
+      "columns": {
+        "instanceId": "Instance ID",
+        "state": "State",
+        "worker": "Worker",
+        "endpoint": "Endpoint",
+        "created": "Created",
+        "actions": "Actions"
+      }
+    },
+    "instance": {
+      "sleep": {
+        "button": "Sleep"
+      },
+      "wake": {
+        "button": "Wake"
+      },
+      "delete": {
+        "button": "Delete",
+        "confirmTitle": "Delete instance?",
+        "confirmBody": "This will permanently stop and remove instance {{instanceId}}. Other instances of this model, if any, are unaffected. This action cannot be undone."
+      }
+    },
     "breadcrumb": {
       "cluster": "Cluster",
       "models": "Models"
-    },
-    "timeline": {
-      "title": "State History",
-      "deployed": "Deployed",
-      "stateChanged": "State changed to"
     },
     "viewLogs": {
       "button": "View starting logs"

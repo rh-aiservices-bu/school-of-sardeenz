@@ -1,5 +1,6 @@
 import type { Config } from '../config.js';
 import type { ModelRepository } from '../services/model-repository.js';
+import type { InstanceRepository } from '../services/instance-repository.js';
 import type { ModelLifecycleService } from '../services/model-lifecycle.js';
 import type { MemoryBudgetService } from '../services/memory-budget.js';
 import type { WorkerPoolService } from '../services/worker-pool.js';
@@ -19,6 +20,7 @@ import type { WorkerClient } from '../clients/worker.js';
 export interface RouteDeps {
   config: Config;
   modelRepository: ModelRepository;
+  instanceRepository: InstanceRepository;
   lifecycle: ModelLifecycleService;
   memoryBudget: MemoryBudgetService;
   workerPool: WorkerPoolService;

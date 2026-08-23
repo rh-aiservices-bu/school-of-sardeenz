@@ -114,6 +114,7 @@ export function useDeployModel() {
           modelName: body.modelName,
           state: ModelLifecycleState.PENDING,
           runnerType: body.runnerType,
+          instanceCount: 1,
           requiredMemory: body.requiredMemory,
           pinned: body.pinned ?? false,
           createdAt: new Date().toISOString(),
@@ -191,4 +192,53 @@ export function useDeleteModel() {
         ),
     ),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Instance-scoped mutations (#120)
+// ---------------------------------------------------------------------------
+//
+// Unlike the model-level mutations above, these don't optimistically patch the cached list/detail
+// shape — the nested `instances[]` array on ModelDetail makes an inline optimistic update fiddly
+// for comparatively rare admin actions, so they simply invalidate on settle.
+
+function invalidateModelQueries(queryClient: QueryClient, modelName: string): void {
+  void queryClient.invalidateQueries({ queryKey: ['models'] });
+  void queryClient.invalidateQueries({ queryKey: ['models', modelName] });
+  void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+}
+
+export function useAddInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (modelName: string) => api.models.createInstance(modelName),
+    onSettled: (_data, _err, modelName) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+export function useDeleteInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
+      api.models.deleteInstance(modelName, instanceId),
+    onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+export function useSleepInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
+      api.models.sleepInstance(modelName, instanceId),
+    onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+export function useWakeInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
+      api.models.wakeInstance(modelName, instanceId),
+    onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
 }

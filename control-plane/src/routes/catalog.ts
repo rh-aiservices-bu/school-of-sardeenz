@@ -69,7 +69,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
 // runner endpoint but not the module, so we cross-reference the model repository for runnerType +
 // engineConfig.version (see isModuleInUse for the conservative matching rule).
 async function isEntryInUse(deps: RouteDeps, runnerType: string): Promise<boolean> {
-  const states = await deps.lifecycle.getAllStates();
+  const states = await deps.lifecycle.getAllInstances();
   const activeNames = new Set(
     states.filter((s) => s.state !== ModelLifecycleState.STOPPED).map((s) => s.modelName),
   );

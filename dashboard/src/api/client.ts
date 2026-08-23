@@ -140,6 +140,23 @@ export const api = {
       request<unknown>(`/models/${encodeURIComponent(name)}/stop`, { method: 'POST' }),
     start: (name: string) =>
       request<unknown>(`/models/${encodeURIComponent(name)}/start`, { method: 'POST' }),
+    createInstance: (name: string) =>
+      request<unknown>(`/models/${encodeURIComponent(name)}/instances`, { method: 'POST' }),
+    deleteInstance: (name: string, instanceId: string) =>
+      request<unknown>(
+        `/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}`,
+        { method: 'DELETE' },
+      ),
+    sleepInstance: (name: string, instanceId: string) =>
+      request<unknown>(
+        `/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/sleep`,
+        { method: 'POST' },
+      ),
+    wakeInstance: (name: string, instanceId: string) =>
+      request<unknown>(
+        `/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/wake`,
+        { method: 'POST' },
+      ),
   },
   workers: {
     list: (signal?: AbortSignal) => request<{ workers: WorkerInfo[] }>('/workers', { signal }),

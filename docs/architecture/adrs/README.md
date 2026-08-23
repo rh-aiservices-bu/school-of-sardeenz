@@ -18,3 +18,4 @@
 - [ADR-016](adr-016-sif-worker-security-posture.md) — Worker Security Posture for SIF Execution
 - [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain *(amended by ADR-018)*
 - [ADR-018](adr-018-runner-catalog-oras-distribution.md) — Runner Catalog and ORAS Distribution *(amends ADR-017)*
+- [ADR-019](adr-019-logical-model-vs-instance-split.md) — Logical Model vs. Instance Split *(refines ADR-014)*

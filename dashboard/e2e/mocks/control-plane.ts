@@ -19,10 +19,21 @@ export interface MockModelInfo {
   runnerType: string;
   requiredMemory: number;
   currentMemory?: number;
+  /** Unambiguous only when the model has exactly one instance — mirrors the real contract. */
   workerId?: string;
+  instanceCount?: number;
   pinned?: boolean;
   createdAt?: string;
   lastInferenceAt?: string;
+}
+
+/** One instance (replica) of a mock model — #120's ModelDetail.instances[] shape. */
+export interface MockInstanceInfo {
+  instanceId: string;
+  state: string;
+  workerId?: string;
+  runnerEndpoint?: { host: string; port: number };
+  createdAt?: string;
 }
 
 export interface MockDeviceInfo {
@@ -93,6 +104,9 @@ export interface MockSseEvent {
 
 interface MockState {
   models: MockModelInfo[];
+  /** modelName -> instances (#120). Auto-populated for models set via setModels() that don't
+   * already have an entry, so existing single-instance test fixtures keep working unmodified. */
+  modelInstances: Record<string, MockInstanceInfo[]>;
   workers: MockWorkerInfo[];
   workerDetails: Record<string, MockWorkerDetail>;
   clusterStatus: MockClusterStatus;
@@ -120,6 +134,7 @@ export class MockControlPlane {
   private static defaultState(): MockState {
     return {
       models: [],
+      modelInstances: {},
       workers: [],
       workerDetails: {},
       clusterStatus: {
@@ -166,7 +181,8 @@ export class MockControlPlane {
     app.get<{ Params: { name: string } }>('/api/v1/models/:name', async (req, reply) => {
       const model = this.state.models.find((m) => m.modelName === req.params.name);
       if (!model) return reply.code(404).send({ error: 'not found' });
-      return reply.send(model);
+      const instances = this.instancesFor(model.modelName);
+      return reply.send({ ...model, instances });
     });
 
     app.post('/api/v1/models', async (req, reply) => {
@@ -179,9 +195,11 @@ export class MockControlPlane {
         runnerType: body.runnerType ?? 'vllm',
         requiredMemory: body.requiredMemory ?? 0,
         currentMemory: 0,
+        instanceCount: 1,
         createdAt: new Date().toISOString(),
       };
       this.state.models.push(newModel);
+      this.state.modelInstances[newModel.modelName] = [this.newInstance(newModel)];
       return reply.code(201).send(newModel);
     });
 
@@ -189,6 +207,7 @@ export class MockControlPlane {
       const idx = this.state.models.findIndex((m) => m.modelName === req.params.name);
       if (idx === -1) return reply.code(404).send({ error: 'not found' });
       this.state.models.splice(idx, 1);
+      delete this.state.modelInstances[req.params.name];
       return reply.code(204).send();
     });
 
@@ -196,6 +215,7 @@ export class MockControlPlane {
       const model = this.state.models.find((m) => m.modelName === req.params.name);
       if (!model) return reply.code(404).send({ error: 'not found' });
       model.state = 'SLEEPING';
+      for (const inst of this.instancesFor(model.modelName)) inst.state = 'SLEEPING';
       return reply.send(model);
     });
 
@@ -203,6 +223,7 @@ export class MockControlPlane {
       const model = this.state.models.find((m) => m.modelName === req.params.name);
       if (!model) return reply.code(404).send({ error: 'not found' });
       model.state = 'STARTING';
+      for (const inst of this.instancesFor(model.modelName)) inst.state = 'STARTING';
       return reply.send(model);
     });
 
@@ -210,6 +231,8 @@ export class MockControlPlane {
       const model = this.state.models.find((m) => m.modelName === req.params.name);
       if (!model) return reply.code(404).send({ error: 'not found' });
       model.state = 'STOPPED';
+      this.state.modelInstances[model.modelName] = [];
+      model.instanceCount = 0;
       return reply.send(model);
     });
 
@@ -217,8 +240,77 @@ export class MockControlPlane {
       const model = this.state.models.find((m) => m.modelName === req.params.name);
       if (!model) return reply.code(404).send({ error: 'not found' });
       model.state = 'STARTING';
+      this.state.modelInstances[model.modelName] = [this.newInstance(model)];
+      model.instanceCount = 1;
       return reply.send(model);
     });
+
+    // Instances (#120)
+    app.post<{ Params: { name: string } }>('/api/v1/models/:name/instances', async (req, reply) => {
+      const model = this.state.models.find((m) => m.modelName === req.params.name);
+      if (!model) return reply.code(404).send({ error: 'not found' });
+      const instances = this.instancesFor(model.modelName);
+      const instance = this.newInstance(model);
+      instances.push(instance);
+      model.instanceCount = instances.length;
+      model.workerId = instances.length === 1 ? instance.workerId : undefined;
+      return reply.code(202).send({ modelName: model.modelName, instanceId: instance.instanceId, state: instance.state });
+    });
+
+    app.delete<{ Params: { name: string; instanceId: string } }>(
+      '/api/v1/models/:name/instances/:instanceId',
+      async (req, reply) => {
+        const model = this.state.models.find((m) => m.modelName === req.params.name);
+        if (!model) return reply.code(404).send({ error: 'not found' });
+        const instances = this.instancesFor(model.modelName);
+        const idx = instances.findIndex((i) => i.instanceId === req.params.instanceId);
+        if (idx === -1) return reply.code(404).send({ error: 'not found' });
+        instances.splice(idx, 1);
+        model.instanceCount = instances.length;
+        model.workerId = instances.length === 1 ? instances[0].workerId : undefined;
+        return reply.code(202).send({
+          modelName: model.modelName,
+          instanceId: req.params.instanceId,
+          state: 'STOPPING',
+        });
+      },
+    );
+
+    app.post<{ Params: { name: string; instanceId: string } }>(
+      '/api/v1/models/:name/instances/:instanceId/sleep',
+      async (req, reply) => {
+        const model = this.state.models.find((m) => m.modelName === req.params.name);
+        if (!model) return reply.code(404).send({ error: 'not found' });
+        const instance = this.instancesFor(model.modelName).find(
+          (i) => i.instanceId === req.params.instanceId,
+        );
+        if (!instance) return reply.code(404).send({ error: 'not found' });
+        instance.state = 'SLEEPING';
+        return reply.code(202).send({
+          modelName: model.modelName,
+          instanceId: instance.instanceId,
+          state: instance.state,
+        });
+      },
+    );
+
+    app.post<{ Params: { name: string; instanceId: string } }>(
+      '/api/v1/models/:name/instances/:instanceId/wake',
+      async (req, reply) => {
+        const model = this.state.models.find((m) => m.modelName === req.params.name);
+        if (!model) return reply.code(404).send({ error: 'not found' });
+        const instance = this.instancesFor(model.modelName).find(
+          (i) => i.instanceId === req.params.instanceId,
+        );
+        if (!instance) return reply.code(404).send({ error: 'not found' });
+        instance.state = 'STARTING';
+        return reply.code(202).send({
+          modelName: model.modelName,
+          instanceId: instance.instanceId,
+          state: instance.state,
+        });
+      },
+    );
 
     // Workers
     app.get('/api/v1/workers', async (_req, reply) => {
@@ -304,13 +396,53 @@ export class MockControlPlane {
   // Test helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Return (creating if absent) the instance list for a model. Models set via setModels() that
+   * don't already have an entry in modelInstances get one instance auto-derived from the model's
+   * own state/workerId, so existing single-instance test fixtures need no changes for #120.
+   */
+  private instancesFor(modelName: string): MockInstanceInfo[] {
+    if (!this.state.modelInstances[modelName]) {
+      const model = this.state.models.find((m) => m.modelName === modelName);
+      this.state.modelInstances[modelName] = model && model.state !== 'STOPPED'
+        ? [this.newInstance(model)]
+        : [];
+    }
+    return this.state.modelInstances[modelName];
+  }
+
+  private instanceCounter = 0;
+
+  private newInstance(model: MockModelInfo): MockInstanceInfo {
+    this.instanceCounter += 1;
+    return {
+      instanceId: `inst-mock${this.instanceCounter.toString().padStart(4, '0')}`,
+      state: model.state,
+      workerId: model.workerId,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
   /** Replace the full model list. */
   setModels(models: MockModelInfo[]): void {
     this.state.models = models.map((m) => ({
       ...m,
+      instanceCount: m.instanceCount ?? (m.state === 'STOPPED' ? 0 : 1),
       createdAt: m.createdAt ?? new Date().toISOString(),
     }));
+    // Reset auto-derived instances; instancesFor() lazily rebuilds them from the new model state.
+    this.state.modelInstances = {};
     this.syncClusterStatus();
+  }
+
+  /** Explicitly set the instances for a model (for tests exercising multi-instance scenarios). */
+  setInstances(modelName: string, instances: MockInstanceInfo[]): void {
+    this.state.modelInstances[modelName] = instances;
+    const model = this.state.models.find((m) => m.modelName === modelName);
+    if (model) {
+      model.instanceCount = instances.length;
+      model.workerId = instances.length === 1 ? instances[0].workerId : undefined;
+    }
   }
 
   /** Replace the full worker list. Also updates cluster status. */

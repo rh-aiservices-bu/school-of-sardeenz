@@ -4,9 +4,12 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ModelLifecycleState } from '@sardeenz/types';
 import { registerModelRoutes } from '../models.js';
 import type { RouteDeps } from '../deps.js';
-import type { ModelState } from '../../services/model-lifecycle.js';
+import type { InstanceState } from '../../services/model-lifecycle.js';
 
-const ACTIVE_STATE: ModelState = {
+const INSTANCE_ID = 'inst-000000000001';
+
+const ACTIVE_STATE: InstanceState = {
+  instanceId: INSTANCE_ID,
   modelName: 'm1',
   state: ModelLifecycleState.ACTIVE,
   workerId: 'worker-1',
@@ -21,10 +24,15 @@ const ACTIVE_STATE: ModelState = {
 
 interface Overrides {
   stopModel?: ReturnType<typeof vi.fn>;
-  removeModel?: ReturnType<typeof vi.fn>;
+  sleepModel?: ReturnType<typeof vi.fn>;
+  wakeModel?: ReturnType<typeof vi.fn>;
+  removeInstance?: ReturnType<typeof vi.fn>;
   deleteModel?: ReturnType<typeof vi.fn>;
+  deleteInstance?: ReturnType<typeof vi.fn>;
   findByName?: ReturnType<typeof vi.fn>;
-  getState?: ReturnType<typeof vi.fn>;
+  getInstance?: ReturnType<typeof vi.fn>;
+  getInstancesForModel?: ReturnType<typeof vi.fn>;
+  transition?: ReturnType<typeof vi.fn>;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -35,18 +43,38 @@ function buildApp(over: Overrides = {}): {
   const logInfo = vi.fn();
   const logError = vi.fn();
 
+  const getInstance = over.getInstance ?? vi.fn(() => Promise.resolve(ACTIVE_STATE));
+  const getInstancesForModel =
+    over.getInstancesForModel ??
+    vi.fn(async () => {
+      const state = (await getInstance()) as InstanceState | null;
+      return state ? [state] : [];
+    });
+
   const deps = {
     leaderElection: { isLeader: true },
     lifecycle: {
-      getState: over.getState ?? vi.fn(() => Promise.resolve(ACTIVE_STATE)),
-      removeModel: over.removeModel ?? vi.fn(() => Promise.resolve()),
+      getInstance,
+      getInstancesForModel,
+      getAllInstances: vi.fn(() => Promise.resolve([])),
+      removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
+      transition: over.transition ?? vi.fn(() => Promise.resolve()),
     },
     sleepWake: {
       stopModel: over.stopModel ?? vi.fn(() => Promise.resolve()),
+      sleepModel: over.sleepModel ?? vi.fn(() => Promise.resolve()),
+      wakeModel: over.wakeModel ?? vi.fn(() => Promise.resolve()),
+    },
+    routingMap: {
+      setModelState: vi.fn(() => Promise.resolve()),
+      removeModel: vi.fn(() => Promise.resolve()),
     },
     modelRepository: {
       delete: over.deleteModel ?? vi.fn(() => Promise.resolve()),
       findByName: over.findByName ?? vi.fn(() => Promise.resolve({ name: 'm1' })),
+    },
+    instanceRepository: {
+      delete: over.deleteInstance ?? vi.fn(() => Promise.resolve(true)),
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
@@ -68,11 +96,11 @@ interface DeployOverrides {
   place?: ReturnType<typeof vi.fn>;
   eligibleWorkerIds?: ReturnType<typeof vi.fn>;
   selectVictims?: ReturnType<typeof vi.fn>;
-  createModel?: ReturnType<typeof vi.fn>;
+  createInstance?: ReturnType<typeof vi.fn>;
   transition?: ReturnType<typeof vi.fn>;
-  getAllStates?: ReturnType<typeof vi.fn>;
-  getState?: ReturnType<typeof vi.fn>;
-  removeModel?: ReturnType<typeof vi.fn>;
+  getAllInstances?: ReturnType<typeof vi.fn>;
+  getInstancesForModel?: ReturnType<typeof vi.fn>;
+  removeInstance?: ReturnType<typeof vi.fn>;
   stopModel?: ReturnType<typeof vi.fn>;
   refreshAll?: ReturnType<typeof vi.fn>;
   deployModel?: ReturnType<typeof vi.fn>;
@@ -80,6 +108,7 @@ interface DeployOverrides {
   findByName?: ReturnType<typeof vi.fn>;
   createModelRecord?: ReturnType<typeof vi.fn>;
   setModelState?: ReturnType<typeof vi.fn>;
+  createInstanceRecord?: ReturnType<typeof vi.fn>;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -118,18 +147,25 @@ function buildDeployApp(over: DeployOverrides = {}): {
       findByName: over.findByName ?? vi.fn(() => Promise.resolve(null)),
       delete: vi.fn(() => Promise.resolve()),
     },
+    instanceRepository: {
+      create: over.createInstanceRecord ?? vi.fn(() => Promise.resolve({})),
+      delete: vi.fn(() => Promise.resolve(true)),
+      findByModel: vi.fn(() => Promise.resolve([])),
+    },
     lifecycle: {
-      createModel: over.createModel ?? vi.fn(() => Promise.resolve()),
-      getAllStates: over.getAllStates ?? vi.fn(() => Promise.resolve([])),
+      createInstance: over.createInstance ?? vi.fn(() => Promise.resolve()),
+      getAllInstances: over.getAllInstances ?? vi.fn(() => Promise.resolve([])),
+      getInstancesForModel: over.getInstancesForModel ?? vi.fn(() => Promise.resolve([])),
       getLastInferenceTimestamps: vi.fn(() => Promise.resolve(new Map())),
-      getState: over.getState ?? vi.fn(() => Promise.resolve(null)),
+      getInstance: vi.fn(() => Promise.resolve(null)),
       transition: over.transition ?? vi.fn(() => Promise.resolve()),
-      removeModel: over.removeModel ?? vi.fn(() => Promise.resolve()),
+      removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
     },
     workerPool: { getAllWorkers: vi.fn(() => []) },
     memoryBudget: {
       getAllBudgets: vi.fn(() => []),
       reserveCapacity: vi.fn(),
+      releaseInstanceReservations: vi.fn(),
       refreshAll: over.refreshAll ?? vi.fn(() => Promise.resolve()),
     },
     placement: {
@@ -149,6 +185,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     routingMap: {
       setModelState: over.setModelState ?? vi.fn(() => Promise.resolve()),
+      removeModel: vi.fn(() => Promise.resolve()),
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
@@ -175,6 +212,7 @@ const DEPLOY_BODY = {
 describe('POST /api/v1/models deploy-path eviction', () => {
   it('returns 202 with capacity reclamation message when eviction is needed', async () => {
     const victim = {
+      instanceId: 'inst-old',
       modelName: 'old-model',
       state: ModelLifecycleState.ACTIVE,
       workerId: 'w1',
@@ -189,10 +227,11 @@ describe('POST /api/v1/models deploy-path eviction', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
 
     expect(res.statusCode).toBe(202);
-    expect(res.json<{ state: string; message: string }>()).toMatchObject({
+    expect(res.json<{ state: string; message: string; instanceId: string }>()).toMatchObject({
       modelName: 'm1',
       state: ModelLifecycleState.PENDING,
       message: 'Capacity reclamation in progress',
+      instanceId: expect.stringMatching(/^inst-/) as string,
     });
 
     const placement = deps.placement as { eligibleWorkerIds: ReturnType<typeof vi.fn> };
@@ -201,6 +240,7 @@ describe('POST /api/v1/models deploy-path eviction', () => {
 
   it('transitions to ERROR and notifies when background reclamation fails', async () => {
     const victim = {
+      instanceId: 'inst-old',
       modelName: 'old-model',
       state: ModelLifecycleState.ACTIVE,
       workerId: 'w1',
@@ -222,15 +262,23 @@ describe('POST /api/v1/models deploy-path eviction', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     const lifecycle = deps.lifecycle as { transition: ReturnType<typeof vi.fn> };
-    const routingMap = deps.routingMap as { setModelState: ReturnType<typeof vi.fn> };
+    const routingMap = deps.routingMap as {
+      setModelState: ReturnType<typeof vi.fn>;
+      removeModel: ReturnType<typeof vi.fn>;
+    };
     const notifications = deps.notifications as { createNotification: ReturnType<typeof vi.fn> };
 
     expect(lifecycle.transition).toHaveBeenCalledWith(
       'm1',
+      expect.stringMatching(/^inst-/) as string,
       ModelLifecycleState.ERROR,
       expect.objectContaining({ errorMessage: expect.any(String) as string }),
     );
-    expect(routingMap.setModelState).toHaveBeenCalledWith('m1', 'ERROR');
+    // refreshModelRoutingState resolves the aggregate from getInstancesForModel — which defaults
+    // to [] in buildDeployApp, so the failed-and-error'd instance has no live sibling and the
+    // model is removed from the routing map entirely rather than set to ERROR.
+    expect(routingMap.removeModel).toHaveBeenCalledWith('m1');
+    void routingMap.setModelState;
     expect(notifications.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({ variant: 'danger' }),
     );
@@ -310,6 +358,64 @@ describe('POST /api/v1/models modelPath containment', () => {
   });
 });
 
+describe('deployFromRecord synchronous-failure reservation release (security L1)', () => {
+  it('releases the instance reservation when a post-reserve step throws synchronously', async () => {
+    const { app, deps } = buildDeployApp({
+      place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      transition: vi.fn(() => Promise.reject(new Error('transition failed'))),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    // Synchronous placement failure surfaces as a 500 to the caller (the DB row is rolled back).
+    expect(res.statusCode).toBe(500);
+
+    const memoryBudget = deps.memoryBudget as { releaseInstanceReservations: ReturnType<typeof vi.fn> };
+    expect(memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
+      expect.stringMatching(/^inst-/) as string,
+    );
+  });
+});
+
+describe('POST /api/v1/models/:modelName/instances', () => {
+  it('creates an additional instance without 409ing when the model already has one', async () => {
+    const deployModel = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          tensorParallel: 1,
+          pinned: false,
+        }),
+      ),
+      place: vi.fn(() => ({ workerId: 'w2', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      deployModel,
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/instances' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ modelName: string; instanceId: string }>()).toMatchObject({
+      modelName: 'm1',
+      instanceId: expect.stringMatching(/^inst-/) as string,
+    });
+  });
+
+  it('returns 404 when no model record exists', async () => {
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() => Promise.resolve(null)),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/instances' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ code: string }>().code).toBe('MODEL_NOT_FOUND');
+  });
+});
+
 describe('DELETE /api/v1/models/:modelName background deletion', () => {
   let app: FastifyInstance;
   let logInfo: ReturnType<typeof vi.fn>;
@@ -345,9 +451,11 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
     );
   });
 
-  it('background delete survives lifecycle.removeModel rejection', async () => {
-    const { app: a, logError: err } = buildApp({
-      removeModel: vi.fn(() => Promise.reject(new Error('lifecycle failure'))),
+  it('background delete isolates a failing instance teardown and still removes the record', async () => {
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app: a, logError: err, logInfo: info } = buildApp({
+      removeInstance: vi.fn(() => Promise.reject(new Error('lifecycle failure'))),
+      deleteModel,
     });
 
     const res = await a.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
@@ -355,18 +463,62 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
+    // Per-instance failure is logged by teardownInstance itself...
     expect(err).toHaveBeenCalledWith(
-      { err: expect.any(Error) as Error, modelName: 'm1' },
-      'Background model deletion failed',
+      { err: expect.any(Error) as Error, modelName: 'm1', instanceId: INSTANCE_ID },
+      'Delete: instance teardown failed',
     );
+    // ...and summarized once for the whole fan-out...
+    expect(err).toHaveBeenCalledWith(
+      { modelName: 'm1', failures: 1, total: 1 },
+      'Some instances failed teardown during model delete',
+    );
+    // ...but the model row and routing map are still cleaned up (M1: Delete must not abort on a
+    // single instance's teardown failure).
+    expect(deleteModel).toHaveBeenCalledWith('m1');
+    expect(info).toHaveBeenCalledWith({ modelName: 'm1' }, 'Model removed');
+  });
+
+  it('isolates teardown across 3 instances — a middle failure does not strand the others or abort the delete', async () => {
+    const instances = ['inst-a', 'inst-b', 'inst-c'].map((instanceId) => ({
+      ...ACTIVE_STATE,
+      instanceId,
+    }));
+    const removeInstance = vi.fn((_modelName: string, instanceId: string) => {
+      if (instanceId === 'inst-b') return Promise.reject(new Error('inst-b teardown failed'));
+      return Promise.resolve();
+    });
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app: a, logError: err, logInfo: info } = buildApp({
+      getInstancesForModel: vi.fn(() => Promise.resolve(instances)),
+      removeInstance,
+      deleteModel,
+    });
+
+    const res = await a.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-a');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-b');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-c');
+    expect(err).toHaveBeenCalledWith(
+      { modelName: 'm1', failures: 1, total: 3 },
+      'Some instances failed teardown during model delete',
+    );
+    expect(deleteModel).toHaveBeenCalledWith('m1');
+    expect(info).toHaveBeenCalledWith({ modelName: 'm1' }, 'Model removed');
   });
 });
 
 describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
-  it('returns 202 and removes DB row for evicted model (no Redis state)', async () => {
+  it('returns 202 and removes DB row for evicted model (no instances)', async () => {
     const deleteModel = vi.fn(() => Promise.resolve());
     const { app } = buildApp({
-      getState: vi.fn(() => Promise.resolve(null)),
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
       findByName: vi.fn(() => Promise.resolve({ name: 'm1' })),
       deleteModel,
     });
@@ -382,9 +534,10 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     expect(deleteModel).toHaveBeenCalledWith('m1');
   });
 
-  it('returns 404 when model has neither Redis state nor DB record', async () => {
+  it('returns 404 when model has neither instances nor DB record', async () => {
     const { app } = buildApp({
-      getState: vi.fn(() => Promise.resolve(null)),
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
       findByName: vi.fn(() => Promise.resolve(null)),
     });
 
@@ -394,11 +547,11 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     expect(res.json<{ code: string }>().code).toBe('MODEL_NOT_FOUND');
   });
 
-  it('allows delete when model is in STOPPED state', async () => {
+  it('allows delete when the (only) instance is in STOPPED state', async () => {
+    const stopped = { ...ACTIVE_STATE, state: ModelLifecycleState.STOPPED };
     const { app } = buildApp({
-      getState: vi.fn(() =>
-        Promise.resolve({ ...ACTIVE_STATE, state: ModelLifecycleState.STOPPED }),
-      ),
+      getInstance: vi.fn(() => Promise.resolve(stopped)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([stopped])),
     });
 
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
@@ -406,11 +559,11 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     expect(res.statusCode).toBe(202);
   });
 
-  it('returns 409 when model is in STOPPING state', async () => {
+  it('returns 409 when an instance is in STOPPING state', async () => {
+    const stopping = { ...ACTIVE_STATE, state: ModelLifecycleState.STOPPING };
     const { app } = buildApp({
-      getState: vi.fn(() =>
-        Promise.resolve({ ...ACTIVE_STATE, state: ModelLifecycleState.STOPPING }),
-      ),
+      getInstance: vi.fn(() => Promise.resolve(stopping)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([stopping])),
     });
 
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
@@ -423,9 +576,9 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
 describe('POST /api/v1/models/:modelName/stop', () => {
   it('stop on an ACTIVE model returns 202 and keeps the record', async () => {
     const deleteModel = vi.fn(() => Promise.resolve());
-    const removeModel = vi.fn(() => Promise.resolve());
+    const removeInstance = vi.fn(() => Promise.resolve());
     const stopModel = vi.fn(() => Promise.resolve());
-    const { app } = buildApp({ deleteModel, removeModel, stopModel });
+    const { app } = buildApp({ deleteModel, removeInstance, stopModel });
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
 
@@ -438,13 +591,16 @@ describe('POST /api/v1/models/:modelName/stop', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(stopModel).toHaveBeenCalledWith('m1', expect.anything());
-    expect(removeModel).toHaveBeenCalledWith('m1');
+    expect(stopModel).toHaveBeenCalledWith('m1', INSTANCE_ID, expect.anything());
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
     expect(deleteModel).not.toHaveBeenCalled();
   });
 
-  it('returns 404 when the model has no runtime state', async () => {
-    const { app } = buildApp({ getState: vi.fn(() => Promise.resolve(null)) });
+  it('returns 404 when the model has no instances', async () => {
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
 
@@ -457,9 +613,11 @@ describe('POST /api/v1/models/:modelName/stop', () => {
     ModelLifecycleState.STARTING,
     ModelLifecycleState.DRAINING,
     ModelLifecycleState.STOPPING,
-  ])('returns 409 when the model is %s (transient state)', async (state) => {
+  ])('returns 409 when the (only) instance is %s (transient state)', async (state) => {
+    const transient = { ...ACTIVE_STATE, state };
     const { app } = buildApp({
-      getState: vi.fn(() => Promise.resolve({ ...ACTIVE_STATE, state })),
+      getInstance: vi.fn(() => Promise.resolve(transient)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([transient])),
     });
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
@@ -483,7 +641,7 @@ describe('POST /api/v1/models/:modelName/stop', () => {
     expect(rejected.json<{ code: string }>().code).toBe('INVALID_STATE');
   });
 
-  it('survives a background stopModel rejection', async () => {
+  it('isolates a failing instance teardown and still clears the in-flight claim', async () => {
     const { app, logError } = buildApp({
       stopModel: vi.fn(() => Promise.reject(new Error('runner gone'))),
     });
@@ -494,8 +652,54 @@ describe('POST /api/v1/models/:modelName/stop', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(logError).toHaveBeenCalledWith(
-      { err: expect.any(Error) as Error, modelName: 'm1' },
-      'Background model stop failed',
+      { err: expect.any(Error) as Error, modelName: 'm1', instanceId: INSTANCE_ID },
+      'Stop: instance teardown failed',
+    );
+    expect(logError).toHaveBeenCalledWith(
+      { modelName: 'm1', failures: 1, total: 1 },
+      'Some instances failed teardown during model stop',
+    );
+
+    // The in-flight claim was released despite the failure — a retry is possible.
+    const retry = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+    expect(retry.statusCode).toBe(202);
+  });
+
+  it('isolates teardown across 3 instances — a middle failure does not strand the others', async () => {
+    const instances = ['inst-a', 'inst-b', 'inst-c'].map((instanceId) => ({
+      ...ACTIVE_STATE,
+      instanceId,
+    }));
+    const stopModel = vi.fn((_modelName: string, instanceId: string) => {
+      if (instanceId === 'inst-b') return Promise.reject(new Error('inst-b runner gone'));
+      return Promise.resolve();
+    });
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app, logInfo, logError } = buildApp({
+      getInstancesForModel: vi.fn(() => Promise.resolve(instances)),
+      stopModel,
+      removeInstance,
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopModel).toHaveBeenCalledWith('m1', 'inst-a', expect.anything());
+    expect(stopModel).toHaveBeenCalledWith('m1', 'inst-b', expect.anything());
+    expect(stopModel).toHaveBeenCalledWith('m1', 'inst-c', expect.anything());
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-a');
+    expect(removeInstance).not.toHaveBeenCalledWith('m1', 'inst-b');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-c');
+    expect(logError).toHaveBeenCalledWith(
+      { modelName: 'm1', failures: 1, total: 3 },
+      'Some instances failed teardown during model stop',
+    );
+    expect(logInfo).not.toHaveBeenCalledWith(
+      { modelName: 'm1', count: 3 },
+      'Model instances stopped',
     );
   });
 });
@@ -516,7 +720,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
   it('deploys from the stored record', async () => {
     const deployModel = vi.fn(() => Promise.resolve());
     const { app } = buildDeployApp({
-      getState: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
       findByName: vi.fn(() => Promise.resolve(STOPPED_RECORD)),
       place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
       deployModel,
@@ -525,11 +729,14 @@ describe('POST /api/v1/models/:modelName/start', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
 
     expect(res.statusCode).toBe(202);
-    expect(res.json<{ state: string; previousState: string }>()).toMatchObject({
-      modelName: 'm1',
-      state: ModelLifecycleState.STARTING,
-      previousState: ModelLifecycleState.STOPPED,
-    });
+    expect(res.json<{ state: string; previousState: string; instanceId: string }>()).toMatchObject(
+      {
+        modelName: 'm1',
+        state: ModelLifecycleState.STARTING,
+        previousState: ModelLifecycleState.STOPPED,
+        instanceId: expect.stringMatching(/^inst-/) as string,
+      },
+    );
 
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -537,6 +744,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
     expect(deployModel).toHaveBeenCalledWith(
       expect.objectContaining({
         modelName: 'm1',
+        instanceId: expect.stringMatching(/^inst-/) as string,
         modelPath: '/weights/m1',
         requiredMemory: 8e9,
         runtimeModule: 'vllm-0.21',
@@ -544,10 +752,10 @@ describe('POST /api/v1/models/:modelName/start', () => {
     );
   });
 
-  it('returns 409 when the model already has runtime state', async () => {
+  it('returns 409 when the model already has an instance', async () => {
     const deployModel = vi.fn(() => Promise.resolve());
     const { app } = buildDeployApp({
-      getState: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ACTIVE_STATE])),
       findByName: vi.fn(() => Promise.resolve(STOPPED_RECORD)),
       deployModel,
     });
@@ -561,7 +769,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
 
   it('returns 404 when no record exists', async () => {
     const { app } = buildDeployApp({
-      getState: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
       findByName: vi.fn(() => Promise.resolve(null)),
     });
 
@@ -573,7 +781,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
 
   it('rejects Start when the stored modelPath escapes the weights directory', async () => {
     const { app } = buildDeployApp({
-      getState: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
       findByName: vi.fn(() =>
         Promise.resolve({ ...STOPPED_RECORD, modelPath: '/etc/passwd' }),
       ),
@@ -587,6 +795,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
 
   it('reclaims capacity via eviction when no worker has room', async () => {
     const victim = {
+      instanceId: 'inst-old',
       modelName: 'old-model',
       state: ModelLifecycleState.ACTIVE,
       workerId: 'w1',
@@ -595,7 +804,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
       pinned: false,
     };
     const { app } = buildDeployApp({
-      getState: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
       findByName: vi.fn(() => Promise.resolve(STOPPED_RECORD)),
       place: vi.fn(() => null),
       selectVictims: vi.fn(() => [victim]),
@@ -608,5 +817,145 @@ describe('POST /api/v1/models/:modelName/start', () => {
       modelName: 'm1',
       state: ModelLifecycleState.PENDING,
     });
+  });
+});
+
+describe('modelName glob rejection (security M1: SCAN-glob boundary validation)', () => {
+  it('DELETE /api/v1/models/* is rejected with 400 and nothing is deleted', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({ removeInstance, deleteModel });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/*' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(removeInstance).not.toHaveBeenCalled();
+    expect(deleteModel).not.toHaveBeenCalled();
+  });
+
+  it.each<['GET' | 'POST' | 'DELETE', string]>([
+    ['GET', '/api/v1/models/*'],
+    ['POST', '/api/v1/models/*/sleep'],
+    ['POST', '/api/v1/models/*/wake'],
+    ['POST', '/api/v1/models/*/stop'],
+    ['POST', '/api/v1/models/*/start'],
+    ['POST', '/api/v1/models/*/instances'],
+    ['DELETE', '/api/v1/models/*/instances/inst-x'],
+    ['POST', '/api/v1/models/*/instances/inst-x/sleep'],
+    ['POST', '/api/v1/models/*/instances/inst-x/wake'],
+  ])('%s %s is rejected with 400 before touching Redis/DB', async (method, url) => {
+    const { app } = buildApp();
+
+    const res = await app.inject({ method, url });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+});
+
+describe('instance-scoped op dedup (quality L4 / security L2)', () => {
+  it('rejects a concurrent second DELETE on the same instance', async () => {
+    const { app } = buildApp();
+
+    const [first, second] = await Promise.all([
+      app.inject({ method: 'DELETE', url: `/api/v1/models/m1/instances/${INSTANCE_ID}` }),
+      app.inject({ method: 'DELETE', url: `/api/v1/models/m1/instances/${INSTANCE_ID}` }),
+    ]);
+
+    const statusCodes = [first.statusCode, second.statusCode].sort((a, b) => a - b);
+    expect(statusCodes).toEqual([202, 409]);
+  });
+
+  it('releases the claim after background teardown so a retry succeeds', async () => {
+    const { app } = buildApp();
+
+    const first = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+    expect(first.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const retry = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+    expect(retry.statusCode).toBe(202);
+  });
+
+  it('rejects a concurrent second sleep on the same instance', async () => {
+    const { app } = buildApp();
+
+    const [first, second] = await Promise.all([
+      app.inject({ method: 'POST', url: `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep` }),
+      app.inject({ method: 'POST', url: `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep` }),
+    ]);
+
+    const statusCodes = [first.statusCode, second.statusCode].sort((a, b) => a - b);
+    expect(statusCodes).toEqual([202, 409]);
+  });
+
+  it('rejects a concurrent second wake on the same instance', async () => {
+    const sleepingState = { ...ACTIVE_STATE, state: ModelLifecycleState.SLEEPING };
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(sleepingState)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([sleepingState])),
+    });
+
+    const [first, second] = await Promise.all([
+      app.inject({ method: 'POST', url: `/api/v1/models/m1/instances/${INSTANCE_ID}/wake` }),
+      app.inject({ method: 'POST', url: `/api/v1/models/m1/instances/${INSTANCE_ID}/wake` }),
+    ]);
+
+    const statusCodes = [first.statusCode, second.statusCode].sort((a, b) => a - b);
+    expect(statusCodes).toEqual([202, 409]);
+  });
+
+  it('releases the sleep claim when transition throws after the claim so a retry succeeds', async () => {
+    const transition = vi.fn<() => Promise<void>>(() =>
+      Promise.reject(new Error('INVALID_TRANSITION')),
+    );
+    const { app } = buildApp({ transition });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep`,
+    });
+    expect(res.statusCode).toBe(500);
+
+    transition.mockImplementationOnce(() => Promise.resolve());
+    const retry = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep`,
+    });
+    expect(retry.statusCode).toBe(202);
+  });
+
+  it('releases the wake claim when transition throws after the claim so a retry succeeds', async () => {
+    const sleepingState = { ...ACTIVE_STATE, state: ModelLifecycleState.SLEEPING };
+    const transition = vi.fn<() => Promise<void>>(() =>
+      Promise.reject(new Error('INVALID_TRANSITION')),
+    );
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(sleepingState)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([sleepingState])),
+      transition,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/wake`,
+    });
+    expect(res.statusCode).toBe(500);
+
+    transition.mockImplementationOnce(() => Promise.resolve());
+    const retry = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/wake`,
+    });
+    expect(retry.statusCode).toBe(202);
   });
 });

@@ -95,6 +95,7 @@ describe('RunnerManager', () => {
   it('starts a runner and returns runnerId, host, port, enginePort', async () => {
     const result = await manager.startRunner({
       modelName: 'test-model',
+      instanceId: 'inst-test-model',
       runnerType: 'vllm',
       modelPath: '/models/test',
       requiredMemory: 1024 * 1024 * 1024,
@@ -112,6 +113,7 @@ describe('RunnerManager', () => {
   it('allocates ports in (management, engine) pairs so engine ports never collide', async () => {
     const r1 = await manager.startRunner({
       modelName: 'model-a',
+      instanceId: 'inst-model-a',
       runnerType: 'vllm',
       modelPath: '/models/a',
       requiredMemory: 1024 * 1024 * 1024,
@@ -120,6 +122,7 @@ describe('RunnerManager', () => {
     });
     const r2 = await manager.startRunner({
       modelName: 'model-b',
+      instanceId: 'inst-model-b',
       runnerType: 'vllm',
       modelPath: '/models/b',
       requiredMemory: 1024 * 1024 * 1024,
@@ -133,9 +136,10 @@ describe('RunnerManager', () => {
     expect(r2.port).toBe(19303);
   });
 
-  it('rejects duplicate model names with ConflictError', async () => {
+  it('rejects duplicate instanceId with ConflictError (#120: conflict key is instanceId, not model name)', async () => {
     await manager.startRunner({
       modelName: 'dupe-model',
+      instanceId: 'inst-dupe-model',
       runnerType: 'vllm',
       modelPath: '/models/dupe',
       requiredMemory: 1024 * 1024 * 1024,
@@ -146,6 +150,7 @@ describe('RunnerManager', () => {
     await expect(
       manager.startRunner({
         modelName: 'dupe-model',
+        instanceId: 'inst-dupe-model',
         runnerType: 'vllm',
         modelPath: '/models/dupe',
         requiredMemory: 1024 * 1024 * 1024,
@@ -155,9 +160,39 @@ describe('RunnerManager', () => {
     ).rejects.toThrow(ConflictError);
   });
 
+  it('allows two replicas of the same model name on this worker with distinct instanceIds (#120)', async () => {
+    const r1 = await manager.startRunner({
+      modelName: 'replica-model',
+      instanceId: 'inst-replica-a',
+      runnerType: 'vllm',
+      modelPath: '/models/replica',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    const r2 = await manager.startRunner({
+      modelName: 'replica-model',
+      instanceId: 'inst-replica-b',
+      runnerType: 'vllm',
+      modelPath: '/models/replica',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+    });
+
+    expect(r1.runnerId).not.toBe(r2.runnerId);
+    expect(manager.getAllRunners()).toHaveLength(2);
+    // getRunnerIdForModel resolves to the most-recently-started runner — documented ambiguity.
+    expect(manager.getRunnerIdForModel('replica-model')).toBe(r2.runnerId);
+    // getRunnerIdForInstance is unambiguous per replica.
+    expect(manager.getRunnerIdForInstance('inst-replica-a')).toBe(r1.runnerId);
+    expect(manager.getRunnerIdForInstance('inst-replica-b')).toBe(r2.runnerId);
+  });
+
   it('stops a runner by ID', async () => {
     const result = await manager.startRunner({
       modelName: 'stop-me',
+      instanceId: 'inst-stop-me',
       runnerType: 'vllm',
       modelPath: '/models/stop',
       requiredMemory: 1024 * 1024 * 1024,
@@ -176,6 +211,7 @@ describe('RunnerManager', () => {
   it('tracks all runners via getAllRunners', async () => {
     await manager.startRunner({
       modelName: 'model-x',
+      instanceId: 'inst-model-x',
       runnerType: 'vllm',
       modelPath: '/models/x',
       requiredMemory: 1024 * 1024 * 1024,
@@ -184,6 +220,7 @@ describe('RunnerManager', () => {
     });
     await manager.startRunner({
       modelName: 'model-y',
+      instanceId: 'inst-model-y',
       runnerType: 'vllm',
       modelPath: '/models/y',
       requiredMemory: 1024 * 1024 * 1024,
@@ -197,6 +234,7 @@ describe('RunnerManager', () => {
   it('stopAll stops all runners', async () => {
     await manager.startRunner({
       modelName: 'model-1',
+      instanceId: 'inst-model-1',
       runnerType: 'vllm',
       modelPath: '/models/1',
       requiredMemory: 1024 * 1024 * 1024,
@@ -205,6 +243,7 @@ describe('RunnerManager', () => {
     });
     await manager.startRunner({
       modelName: 'model-2',
+      instanceId: 'inst-model-2',
       runnerType: 'vllm',
       modelPath: '/models/2',
       requiredMemory: 1024 * 1024 * 1024,
@@ -226,6 +265,7 @@ describe('RunnerManager', () => {
     await expect(
       mgr.startRunner({
         modelName: 'retry-me',
+        instanceId: 'inst-retry-me',
         runnerType: 'vllm',
         modelPath: '/models/retry',
         requiredMemory: 1,
@@ -238,6 +278,7 @@ describe('RunnerManager', () => {
     await expect(
       mgr.startRunner({
         modelName: 'retry-me',
+        instanceId: 'inst-retry-me',
         runnerType: 'vllm',
         modelPath: '/models/retry',
         requiredMemory: 1,
@@ -271,6 +312,7 @@ describe('RunnerManager', () => {
       ['a', 'b', 'c'].map((name) =>
         mgr.startRunner({
           modelName: `model-${name}`,
+          instanceId: `inst-model-${name}`,
           runnerType: 'vllm',
           modelPath: `/models/${name}`,
           requiredMemory: 1,
@@ -297,6 +339,7 @@ describe('RunnerManager', () => {
     await expect(
       mgr.startRunner({
         modelName: 'fails-to-launch',
+        instanceId: 'inst-fails-to-launch',
         runnerType: 'vllm',
         modelPath: '/models/fail',
         requiredMemory: 1,
@@ -325,6 +368,7 @@ describe('RunnerManager', () => {
       await expect(
         mgr.startRunner({
           modelName: 'fails-then-expires',
+          instanceId: 'inst-fails-then-expires',
           runnerType: 'vllm',
           modelPath: '/models/fail-expires',
           requiredMemory: 1,
@@ -347,6 +391,7 @@ describe('RunnerManager', () => {
   it('allows starting a model after it was stopped', async () => {
     const r1 = await manager.startRunner({
       modelName: 'recycled',
+      instanceId: 'inst-recycled',
       runnerType: 'vllm',
       modelPath: '/models/recycled',
       requiredMemory: 1024 * 1024 * 1024,
@@ -357,6 +402,7 @@ describe('RunnerManager', () => {
 
     const r2 = await manager.startRunner({
       modelName: 'recycled',
+      instanceId: 'inst-recycled',
       runnerType: 'vllm',
       modelPath: '/models/recycled',
       requiredMemory: 1024 * 1024 * 1024,
@@ -377,6 +423,7 @@ describe('RunnerManager', () => {
 
     const { runnerId } = await mgr.startRunner({
       modelName: 'crashes-later',
+      instanceId: 'inst-crashes-later',
       runnerType: 'vllm',
       modelPath: '/models/crashes-later',
       requiredMemory: 1024 * 1024 * 1024,
@@ -395,6 +442,7 @@ describe('RunnerManager', () => {
     // The model slot is freed too — a replacement runner can be started for the same model.
     const restarted = await mgr.startRunner({
       modelName: 'crashes-later',
+      instanceId: 'inst-crashes-later',
       runnerType: 'vllm',
       modelPath: '/models/crashes-later',
       requiredMemory: 1024 * 1024 * 1024,
@@ -412,6 +460,7 @@ describe('RunnerManager', () => {
 
     const { runnerId } = await mgr.startRunner({
       modelName: 'stopped-deliberately',
+      instanceId: 'inst-stopped-deliberately',
       runnerType: 'vllm',
       modelPath: '/models/stopped-deliberately',
       requiredMemory: 1024 * 1024 * 1024,
@@ -431,6 +480,7 @@ describe('RunnerManager', () => {
   it('reuses released port after stop', async () => {
     const a = await manager.startRunner({
       modelName: 'port-reuse-a',
+      instanceId: 'inst-port-reuse-a',
       runnerType: 'vllm',
       modelPath: '/models/port-reuse-a',
       requiredMemory: 1024 * 1024 * 1024,
@@ -443,6 +493,7 @@ describe('RunnerManager', () => {
 
     const b = await manager.startRunner({
       modelName: 'port-reuse-b',
+      instanceId: 'inst-port-reuse-b',
       runnerType: 'vllm',
       modelPath: '/models/port-reuse-b',
       requiredMemory: 1024 * 1024 * 1024,
@@ -458,6 +509,7 @@ describe('RunnerManager', () => {
 
     const a = await mgr.startRunner({
       modelName: 'port-reuse-exit-a',
+      instanceId: 'inst-port-reuse-exit-a',
       runnerType: 'vllm',
       modelPath: '/models/port-reuse-exit-a',
       requiredMemory: 1024 * 1024 * 1024,
@@ -470,6 +522,7 @@ describe('RunnerManager', () => {
 
     const b = await mgr.startRunner({
       modelName: 'port-reuse-exit-b',
+      instanceId: 'inst-port-reuse-exit-b',
       runnerType: 'vllm',
       modelPath: '/models/port-reuse-exit-b',
       requiredMemory: 1024 * 1024 * 1024,
@@ -484,6 +537,7 @@ describe('RunnerManager', () => {
 
     await mgr.startRunner({
       modelName: 'exhaust-a',
+      instanceId: 'inst-exhaust-a',
       runnerType: 'vllm',
       modelPath: '/models/exhaust-a',
       requiredMemory: 1024 * 1024 * 1024,
@@ -494,6 +548,7 @@ describe('RunnerManager', () => {
     await expect(
       mgr.startRunner({
         modelName: 'exhaust-b',
+        instanceId: 'inst-exhaust-b',
         runnerType: 'vllm',
         modelPath: '/models/exhaust-b',
         requiredMemory: 1024 * 1024 * 1024,
@@ -511,6 +566,7 @@ describe('RunnerManager', () => {
 
     const a = await mgr.startRunner({
       modelName: 'skip-worker-port',
+      instanceId: 'inst-skip-worker-port',
       runnerType: 'vllm',
       modelPath: '/models/skip-worker-port',
       requiredMemory: 1024 * 1024 * 1024,
@@ -543,6 +599,7 @@ describe('RunnerManager', () => {
     await expect(
       mgr.startRunner({
         modelName: 'released-on-failure-a',
+        instanceId: 'inst-released-on-failure-a',
         runnerType: 'vllm',
         modelPath: '/models/released-on-failure-a',
         requiredMemory: 1,
@@ -553,6 +610,7 @@ describe('RunnerManager', () => {
 
     const b = await mgr.startRunner({
       modelName: 'released-on-failure-b',
+      instanceId: 'inst-released-on-failure-b',
       runnerType: 'vllm',
       modelPath: '/models/released-on-failure-b',
       requiredMemory: 1,

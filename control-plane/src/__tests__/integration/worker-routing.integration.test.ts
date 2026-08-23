@@ -88,6 +88,7 @@ describe.skipIf(!AVAILABLE)('Worker routing integration', () => {
     });
 
     const MODEL = 'routing-model';
+    const INSTANCE_ID = 'inst-routing-model';
     await harness.modelRepository.create({
       name: MODEL,
       runnerType: 'vllm',
@@ -96,12 +97,13 @@ describe.skipIf(!AVAILABLE)('Worker routing integration', () => {
       deviceType: 'CUDA',
     });
 
-    await harness.lifecycle.createModel(MODEL, WORKER_ID);
-    await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING);
+    await harness.lifecycle.createInstance(MODEL, INSTANCE_ID, WORKER_ID);
+    await harness.lifecycle.transition(MODEL, INSTANCE_ID, ModelLifecycleState.STARTING);
 
     runner.setHealthState(RunnerState.READY);
     await harness.deployOrchestration.deployModel({
       modelName: MODEL,
+      instanceId: INSTANCE_ID,
       workerId: WORKER_ID,
       runnerType: 'vllm',
       modelPath: `/models/${MODEL}`,
@@ -120,14 +122,14 @@ describe.skipIf(!AVAILABLE)('Worker routing integration', () => {
     // Sleep: routing entry endpoints should be cleared
     const runnerClient = new RunnerClient({ host: runner.host, port: runner.port });
     runner.setActiveRequests(0);
-    await harness.sleepWake.sleepModel(MODEL, runnerClient);
+    await harness.sleepWake.sleepModel(MODEL, INSTANCE_ID, runnerClient);
 
     const sleepEntry = await harness.routingMap.getEntry(MODEL);
     expect(sleepEntry?.endpoints.length ?? 0).toBe(0);
 
     // Wake: routing entry endpoints should be restored
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
-    await harness.sleepWake.wakeModel(MODEL, runnerClient);
+    await harness.sleepWake.wakeModel(MODEL, INSTANCE_ID, runnerClient);
 
     const wakeEntry = await harness.routingMap.getEntry(MODEL);
     expect(wakeEntry).not.toBeNull();

@@ -44,6 +44,7 @@ import {
   useDeleteModel,
   useStopModel,
   useStartModel,
+  useAddInstance,
 } from '../../hooks/useModels';
 import type { ModelInfo } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
@@ -64,11 +65,14 @@ const STATE_SORT_ORDER: Record<ModelLifecycleState, number> = {
   [ModelLifecycleState.ERROR]: 7,
 };
 
+// Column order: [select?], modelName, state, runnerType, worker, instances, memory,
+// lastInference, pinned, [actions?]. The "instances" column (#120) sits between worker and
+// memory, shifting currentMemory/lastInferenceAt by one from their pre-#120 indices.
 const SORT_COLUMN_INDEX: Record<SortField, number> = {
   modelName: 1,
   state: 2,
-  currentMemory: 5,
-  lastInferenceAt: 6,
+  currentMemory: 6,
+  lastInferenceAt: 7,
 };
 
 const ALL_STATES: ModelLifecycleState[] = [
@@ -114,6 +118,7 @@ export function ModelList() {
   const deleteModel = useDeleteModel();
   const stopModel = useStopModel();
   const startModel = useStartModel();
+  const addInstance = useAddInstance();
 
   // Sorting
   const [sortField, setSortField] = useState<SortField>('modelName');
@@ -297,6 +302,13 @@ export function ModelList() {
     stopModel.mutate(stopConfirmModel.modelName, {
       onError: (err) => setMutationError(err instanceof Error ? err.message : 'Stop failed'),
       onSettled: () => setStopConfirmModel(null),
+    });
+  };
+
+  const handleAddInstance = (model: ModelInfo) => {
+    setMutationError(null);
+    addInstance.mutate(model.modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Add instance failed'),
     });
   };
 
@@ -607,6 +619,7 @@ export function ModelList() {
                 <Th sort={getSortParams('state')}>{t('list.table.state')}</Th>
                 <Th>{t('list.table.runnerType')}</Th>
                 <Th>{t('list.table.worker')}</Th>
+                <Th>{t('list.instances.columnHeader')}</Th>
                 <Th sort={getSortParams('currentMemory')}>{t('list.table.memory')}</Th>
                 <Th sort={getSortParams('lastInferenceAt')}>{t('list.table.lastInference')}</Th>
                 <Th>{t('list.table.pinned')}</Th>
@@ -648,6 +661,11 @@ export function ModelList() {
                       ) : (
                         '—'
                       )}
+                    </Td>
+                    <Td dataLabel={t('list.instances.columnHeader')}>
+                      <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
+                        {t('list.instances.count', { count: model.instanceCount })}
+                      </Link>
                     </Td>
                     <Td dataLabel={t('list.table.memory')} style={{ minWidth: '160px' }}>
                       {required > 0 ? (
@@ -704,6 +722,17 @@ export function ModelList() {
                           popperProps={{ position: 'right' }}
                         >
                           <DropdownList>
+                            {model.state !== ModelLifecycleState.STOPPED && (
+                              <DropdownItem
+                                key="add-instance"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  handleAddInstance(model);
+                                }}
+                              >
+                                {t('list.addInstance.menuItem')}
+                              </DropdownItem>
+                            )}
                             {model.state === ModelLifecycleState.ACTIVE && (
                               <DropdownItem
                                 key="sleep"

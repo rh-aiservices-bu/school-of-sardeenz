@@ -106,12 +106,33 @@ export function registerLogRoutes(app: FastifyInstance, runnerManager: RunnerMan
 
       // Resolve via the model→runner map, which is set the instant startRunner() begins — so this
       // works during cold-start, before the runner is healthy and before the control plane knows
-      // the runnerId. 404 (pre-hijack) until the worker has actually received the start command.
+      // the runnerId. With replicas (#120), more than one runner may serve this model name on
+      // this worker — getRunnerIdForModel resolves to the most-recently-started one; use
+      // /runners/by-instance/:instanceId/logs to address a specific replica unambiguously.
+      // 404 (pre-hijack) until the worker has actually received the start command.
       const runnerId = runnerManager.getRunnerIdForModel(modelName);
       if (!runnerId) {
         return reply
           .status(404)
           .send({ error: `No runner for model ${modelName}`, code: 'NOT_FOUND' });
+      }
+
+      stream(req, reply, runnerId);
+    },
+  );
+
+  app.get<{ Params: { instanceId: string } }>(
+    '/runners/by-instance/:instanceId/logs',
+    async (req, reply) => {
+      const { instanceId } = req.params;
+
+      // Resolve via the instance→runner map, set the instant startRunner() begins — unambiguous
+      // even with several replicas of the same model on this worker, unlike by-model above.
+      const runnerId = runnerManager.getRunnerIdForInstance(instanceId);
+      if (!runnerId) {
+        return reply
+          .status(404)
+          .send({ error: `No runner for instance ${instanceId}`, code: 'NOT_FOUND' });
       }
 
       stream(req, reply, runnerId);

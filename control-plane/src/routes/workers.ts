@@ -7,12 +7,18 @@ import { ControlPlaneError } from '../errors.js';
 export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get('/api/v1/workers', async (_request, reply) => {
     const allWorkers = deps.workerPool.getAllWorkers();
-    const allStates = await deps.lifecycle.getAllStates();
+    const allInstances = await deps.lifecycle.getAllInstances();
 
-    const modelCountByWorker = new Map<string, number>();
-    for (const state of allStates) {
-      if (state.workerId && state.state !== ModelLifecycleState.STOPPED) {
-        modelCountByWorker.set(state.workerId, (modelCountByWorker.get(state.workerId) ?? 0) + 1);
+    // Per-worker instance count (not per-model — a 2-replica model on one worker counts 2). The
+    // wire field is still `modelCount` (control-plane.yaml WorkerDetail) — unchanged, it reads as
+    // "runners on this worker", which is what it now measures.
+    const instanceCountByWorker = new Map<string, number>();
+    for (const instance of allInstances) {
+      if (instance.workerId && instance.state !== ModelLifecycleState.STOPPED) {
+        instanceCountByWorker.set(
+          instance.workerId,
+          (instanceCountByWorker.get(instance.workerId) ?? 0) + 1,
+        );
       }
     }
 
@@ -29,7 +35,7 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
           memoryAvailableBytes: 'availableBytes' in d ? d.availableBytes : 0,
           memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
         })),
-        modelCount: modelCountByWorker.get(w.workerId) ?? 0,
+        modelCount: instanceCountByWorker.get(w.workerId) ?? 0,
         lastHeartbeatAt: w.lastHeartbeatAt ?? undefined,
       };
     });
@@ -45,8 +51,8 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
       throw ControlPlaneError.workerNotFound(workerId);
     }
 
-    const allStates = await deps.lifecycle.getAllStates();
-    const workerModels = allStates
+    const allInstances = await deps.lifecycle.getAllInstances();
+    const workerModels = allInstances
       .filter((s) => s.workerId === workerId && s.state !== ModelLifecycleState.STOPPED)
       .map((s) => ({
         modelName: s.modelName,

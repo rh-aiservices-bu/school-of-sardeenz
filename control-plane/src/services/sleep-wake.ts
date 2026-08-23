@@ -8,7 +8,7 @@ import {
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
 import { delaySafe } from '../utils.js';
-import type { ModelLifecycleService } from './model-lifecycle.js';
+import { deriveAggregateState, type ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 
@@ -31,6 +31,31 @@ export function toRoutingState(state: ModelLifecycleState): ModelState | null {
   }
 }
 
+/**
+ * Recompute a model's routing-map state from the aggregate of all of its current instances,
+ * and write it. Replaces per-instance-operation calls to `routingMap.setModelState(modelName,
+ * <fixed state>)` — with N instances, the routing-map model-level state must reflect the
+ * aggregate (e.g. one instance sleeping while another stays ACTIVE must not flip the model's
+ * routing state to SLEEPING). When no instances remain, removes the model from the routing map
+ * entirely rather than leaving a stale STOPPED-ish entry (`toRoutingState` has no STOPPED
+ * mapping). Endpoints themselves are still added/removed per instance by the callers of this
+ * function — this only recomputes the model-level `state` field of the routing entry.
+ */
+export async function refreshModelRoutingState(
+  lifecycle: ModelLifecycleService,
+  routingMap: RoutingMapService,
+  modelName: string,
+): Promise<void> {
+  const instances = await lifecycle.getInstancesForModel(modelName);
+  const aggregate = deriveAggregateState(instances);
+  const routingState = toRoutingState(aggregate);
+  if (routingState) {
+    await routingMap.setModelState(modelName, routingState);
+  } else {
+    await routingMap.removeModel(modelName);
+  }
+}
+
 /** Result returned by pollRunnerHealth. */
 export interface RunnerHealthResult {
   state: RunnerState;
@@ -49,178 +74,198 @@ export class SleepWakeService {
   ) {}
 
   /**
-   * Transition an ACTIVE model to SLEEPING:
+   * Transition an ACTIVE instance to SLEEPING:
    *   ACTIVE → DRAINING → (drain) → send /sleep → SLEEPING
    *
-   * Updates the routing map at each stage. Records duration in sleepDuration histogram.
+   * Updates the routing map (per-instance endpoint removal, then a model-level aggregate
+   * refresh) at each stage. Records duration in sleepDuration histogram.
    */
-  async sleepModel(modelName: string, runnerClient: RunnerClient): Promise<void> {
+  async sleepModel(modelName: string, instanceId: string, runnerClient: RunnerClient): Promise<void> {
     const startedAt = Date.now();
 
-    // Fetch current model state for endpoint details.
-    const modelState = await this.lifecycle.getState(modelName);
-    if (!modelState) {
-      throw ControlPlaneError.modelNotFound(modelName);
+    // Fetch current instance state for endpoint details.
+    const instanceState = await this.lifecycle.getInstance(modelName, instanceId);
+    if (!instanceState) {
+      throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
     }
 
     try {
       // ACTIVE → DRAINING is claimed atomically by the route handler.
       // If called directly (not from route), claim it here.
-      if (modelState.state === ModelLifecycleState.ACTIVE) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.DRAINING);
+      if (instanceState.state === ModelLifecycleState.ACTIVE) {
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
       }
-      await this.routingMap.setModelState(modelName, ModelState.DRAINING);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
 
       // Wait for in-flight requests to drain.
-      await this.waitForDrain(modelName, runnerClient);
+      await this.waitForDrain(modelName, instanceId, runnerClient);
 
       // Send sleep command. The runner's /sleep call is synchronous — it blocks until
       // offload is complete, so we apply the sleep timeout to this call directly.
       await runnerClient.sleep(SleepLevel.L1_HOST_RAM, this.sleepTimeoutMs);
 
-      // Clear the endpoint so the proxy stops routing to this model. Match on the same
+      // Clear the endpoint so the proxy stops routing to this instance. Match on the same
       // (host, engine port) pair the endpoint was registered under.
-      if (modelState.runnerHost && modelState.runnerPort) {
+      if (instanceState.runnerHost && instanceState.runnerPort) {
         await this.routingMap.removeEndpoint(
           modelName,
-          modelState.runnerHost,
-          modelState.runnerEnginePort ?? modelState.runnerPort,
+          instanceState.runnerHost,
+          instanceState.runnerEnginePort ?? instanceState.runnerPort,
         );
       }
 
       // DRAINING → SLEEPING
-      await this.lifecycle.transition(modelName, ModelLifecycleState.SLEEPING);
-      await this.routingMap.setModelState(modelName, ModelState.SLEEPING);
+      await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.SLEEPING);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
 
       sleepDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
-      await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
+      await this.transitionToError(
+        modelName,
+        instanceId,
+        err instanceof Error ? err.message : String(err),
+      );
       throw err;
     }
   }
 
   /**
-   * Transition a SLEEPING model back to ACTIVE:
+   * Transition a SLEEPING instance back to ACTIVE:
    *   SLEEPING → STARTING → send /wake → (poll until READY) → ACTIVE
    *
-   * Updates the routing map at each stage. Records duration in wakeDuration histogram.
+   * Updates the routing map (per-instance endpoint re-add, then a model-level aggregate
+   * refresh) at each stage. Records duration in wakeDuration histogram.
    */
-  async wakeModel(modelName: string, runnerClient: RunnerClient): Promise<void> {
+  async wakeModel(modelName: string, instanceId: string, runnerClient: RunnerClient): Promise<void> {
     const startedAt = Date.now();
 
     wakeTriggersTotal.inc();
 
-    const modelState = await this.lifecycle.getState(modelName);
-    if (!modelState) {
-      throw ControlPlaneError.modelNotFound(modelName);
+    const instanceState = await this.lifecycle.getInstance(modelName, instanceId);
+    if (!instanceState) {
+      throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
     }
 
     try {
       // SLEEPING → STARTING is claimed atomically by the route handler.
       // If called directly (not from route), claim it here.
-      if (modelState.state === ModelLifecycleState.SLEEPING) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
+      if (instanceState.state === ModelLifecycleState.SLEEPING) {
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STARTING);
       }
-      await this.routingMap.setModelState(modelName, ModelState.STARTING);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
 
       // Send wake command. Unlike sleep, /wake on the runner completes quickly —
       // the runner begins reloading weights but does not wait for READY itself.
       await runnerClient.wake();
 
       // Poll health until the runner reports READY.
-      await this.waitForReady(modelName, runnerClient);
+      await this.waitForReady(modelName, instanceId, runnerClient);
 
       // Re-register the endpoint and flip state to ACTIVE. Route inference to the engine port
       // (falling back to the management port for pre-engine-port state or single-server runners).
-      if (modelState.runnerHost && modelState.runnerPort) {
+      if (instanceState.runnerHost && instanceState.runnerPort) {
         const endpoint: RunnerEndpoint = {
-          host: modelState.runnerHost,
-          port: modelState.runnerEnginePort ?? modelState.runnerPort,
+          host: instanceState.runnerHost,
+          port: instanceState.runnerEnginePort ?? instanceState.runnerPort,
           weight: 1,
           healthy: true,
-          ...(modelState.runnerId ? { runnerId: modelState.runnerId } : {}),
+          ...(instanceState.runnerId ? { runnerId: instanceState.runnerId } : {}),
         };
         await this.routingMap.addEndpoint(modelName, endpoint);
       }
 
       // STARTING → ACTIVE
-      await this.lifecycle.transition(modelName, ModelLifecycleState.ACTIVE);
-      await this.routingMap.setModelState(modelName, ModelState.ACTIVE);
+      await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ACTIVE);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
 
       wakeDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
-      await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
+      await this.transitionToError(
+        modelName,
+        instanceId,
+        err instanceof Error ? err.message : String(err),
+      );
       throw err;
     }
   }
 
   /**
-   * Gracefully stop a model regardless of its current state:
-   *   ACTIVE → DRAINING → STOPPING → STOPPED  (removes from routing map)
-   *   SLEEPING → STOPPING → STOPPED           (removes from routing map)
+   * Gracefully stop an instance regardless of its current state:
+   *   ACTIVE → DRAINING → STOPPING → STOPPED  (removes the instance's endpoint)
+   *   SLEEPING → STOPPING → STOPPED           (removes the instance's endpoint)
    *
    * Passing null for runnerClient skips runner communication (e.g., the runner
-   * process is already gone).
+   * process is already gone). Does not remove the instance's Redis record or the routing
+   * model-level aggregate — callers do that (see routes/models.ts) once this settles, since
+   * "stop this instance" and "forget this instance" are different concerns and the caller may
+   * need the settled STOPPED state for other bookkeeping first.
    */
-  async stopModel(modelName: string, runnerClient: RunnerClient | null): Promise<void> {
-    const modelState = await this.lifecycle.getState(modelName);
-    if (!modelState) {
-      throw ControlPlaneError.modelNotFound(modelName);
+  async stopModel(
+    modelName: string,
+    instanceId: string,
+    runnerClient: RunnerClient | null,
+  ): Promise<void> {
+    const instanceState = await this.lifecycle.getInstance(modelName, instanceId);
+    if (!instanceState) {
+      throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
     }
 
     try {
-      const currentState = modelState.state;
+      const currentState = instanceState.state;
 
       // If ACTIVE, drain first.
       if (currentState === ModelLifecycleState.ACTIVE) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.DRAINING);
-        await this.routingMap.setModelState(modelName, ModelState.DRAINING);
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
+        await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
 
         if (runnerClient) {
-          await this.waitForDrain(modelName, runnerClient);
+          await this.waitForDrain(modelName, instanceId, runnerClient);
         }
       }
 
       // Remove the endpoint so routing stops immediately. Match on the same (host, engine port)
       // pair the endpoint was registered under.
-      if (modelState.runnerHost && modelState.runnerPort) {
+      if (instanceState.runnerHost && instanceState.runnerPort) {
         await this.routingMap.removeEndpoint(
           modelName,
-          modelState.runnerHost,
-          modelState.runnerEnginePort ?? modelState.runnerPort,
+          instanceState.runnerHost,
+          instanceState.runnerEnginePort ?? instanceState.runnerPort,
         );
       }
 
       // Transition to STOPPING then STOPPED. States like PENDING and STARTING
       // cannot reach STOPPING directly, so route them through ERROR first.
-      const stateBeforeStopping = (await this.lifecycle.getState(modelName))?.state;
+      const stateBeforeStopping = (await this.lifecycle.getInstance(modelName, instanceId))?.state;
 
       if (
         stateBeforeStopping === ModelLifecycleState.PENDING ||
         stateBeforeStopping === ModelLifecycleState.STARTING
       ) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.ERROR, {
-          errorMessage: 'Model stopped during startup',
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ERROR, {
+          errorMessage: 'Instance stopped during startup',
         });
-        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STOPPED);
       } else if (
         stateBeforeStopping === ModelLifecycleState.DRAINING ||
         stateBeforeStopping === ModelLifecycleState.SLEEPING
       ) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPING);
-        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STOPPING);
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STOPPED);
       } else if (stateBeforeStopping === ModelLifecycleState.STOPPING) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STOPPED);
       } else if (stateBeforeStopping === ModelLifecycleState.ERROR) {
-        await this.lifecycle.transition(modelName, ModelLifecycleState.STOPPED);
+        await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STOPPED);
       }
       // STOPPED is already terminal — no transition needed.
 
-      // Remove from routing map entirely.
-      await this.routingMap.removeModel(modelName);
-      this.memoryBudget.releaseModelReservations(modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      this.memoryBudget.releaseInstanceReservations(instanceId);
     } catch (err) {
-      await this.transitionToError(modelName, err instanceof Error ? err.message : String(err));
+      await this.transitionToError(
+        modelName,
+        instanceId,
+        err instanceof Error ? err.message : String(err),
+      );
       throw err;
     }
   }
@@ -231,16 +276,18 @@ export class SleepWakeService {
    */
   async pollRunnerHealth(
     modelName: string,
+    instanceId: string,
     runnerClient: RunnerClient,
   ): Promise<RunnerHealthResult> {
     try {
       const health = await runnerClient.getHealth();
 
       // Detect unexpected runner state transitions and surface them.
-      const modelState = await this.lifecycle.getState(modelName);
-      if (modelState && health.state === RunnerState.ERROR) {
+      const instanceState = await this.lifecycle.getInstance(modelName, instanceId);
+      if (instanceState && health.state === RunnerState.ERROR) {
         await this.transitionToError(
           modelName,
+          instanceId,
           health.message ?? 'Runner reported ERROR state during health check',
         );
       }
@@ -269,11 +316,15 @@ export class SleepWakeService {
    * Poll the runner's health until activeRequests reaches 0 (drain complete),
    * respecting sleepTimeoutMs via AbortSignal.timeout().
    */
-  private async waitForDrain(modelName: string, runnerClient: RunnerClient): Promise<void> {
+  private async waitForDrain(
+    modelName: string,
+    instanceId: string,
+    runnerClient: RunnerClient,
+  ): Promise<void> {
     const signal = AbortSignal.timeout(this.sleepTimeoutMs);
 
     while (!signal.aborted) {
-      const result = await this.pollRunnerHealth(modelName, runnerClient);
+      const result = await this.pollRunnerHealth(modelName, instanceId, runnerClient);
 
       if (result.activeRequests !== null && result.activeRequests === 0) {
         return;
@@ -282,19 +333,23 @@ export class SleepWakeService {
       await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
-    const message = `Drain timed out after ${this.sleepTimeoutMs}ms for model ${modelName}`;
-    throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName });
+    const message = `Drain timed out after ${this.sleepTimeoutMs}ms for instance ${instanceId} (${modelName})`;
+    throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName, instanceId });
   }
 
   /**
    * Poll the runner's health until state is READY or BUSY, respecting
    * wakeTimeoutMs via AbortSignal.timeout().
    */
-  private async waitForReady(modelName: string, runnerClient: RunnerClient): Promise<void> {
+  private async waitForReady(
+    modelName: string,
+    instanceId: string,
+    runnerClient: RunnerClient,
+  ): Promise<void> {
     const signal = AbortSignal.timeout(this.wakeTimeoutMs);
 
     while (!signal.aborted) {
-      const result = await this.pollRunnerHealth(modelName, runnerClient);
+      const result = await this.pollRunnerHealth(modelName, instanceId, runnerClient);
 
       if (result.state === RunnerState.READY || result.state === RunnerState.BUSY) {
         return;
@@ -304,29 +359,32 @@ export class SleepWakeService {
         throw new ControlPlaneError(
           502,
           'RUNNER_UNAVAILABLE',
-          `Runner entered ERROR state while waking model ${modelName}: ${result.message ?? 'unknown'}`,
-          { modelName, runnerMessage: result.message ?? null },
+          `Runner entered ERROR state while waking instance ${instanceId} (${modelName}): ${result.message ?? 'unknown'}`,
+          { modelName, instanceId, runnerMessage: result.message ?? null },
         );
       }
 
       await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
-    const message = `Wake timed out after ${this.wakeTimeoutMs}ms for model ${modelName}`;
-    throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName });
+    const message = `Wake timed out after ${this.wakeTimeoutMs}ms for instance ${instanceId} (${modelName})`;
+    throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName, instanceId });
   }
 
   /**
-   * Best-effort transition to ERROR state and update the routing map.
+   * Best-effort transition to ERROR state and refresh the routing map's aggregate.
    * Swallows errors so it can be safely called from catch blocks.
    */
-  private async transitionToError(modelName: string, errorMessage: string): Promise<void> {
+  private async transitionToError(
+    modelName: string,
+    instanceId: string,
+    errorMessage: string,
+  ): Promise<void> {
     try {
-      await this.lifecycle.transition(modelName, ModelLifecycleState.ERROR, { errorMessage });
-      const routingState = toRoutingState(ModelLifecycleState.ERROR);
-      if (routingState) {
-        await this.routingMap.setModelState(modelName, routingState);
-      }
+      await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ERROR, {
+        errorMessage,
+      });
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
     } catch {
       // Intentionally swallowed — do not mask the original error.
     }

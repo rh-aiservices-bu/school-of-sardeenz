@@ -88,6 +88,31 @@ export class ControlPlaneClient {
     return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/start`);
   }
 
+  async createInstance(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/instances`);
+  }
+
+  async deleteInstance(name: string, instanceId: string): Promise<ProxyResult> {
+    return this.request(
+      'DELETE',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}`,
+    );
+  }
+
+  async sleepInstance(name: string, instanceId: string): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/sleep`,
+    );
+  }
+
+  async wakeInstance(name: string, instanceId: string): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/wake`,
+    );
+  }
+
   async browseWeights(path?: string): Promise<ProxyResult> {
     const qs = path ? `?path=${encodeURIComponent(path)}` : '';
     return this.request('GET', `/api/v1/weights${qs}`);

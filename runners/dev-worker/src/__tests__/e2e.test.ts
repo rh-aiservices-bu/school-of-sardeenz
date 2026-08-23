@@ -180,9 +180,10 @@ describe('Dev Worker E2E', () => {
     expect(manager.getRunner(runnerId)).toBeUndefined();
   }, 15000);
 
-  it('returns 409 for duplicate model', async () => {
+  it('returns 409 for duplicate instanceId (#120: conflict key is instanceId, not model name)', async () => {
     const body = JSON.stringify({
       modelName: 'dup-model',
+      instanceId: 'inst-dup-fixed',
       runnerType: 'vllm',
       modelPath: '/models/dup',
       requiredMemory: 1024 * 1024 * 1024,
@@ -206,6 +207,40 @@ describe('Dev Worker E2E', () => {
     expect(r2.status).toBe(409);
 
     await fetch(`${baseUrl}/runners/${runnerId}`, { method: 'DELETE' });
+  });
+
+  it('allows two replicas of the same model on this worker with distinct instanceIds (#120)', async () => {
+    const makeBody = (instanceId: string) =>
+      JSON.stringify({
+        modelName: 'replica-model',
+        instanceId,
+        runnerType: 'vllm',
+        modelPath: '/models/replica',
+        requiredMemory: 1024 * 1024 * 1024,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      });
+
+    const r1 = await fetch(`${baseUrl}/runners`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: makeBody('inst-replica-a'),
+    });
+    expect(r1.status).toBe(201);
+    const { runnerId: runnerA } = (await r1.json()) as { runnerId: string };
+
+    const r2 = await fetch(`${baseUrl}/runners`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: makeBody('inst-replica-b'),
+    });
+    expect(r2.status).toBe(201);
+    const { runnerId: runnerB } = (await r2.json()) as { runnerId: string };
+
+    expect(runnerA).not.toBe(runnerB);
+
+    await fetch(`${baseUrl}/runners/${runnerA}`, { method: 'DELETE' });
+    await fetch(`${baseUrl}/runners/${runnerB}`, { method: 'DELETE' });
   });
 
   it('returns 404 for unknown runner delete', async () => {

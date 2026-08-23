@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { ConflictError, NotFoundError, type RunnerManager } from '../runner-manager.js';
 
 export function registerRunnerRoutes(app: FastifyInstance, runnerManager: RunnerManager): void {
   app.post<{
     Body: {
       modelName: string;
+      instanceId?: string;
       runnerType: string;
       modelPath: string;
       requiredMemory: number;
@@ -20,8 +22,8 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
     // command actually reached this worker — the earliest guaranteed point, before any validation.
     console.log(
       `[worker] POST /runners received: model=${body?.modelName ?? '?'} ` +
-        `runner=${body?.runnerType ?? '?'} module=${body?.runtimeModule ?? '-'} ` +
-        `devices=${body?.devices?.length ?? 0}`,
+        `instance=${body?.instanceId ?? '-'} runner=${body?.runnerType ?? '?'} ` +
+        `module=${body?.runtimeModule ?? '-'} devices=${body?.devices?.length ?? 0}`,
     );
 
     if (!body?.modelName || !body?.runnerType || !body?.modelPath || !body?.devices) {
@@ -32,9 +34,14 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       });
     }
 
+    // instanceId is optional/back-compat in the contract — the control plane always sends one,
+    // but a fallback keeps older callers (and manual testing) working.
+    const instanceId = body.instanceId ?? `inst-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+
     try {
       const result = await runnerManager.startRunner({
         modelName: body.modelName,
+        instanceId,
         runnerType: body.runnerType,
         modelPath: body.modelPath,
         requiredMemory: body.requiredMemory ?? 0,
@@ -47,12 +54,12 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       return reply.status(201).send(result);
     } catch (err) {
       if (err instanceof ConflictError) {
-        console.warn(`[worker] POST /runners conflict for ${body.modelName}: ${err.message}`);
+        console.warn(`[worker] POST /runners conflict for instance ${instanceId}: ${err.message}`);
         return reply.status(409).send({ error: err.message, code: 'CONFLICT' });
       }
       // Surface launcher failures (SIF missing, apptainer verify/exec error, health timeout, …) —
       // otherwise they vanish into a 500 with no worker-side trace.
-      console.error(`[worker] Failed to start runner for ${body.modelName}:`, err);
+      console.error(`[worker] Failed to start runner for ${body.modelName}/${instanceId}:`, err);
       throw err;
     }
   });

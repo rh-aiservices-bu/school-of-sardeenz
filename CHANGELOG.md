@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Logical model vs. instance split — N replicas per model (ADR-019).** A model name is now a
+  logical model (unique config in Postgres `models`) served by N instances (new `instances` table,
+  migration 003; instance-keyed Redis lifecycle state `models:{name}:{instanceId}` with
+  control-plane-minted `inst-<12hex>` IDs). New instance API: `POST /api/v1/models/{name}/instances`
+  creates a replica (same worker or different — the dev-worker agent now runs N runners per model);
+  instance-scoped `DELETE`/`sleep`/`wake` sub-routes; model-level actions fan out per-instance with
+  error isolation. `GET /models` reports a derived aggregate state (ACTIVE if ≥1 instance ACTIVE)
+  plus instance counts; `GET /models/{name}` lists instances. **Breaking contract change** to
+  `control-plane.yaml` response shapes (dashboard/BFF updated in the same change);
+  `worker-agent.yaml` gains `StartRunnerRequest.instanceId` and `GET /runners/by-instance/{id}/logs`.
+  New internal `updateEndpointWeight` routing-map primitive (atomic Lua, mirrors endpoint-health
+  updates) enables deterministic traffic shifting; a scripted move (deploy new instance → shift →
+  stop old) completes with zero failed requests under concurrent load in the integration suite.
+  Reconciliation gains per-instance recovery, a run-once legacy-key prune, and an orphaned-instance
+  reaper (read-skew-safe sequential two-store read + per-candidate recheck). Dashboard groups
+  instances under each model with per-instance management on the detail page. The proxy is
+  untouched — routing map shape and Rust contract mirror are unchanged. (#120)
+
 - **Stop/Start model lifecycle operations (model record = configuration registry).** Decision on
   #121 (option A): a model record is a configuration registry entry that outlives its runner —
   Stop (`POST /api/v1/models/{modelName}/stop`) tears down the runner and keeps the record; Start

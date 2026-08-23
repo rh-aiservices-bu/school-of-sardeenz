@@ -4,17 +4,21 @@ import type { ControlPlaneComponents } from '@sardeenz/types';
 
 import { ReconciliationService } from '../reconciliation.js';
 import type { ReconciliationConfig } from '../reconciliation.js';
-import type { ModelLifecycleService, ModelState } from '../model-lifecycle.js';
+import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
 import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RoutingMapService } from '../routing-map.js';
+import type { ModelRepository, ModelRecord } from '../model-repository.js';
 import type { Redis } from '../../clients/redis.js';
 import { deviceMemoryBytes } from '../../health/metrics.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
-function makeModelState(overrides: Partial<ModelState> & { modelName: string }): ModelState {
+function makeModelState(
+  overrides: Partial<InstanceState> & { modelName: string },
+): InstanceState {
   return {
+    instanceId: `inst-${overrides.modelName}`,
     state: ModelLifecycleState.ACTIVE,
     workerId: 'w1',
     runnerHost: null,
@@ -43,8 +47,11 @@ function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
 
 interface MockDeps {
   lifecycle: {
-    getAllStates: ReturnType<typeof vi.fn>;
+    getAllInstances: ReturnType<typeof vi.fn>;
+    getInstancesForModel: ReturnType<typeof vi.fn>;
+    removeInstance: ReturnType<typeof vi.fn>;
     transition: ReturnType<typeof vi.fn>;
+    pruneLegacyInstanceKeys: ReturnType<typeof vi.fn>;
   };
   workerPool: {
     discoverWorkers: ReturnType<typeof vi.fn>;
@@ -57,20 +64,45 @@ interface MockDeps {
     refreshAll: ReturnType<typeof vi.fn>;
     getAllBudgets: ReturnType<typeof vi.fn>;
     clearWorkerReservations: ReturnType<typeof vi.fn>;
+    releaseInstanceReservations: ReturnType<typeof vi.fn>;
   };
   routingMap: {
     removeModel: ReturnType<typeof vi.fn>;
+    removeEndpoint: ReturnType<typeof vi.fn>;
+    setModelState: ReturnType<typeof vi.fn>;
   };
   leaderElection: {
     isLeader: boolean;
   };
   logger: {
+    debug: ReturnType<typeof vi.fn>;
     info: ReturnType<typeof vi.fn>;
     warn: ReturnType<typeof vi.fn>;
     error: ReturnType<typeof vi.fn>;
   };
   redis: {
     publish: ReturnType<typeof vi.fn>;
+  };
+  modelRepository: {
+    findAll: ReturnType<typeof vi.fn>;
+    findByName: ReturnType<typeof vi.fn>;
+  };
+}
+
+function makeModelRecord(overrides: Partial<ModelRecord> & { name: string }): ModelRecord {
+  return {
+    id: `rec-${overrides.name}`,
+    runnerType: 'vllm',
+    modelPath: '/weights/x',
+    requiredMemory: null,
+    deviceType: null,
+    tensorParallel: 1,
+    engineConfig: null,
+    runtimeModule: null,
+    pinned: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
   };
 }
 
@@ -85,8 +117,15 @@ const KEY_PREFIX = 'sardeenz';
 function createMocks(): MockDeps {
   return {
     lifecycle: {
-      getAllStates: vi.fn().mockResolvedValue([]),
+      getAllInstances: vi.fn().mockResolvedValue([]),
+      // refreshModelRoutingState (called by handleDeadWorkers/recoverStuckInstances after
+      // removing the affected instance's endpoint) resolves the model-level routing aggregate
+      // from this. Default: no other instances remain, so it drives routingMap.removeModel —
+      // matching the pre-#120 single-instance-per-model behavior these tests assert on.
+      getInstancesForModel: vi.fn().mockResolvedValue([]),
+      removeInstance: vi.fn().mockResolvedValue(undefined),
       transition: vi.fn().mockResolvedValue({}),
+      pruneLegacyInstanceKeys: vi.fn().mockResolvedValue([]),
     },
     workerPool: {
       discoverWorkers: vi.fn().mockResolvedValue(undefined),
@@ -99,14 +138,18 @@ function createMocks(): MockDeps {
       refreshAll: vi.fn().mockResolvedValue(undefined),
       getAllBudgets: vi.fn().mockReturnValue([]),
       clearWorkerReservations: vi.fn(),
+      releaseInstanceReservations: vi.fn(),
     },
     routingMap: {
       removeModel: vi.fn().mockResolvedValue(undefined),
+      removeEndpoint: vi.fn().mockResolvedValue(undefined),
+      setModelState: vi.fn().mockResolvedValue(undefined),
     },
     leaderElection: {
       isLeader: true,
     },
     logger: {
+      debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
@@ -114,10 +157,19 @@ function createMocks(): MockDeps {
     redis: {
       publish: vi.fn().mockResolvedValue(1),
     },
+    modelRepository: {
+      findAll: vi.fn().mockResolvedValue([]),
+      // Defaults to "no row" so existing reap-path tests (which only set up findAll) still reap;
+      // tests exercising the race set this explicitly.
+      findByName: vi.fn().mockResolvedValue(null),
+    },
   };
 }
 
-function createService(mocks: MockDeps): ReconciliationService {
+function createService(
+  mocks: MockDeps,
+  options: { withModelRepository?: boolean } = {},
+): ReconciliationService {
   return new ReconciliationService(
     mocks.lifecycle as unknown as ModelLifecycleService,
     mocks.workerPool as unknown as WorkerPoolService,
@@ -128,6 +180,13 @@ function createService(mocks: MockDeps): ReconciliationService {
     mocks.logger,
     mocks.redis as unknown as Redis,
     KEY_PREFIX,
+    undefined,
+    undefined,
+    // Left undefined by default (matching notifications/instanceRepository's optionality above)
+    // so the many pre-existing tests in this file — which populate getAllInstances with
+    // instances but never set up modelRepository — aren't affected by the new orphan-reap step.
+    // Only the dedicated describe block below opts in.
+    options.withModelRepository ? (mocks.modelRepository as unknown as ModelRepository) : undefined,
   );
 }
 
@@ -149,7 +208,7 @@ describe('ReconciliationService', () => {
       expect(mocks.workerPool.discoverWorkers).not.toHaveBeenCalled();
       expect(mocks.workerPool.checkHeartbeats).not.toHaveBeenCalled();
       expect(mocks.memoryBudget.refreshAll).not.toHaveBeenCalled();
-      expect(mocks.lifecycle.getAllStates).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.getAllInstances).not.toHaveBeenCalled();
     });
 
     it('runs all steps when leader', async () => {
@@ -159,7 +218,7 @@ describe('ReconciliationService', () => {
       expect(mocks.workerPool.checkHeartbeats).toHaveBeenCalledOnce();
       expect(mocks.workerPool.getDeadWorkers).toHaveBeenCalledOnce();
       expect(mocks.memoryBudget.refreshAll).toHaveBeenCalledOnce();
-      expect(mocks.lifecycle.getAllStates).toHaveBeenCalled();
+      expect(mocks.lifecycle.getAllInstances).toHaveBeenCalled();
     });
   });
 
@@ -205,7 +264,7 @@ describe('ReconciliationService', () => {
   describe('tick — dead worker handling', () => {
     it('transitions models on dead workers to ERROR', async () => {
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'model-a',
           workerId: 'w1',
@@ -217,6 +276,7 @@ describe('ReconciliationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'model-a',
+        'inst-model-a',
         ModelLifecycleState.ERROR,
         { errorMessage: 'Worker w1 is dead' },
       );
@@ -224,7 +284,7 @@ describe('ReconciliationService', () => {
 
     it('removes routing for dead worker models', async () => {
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'model-a',
           workerId: 'w1',
@@ -239,7 +299,7 @@ describe('ReconciliationService', () => {
 
     it('removes dead workers from the pool', async () => {
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
 
       await service.tick();
 
@@ -248,7 +308,7 @@ describe('ReconciliationService', () => {
 
     it('clears VRAM reservations for dead workers so their capacity is not leaked (#87)', async () => {
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
 
       await service.tick();
 
@@ -257,7 +317,7 @@ describe('ReconciliationService', () => {
 
     it('skips models in STOPPED or ERROR state on dead workers', async () => {
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'stopped-model',
           workerId: 'w1',
@@ -277,7 +337,7 @@ describe('ReconciliationService', () => {
 
     it('continues processing if one model transition fails', async () => {
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'model-a',
           workerId: 'w1',
@@ -302,7 +362,7 @@ describe('ReconciliationService', () => {
 
   describe('tick — stuck model recovery', () => {
     it('transitions STARTING models stuck past deployTimeoutSecs to ERROR', async () => {
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'stuck-starting',
           state: ModelLifecycleState.STARTING,
@@ -314,6 +374,7 @@ describe('ReconciliationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'stuck-starting',
+        'inst-stuck-starting',
         ModelLifecycleState.ERROR,
         expect.objectContaining({
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -324,7 +385,7 @@ describe('ReconciliationService', () => {
     });
 
     it('transitions DRAINING models stuck past sleepTimeoutSecs to ERROR', async () => {
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'stuck-draining',
           state: ModelLifecycleState.DRAINING,
@@ -336,6 +397,7 @@ describe('ReconciliationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'stuck-draining',
+        'inst-stuck-draining',
         ModelLifecycleState.ERROR,
         expect.objectContaining({
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -345,7 +407,7 @@ describe('ReconciliationService', () => {
     });
 
     it('transitions STOPPING models stuck past sleepTimeoutSecs to ERROR', async () => {
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'stuck-stopping',
           state: ModelLifecycleState.STOPPING,
@@ -357,6 +419,7 @@ describe('ReconciliationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'stuck-stopping',
+        'inst-stuck-stopping',
         ModelLifecycleState.ERROR,
         expect.objectContaining({
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -366,7 +429,7 @@ describe('ReconciliationService', () => {
     });
 
     it('does not touch models within their timeout window', async () => {
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'recent-starting',
           state: ModelLifecycleState.STARTING,
@@ -385,7 +448,7 @@ describe('ReconciliationService', () => {
     });
 
     it('does not touch non-transitional states', async () => {
-      mocks.lifecycle.getAllStates.mockResolvedValue([
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
         makeModelState({
           modelName: 'active',
           state: ModelLifecycleState.ACTIVE,
@@ -433,7 +496,7 @@ describe('ReconciliationService', () => {
 
       await service.tick();
 
-      expect(mocks.lifecycle.getAllStates).toHaveBeenCalled();
+      expect(mocks.lifecycle.getAllInstances).toHaveBeenCalled();
     });
 
     it('logs errors for failed steps', async () => {
@@ -444,6 +507,205 @@ describe('ReconciliationService', () => {
       expect(mocks.logger.error).toHaveBeenCalledWith(
         expect.objectContaining({ step: 'discoverWorkers', err: 'connection lost' }),
         'Reconciliation step failed',
+      );
+    });
+  });
+
+  describe('tick — legacy Redis key pruning (boundary review MEDIUM-1 / LOW-1)', () => {
+    it('calls pruneLegacyInstanceKeys on the first tick', async () => {
+      await service.tick();
+
+      expect(mocks.lifecycle.pruneLegacyInstanceKeys).toHaveBeenCalledOnce();
+    });
+
+    it('does not call pruneLegacyInstanceKeys again on a second tick (round-2 LOW-1)', async () => {
+      await service.tick();
+      await service.tick();
+
+      expect(mocks.lifecycle.pruneLegacyInstanceKeys).toHaveBeenCalledOnce();
+    });
+
+    it('logs once per legacy key removed', async () => {
+      mocks.lifecycle.pruneLegacyInstanceKeys.mockResolvedValue(['legacy-a', 'legacy-b']);
+
+      await service.tick();
+
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        { modelName: 'legacy-a' },
+        'Removed orphaned pre-#120 Redis lifecycle key (single-segment, no instanceId) — see ADR-019',
+      );
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        { modelName: 'legacy-b' },
+        'Removed orphaned pre-#120 Redis lifecycle key (single-segment, no instanceId) — see ADR-019',
+      );
+    });
+
+    it('does not log anything when there are no legacy keys', async () => {
+      await service.tick();
+
+      expect(mocks.logger.warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: expect.anything() as string }),
+        expect.stringContaining('orphaned') as string,
+      );
+    });
+
+    it('a pruneLegacyInstanceKeys failure does not abort the rest of the tick', async () => {
+      mocks.lifecycle.pruneLegacyInstanceKeys.mockRejectedValue(new Error('scan failed'));
+
+      await service.tick();
+
+      expect(mocks.memoryBudget.refreshAll).toHaveBeenCalledOnce();
+      expect(mocks.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ step: 'pruneLegacyInstanceKeys', err: 'scan failed' }),
+        'Reconciliation step failed',
+      );
+    });
+  });
+
+  describe('tick — orphaned instance reaping (boundary review round-2 MEDIUM-2)', () => {
+    it('reaps a Redis instance whose model has no Postgres row', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'deleted-model',
+          instanceId: 'inst-orphan',
+          state: ModelLifecycleState.ERROR,
+          runnerHost: 'worker-1',
+          runnerPort: 8000,
+        }),
+      ]);
+      mocks.modelRepository.findAll.mockResolvedValue([]);
+      const orphanService = createService(mocks, { withModelRepository: true });
+
+      await orphanService.tick();
+
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith('inst-orphan');
+      expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith(
+        'deleted-model',
+        'worker-1',
+        8000,
+      );
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+      expect(mocks.logger.info).toHaveBeenCalledWith(
+        { modelName: 'deleted-model', instanceId: 'inst-orphan' },
+        'Reaped orphaned Redis instance with no matching model row',
+      );
+    });
+
+    it('leaves a Redis instance alone when its model still has a Postgres row', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'live-model',
+          instanceId: 'inst-live',
+          state: ModelLifecycleState.ACTIVE,
+        }),
+      ]);
+      mocks.modelRepository.findAll.mockResolvedValue([makeModelRecord({ name: 'live-model' })]);
+      const liveService = createService(mocks, { withModelRepository: true });
+
+      await liveService.tick();
+
+      expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+    });
+
+    it('does not remove an endpoint for an orphan with no runner endpoint', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'deleted-model',
+          instanceId: 'inst-orphan',
+          state: ModelLifecycleState.ERROR,
+          runnerHost: null,
+          runnerPort: null,
+        }),
+      ]);
+      mocks.modelRepository.findAll.mockResolvedValue([]);
+      const orphanService = createService(mocks, { withModelRepository: true });
+
+      await orphanService.tick();
+
+      expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+    });
+
+    it('is a no-op when modelRepository is not wired', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'deleted-model', instanceId: 'inst-orphan' }),
+      ]);
+      const unwiredService = createService(mocks);
+
+      await unwiredService.tick();
+
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+      expect(mocks.modelRepository.findAll).not.toHaveBeenCalled();
+    });
+
+    it('skips reaping when the model row appears between the initial diff and the per-candidate recheck (round-3 HIGH-1)', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'racing-model',
+          instanceId: 'inst-racing',
+          state: ModelLifecycleState.STARTING,
+          runnerHost: 'worker-1',
+          runnerPort: 8000,
+        }),
+      ]);
+      // Initial diff: findAll() doesn't see the model row yet (it committed after this read's
+      // snapshot but before the Redis read observed the instance) — the candidate looks orphaned.
+      mocks.modelRepository.findAll.mockResolvedValue([]);
+      // But the per-candidate recheck runs later and now sees the row a concurrent deploy created.
+      mocks.modelRepository.findByName.mockResolvedValue(makeModelRecord({ name: 'racing-model' }));
+      const orphanService = createService(mocks, { withModelRepository: true });
+
+      await orphanService.tick();
+
+      expect(mocks.modelRepository.findByName).toHaveBeenCalledWith('racing-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
+      expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+      expect(mocks.logger.debug).toHaveBeenCalledWith(
+        { modelName: 'racing-model', instanceId: 'inst-racing' },
+        'Skipping reap: model row now exists (race with concurrent deploy)',
+      );
+    });
+
+    it('still reaps a genuine orphan when the per-candidate recheck also finds no model row', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'deleted-model',
+          instanceId: 'inst-orphan',
+          state: ModelLifecycleState.ERROR,
+          runnerHost: 'worker-1',
+          runnerPort: 8000,
+        }),
+      ]);
+      mocks.modelRepository.findAll.mockResolvedValue([]);
+      mocks.modelRepository.findByName.mockResolvedValue(null);
+      const orphanService = createService(mocks, { withModelRepository: true });
+
+      await orphanService.tick();
+
+      expect(mocks.modelRepository.findByName).toHaveBeenCalledWith('deleted-model');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+    });
+
+    it('a reap failure for one orphan does not abort the rest of the tick', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'deleted-model', instanceId: 'inst-orphan' }),
+      ]);
+      mocks.modelRepository.findAll.mockResolvedValue([]);
+      mocks.lifecycle.removeInstance.mockRejectedValueOnce(new Error('redis down'));
+      const orphanService = createService(mocks, { withModelRepository: true });
+
+      await orphanService.tick();
+
+      expect(mocks.memoryBudget.refreshAll).toHaveBeenCalledOnce();
+      expect(mocks.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelName: 'deleted-model',
+          instanceId: 'inst-orphan',
+          err: 'redis down',
+        }),
+        'Failed to reap orphaned instance',
       );
     });
   });
@@ -484,7 +746,7 @@ describe('ReconciliationService', () => {
     it('publishes WORKER_LEFT before removing a dead worker', async () => {
       mocks.workerPool.getAllWorkers.mockReturnValue([]);
       mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'dead-w1' })]);
-      mocks.lifecycle.getAllStates.mockResolvedValue([]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
 
       await service.tick();
 
@@ -542,7 +804,7 @@ describe('ReconciliationService', () => {
       await service.tick();
 
       expect(mocks.memoryBudget.refreshAll).toHaveBeenCalledOnce();
-      expect(mocks.lifecycle.getAllStates).toHaveBeenCalled();
+      expect(mocks.lifecycle.getAllInstances).toHaveBeenCalled();
     });
   });
 

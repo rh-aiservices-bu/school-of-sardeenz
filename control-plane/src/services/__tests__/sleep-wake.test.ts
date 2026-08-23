@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ModelLifecycleState, RunnerState, SleepLevel } from '@sardeenz/types';
 
 import { SleepWakeService } from '../sleep-wake.js';
-import type { ModelLifecycleService, ModelState } from '../model-lifecycle.js';
+import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RunnerClient } from '../../clients/runner.js';
@@ -11,8 +11,11 @@ import type { RunnerClient } from '../../clients/runner.js';
 // the routing endpoint is registered under the *engine* port, so sleep/wake/stop must remove and
 // re-add it under that same engine port — never the management port.
 
-function makeState(overrides: Partial<ModelState> = {}): ModelState {
+const INSTANCE_ID = 'test-instance';
+
+function makeState(overrides: Partial<InstanceState> = {}): InstanceState {
   return {
+    instanceId: INSTANCE_ID,
     modelName: 'test-model',
     state: ModelLifecycleState.ACTIVE,
     workerId: 'worker-1',
@@ -30,7 +33,8 @@ function makeState(overrides: Partial<ModelState> = {}): ModelState {
 
 interface Mocks {
   lifecycle: {
-    getState: ReturnType<typeof vi.fn>;
+    getInstance: ReturnType<typeof vi.fn>;
+    getInstancesForModel: ReturnType<typeof vi.fn>;
     transition: ReturnType<typeof vi.fn>;
   };
   routingMap: {
@@ -40,7 +44,7 @@ interface Mocks {
     removeModel: ReturnType<typeof vi.fn>;
   };
   memoryBudget: {
-    releaseModelReservations: ReturnType<typeof vi.fn>;
+    releaseInstanceReservations: ReturnType<typeof vi.fn>;
   };
   runnerClient: {
     getHealth: ReturnType<typeof vi.fn>;
@@ -50,11 +54,19 @@ interface Mocks {
 }
 
 function createMocks(): Mocks {
+  const lifecycle = {
+    getInstance: vi.fn().mockResolvedValue(makeState()),
+    // refreshModelRoutingState (called internally by every SleepWakeService method) resolves the
+    // model-level routing aggregate from this — mirror whatever getInstance currently returns so
+    // these single-instance tests behave as before #120.
+    getInstancesForModel: vi.fn(async (): Promise<InstanceState[]> => {
+      const current = (await lifecycle.getInstance()) as InstanceState | null;
+      return current ? [current] : [];
+    }),
+    transition: vi.fn().mockResolvedValue({}),
+  };
   return {
-    lifecycle: {
-      getState: vi.fn().mockResolvedValue(makeState()),
-      transition: vi.fn().mockResolvedValue({}),
-    },
+    lifecycle,
     routingMap: {
       setModelState: vi.fn().mockResolvedValue(undefined),
       addEndpoint: vi.fn().mockResolvedValue(undefined),
@@ -62,7 +74,7 @@ function createMocks(): Mocks {
       removeModel: vi.fn().mockResolvedValue(undefined),
     },
     memoryBudget: {
-      releaseModelReservations: vi.fn(),
+      releaseInstanceReservations: vi.fn(),
     },
     runnerClient: {
       // READY with no in-flight requests → drain and wake complete on the first poll.
@@ -94,7 +106,7 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
   });
 
   it('sleepModel removes the endpoint under the engine port, not the management port', async () => {
-    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('test-model', '10.0.0.1', 5002);
     expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalledWith(
@@ -105,9 +117,9 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
   });
 
   it('wakeModel re-registers the endpoint under the engine port', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
+    mocks.lifecycle.getInstance.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
 
-    await service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
       host: '10.0.0.1',
@@ -119,18 +131,18 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
   });
 
   it('stopModel removes the endpoint under the engine port', async () => {
-    await service.stopModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.stopModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('test-model', '10.0.0.1', 5002);
   });
 
   it('falls back to the management port when no engine port is recorded (legacy state)', async () => {
     // State persisted before the engine-port split carries no runnerEnginePort.
-    mocks.lifecycle.getState.mockResolvedValue(
+    mocks.lifecycle.getInstance.mockResolvedValue(
       makeState({ state: ModelLifecycleState.SLEEPING, runnerEnginePort: undefined }),
     );
 
-    await service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
       'test-model',
@@ -153,6 +165,7 @@ describe('SleepWakeService — activeRequests unknown handling (#116)', () => {
 
     const result = await service.pollRunnerHealth(
       'test-model',
+      INSTANCE_ID,
       mocks.runnerClient as unknown as RunnerClient,
     );
 
@@ -164,6 +177,7 @@ describe('SleepWakeService — activeRequests unknown handling (#116)', () => {
 
     const result = await service.pollRunnerHealth(
       'test-model',
+      INSTANCE_ID,
       mocks.runnerClient as unknown as RunnerClient,
     );
 
@@ -177,7 +191,7 @@ describe('SleepWakeService — activeRequests unknown handling (#116)', () => {
       .mockResolvedValueOnce({ state: RunnerState.READY })
       .mockResolvedValueOnce({ state: RunnerState.READY, activeRequests: 0 });
 
-    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(2);
     expect(mocks.runnerClient.sleep).toHaveBeenCalled();
@@ -194,15 +208,15 @@ describe('SleepWakeService — VRAM reservation release (#87)', () => {
   });
 
   it('stopModel releases the model reservation once the model is fully stopped', async () => {
-    await service.stopModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.stopModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
-    expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+    expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
   });
 
   it('sleepModel does NOT release the reservation — a sleeping model keeps its VRAM budget', async () => {
-    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
-    expect(mocks.memoryBudget.releaseModelReservations).not.toHaveBeenCalled();
+    expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
   });
 });
 
@@ -216,13 +230,13 @@ describe('SleepWakeService — timeout threading (#89)', () => {
   });
 
   it('sleepModel passes sleepTimeoutMs to runnerClient.sleep()', async () => {
-    await service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.runnerClient.sleep).toHaveBeenCalledWith(SleepLevel.L1_HOST_RAM, 5_000);
   });
 
   it('wakeModel does not pass a custom timeout to runnerClient.wake()', async () => {
-    await service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient);
+    await service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
 
     expect(mocks.runnerClient.wake).toHaveBeenCalledWith();
   });
@@ -245,13 +259,13 @@ describe('SleepWakeService — RUNNER_TIMEOUT reachability (#96)', () => {
     );
 
     await expect(
-      service.sleepModel('test-model', mocks.runnerClient as unknown as RunnerClient),
+      service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient),
     ).rejects.toMatchObject({ code: 'RUNNER_TIMEOUT' });
   });
 
   it('waitForReady surfaces RUNNER_TIMEOUT, not an AbortError, when the runner never becomes ready', async () => {
     const mocks = createMocks();
-    mocks.lifecycle.getState.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
+    mocks.lifecycle.getInstance.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
     mocks.runnerClient.getHealth.mockResolvedValue({
       state: RunnerState.STARTING,
       activeRequests: 0,
@@ -266,7 +280,7 @@ describe('SleepWakeService — RUNNER_TIMEOUT reachability (#96)', () => {
     );
 
     await expect(
-      service.wakeModel('test-model', mocks.runnerClient as unknown as RunnerClient),
+      service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient),
     ).rejects.toMatchObject({ code: 'RUNNER_TIMEOUT' });
   });
 });

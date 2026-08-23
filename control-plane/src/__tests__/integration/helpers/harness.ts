@@ -11,6 +11,7 @@ import { loadRootEnv } from '../../../load-env.js';
 import { redisKey } from '../../../clients/redis.js';
 import { runMigrations } from '../../../clients/migrations.js';
 import { ModelRepository } from '../../../services/model-repository.js';
+import { InstanceRepository } from '../../../services/instance-repository.js';
 import { ModelLifecycleService } from '../../../services/model-lifecycle.js';
 import { MemoryBudgetService } from '../../../services/memory-budget.js';
 import { WorkerPoolService } from '../../../services/worker-pool.js';
@@ -121,6 +122,7 @@ export interface TestHarness {
   db: pg.Pool;
   keyPrefix: string;
   modelRepository: ModelRepository;
+  instanceRepository: InstanceRepository;
   lifecycle: ModelLifecycleService;
   memoryBudget: MemoryBudgetService;
   workerPool: WorkerPoolService;
@@ -182,6 +184,7 @@ export function createHarness(): TestHarness {
   });
 
   const modelRepository = new ModelRepository(db);
+  const instanceRepository = new InstanceRepository(db);
   const lifecycle = new ModelLifecycleService(redis, keyPrefix);
   const memoryBudget = new MemoryBudgetService(redis, keyPrefix, 30);
   const workerPool = new WorkerPoolService(redis, keyPrefix, 300);
@@ -270,7 +273,7 @@ export function createHarness(): TestHarness {
       'migrations',
     );
     await runMigrations(db, migrationsDir);
-    await db.query('TRUNCATE models, memory_profiles, benchmarks, settings CASCADE');
+    await db.query('TRUNCATE models, instances, memory_profiles, benchmarks, settings CASCADE');
   }
 
   async function teardown(): Promise<void> {
@@ -281,7 +284,7 @@ export function createHarness(): TestHarness {
     redis.disconnect();
     // Leave no residue behind, so the last test of a run doesn't linger in the test DB (this is the
     // very failure mode that seeded herd-model/stuck-model into the dev DB before this fix).
-    await db.query('TRUNCATE models, memory_profiles, benchmarks, settings CASCADE');
+    await db.query('TRUNCATE models, instances, memory_profiles, benchmarks, settings CASCADE');
     await db.end();
   }
 
@@ -290,6 +293,7 @@ export function createHarness(): TestHarness {
     db,
     keyPrefix,
     modelRepository,
+    instanceRepository,
     lifecycle,
     memoryBudget,
     workerPool,

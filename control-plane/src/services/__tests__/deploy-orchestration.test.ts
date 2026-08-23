@@ -3,12 +3,14 @@ import { ModelLifecycleState, ModelState, RunnerState, WorkerStatus } from '@sar
 
 import { DeployOrchestrationService } from '../deploy-orchestration.js';
 import type { DeployModelParams } from '../deploy-orchestration.js';
-import type { ModelLifecycleService } from '../model-lifecycle.js';
+import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RunnerClient } from '../../clients/runner.js';
 import type { WorkerClient, StartRunnerResponse } from '../../clients/worker.js';
+
+const INSTANCE_ID = 'test-instance';
 
 function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
   return {
@@ -26,6 +28,7 @@ function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
 function makeParams(overrides: Partial<DeployModelParams> = {}): DeployModelParams {
   return {
     modelName: 'test-model',
+    instanceId: INSTANCE_ID,
     workerId: 'worker-1',
     runnerType: 'vllm',
     modelPath: '/models/test',
@@ -48,18 +51,19 @@ function makeRunnerResponse(overrides: Partial<StartRunnerResponse> = {}): Start
 interface MockDeps {
   lifecycle: {
     transition: ReturnType<typeof vi.fn>;
-    getState: ReturnType<typeof vi.fn>;
+    getInstancesForModel: ReturnType<typeof vi.fn>;
     setRunnerEndpoint: ReturnType<typeof vi.fn>;
   };
   routingMap: {
     setModelState: ReturnType<typeof vi.fn>;
     addEndpoint: ReturnType<typeof vi.fn>;
+    removeModel: ReturnType<typeof vi.fn>;
   };
   workerPool: {
     getWorker: ReturnType<typeof vi.fn>;
   };
   memoryBudget: {
-    releaseModelReservations: ReturnType<typeof vi.fn>;
+    releaseInstanceReservations: ReturnType<typeof vi.fn>;
   };
   workerClient: {
     startRunner: ReturnType<typeof vi.fn>;
@@ -71,21 +75,48 @@ interface MockDeps {
 }
 
 function createMocks(): MockDeps {
+  // The route handler creates this instance's Redis record (STARTING) before calling
+  // deployModel() — mirror that here so refreshModelRoutingState (called at the top of
+  // deployModel, after the ACTIVE transition, and from transitionToError) derives the aggregate
+  // routing state from this single instance's current tracked state, exactly like the real
+  // ModelLifecycleService would.
+  const trackedInstance = { state: ModelLifecycleState.STARTING as ModelLifecycleState };
+
   return {
     lifecycle: {
-      transition: vi.fn().mockResolvedValue({}),
-      getState: vi.fn(),
+      transition: vi.fn((_modelName: string, _instanceId: string, to: ModelLifecycleState) => {
+        trackedInstance.state = to;
+        return Promise.resolve({});
+      }),
+      getInstancesForModel: vi.fn(
+        (): InstanceState[] => [
+          {
+            instanceId: INSTANCE_ID,
+            modelName: 'test-model',
+            state: trackedInstance.state,
+            workerId: 'worker-1',
+            runnerHost: null,
+            runnerPort: null,
+            runnerId: null,
+            deviceIndices: null,
+            lastInferenceAt: null,
+            stateChangedAt: new Date().toISOString(),
+            errorMessage: null,
+          },
+        ],
+      ),
       setRunnerEndpoint: vi.fn().mockResolvedValue(undefined),
     },
     routingMap: {
       setModelState: vi.fn().mockResolvedValue(undefined),
       addEndpoint: vi.fn().mockResolvedValue(undefined),
+      removeModel: vi.fn().mockResolvedValue(undefined),
     },
     workerPool: {
       getWorker: vi.fn().mockReturnValue(makeWorker()),
     },
     memoryBudget: {
-      releaseModelReservations: vi.fn(),
+      releaseInstanceReservations: vi.fn(),
     },
     workerClient: {
       startRunner: vi.fn().mockResolvedValue(makeRunnerResponse()),
@@ -132,7 +163,7 @@ describe('DeployOrchestrationService', () => {
       );
       expect(mocks.workerClient.startRunner).toHaveBeenCalledOnce();
       // No distinct engine port reported → inference falls back to the management port.
-      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', {
+      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', INSTANCE_ID, {
         runnerId: 'runner-abc',
         host: '10.0.0.1',
         port: 5001,
@@ -148,6 +179,7 @@ describe('DeployOrchestrationService', () => {
       });
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ACTIVE,
         {
           runnerHost: '10.0.0.1',
@@ -162,7 +194,7 @@ describe('DeployOrchestrationService', () => {
     it('releases the model reservation after transitioning to ACTIVE (#87)', async () => {
       await service.deployModel(makeParams());
 
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
 
     it('routes inference to the engine port while keeping management on the runner port', async () => {
@@ -174,7 +206,7 @@ describe('DeployOrchestrationService', () => {
       await service.deployModel(makeParams());
 
       // Health polling targets the management port (the runner client is created from host+port).
-      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', {
+      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith('test-model', INSTANCE_ID, {
         runnerId: 'runner-abc',
         host: '10.0.0.1',
         port: 5001,
@@ -190,6 +222,7 @@ describe('DeployOrchestrationService', () => {
       });
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ACTIVE,
         {
           runnerHost: '10.0.0.1',
@@ -215,12 +248,14 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.workerClient.startRunner).toHaveBeenCalledWith({
         modelName: 'test-model',
+        instanceId: INSTANCE_ID,
         runnerType: 'vllm',
         modelPath: '/models/test',
         requiredMemory: 1_000_000,
         deviceType: 'CUDA',
         tensorParallel: 2,
         engineConfig: { maxModelLen: 4096 },
+        runtimeModule: undefined,
         devices: [
           { deviceIndex: 0, deviceType: 'CUDA' },
           { deviceIndex: 1, deviceType: 'CUDA' },
@@ -263,6 +298,7 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ERROR,
         expect.objectContaining({
           errorMessage: expect.stringContaining('Worker not found') as string,
@@ -275,7 +311,7 @@ describe('DeployOrchestrationService', () => {
 
       await expect(service.deployModel(makeParams())).rejects.toThrow();
 
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
   });
 
@@ -287,10 +323,11 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ERROR,
         expect.objectContaining({ errorMessage: 'connection refused' }),
       );
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
   });
 
@@ -310,6 +347,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(3);
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ACTIVE,
         expect.any(Object),
       );
@@ -325,6 +363,7 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ACTIVE,
         expect.any(Object),
       );
@@ -341,10 +380,11 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ERROR,
         expect.objectContaining({ errorMessage: expect.stringContaining('OOM killed') as string }),
       );
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
 
     it('transitions to ERROR on deploy timeout, surfacing RUNNER_TIMEOUT (not an AbortError) (#96)', async () => {
@@ -373,10 +413,11 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
+        INSTANCE_ID,
         ModelLifecycleState.ERROR,
         expect.objectContaining({ errorMessage: expect.any(String) as string }),
       );
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
   });
 
@@ -395,8 +436,8 @@ describe('DeployOrchestrationService', () => {
 
       await expect(service.deployModel(params)).rejects.toThrow();
 
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledTimes(1);
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -407,7 +448,7 @@ describe('DeployOrchestrationService', () => {
 
       await expect(service.deployModel(makeParams())).rejects.toThrow('Worker not found');
 
-      expect(mocks.memoryBudget.releaseModelReservations).toHaveBeenCalledWith('test-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
   });
 });

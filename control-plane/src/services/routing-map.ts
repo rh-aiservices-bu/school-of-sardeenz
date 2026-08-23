@@ -1,6 +1,7 @@
 import { ModelState, RoutingMapUpdateType } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
+import { ControlPlaneError } from '../errors.js';
 
 export interface RunnerEndpoint {
   host: string;
@@ -250,6 +251,68 @@ export class RoutingMapService {
       host,
       port.toString(),
       healthy.toString(),
+      now,
+      JSON.stringify(update),
+    );
+  }
+
+  /**
+   * Set the traffic weight on a single endpoint of a model's routing entry, without changing
+   * its healthy flag. Internal primitive for #120's scripted move (deploy new instance → set
+   * the old instance's endpoint weight to 0 to shift traffic → drain → remove) — no HTTP route
+   * in M7; the move-model UI (#124) is M8. Mirrors updateEndpointHealth's shape and Lua pattern.
+   * No-ops (does not throw) when the routing entry or the specific endpoint is absent, matching
+   * updateEndpointHealth's behavior for the same reason: a caller racing a concurrent
+   * removeEndpoint shouldn't fail.
+   */
+  async updateEndpointWeight(
+    modelName: string,
+    host: string,
+    port: number,
+    weight: number,
+  ): Promise<void> {
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100) {
+      throw ControlPlaneError.invalidRequest('weight must be an integer between 0 and 100');
+    }
+
+    const now = new Date().toISOString();
+
+    const luaScript = `
+      ${LUA_ENCODE_ROUTING_ENTRY}
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      if not raw then return nil end
+      local entry = cjson.decode(raw)
+      local changed = nil
+      for i, e in ipairs(entry.endpoints) do
+        if e.host == ARGV[2] and e.port == tonumber(ARGV[3]) then
+          e.weight = tonumber(ARGV[4])
+          entry.endpoints[i] = e
+          changed = e
+          break
+        end
+      end
+      if not changed then return nil end
+      entry.updatedAt = ARGV[5]
+      redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
+      redis.call('PUBLISH', KEYS[2], ARGV[6])
+      return 1
+    `;
+
+    const update: RoutingMapUpdate = {
+      type: RoutingMapUpdateType.ENDPOINT_UPDATED,
+      modelName,
+      timestamp: now,
+    };
+
+    await this.redis.eval(
+      luaScript,
+      2,
+      this.hashKey,
+      this.pubsubChannel,
+      modelName,
+      host,
+      port.toString(),
+      weight.toString(),
       now,
       JSON.stringify(update),
     );
