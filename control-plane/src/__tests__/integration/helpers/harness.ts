@@ -3,6 +3,9 @@ import pg from 'pg';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { WorkerAgentComponents } from '@sardeenz/types';
+import { ModelType, SleepLevel } from '@sardeenz/types';
+
 import { loadRootEnv } from '../../../load-env.js';
 
 import { redisKey } from '../../../clients/redis.js';
@@ -131,10 +134,19 @@ export interface TestHarness {
   teardown(): Promise<void>;
 }
 
+// Current WorkerInfo/WorkerMemoryReport contract shape (packages/contracts/specs/worker-agent.yaml),
+// validated at the Redis boundary by WorkerPoolService (control-plane/src/services/worker-pool.ts).
+// Typing the fixture against the generated contract types (rather than ad-hoc shapes) means a future
+// contract change that this fixture doesn't account for fails typecheck instead of silently rotting
+// until the next live-stack integration run (see #141).
+type WorkerInfoPayload = WorkerAgentComponents['schemas']['WorkerInfo'];
+type WorkerDeviceInfo = WorkerAgentComponents['schemas']['WorkerDeviceInfo'];
+type WorkerMemoryReportPayload = WorkerAgentComponents['schemas']['WorkerMemoryReport'];
+
 export interface RegisterWorkerOpts {
   workerId: string;
   managementUrl: string;
-  devices: { deviceIndex: number; deviceType: string; memoryTotalBytes: number }[];
+  devices: WorkerDeviceInfo[];
   runnerType?: string;
 }
 
@@ -198,14 +210,16 @@ export function createHarness(): TestHarness {
     const heartbeatKey = redisKey(keyPrefix, 'workers', opts.workerId, 'heartbeat');
     const memoryKey = redisKey(keyPrefix, 'workers', opts.workerId, 'memory');
 
-    const info = {
+    const info: WorkerInfoPayload = {
       capabilities: [
         {
           runnerType: opts.runnerType ?? 'vllm',
           engineName: 'vLLM',
-          supportedModelTypes: ['text-generation'],
+          supportedModelTypes: [ModelType.LLM],
           supportedDeviceTypes: opts.devices.map((d) => d.deviceType),
-          supportedSleepLevels: ['L1_HOST_RAM'],
+          supportedSleepLevels: [SleepLevel.L1_HOST_RAM],
+          maxTensorParallelism: 1,
+          kvCacheElasticSharing: false,
         },
       ],
       devices: opts.devices.map((d) => ({
@@ -216,7 +230,7 @@ export function createHarness(): TestHarness {
       managementUrl: opts.managementUrl,
     };
 
-    const memoryReport = {
+    const memoryReport: WorkerMemoryReportPayload = {
       devices: opts.devices.map((d) => ({
         deviceIndex: d.deviceIndex,
         deviceType: d.deviceType,

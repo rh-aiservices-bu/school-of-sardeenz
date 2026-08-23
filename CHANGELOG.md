@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Integration harness worker fixture updated to the current WorkerInfo contract.** The M6
+  Redis-boundary validation (#83) silently rejected the harness's `registerWorker` fixture
+  (`supportedModelTypes: ['text-generation']` is not a `ModelType` member), failing 8 of 11
+  integration tests with cascading "Worker not found" errors. The fixture is now built from the
+  generated contract types (`ModelType.LLM`, `SleepLevel.L1_HOST_RAM`, enum-typed device options),
+  so future contract drift fails `tsc` instead of rotting silently. Test-only change. (#141)
+
 - **Docs accuracy sweep.** Corrected the stale contract file index in `docs/development/contracts.md`
   (`specs/control-plane.yaml` replaces the non-existent `dashboard-control-plane.yaml`, and
   `specs/worker-agent.yaml` was missing entirely); fixed `npm run generate` → `npm run codegen`

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import { DeviceType, ModelLifecycleState, RunnerState } from '@sardeenz/types';
 
 import { canConnect, createHarness, type TestHarness } from './helpers/harness.js';
 import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.js';
@@ -22,7 +22,7 @@ async function deployModel(
   await harness.registerWorker({
     workerId: WORKER_ID,
     managementUrl: worker.url,
-    devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+    devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
   });
 
   await harness.modelRepository.create({
