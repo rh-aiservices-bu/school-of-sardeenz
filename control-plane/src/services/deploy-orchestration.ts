@@ -1,4 +1,4 @@
-import { ModelLifecycleState, ModelState, RunnerState } from '@sardeenz/types';
+import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
 import type { RunnerClient } from '../clients/runner.js';
 import type { WorkerClient, StartRunnerRequest } from '../clients/worker.js';
 import {
@@ -13,9 +13,11 @@ import type { MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 import type { WorkerPoolService } from './worker-pool.js';
 import type { NotificationService } from './notification.js';
+import { refreshModelRoutingState } from './sleep-wake.js';
 
 export interface DeployModelParams {
   modelName: string;
+  instanceId: string;
   workerId: string;
   runnerType: string;
   modelPath: string;
@@ -45,7 +47,12 @@ export class DeployOrchestrationService {
     deployTriggersTotal.inc();
 
     try {
-      await this.routingMap.setModelState(params.modelName, ModelState.STARTING);
+      // The route handler has already created this instance's Redis record (PENDING, then
+      // STARTING) before calling deployModel() in the background — refresh the model-level
+      // routing aggregate from all instances rather than stomping it to STARTING, since another
+      // instance of this model may already be ACTIVE (a second replica deploying must not make
+      // an already-healthy model look like it's starting from scratch).
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
 
       const worker = this.workerPool.getWorker(params.workerId);
       if (!worker) {
@@ -55,6 +62,7 @@ export class DeployOrchestrationService {
       const workerClient = this.createWorkerClient(worker.managementUrl);
       const startRequest: StartRunnerRequest = {
         modelName: params.modelName,
+        instanceId: params.instanceId,
         runnerType: params.runnerType,
         modelPath: params.modelPath,
         requiredMemory: params.requiredMemory,
@@ -72,9 +80,9 @@ export class DeployOrchestrationService {
       const enginePort = runnerInfo.enginePort ?? runnerInfo.port;
 
       // Persist the placement immediately (before waitForReady) so log streaming can
-      // resolve the runner while the model is still STARTING, rather than only after
+      // resolve the runner while the instance is still STARTING, rather than only after
       // the ACTIVE transition below.
-      await this.lifecycle.setRunnerEndpoint(params.modelName, {
+      await this.lifecycle.setRunnerEndpoint(params.modelName, params.instanceId, {
         runnerId: runnerInfo.runnerId,
         host: runnerInfo.host,
         port: runnerInfo.port,
@@ -83,7 +91,7 @@ export class DeployOrchestrationService {
 
       // Health-poll the management shim, not the engine port.
       const runnerClient = this.createRunnerClient(runnerInfo.host, runnerInfo.port);
-      await this.waitForReady(params.modelName, runnerClient);
+      await this.waitForReady(params.modelName, params.instanceId, runnerClient);
 
       // Route inference to the engine port so the proxy reaches the OpenAI server, not the shim.
       const endpoint: RunnerEndpoint = {
@@ -95,19 +103,19 @@ export class DeployOrchestrationService {
       };
       await this.routingMap.addEndpoint(params.modelName, endpoint);
 
-      await this.lifecycle.transition(params.modelName, ModelLifecycleState.ACTIVE, {
+      await this.lifecycle.transition(params.modelName, params.instanceId, ModelLifecycleState.ACTIVE, {
         runnerHost: runnerInfo.host,
         runnerPort: runnerInfo.port,
         runnerEnginePort: enginePort,
         runnerId: runnerInfo.runnerId,
       });
-      await this.routingMap.setModelState(params.modelName, ModelState.ACTIVE);
-      this.memoryBudget.releaseModelReservations(params.modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
+      this.memoryBudget.releaseInstanceReservations(params.instanceId);
 
       this.notifications
         ?.createNotification({
           title: 'Model deployed',
-          description: `${params.modelName} is now active`,
+          description: `${params.modelName} (${params.instanceId}) is now active`,
           variant: 'success',
           source: { type: 'model', name: params.modelName },
         })
@@ -117,6 +125,7 @@ export class DeployOrchestrationService {
     } catch (err) {
       await this.transitionToError(
         params.modelName,
+        params.instanceId,
         err instanceof Error ? err.message : String(err),
       );
       this.releaseReservations(params);
@@ -124,7 +133,11 @@ export class DeployOrchestrationService {
     }
   }
 
-  private async waitForReady(modelName: string, runnerClient: RunnerClient): Promise<void> {
+  private async waitForReady(
+    modelName: string,
+    instanceId: string,
+    runnerClient: RunnerClient,
+  ): Promise<void> {
     const signal = AbortSignal.timeout(this.deployTimeoutMs);
 
     while (!signal.aborted) {
@@ -138,16 +151,16 @@ export class DeployOrchestrationService {
         throw new ControlPlaneError(
           502,
           'RUNNER_UNAVAILABLE',
-          `Runner entered ERROR state while deploying model ${modelName}: ${result.message ?? 'unknown'}`,
-          { modelName, runnerMessage: result.message ?? null },
+          `Runner entered ERROR state while deploying instance ${instanceId} (${modelName}): ${result.message ?? 'unknown'}`,
+          { modelName, instanceId, runnerMessage: result.message ?? null },
         );
       }
 
       await delaySafe(this.healthCheckIntervalMs, signal);
     }
 
-    const message = `Deploy timed out after ${this.deployTimeoutMs}ms for model ${modelName}`;
-    throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName });
+    const message = `Deploy timed out after ${this.deployTimeoutMs}ms for instance ${instanceId} (${modelName})`;
+    throw new ControlPlaneError(504, 'RUNNER_TIMEOUT', message, { modelName, instanceId });
   }
 
   private async pollRunnerHealth(
@@ -171,14 +184,20 @@ export class DeployOrchestrationService {
     }
   }
 
-  private async transitionToError(modelName: string, errorMessage: string): Promise<void> {
+  private async transitionToError(
+    modelName: string,
+    instanceId: string,
+    errorMessage: string,
+  ): Promise<void> {
     try {
-      await this.lifecycle.transition(modelName, ModelLifecycleState.ERROR, { errorMessage });
-      await this.routingMap.setModelState(modelName, ModelState.ERROR);
+      await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ERROR, {
+        errorMessage,
+      });
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
       this.notifications
         ?.createNotification({
           title: 'Model deployment failed',
-          description: `${modelName}: ${errorMessage}`,
+          description: `${modelName} (${instanceId}): ${errorMessage}`,
           variant: 'danger',
           source: { type: 'model', name: modelName },
         })
@@ -189,6 +208,6 @@ export class DeployOrchestrationService {
   }
 
   private releaseReservations(params: DeployModelParams): void {
-    this.memoryBudget.releaseModelReservations(params.modelName);
+    this.memoryBudget.releaseInstanceReservations(params.instanceId);
   }
 }

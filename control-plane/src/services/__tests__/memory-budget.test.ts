@@ -70,7 +70,7 @@ function workerKey(workerId: string): string {
 // ---------------------------------------------------------------------------
 // Issue #87: reservations must survive refreshAll/refreshWorkerBudget regardless
 // of what usedBytes the worker reports — they are only ever cleared explicitly via
-// releaseModelReservations or clearWorkerReservations, never inferred from usage.
+// releaseInstanceReservations or clearWorkerReservations, never inferred from usage.
 // ---------------------------------------------------------------------------
 
 describe('MemoryBudgetService — reservations survive refreshes', () => {
@@ -294,7 +294,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     expect(device?.availableBytes).toBe(totalBytes - modelABytes - modelBBytes);
   });
 
-  it('releaseModelReservations restores availableBytes for the released model only', async () => {
+  it('releaseInstanceReservations restores availableBytes for the released model only', async () => {
     const workerId = 'w1';
     const deviceIndex = 0;
     const totalBytes = 16_000_000_000;
@@ -315,7 +315,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     service.reserveCapacity(workerId, deviceIndex, 'model-a', modelABytes);
     service.reserveCapacity(workerId, deviceIndex, 'model-b', modelBBytes);
 
-    service.releaseModelReservations('model-a');
+    service.releaseInstanceReservations('model-a');
 
     const budget = service.getWorkerBudget(workerId);
     const device = budget?.devices[0];
@@ -323,7 +323,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     expect(device?.availableBytes).toBe(totalBytes - modelBBytes);
   });
 
-  it('releaseModelReservations removes the model from every device it reserved on', async () => {
+  it('releaseInstanceReservations removes the model from every device it reserved on', async () => {
     const workerId = 'w1';
     const totalBytes = 16_000_000_000;
     const bytesPerDevice = 4_000_000_000;
@@ -341,7 +341,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     service.reserveCapacity(workerId, 0, 'model-a', bytesPerDevice);
     service.reserveCapacity(workerId, 1, 'model-a', bytesPerDevice);
 
-    service.releaseModelReservations('model-a');
+    service.releaseInstanceReservations('model-a');
 
     const budget = service.getWorkerBudget(workerId);
     expect(budget?.devices[0]?.reservedBytes).toBe(0);
@@ -350,7 +350,7 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     expect(budget?.devices[1]?.availableBytes).toBe(totalBytes);
   });
 
-  it('releaseModelReservations is idempotent — releasing twice is a no-op', async () => {
+  it('releaseInstanceReservations is idempotent — releasing twice is a no-op', async () => {
     const workerId = 'w1';
     const deviceIndex = 0;
     const totalBytes = 16_000_000_000;
@@ -369,8 +369,8 @@ describe('MemoryBudgetService — reservation mechanics', () => {
     await service.refreshWorkerBudget(workerId);
     service.reserveCapacity(workerId, deviceIndex, 'model-a', reservedBytes);
 
-    service.releaseModelReservations('model-a');
-    service.releaseModelReservations('model-a'); // double release — should not throw or misbehave
+    service.releaseInstanceReservations('model-a');
+    service.releaseInstanceReservations('model-a'); // double release — should not throw or misbehave
 
     const budget = service.getWorkerBudget(workerId);
     const device = budget?.devices[0];

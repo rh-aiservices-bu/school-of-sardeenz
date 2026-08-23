@@ -73,6 +73,19 @@ export class WorkerClient {
     });
   }
 
+  /**
+   * Same as {@link streamRunnerLogsByModel}, but addressed by the control-plane-assigned
+   * `instanceId` — unambiguous when replicas of the same model run on this worker. Like
+   * streamRunnerLogsByModel, does NOT throw on a non-2xx status (the caller inspects
+   * `response.ok`/`.status` to retry a `404` during cold-start) and applies no default timeout.
+   */
+  async streamRunnerLogsByInstance(instanceId: string, signal?: AbortSignal): Promise<Response> {
+    return fetch(`${this.baseUrl}/runners/by-instance/${encodeURIComponent(instanceId)}/logs`, {
+      headers: { Accept: 'text/event-stream', ...this.authHeaders() },
+      signal,
+    });
+  }
+
   async stopRunner(runnerId: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}`, {
       method: 'DELETE',

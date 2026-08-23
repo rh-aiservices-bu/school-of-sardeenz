@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
+import { ModelLifecycleState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
+import { assertValidModelName } from '../utils/model-name.js';
 
 const POLL_INTERVAL_MS = 500;
 const PING_INTERVAL_MS = 30_000;
@@ -28,16 +30,17 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
     '/api/v1/models/:modelName/logs',
     async (request, reply) => {
       const { modelName } = request.params;
+      assertValidModelName(modelName);
 
       // Mirror the GET /:modelName detail route's not-found check — do this BEFORE
       // hijacking, since a 404 after hijack can't be delivered as a normal HTTP error
       // (EventSource treats any post-hijack non-200 as an unrecoverable connection reset).
-      const [initialState, record] = await Promise.all([
-        deps.lifecycle.getState(modelName),
+      const [initialInstances, record] = await Promise.all([
+        deps.lifecycle.getInstancesForModel(modelName),
         deps.modelRepository.findByName(modelName),
       ]);
 
-      if (!initialState && !record) {
+      if (initialInstances.length === 0 && !record) {
         throw ControlPlaneError.modelNotFound(modelName);
       }
 
@@ -143,20 +146,29 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
       const poll = async (): Promise<void> => {
         if (ended || attaching) return;
 
-        let current;
+        let instances;
         try {
-          current = await deps.lifecycle.getState(modelName);
+          instances = await deps.lifecycle.getInstancesForModel(modelName);
         } catch {
           return;
         }
 
         if (ended) return;
 
-        if (!current) {
+        if (instances.length === 0) {
           write('end', 'model removed');
           cleanup();
           return;
         }
+
+        // With replicas, several instances may exist for this model — prefer whichever one is
+        // cold-starting (the case this stream exists for); fall back to the most recently
+        // changed instance otherwise. The worker's by-model logs route (below) resolves the
+        // model name to its own most-recently-started runner, so this only needs a workerId to
+        // attach to, not a specific instance.
+        const current =
+          instances.find((i) => i.state === ModelLifecycleState.STARTING) ??
+          [...instances].sort((a, b) => b.stateChangedAt.localeCompare(a.stateChangedAt))[0];
 
         if (current.workerId) {
           attaching = true;

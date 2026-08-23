@@ -6,7 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Logical model vs. instance split — N replicas per model (ADR-019).** A model name is now a
+  logical model (unique config in Postgres `models`) served by N instances (new `instances` table,
+  migration 003; instance-keyed Redis lifecycle state `models:{name}:{instanceId}` with
+  control-plane-minted `inst-<12hex>` IDs). New instance API: `POST /api/v1/models/{name}/instances`
+  creates a replica (same worker or different — the dev-worker agent now runs N runners per model);
+  instance-scoped `DELETE`/`sleep`/`wake` sub-routes; model-level actions fan out per-instance with
+  error isolation. `GET /models` reports a derived aggregate state (ACTIVE if ≥1 instance ACTIVE)
+  plus instance counts; `GET /models/{name}` lists instances. **Breaking contract change** to
+  `control-plane.yaml` response shapes (dashboard/BFF updated in the same change);
+  `worker-agent.yaml` gains `StartRunnerRequest.instanceId` and `GET /runners/by-instance/{id}/logs`.
+  New internal `updateEndpointWeight` routing-map primitive (atomic Lua, mirrors endpoint-health
+  updates) enables deterministic traffic shifting; a scripted move (deploy new instance → shift →
+  stop old) completes with zero failed requests under concurrent load in the integration suite.
+  Reconciliation gains per-instance recovery, a run-once legacy-key prune, and an orphaned-instance
+  reaper (read-skew-safe sequential two-store read + per-candidate recheck). Dashboard groups
+  instances under each model with per-instance management on the detail page. The proxy is
+  untouched — routing map shape and Rust contract mirror are unchanged. (#120)
+
+- **Stop/Start model lifecycle operations (model record = configuration registry).** Decision on
+  #121 (option A): a model record is a configuration registry entry that outlives its runner —
+  Stop (`POST /api/v1/models/{modelName}/stop`) tears down the runner and keeps the record; Start
+  (`POST /api/v1/models/{modelName}/start`) re-deploys from the stored configuration (placement
+  re-runs, so the model may land on a different worker); Delete remains the record-removing
+  teardown. Stop is valid only from settled states (`ACTIVE`/`SLEEPING`/`ERROR`) and rejects
+  transient states with 409, with a synchronous claim closing the double-Stop race; Start re-validates
+  weights-path containment and 409s when runtime state already exists. The deploy pipeline is
+  extracted into a shared `deployFromRecord` helper used by both deploy and Start. Dashboard adds
+  per-state Start/Stop actions (list + detail, confirm modals, i18n); contract and docs now describe
+  `STOPPED` as "configured but not running — record retained, can be started or deleted" instead of
+  teardown framing. (#121)
+
+- **`make dev-full-logged` target.** Full dev stack (proxy, control plane, dashboard, BFF) via the
+  existing `:logged` scripts plus one dev worker tee'd to `logs/worker.log`. The worker invocation
+  defaults `SARDEENZ_RUNNER_CATALOG_URL` to `./runners.yaml` (correct for the repo-root cwd this
+  target runs from; a shell-exported value still wins), avoiding the `.env` control-plane-relative
+  path that breaks worker catalog loading when launched from the root.
+
 ### Fixed
+
+- **Integration harness worker fixture updated to the current WorkerInfo contract.** The M6
+  Redis-boundary validation (#83) silently rejected the harness's `registerWorker` fixture
+  (`supportedModelTypes: ['text-generation']` is not a `ModelType` member), failing 8 of 11
+  integration tests with cascading "Worker not found" errors. The fixture is now built from the
+  generated contract types (`ModelType.LLM`, `SleepLevel.L1_HOST_RAM`, enum-typed device options),
+  so future contract drift fails `tsc` instead of rotting silently. Test-only change. (#141)
 
 - **Docs accuracy sweep.** Corrected the stale contract file index in `docs/development/contracts.md`
   (`specs/control-plane.yaml` replaces the non-existent `dashboard-control-plane.yaml`, and

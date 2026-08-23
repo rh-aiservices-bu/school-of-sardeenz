@@ -9,6 +9,7 @@ import { runMigrations } from './clients/migrations.js';
 import { RunnerClient } from './clients/runner.js';
 import { buildServer } from './server.js';
 import { ModelRepository } from './services/model-repository.js';
+import { InstanceRepository } from './services/instance-repository.js';
 import { ModelLifecycleService } from './services/model-lifecycle.js';
 import { MemoryBudgetService } from './services/memory-budget.js';
 import { WorkerPoolService } from './services/worker-pool.js';
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   }
 
   const modelRepository = new ModelRepository(db);
+  const instanceRepository = new InstanceRepository(db);
   const lifecycle = new ModelLifecycleService(redis, config.redisKeyPrefix);
   const memoryBudget = new MemoryBudgetService(
     redis,
@@ -134,6 +136,7 @@ async function main(): Promise<void> {
     routes: {
       config,
       modelRepository,
+      instanceRepository,
       lifecycle,
       memoryBudget,
       workerPool,
@@ -167,6 +170,8 @@ async function main(): Promise<void> {
     redis,
     config.redisKeyPrefix,
     notifications,
+    instanceRepository,
+    modelRepository,
   );
 
   await leaderElection.start();

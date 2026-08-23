@@ -6,7 +6,7 @@ COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podm
 
 .PHONY: help all lint lint-specs format format-check typecheck test test-integration \
         test-coverage codegen clean services services-stop \
-        dev dev-full dev-cp dev-bff dev-dashboard dev-proxy \
+        dev dev-full dev-full-logged dev-cp dev-bff dev-dashboard dev-proxy \
         dev-worker dev-worker-2 dev-worker-stop
 
 ##@ Help
@@ -35,6 +35,14 @@ dev-full: ## App stack + ONE dev worker (proxy, cp, dashboard, BFF, worker)
 		"npm run dev -w @sardeenz/dashboard" \
 		"npm run dev:server -w @sardeenz/dashboard" \
 		"node --import tsx runners/dev-worker/src/index.ts"
+
+dev-full-logged: ## App stack + ONE dev worker, each tee'd to logs/<service>.log
+	npx concurrently --names "proxy,cp,dashboard,bff,worker" --prefix-colors "yellow,magenta,green,cyan,blue" \
+		"./scripts/dev-proxy.sh --logged" \
+		"npm run dev:logged -w @sardeenz/control-plane" \
+		"npm run dev:logged -w @sardeenz/dashboard" \
+		"npm run dev:server:logged -w @sardeenz/dashboard" \
+		"mkdir -p logs && SARDEENZ_RUNNER_CATALOG_URL=$${SARDEENZ_RUNNER_CATALOG_URL:-./runners.yaml} node --import tsx runners/dev-worker/src/index.ts 2>&1 | tee logs/worker.log"
 
 dev-cp: ## Control plane only (Fastify dev server, :3000)
 	npm run dev -w @sardeenz/control-plane

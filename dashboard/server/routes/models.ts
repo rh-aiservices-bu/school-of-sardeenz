@@ -85,4 +85,73 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       return reply.code(status).send(data);
     },
   );
+
+  // POST /api/models/:name/stop — write op: no Redis fallback
+  app.post<{ Params: { name: string } }>(
+    '/api/models/:name/stop',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.stopModel(request.params.name);
+      return reply.code(status).send(data);
+    },
+  );
+
+  // POST /api/models/:name/start — write op: no Redis fallback
+  app.post<{ Params: { name: string } }>(
+    '/api/models/:name/start',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.startModel(request.params.name);
+      return reply.code(status).send(data);
+    },
+  );
+
+  // POST /api/models/:name/instances — create a replica instance: no Redis fallback
+  app.post<{ Params: { name: string } }>(
+    '/api/models/:name/instances',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.createInstance(request.params.name);
+      return reply.code(status).send(data);
+    },
+  );
+
+  // DELETE /api/models/:name/instances/:instanceId — write op: no Redis fallback
+  app.delete<{ Params: { name: string; instanceId: string } }>(
+    '/api/models/:name/instances/:instanceId',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.deleteInstance(
+        request.params.name,
+        request.params.instanceId,
+      );
+      return reply.code(status).send(data);
+    },
+  );
+
+  // POST /api/models/:name/instances/:instanceId/sleep — write op: no Redis fallback
+  app.post<{ Params: { name: string; instanceId: string } }>(
+    '/api/models/:name/instances/:instanceId/sleep',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.sleepInstance(
+        request.params.name,
+        request.params.instanceId,
+      );
+      return reply.code(status).send(data);
+    },
+  );
+
+  // POST /api/models/:name/instances/:instanceId/wake — write op: no Redis fallback
+  app.post<{ Params: { name: string; instanceId: string } }>(
+    '/api/models/:name/instances/:instanceId/wake',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.wakeInstance(
+        request.params.name,
+        request.params.instanceId,
+      );
+      return reply.code(status).send(data);
+    },
+  );
 }

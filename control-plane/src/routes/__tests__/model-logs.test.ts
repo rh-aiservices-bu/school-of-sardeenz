@@ -7,11 +7,12 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import { registerModelLogRoutes } from '../model-logs.js';
 import { ControlPlaneError } from '../../errors.js';
 import type { RouteDeps } from '../deps.js';
-import type { ModelState } from '../../services/model-lifecycle.js';
+import type { InstanceState } from '../../services/model-lifecycle.js';
 import type { WorkerRecord } from '../../services/worker-pool.js';
 
-function makeState(overrides: Partial<ModelState> = {}): ModelState {
+function makeState(overrides: Partial<InstanceState> = {}): InstanceState {
   return {
+    instanceId: 'inst-000000000001',
     modelName: 'test-model',
     state: ModelLifecycleState.STARTING,
     workerId: null,
@@ -63,7 +64,7 @@ function make404Response(): Response {
 }
 
 interface Mocks {
-  lifecycle: { getState: ReturnType<typeof vi.fn> };
+  lifecycle: { getInstancesForModel: ReturnType<typeof vi.fn> };
   modelRepository: { findByName: ReturnType<typeof vi.fn> };
   workerPool: { getWorker: ReturnType<typeof vi.fn> };
   createWorkerClient: ReturnType<typeof vi.fn>;
@@ -71,17 +72,23 @@ interface Mocks {
 
 function createMocks(): Mocks {
   return {
-    lifecycle: { getState: vi.fn() },
+    lifecycle: { getInstancesForModel: vi.fn() },
     modelRepository: { findByName: vi.fn() },
     workerPool: { getWorker: vi.fn() },
     createWorkerClient: vi.fn(),
   };
 }
 
+/** Mirrors what the real getInstancesForModel would return for a single-instance model. */
+function oneInstance(state: InstanceState | null): InstanceState[] {
+  return state ? [state] : [];
+}
+
 function toDeps(mocks: Mocks, deployTimeoutSecs = 5): RouteDeps {
   return {
     config: { deployTimeoutSecs } as unknown as RouteDeps['config'],
     modelRepository: mocks.modelRepository as unknown as RouteDeps['modelRepository'],
+    instanceRepository: {} as RouteDeps['instanceRepository'],
     lifecycle: mocks.lifecycle as unknown as RouteDeps['lifecycle'],
     memoryBudget: {} as RouteDeps['memoryBudget'],
     workerPool: mocks.workerPool as unknown as RouteDeps['workerPool'],
@@ -123,7 +130,7 @@ describe('GET /api/v1/models/:modelName/logs', () => {
 
   it('returns 404 for an unknown model before hijacking', async () => {
     const mocks = createMocks();
-    mocks.lifecycle.getState.mockResolvedValue(null);
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([]);
     mocks.modelRepository.findByName.mockResolvedValue(null);
     app = await buildTestApp(toDeps(mocks));
 
@@ -137,8 +144,8 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     const mocks = createMocks();
     // workerId is set at STARTING; runnerId is deliberately NOT required to attach — logs are
     // addressed by model name so they're reachable during cold-start.
-    mocks.lifecycle.getState.mockResolvedValue(
-      makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE }),
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue(
+      oneInstance(makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE })),
     );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
     const streamRunnerLogsByModel = vi
@@ -158,8 +165,8 @@ describe('GET /api/v1/models/:modelName/logs', () => {
 
   it('registers the hijacked raw response and removes it once the stream ends', async () => {
     const mocks = createMocks();
-    mocks.lifecycle.getState.mockResolvedValue(
-      makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE }),
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue(
+      oneInstance(makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE })),
     );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
     const streamRunnerLogsByModel = vi
@@ -181,7 +188,9 @@ describe('GET /api/v1/models/:modelName/logs', () => {
   it('retries while the worker returns 404, then streams once the runner registers', async () => {
     const mocks = createMocks();
     // workerId is known throughout STARTING; the worker 404s until it receives the start command.
-    mocks.lifecycle.getState.mockResolvedValue(makeState({ workerId: 'worker-1' }));
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue(
+      oneInstance(makeState({ workerId: 'worker-1' })),
+    );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
     const streamRunnerLogsByModel = vi
       .fn()
@@ -201,7 +210,9 @@ describe('GET /api/v1/models/:modelName/logs', () => {
 
   it('times out (ending the stream) when the runner never registers', async () => {
     const mocks = createMocks();
-    mocks.lifecycle.getState.mockResolvedValue(makeState({ workerId: 'worker-1' }));
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue(
+      oneInstance(makeState({ workerId: 'worker-1' })),
+    );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
     // Worker keeps 404-ing — runner never comes up. Short deploy timeout bounds the wait.
     const streamRunnerLogsByModel = vi.fn().mockResolvedValue(make404Response());
@@ -214,4 +225,32 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     expect(res.body).toContain('event: end');
     expect(res.body).toContain('timed out waiting for runner placement');
   }, 10_000);
+
+  it('prefers the STARTING instance when the model has a replica already ACTIVE', async () => {
+    const mocks = createMocks();
+    const active = makeState({
+      instanceId: 'inst-active',
+      workerId: 'worker-active',
+      state: ModelLifecycleState.ACTIVE,
+      stateChangedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const starting = makeState({
+      instanceId: 'inst-starting',
+      workerId: 'worker-1',
+      state: ModelLifecycleState.STARTING,
+      stateChangedAt: '2026-06-01T00:00:00.000Z',
+    });
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([active, starting]);
+    mocks.workerPool.getWorker.mockReturnValue(makeWorker());
+    const streamRunnerLogsByModel = vi
+      .fn()
+      .mockResolvedValue(makeUpstreamResponse(['event: log\ndata: cold-starting replica\n\n']));
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    app = await buildTestApp(toDeps(mocks));
+
+    await app.inject({ method: 'GET', url: '/api/v1/models/test-model/logs' });
+
+    // The STARTING instance's worker (worker-1) is attached to, not the older ACTIVE one.
+    expect(mocks.createWorkerClient).toHaveBeenCalledWith('http://worker-1:8080');
+  });
 });

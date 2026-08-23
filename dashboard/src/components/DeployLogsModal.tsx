@@ -43,6 +43,10 @@ export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalP
   const isActive = model?.state === ModelLifecycleState.ACTIVE;
   const isError = model?.state === ModelLifecycleState.ERROR;
   const isStarting = model?.state === ModelLifecycleState.STARTING || model === undefined;
+  // The aggregate model state is ERROR only when no instance is healthy — surface the errored
+  // instance's own message (see ModelDetail for the same per-instance derivation).
+  const errorMessage = model?.instances?.find((i) => i.state === ModelLifecycleState.ERROR)
+    ?.errorMessage;
 
   return (
     <Modal variant={ModalVariant.large} isOpen={isOpen} onClose={onClose} aria-label={t('logs.modalTitle')}>
@@ -96,7 +100,7 @@ export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalP
             isInline
             style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           >
-            {model?.errorMessage ?? t('logs.failureBodyFallback')}
+            {errorMessage ?? t('logs.failureBodyFallback')}
           </Alert>
         )}
 

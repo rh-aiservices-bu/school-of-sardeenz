@@ -148,7 +148,7 @@ Each worker runs a three-layer process architecture:
 
 1. **Worker agent** — a long-lived management process inside the worker Pod. It self-registers to Redis/Valkey (capabilities, devices, heartbeat), receives commands from the control plane to start and stop runners, and exposes an HTTP management API (`POST /runners`, `DELETE /runners/{runnerId}`).
 
-2. **Runner** — a separate process spawned by the worker agent, one per model. Each runner is a thin engine-specific shim that:
+2. **Runner** — a separate process spawned by the worker agent, one per model **instance**. A logical model may have several instances (replicas) — including more than one on the same worker — each with its own runner process (see [ADR-019](adrs/adr-019-logical-model-vs-instance-split.md)). Each runner is a thin engine-specific shim that:
    - Executes its engine **SIF** in place — `apptainer exec --nv /modules/<engine>-<version>.sif <serve cmd>` — from the shared RWX module store (no per-host copy)
    - Runs the actual engine as the exec'd process
    - Exposes the runner contract HTTP API (`/health`, `/sleep`, `/wake`, `/memory-report`) on its own port
@@ -183,7 +183,7 @@ graph LR
 
     subgraph "Redis / Valkey"
         RM[Routing Map]
-        MS[Model States]
+        MS[Instance States]
         MB[Memory Budgets]
         CT[Cluster Topology]
         DU[Device Memory Usage]
@@ -225,11 +225,21 @@ Data is split across three purpose-matched stores:
 
 | Store              | What                                                                                                    | Why                                                                                                                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Redis / Valkey** | Routing map, model states, device memory budgets, worker-reported device memory usage, cluster topology | Sub-millisecond reads for the proxy. Pub/sub for state change notifications. Workers push their own device memory data, inverting v1's polling model. |
-| **PostgreSQL**     | Configurations, benchmarks, memory profiles, persistent settings                                        | Durability, queryability, transactional guarantees for data that must survive restarts.                                                               |
+| **Redis / Valkey** | Routing map, instance lifecycle states, device memory budgets, worker-reported device memory usage, cluster topology | Sub-millisecond reads for the proxy. Pub/sub for state change notifications. Workers push their own device memory data, inverting v1's polling model. |
+| **PostgreSQL**     | Configurations, instance placement ledger, benchmarks, memory profiles, persistent settings                        | Durability, queryability, transactional guarantees for data that must survive restarts.                                                               |
 | **Prometheus**     | Inference metrics, device utilization, proxy stats, component health                                    | Time-series collection via scrape endpoints. Dashboard reads directly for monitoring views.                                                           |
 
 > See [ADR-009](adrs/adr-009-state-and-persistence.md) for the full rationale.
+
+**Logical model vs. instance.** A *logical model* (Postgres `models` — config: runner type, weights
+path, memory requirement, etc.; unique name, the routing key clients request) may have zero or more
+*instances* (one runner process on one worker each, with its own lifecycle state, VRAM reservation,
+and routing endpoint — identified by a control-plane-minted `instanceId`). Instance lifecycle state
+lives in Redis, one key per instance (`{prefix}:models:{modelName}:{instanceId}`); a lightweight
+Postgres `instances` table is the durable identity/placement ledger, written at instance create/
+delete. The model's own state (`ACTIVE`, `SLEEPING`, etc., as surfaced by the API and dashboard) is
+derived from its instances on read — the highest-precedence state present, with `ACTIVE` outranking
+`ERROR` so one healthy replica masks a broken one. See [ADR-019](adrs/adr-019-logical-model-vs-instance-split.md).
 
 ## Worker and Runner Model
 

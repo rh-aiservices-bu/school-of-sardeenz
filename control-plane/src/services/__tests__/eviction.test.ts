@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
 
 import { EvictionEngine, LruEvictionStrategy } from '../eviction.js';
-import type { ModelState } from '../model-lifecycle.js';
+import type { InstanceState } from '../model-lifecycle.js';
 
-function makeModelState(overrides: Partial<ModelState> & { modelName: string }): ModelState {
+function makeModelState(
+  overrides: Partial<InstanceState> & { modelName: string },
+): InstanceState {
   return {
+    instanceId: `inst-${overrides.modelName}`,
     state: ModelLifecycleState.ACTIVE,
     workerId: 'w1',
     runnerHost: null,
@@ -25,6 +28,7 @@ describe('LruEvictionStrategy', () => {
   it('selects least recently used models first', () => {
     const candidates = [
       {
+        instanceId: 'inst-b',
         modelName: 'b',
         state: ModelLifecycleState.ACTIVE,
         workerId: 'w1',
@@ -33,6 +37,7 @@ describe('LruEvictionStrategy', () => {
         pinned: false,
       },
       {
+        instanceId: 'inst-a',
         modelName: 'a',
         state: ModelLifecycleState.ACTIVE,
         workerId: 'w1',
@@ -41,6 +46,7 @@ describe('LruEvictionStrategy', () => {
         pinned: false,
       },
       {
+        instanceId: 'inst-c',
         modelName: 'c',
         state: ModelLifecycleState.ACTIVE,
         workerId: 'w1',
@@ -57,6 +63,7 @@ describe('LruEvictionStrategy', () => {
   it('treats null lastInferenceAt as oldest', () => {
     const candidates = [
       {
+        instanceId: 'inst-a',
         modelName: 'a',
         state: ModelLifecycleState.ACTIVE,
         workerId: 'w1',
@@ -65,6 +72,7 @@ describe('LruEvictionStrategy', () => {
         pinned: false,
       },
       {
+        instanceId: 'inst-b',
         modelName: 'b',
         state: ModelLifecycleState.ACTIVE,
         workerId: 'w1',
@@ -81,14 +89,14 @@ describe('LruEvictionStrategy', () => {
 
 /** Uniform 8e9-byte memoryByModel map, keyed by each model's modelName — for tests that aren't
  * exercising size-based selection and just need every candidate to have a non-zero size. */
-function uniformMemory(models: ModelState[], bytes = 8e9): Map<string, number> {
+function uniformMemory(models: InstanceState[], bytes = 8e9): Map<string, number> {
   return new Map(models.map((m) => [m.modelName, bytes]));
 }
 
 describe('EvictionEngine', () => {
   it('excludes pinned models', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'pinned-model' }),
       makeModelState({ modelName: 'unpinned-model', lastInferenceAt: '2026-01-01T00:01:00Z' }),
     ];
@@ -112,7 +120,7 @@ describe('EvictionEngine', () => {
       circuitBreakerWindowSecs: 60,
     });
 
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({
         modelName: 'new-model',
         stateChangedAt: new Date().toISOString(),
@@ -131,7 +139,7 @@ describe('EvictionEngine', () => {
       circuitBreakerWindowSecs: 60,
     });
 
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'a', lastInferenceAt: '2026-01-01T00:01:00Z' }),
       makeModelState({ modelName: 'b', lastInferenceAt: '2026-01-01T00:02:00Z' }),
       makeModelState({ modelName: 'c', lastInferenceAt: '2026-01-01T00:03:00Z' }),
@@ -149,7 +157,7 @@ describe('EvictionEngine', () => {
 
   it('only evicts ACTIVE or SLEEPING models', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'active', state: ModelLifecycleState.ACTIVE }),
       makeModelState({ modelName: 'sleeping', state: ModelLifecycleState.SLEEPING }),
       makeModelState({ modelName: 'starting', state: ModelLifecycleState.STARTING }),
@@ -172,7 +180,7 @@ describe('EvictionEngine', () => {
 
   it('filters by target worker when specified', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'on-w1', workerId: 'w1' }),
       makeModelState({ modelName: 'on-w2', workerId: 'w2' }),
     ];
@@ -190,7 +198,7 @@ describe('EvictionEngine', () => {
 
   it('filters by target worker set with multiple workers', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'on-w1', workerId: 'w1' }),
       makeModelState({ modelName: 'on-w2', workerId: 'w2' }),
       makeModelState({ modelName: 'on-w3', workerId: 'w3' }),
@@ -211,7 +219,7 @@ describe('EvictionEngine', () => {
 
   it('excludes candidates with zero or unknown memoryBytes', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'zero-size', lastInferenceAt: '2026-01-01T00:01:00Z' }),
       makeModelState({ modelName: 'sized', lastInferenceAt: '2026-01-01T00:02:00Z' }),
     ];
@@ -225,7 +233,7 @@ describe('EvictionEngine', () => {
 
   it('selects victims from a mix of zero-size and sized candidates', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'zero-size', lastInferenceAt: '2026-01-01T00:01:00Z' }),
       makeModelState({ modelName: 'sized-a', lastInferenceAt: '2026-01-01T00:02:00Z' }),
       makeModelState({ modelName: 'sized-b', lastInferenceAt: '2026-01-01T00:03:00Z' }),
@@ -243,7 +251,7 @@ describe('EvictionEngine', () => {
 
   it('returns empty when all candidates have zero memoryBytes', () => {
     const engine = new EvictionEngine();
-    const models: ModelState[] = [
+    const models: InstanceState[] = [
       makeModelState({ modelName: 'a', lastInferenceAt: '2026-01-01T00:01:00Z' }),
       makeModelState({ modelName: 'b', lastInferenceAt: '2026-01-01T00:02:00Z' }),
     ];
@@ -268,7 +276,7 @@ describe('EvictionEngine', () => {
     engine.recordEviction('test');
     engine.recordEviction('test');
 
-    const models: ModelState[] = [makeModelState({ modelName: 'a' })];
+    const models: InstanceState[] = [makeModelState({ modelName: 'a' })];
 
     const victims = engine.selectVictims(models, new Set(), 8e9);
     expect(victims).toHaveLength(0);

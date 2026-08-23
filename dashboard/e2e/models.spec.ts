@@ -22,6 +22,14 @@ const SLEEPING_MODEL: MockModelInfo = {
   createdAt: new Date(Date.now() - 7200_000).toISOString(),
 };
 
+const STOPPED_MODEL: MockModelInfo = {
+  modelName: 'stopped/model',
+  state: 'STOPPED',
+  runnerType: 'vllm',
+  requiredMemory: 8 * 1024 ** 3,
+  createdAt: new Date(Date.now() - 7200_000).toISOString(),
+};
+
 test.describe('Model Management', () => {
   test.describe('Model List', () => {
     test('renders model table when models exist', async ({ page, bffPort, mockControlPlane }) => {
@@ -233,6 +241,58 @@ test.describe('Model Management', () => {
 
       // Model should still be visible
       await expect(page.getByText(ACTIVE_MODEL.modelName)).toBeVisible();
+    });
+  });
+
+  test.describe('Start / Stop Flow', () => {
+    test('STOPPED model row offers Start and Delete, not Sleep/Wake', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
+      mockControlPlane.setModels([STOPPED_MODEL]);
+
+      await page.goto(bffUrl(bffPort, '/models'));
+
+      await page.locator(`button[aria-label="Actions for ${STOPPED_MODEL.modelName}"]`).click();
+
+      await expect(page.getByRole('menuitem', { name: 'Start' })).toBeVisible();
+      await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeVisible();
+      await expect(page.getByRole('menuitem', { name: 'Sleep' })).not.toBeVisible();
+      await expect(page.getByRole('menuitem', { name: 'Wake' })).not.toBeVisible();
+    });
+
+    test('Start action transitions the model out of STOPPED', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
+      mockControlPlane.setModels([STOPPED_MODEL]);
+
+      await page.goto(bffUrl(bffPort, '/models'));
+
+      await page.locator(`button[aria-label="Actions for ${STOPPED_MODEL.modelName}"]`).click();
+      await page.getByRole('menuitem', { name: 'Start' }).click();
+
+      // The mock CP flips the model to STARTING; the row should no longer show STOPPED.
+      await expect(page.getByText('Stopped', { exact: false })).not.toBeVisible({
+        timeout: 5_000,
+      });
+    });
+
+    test('ACTIVE model row offers Stop, and Stop opens a confirmation', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
+      mockControlPlane.setModels([ACTIVE_MODEL]);
+
+      await page.goto(bffUrl(bffPort, '/models'));
+
+      await page.locator(`button[aria-label="Actions for ${ACTIVE_MODEL.modelName}"]`).click();
+      await page.getByRole('menuitem', { name: 'Stop' }).click();
+
+      await expect(page.getByText('Stop model?')).toBeVisible();
     });
   });
 

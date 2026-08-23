@@ -1,9 +1,10 @@
 import { ModelLifecycleState } from '@sardeenz/types';
 
-import type { ModelState } from './model-lifecycle.js';
+import type { InstanceState } from './model-lifecycle.js';
 import { evictionsTotal, evictionDuration } from '../health/metrics.js';
 
 export interface EvictionCandidate {
+  instanceId: string;
   modelName: string;
   state: ModelLifecycleState;
   workerId: string;
@@ -59,7 +60,7 @@ export class EvictionEngine {
   ) {}
 
   selectVictims(
-    allModels: ModelState[],
+    allInstances: InstanceState[],
     pinnedModels: Set<string>,
     requiredBytes: number,
     targetWorkerIds?: ReadonlySet<string>,
@@ -69,7 +70,10 @@ export class EvictionEngine {
       return [];
     }
 
-    const candidates = allModels
+    // pinnedModels and memoryByModel are keyed by logical model name (pinning and configured
+    // size are model-level config, not per-instance) — every instance of a pinned model is
+    // excluded, and every instance of a model inherits its model's configured memory size.
+    const candidates = allInstances
       .filter(
         (m) => m.state === ModelLifecycleState.ACTIVE || m.state === ModelLifecycleState.SLEEPING,
       )
@@ -82,10 +86,14 @@ export class EvictionEngine {
       })
       .map(
         (m): EvictionCandidate => ({
+          instanceId: m.instanceId,
           modelName: m.modelName,
           state: m.state,
           workerId: m.workerId ?? '',
           memoryBytes: memoryByModel?.get(m.modelName) ?? 0,
+          // lastInferenceAt is tracked per logical model (ADR-014), not per instance — replicas
+          // of the same model share this timestamp, so LRU ordering picks a replica of the
+          // least-recently-used *model* first when multiple models are eviction-eligible.
           lastInferenceAt: m.lastInferenceAt,
           pinned: false,
         }),

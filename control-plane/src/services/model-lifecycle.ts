@@ -18,12 +18,54 @@ const VALID_TRANSITIONS: ReadonlyMap<ModelLifecycleState, readonly ModelLifecycl
       [ModelLifecycleState.STARTING, ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
     ],
     [ModelLifecycleState.STOPPING, [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR]],
+    // STOPPED has no outgoing edges on purpose. Under the registry model (#121), a "stopped"
+    // model is represented by the *absence* of any Redis lifecycle record for it, not by a
+    // persisted STOPPED record: deleting an instance (or the last instance of a stop) removes
+    // its Redis key entirely. The read routes synthesize the STOPPED aggregate for a model with
+    // zero instances. A STOPPED → STARTING edge would therefore never be exercised on a
+    // persisted record — do not add one.
     [ModelLifecycleState.STOPPED, []],
     [ModelLifecycleState.ERROR, [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING]],
   ],
 );
 
-export interface ModelState {
+// Aggregate state derivation precedence (#120 / ADR-019): a model can have N instances, each
+// with its own lifecycle state. The logical model's state is derived on read as the
+// highest-precedence state present across its instances. ACTIVE outranks ERROR deliberately —
+// one healthy replica must mask a broken one (M7 acceptance criterion 4).
+const AGGREGATE_STATE_PRECEDENCE: readonly ModelLifecycleState[] = [
+  ModelLifecycleState.ACTIVE,
+  ModelLifecycleState.STARTING,
+  ModelLifecycleState.DRAINING,
+  ModelLifecycleState.SLEEPING,
+  ModelLifecycleState.PENDING,
+  ModelLifecycleState.STOPPING,
+  ModelLifecycleState.ERROR,
+];
+
+/**
+ * Derive a logical model's aggregate state from the states of all of its instances.
+ *
+ * STOPPED instances are excluded before ranking: a STOPPED Redis record is a transient
+ * artifact between an instance finishing its stop sequence and the caller deleting its key
+ * (see the STOPPED comment on VALID_TRANSITIONS above) — it must not count as a "present" state
+ * any more than an already-deleted instance would, or a model whose only instance just stopped
+ * would incorrectly fall through every precedence bucket.
+ */
+export function deriveAggregateState(instances: readonly { state: ModelLifecycleState }[]) {
+  const relevant = instances.filter((i) => i.state !== ModelLifecycleState.STOPPED);
+  if (relevant.length === 0) return ModelLifecycleState.STOPPED;
+  const present = new Set(relevant.map((i) => i.state));
+  for (const candidate of AGGREGATE_STATE_PRECEDENCE) {
+    if (present.has(candidate)) return candidate;
+  }
+  // Unreachable given AGGREGATE_STATE_PRECEDENCE covers every non-STOPPED ModelLifecycleState
+  // value, but fall back safely rather than returning undefined.
+  return ModelLifecycleState.ERROR;
+}
+
+export interface InstanceState {
+  instanceId: string;
   modelName: string;
   state: ModelLifecycleState;
   workerId: string | null;
@@ -54,8 +96,8 @@ export function isTerminalState(state: ModelLifecycleState): boolean {
 
 const MODEL_STATE_PREFIX = 'models';
 
-function modelStateKey(prefix: string, modelName: string): string {
-  return redisKey(prefix, MODEL_STATE_PREFIX, modelName);
+function instanceStateKey(prefix: string, modelName: string, instanceId: string): string {
+  return redisKey(prefix, MODEL_STATE_PREFIX, modelName, instanceId);
 }
 
 export class ModelLifecycleService {
@@ -64,14 +106,53 @@ export class ModelLifecycleService {
     private readonly keyPrefix: string,
   ) {}
 
-  async getState(modelName: string): Promise<ModelState | null> {
-    const raw = await this.redis.get(modelStateKey(this.keyPrefix, modelName));
+  async getInstance(modelName: string, instanceId: string): Promise<InstanceState | null> {
+    const raw = await this.redis.get(instanceStateKey(this.keyPrefix, modelName, instanceId));
     if (!raw) return null;
-    return JSON.parse(raw) as ModelState;
+    return JSON.parse(raw) as InstanceState;
   }
 
-  async getAllStates(): Promise<ModelState[]> {
-    const pattern = redisKey(this.keyPrefix, MODEL_STATE_PREFIX, '*');
+  /** All instances of a single model. */
+  async getInstancesForModel(modelName: string): Promise<InstanceState[]> {
+    const pattern = redisKey(this.keyPrefix, MODEL_STATE_PREFIX, modelName, '*');
+    return this.getStatesForPattern(pattern);
+  }
+
+  /**
+   * Every instance of every model. Anchored to two `:`-delimited segments
+   * (`models:{modelName}:{instanceId}`) rather than a bare `models:*` — a single `*` also matches
+   * the pre-#120 single-segment key shape `models:{modelName}` (glob `*` matches `:` too), which
+   * would surface a stale in-place-upgrade orphan as a phantom instance with `instanceId ===
+   * undefined`. Two segments structurally rejects those; see `pruneLegacyInstanceKeys` and
+   * ADR-019.
+   */
+  async getAllInstances(): Promise<InstanceState[]> {
+    const pattern = redisKey(this.keyPrefix, MODEL_STATE_PREFIX, '*', '*');
+    return this.getStatesForPattern(pattern);
+  }
+
+  /**
+   * One-time self-heal for a control plane upgraded in place over pre-#120 Redis state: the old
+   * lifecycle key shape was `{prefix}:models:{modelName}` (no instance segment). `getAllInstances`
+   * now requires a second `:`-delimited segment, so these orphans are invisible to every read
+   * path — this broad scan is the only way they're ever found and removed. Returns the modelName
+   * portion of each key deleted, so the caller (reconciliation) can log once per key.
+   */
+  async pruneLegacyInstanceKeys(): Promise<string[]> {
+    const broadPattern = redisKey(this.keyPrefix, MODEL_STATE_PREFIX, '*');
+    const keys = await this.scanKeys(broadPattern);
+    const legacyPrefix = `${redisKey(this.keyPrefix, MODEL_STATE_PREFIX)}:`;
+    const removed: string[] = [];
+    for (const key of keys) {
+      const rest = key.slice(legacyPrefix.length);
+      if (rest.includes(':')) continue; // proper {modelName}:{instanceId} key — leave it alone
+      await this.redis.del(key);
+      removed.push(rest);
+    }
+    return removed;
+  }
+
+  private async getStatesForPattern(pattern: string): Promise<InstanceState[]> {
     const keys = await this.scanKeys(pattern);
     if (keys.length === 0) return [];
 
@@ -82,10 +163,10 @@ export class ModelLifecycleService {
     const results = await pipeline.exec();
     if (!results) return [];
 
-    const states: ModelState[] = [];
+    const states: InstanceState[] = [];
     for (const [err, raw] of results) {
       if (!err && typeof raw === 'string') {
-        states.push(JSON.parse(raw) as ModelState);
+        states.push(JSON.parse(raw) as InstanceState);
       }
     }
     return states;
@@ -102,10 +183,15 @@ export class ModelLifecycleService {
     return keys;
   }
 
-  async createModel(modelName: string, workerId?: string | null): Promise<ModelState> {
-    const key = modelStateKey(this.keyPrefix, modelName);
+  async createInstance(
+    modelName: string,
+    instanceId: string,
+    workerId?: string | null,
+  ): Promise<InstanceState> {
+    const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
 
-    const state: ModelState = {
+    const state: InstanceState = {
+      instanceId,
       modelName,
       state: ModelLifecycleState.PENDING,
       workerId: workerId ?? null,
@@ -121,17 +207,21 @@ export class ModelLifecycleService {
 
     const result = await this.redis.set(key, JSON.stringify(state), 'NX');
     if (!result) {
-      throw ControlPlaneError.modelAlreadyExists(modelName);
+      // instanceId is a freshly minted UUID-derived id — a collision here means a genuine bug,
+      // not a legitimate retry, but the guard is kept for the same reason the pre-#120 code kept
+      // it: SET NX makes concurrent create calls for the same key race safely to one winner.
+      throw ControlPlaneError.modelAlreadyExists(`${modelName}/${instanceId}`);
     }
     return state;
   }
 
   async transition(
     modelName: string,
+    instanceId: string,
     to: ModelLifecycleState,
     updates?: Partial<
       Pick<
-        ModelState,
+        InstanceState,
         | 'workerId'
         | 'runnerHost'
         | 'runnerPort'
@@ -141,8 +231,8 @@ export class ModelLifecycleService {
         | 'errorMessage'
       >
     >,
-  ): Promise<ModelState> {
-    const key = modelStateKey(this.keyPrefix, modelName);
+  ): Promise<InstanceState> {
+    const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
 
     const luaScript = `
       local raw = redis.call('GET', KEYS[1])
@@ -218,13 +308,13 @@ export class ModelLifecycleService {
       );
 
       if (!result) {
-        throw ControlPlaneError.modelNotFound(modelName);
+        throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
       }
 
       const raw = result as string;
       const separatorIndex = raw.indexOf('|');
       const fromState = raw.slice(0, separatorIndex);
-      const newState = JSON.parse(raw.slice(separatorIndex + 1)) as ModelState;
+      const newState = JSON.parse(raw.slice(separatorIndex + 1)) as InstanceState;
 
       stateTransitionsTotal.inc({ from: fromState, to });
 
@@ -233,7 +323,7 @@ export class ModelLifecycleService {
       if (err instanceof Error && err.message.includes('INVALID_TRANSITION')) {
         const parts = err.message.split(':');
         throw ControlPlaneError.invalidState(
-          modelName,
+          `${modelName}/${instanceId}`,
           parts[1] ?? 'unknown',
           `transition to ${to}`,
         );
@@ -250,12 +340,13 @@ export class ModelLifecycleService {
    */
   async setRunnerEndpoint(
     modelName: string,
+    instanceId: string,
     endpoint: { runnerId: string; host: string; port: number; enginePort?: number },
   ): Promise<void> {
-    const key = modelStateKey(this.keyPrefix, modelName);
-    const state = await this.getState(modelName);
+    const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
+    const state = await this.getInstance(modelName, instanceId);
     if (!state) {
-      throw ControlPlaneError.modelNotFound(modelName);
+      throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
     }
 
     state.runnerId = endpoint.runnerId;
@@ -266,8 +357,8 @@ export class ModelLifecycleService {
     await this.redis.set(key, JSON.stringify(state));
   }
 
-  async removeModel(modelName: string): Promise<void> {
-    const key = modelStateKey(this.keyPrefix, modelName);
+  async removeInstance(modelName: string, instanceId: string): Promise<void> {
+    const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
     await this.redis.del(key);
   }
 

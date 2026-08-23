@@ -5,7 +5,9 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import { registerInternalRoutes } from '../internal.js';
 import { ControlPlaneError } from '../../errors.js';
 import type { RouteDeps } from '../deps.js';
-import type { ModelState } from '../../services/model-lifecycle.js';
+import type { InstanceState } from '../../services/model-lifecycle.js';
+
+const INSTANCE_ID = 'inst-000000000001';
 
 interface WakeResponse {
   accepted: boolean;
@@ -20,8 +22,9 @@ interface ErrorResponse {
   details?: Record<string, unknown>;
 }
 
-function makeSleepingState(overrides: Partial<ModelState> = {}): ModelState {
+function makeSleepingState(overrides: Partial<InstanceState> = {}): InstanceState {
   return {
+    instanceId: INSTANCE_ID,
     modelName: 'test-model',
     state: ModelLifecycleState.SLEEPING,
     workerId: 'worker-1',
@@ -38,12 +41,11 @@ function makeSleepingState(overrides: Partial<ModelState> = {}): ModelState {
 
 // Mocks keyed by method name for easy vi.fn() access without unbound-method warnings.
 interface MockLifecycle {
-  getState: ReturnType<typeof vi.fn>;
+  getInstancesForModel: ReturnType<typeof vi.fn>;
   transition: ReturnType<typeof vi.fn>;
-  getAllStates: ReturnType<typeof vi.fn>;
-  createModel: ReturnType<typeof vi.fn>;
-  removeModel: ReturnType<typeof vi.fn>;
-  updateLastInference: ReturnType<typeof vi.fn>;
+  getAllInstances: ReturnType<typeof vi.fn>;
+  createInstance: ReturnType<typeof vi.fn>;
+  removeInstance: ReturnType<typeof vi.fn>;
 }
 
 interface MockSleepWake {
@@ -52,6 +54,8 @@ interface MockSleepWake {
 
 interface MockRoutingMap {
   getRoutingMap: ReturnType<typeof vi.fn>;
+  setModelState: ReturnType<typeof vi.fn>;
+  removeModel: ReturnType<typeof vi.fn>;
 }
 
 interface Mocks {
@@ -65,18 +69,19 @@ interface Mocks {
 function createMocks(): Mocks {
   return {
     lifecycle: {
-      getState: vi.fn(),
+      getInstancesForModel: vi.fn().mockResolvedValue([]),
       transition: vi.fn().mockResolvedValue({}),
-      getAllStates: vi.fn(),
-      createModel: vi.fn(),
-      removeModel: vi.fn(),
-      updateLastInference: vi.fn(),
+      getAllInstances: vi.fn(),
+      createInstance: vi.fn(),
+      removeInstance: vi.fn(),
     },
     sleepWake: {
       wakeModel: vi.fn().mockResolvedValue(undefined),
     },
     routingMap: {
       getRoutingMap: vi.fn().mockResolvedValue({}),
+      setModelState: vi.fn().mockResolvedValue(undefined),
+      removeModel: vi.fn().mockResolvedValue(undefined),
     },
     createRunnerClient: vi.fn().mockReturnValue({
       wake: vi.fn().mockResolvedValue(undefined),
@@ -90,6 +95,7 @@ function toDeps(mocks: Mocks): RouteDeps {
   return {
     config: {} as RouteDeps['config'],
     modelRepository: {} as RouteDeps['modelRepository'],
+    instanceRepository: {} as RouteDeps['instanceRepository'],
     lifecycle: mocks.lifecycle as unknown as RouteDeps['lifecycle'],
     memoryBudget: {} as RouteDeps['memoryBudget'],
     workerPool: {} as RouteDeps['workerPool'],
@@ -142,7 +148,7 @@ describe('POST /api/v1/wake — internal wake route', () => {
 
   it('rejects requests when this instance is not the leader', async () => {
     mocks.leaderElection.isLeader = false;
-    mocks.lifecycle.getState.mockResolvedValue(makeSleepingState());
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({
@@ -163,7 +169,7 @@ describe('POST /api/v1/wake — internal wake route', () => {
   // -------------------------------------------------------------------------
 
   it('atomically transitions SLEEPING → STARTING before launching background wake', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(makeSleepingState());
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({
@@ -184,12 +190,13 @@ describe('POST /api/v1/wake — internal wake route', () => {
 
     expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
       'test-model',
+      INSTANCE_ID,
       ModelLifecycleState.STARTING,
     );
   });
 
   it('does not launch background wake when CAS transition fails (concurrent request lost the race)', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(makeSleepingState());
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
     // Simulate CAS failure: another request already moved the state to STARTING
     mocks.lifecycle.transition.mockRejectedValue(
       ControlPlaneError.invalidState(
@@ -219,9 +226,9 @@ describe('POST /api/v1/wake — internal wake route', () => {
   // -------------------------------------------------------------------------
 
   it('returns 200 when model is already ACTIVE', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([
       makeSleepingState({ state: ModelLifecycleState.ACTIVE }),
-    );
+    ]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({
@@ -237,9 +244,9 @@ describe('POST /api/v1/wake — internal wake route', () => {
   });
 
   it('returns 202 idempotently when model is already STARTING', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([
       makeSleepingState({ state: ModelLifecycleState.STARTING }),
-    );
+    ]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({
@@ -259,7 +266,7 @@ describe('POST /api/v1/wake — internal wake route', () => {
   // -------------------------------------------------------------------------
 
   it('returns 202 with STARTING state on successful wake initiation', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(makeSleepingState());
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({
@@ -279,7 +286,7 @@ describe('POST /api/v1/wake — internal wake route', () => {
   it('creates a runner client and calls wakeModel with it', async () => {
     const mockRunnerClient = { wake: vi.fn(), getHealth: vi.fn() };
     mocks.createRunnerClient.mockReturnValue(mockRunnerClient);
-    mocks.lifecycle.getState.mockResolvedValue(makeSleepingState());
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
     app = await buildTestApp(toDeps(mocks));
 
     await app.inject({
@@ -289,7 +296,38 @@ describe('POST /api/v1/wake — internal wake route', () => {
     });
 
     expect(mocks.createRunnerClient).toHaveBeenCalledWith('10.0.0.1', 5001);
-    expect(mocks.sleepWake.wakeModel).toHaveBeenCalledWith('test-model', mockRunnerClient);
+    expect(mocks.sleepWake.wakeModel).toHaveBeenCalledWith(
+      'test-model',
+      INSTANCE_ID,
+      mockRunnerClient,
+    );
+  });
+
+  it('wakes the most-recently-active SLEEPING instance when several exist', async () => {
+    const older = makeSleepingState({
+      instanceId: 'inst-older',
+      lastInferenceAt: '2026-01-01T00:00:00.000Z',
+      stateChangedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const newer = makeSleepingState({
+      instanceId: 'inst-newer',
+      lastInferenceAt: '2026-06-01T00:00:00.000Z',
+      stateChangedAt: '2026-06-01T00:00:00.000Z',
+    });
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([older, newer]);
+    app = await buildTestApp(toDeps(mocks));
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/wake',
+      payload: { modelName: 'test-model' },
+    });
+
+    expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+      'test-model',
+      'inst-newer',
+      ModelLifecycleState.STARTING,
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -309,7 +347,7 @@ describe('POST /api/v1/wake — internal wake route', () => {
   });
 
   it('returns 404 for unknown model', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(null);
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({
@@ -322,10 +360,10 @@ describe('POST /api/v1/wake — internal wake route', () => {
     expect(res.json<ErrorResponse>().code).toBe('MODEL_NOT_FOUND');
   });
 
-  it('returns 500 when model has no runner endpoint', async () => {
-    mocks.lifecycle.getState.mockResolvedValue(
+  it('returns 500 when the target instance has no runner endpoint', async () => {
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([
       makeSleepingState({ runnerHost: null, runnerPort: null }),
-    );
+    ]);
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({

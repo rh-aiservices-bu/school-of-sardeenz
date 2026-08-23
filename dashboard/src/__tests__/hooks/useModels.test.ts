@@ -7,6 +7,7 @@ const existing: ModelInfo = {
   modelName: 'existing',
   state: ModelLifecycleState.ACTIVE,
   runnerType: 'vllm',
+  instanceCount: 1,
   createdAt: '2026-01-01T00:00:00.000Z',
 };
 
@@ -16,6 +17,7 @@ const appendPending = (models: ModelInfo[]): ModelInfo[] => [
     modelName: 'new-model',
     state: ModelLifecycleState.PENDING,
     runnerType: 'vllm',
+    instanceCount: 1,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
 ];

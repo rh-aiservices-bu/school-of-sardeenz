@@ -56,7 +56,7 @@ function buildApp(over: Overrides = {}): {
       refresh: vi.fn(() => Promise.resolve(SNAPSHOT)),
     },
     moduleStore,
-    lifecycle: { getAllStates: vi.fn(() => Promise.resolve(over.activeStates ?? [])) },
+    lifecycle: { getAllInstances: vi.fn(() => Promise.resolve(over.activeStates ?? [])) },
     modelRepository: { findAll: vi.fn(() => Promise.resolve(over.modelRecords ?? [])) },
     leaderElection: { isLeader: over.isLeader ?? true },
   } as unknown as RouteDeps;

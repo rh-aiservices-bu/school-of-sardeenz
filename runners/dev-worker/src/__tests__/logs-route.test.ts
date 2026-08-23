@@ -114,6 +114,7 @@ describe('GET /runners/:runnerId/logs', () => {
   it('replays buffered lines then streams live-appended lines', async () => {
     const { runnerId } = await manager.startRunner({
       modelName: 'logs-model',
+      instanceId: 'inst-logs-model',
       runnerType: 'vllm',
       modelPath: '/models/logs',
       requiredMemory: 1024 * 1024 * 1024,
@@ -145,12 +146,53 @@ describe('GET /runners/:runnerId/logs', () => {
     await manager.stopRunner(runnerId);
   });
 
+  it('streams by instanceId, unambiguous even with a same-named replica also running (#120)', async () => {
+    const a = await manager.startRunner({
+      modelName: 'by-instance-model',
+      instanceId: 'inst-by-instance-a',
+      runnerType: 'vllm',
+      modelPath: '/models/by-instance',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    const b = await manager.startRunner({
+      modelName: 'by-instance-model',
+      instanceId: 'inst-by-instance-b',
+      runnerType: 'vllm',
+      modelPath: '/models/by-instance',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+    });
+
+    const logBuffer = manager.getLogBuffer();
+    logBuffer.append(a.runnerId, 'stdout', 'replica a line\n');
+    logBuffer.append(b.runnerId, 'stdout', 'replica b line\n');
+
+    const resA = await fetch(`${baseUrl}/runners/by-instance/inst-by-instance-a/logs`);
+    expect(resA.status).toBe(200);
+    const readerA = resA.body!.getReader();
+    const decoderA = new TextDecoder();
+    const receivedA = await readUntil(readerA, decoderA, (r) => r.includes('replica a line'));
+    expect(receivedA).toContain('replica a line');
+    expect(receivedA).not.toContain('replica b line');
+    await readerA.cancel();
+
+    const missing = await fetch(`${baseUrl}/runners/by-instance/nonexistent-instance/logs`);
+    expect(missing.status).toBe(404);
+
+    await manager.stopRunner(a.runnerId);
+    await manager.stopRunner(b.runnerId);
+  });
+
   it('replays sealed startup logs then ends immediately when reopened after startup', async () => {
     // Simulates the "View starting logs" reopen: the runner finished starting (stream sealed via
     // markEnded), the buffer retains the startup logs, and a fresh connection should replay them
     // then get an end frame right away rather than hanging for live lines that never come.
     const { runnerId } = await manager.startRunner({
       modelName: 'logs-model-sealed',
+      instanceId: 'inst-logs-model-sealed',
       runnerType: 'vllm',
       modelPath: '/models/logs-sealed',
       requiredMemory: 1024 * 1024 * 1024,
@@ -180,6 +222,7 @@ describe('GET /runners/:runnerId/logs', () => {
   it('sends an end frame when the runner stops', async () => {
     const { runnerId } = await manager.startRunner({
       modelName: 'logs-model-end',
+      instanceId: 'inst-logs-model-end',
       runnerType: 'vllm',
       modelPath: '/models/logs-end',
       requiredMemory: 1024 * 1024 * 1024,
@@ -219,6 +262,7 @@ describe('GET /runners/:runnerId/logs', () => {
     try {
       const startPromise = failManager.startRunner({
         modelName: 'failing-launch-model',
+        instanceId: 'inst-failing-launch-model',
         runnerType: 'vllm',
         modelPath: '/models/failing-launch',
         requiredMemory: 1024 * 1024 * 1024,
@@ -265,6 +309,7 @@ describe('GET /runners/:runnerId/logs', () => {
       await expect(
         failManager.startRunner({
           modelName: 'failure-logs-model',
+          instanceId: 'inst-failure-logs-model',
           runnerType: 'vllm',
           modelPath: '/models/failure-logs',
           requiredMemory: 1024 * 1024 * 1024,

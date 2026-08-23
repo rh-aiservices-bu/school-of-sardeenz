@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import { DeviceType, ModelLifecycleState, RunnerState } from '@sardeenz/types';
 
 import { canConnect, createHarness, type TestHarness } from './helpers/harness.js';
 import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.js';
@@ -16,11 +16,12 @@ async function deployModel(
   runner: MockRunnerServer,
   worker: MockWorkerServer,
   modelName: string,
+  instanceId: string,
 ): Promise<void> {
   await harness.registerWorker({
     workerId: WORKER_ID,
     managementUrl: worker.url,
-    devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+    devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
   });
 
   await harness.modelRepository.create({
@@ -31,13 +32,14 @@ async function deployModel(
     deviceType: 'CUDA',
   });
 
-  await harness.lifecycle.createModel(modelName, WORKER_ID);
-  await harness.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
+  await harness.lifecycle.createInstance(modelName, instanceId, WORKER_ID);
+  await harness.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STARTING);
 
   runner.setHealthState(RunnerState.READY);
 
   await harness.deployOrchestration.deployModel({
     modelName,
+    instanceId,
     workerId: WORKER_ID,
     runnerType: 'vllm',
     modelPath: `/models/${modelName}`,
@@ -74,29 +76,30 @@ describe.skipIf(!AVAILABLE)('Sleep/wake integration', () => {
 
   it('sleep/wake round-trip: ACTIVE → SLEEPING → ACTIVE with routing restored', async () => {
     const MODEL = 'roundtrip-model';
-    await deployModel(harness, runner, worker, MODEL);
+    const INSTANCE_ID = 'inst-roundtrip';
+    await deployModel(harness, runner, worker, MODEL, INSTANCE_ID);
 
-    const preState = await harness.lifecycle.getState(MODEL);
-    expect(preState?.state).toBe(ModelLifecycleState.ACTIVE);
+    const preInstance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
+    expect(preInstance?.state).toBe(ModelLifecycleState.ACTIVE);
 
     const runnerClient = new RunnerClient({ host: runner.host, port: runner.port });
 
     // Sleep the model
     runner.setActiveRequests(0);
-    await harness.sleepWake.sleepModel(MODEL, runnerClient);
+    await harness.sleepWake.sleepModel(MODEL, INSTANCE_ID, runnerClient);
 
-    const sleepState = await harness.lifecycle.getState(MODEL);
-    expect(sleepState?.state).toBe(ModelLifecycleState.SLEEPING);
+    const sleepInstance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
+    expect(sleepInstance?.state).toBe(ModelLifecycleState.SLEEPING);
 
     const sleepEntry = await harness.routingMap.getEntry(MODEL);
     expect(sleepEntry?.endpoints.length ?? 0).toBe(0);
 
     // Wake the model — runner transitions STARTING → READY after a delay
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
-    await harness.sleepWake.wakeModel(MODEL, runnerClient);
+    await harness.sleepWake.wakeModel(MODEL, INSTANCE_ID, runnerClient);
 
-    const wakeState = await harness.lifecycle.getState(MODEL);
-    expect(wakeState?.state).toBe(ModelLifecycleState.ACTIVE);
+    const wakeInstance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
+    expect(wakeInstance?.state).toBe(ModelLifecycleState.ACTIVE);
 
     const wakeEntry = await harness.routingMap.getEntry(MODEL);
     expect(wakeEntry?.endpoints.length).toBe(1);
@@ -104,22 +107,23 @@ describe.skipIf(!AVAILABLE)('Sleep/wake integration', () => {
 
   it('CAS transition prevents concurrent SLEEPING → STARTING races', async () => {
     const MODEL = 'herd-model';
-    await deployModel(harness, runner, worker, MODEL);
+    const INSTANCE_ID = 'inst-herd';
+    await deployModel(harness, runner, worker, MODEL, INSTANCE_ID);
 
     const runnerClient = new RunnerClient({ host: runner.host, port: runner.port });
 
     // Sleep first
     runner.setActiveRequests(0);
-    await harness.sleepWake.sleepModel(MODEL, runnerClient);
+    await harness.sleepWake.sleepModel(MODEL, INSTANCE_ID, runnerClient);
 
-    const sleepState = await harness.lifecycle.getState(MODEL);
-    expect(sleepState?.state).toBe(ModelLifecycleState.SLEEPING);
+    const sleepInstance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
+    expect(sleepInstance?.state).toBe(ModelLifecycleState.SLEEPING);
 
     // Race 3 concurrent CAS transitions — only one should win
     const results = await Promise.allSettled([
-      harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING),
-      harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING),
-      harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING),
+      harness.lifecycle.transition(MODEL, INSTANCE_ID, ModelLifecycleState.STARTING),
+      harness.lifecycle.transition(MODEL, INSTANCE_ID, ModelLifecycleState.STARTING),
+      harness.lifecycle.transition(MODEL, INSTANCE_ID, ModelLifecycleState.STARTING),
     ]);
 
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
@@ -128,7 +132,7 @@ describe.skipIf(!AVAILABLE)('Sleep/wake integration', () => {
     expect(fulfilled.length).toBe(1);
     expect(rejected.length).toBe(2);
 
-    const finalState = await harness.lifecycle.getState(MODEL);
-    expect(finalState?.state).toBe(ModelLifecycleState.STARTING);
+    const finalInstance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
+    expect(finalInstance?.state).toBe(ModelLifecycleState.STARTING);
   });
 });

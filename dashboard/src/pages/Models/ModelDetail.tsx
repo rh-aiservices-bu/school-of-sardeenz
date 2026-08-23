@@ -27,9 +27,21 @@ import {
   CodeBlockCode,
   Title,
 } from '@patternfly/react-core';
+import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 import { LockIcon } from '@patternfly/react-icons';
 import { ModelLifecycleState } from '@sardeenz/types';
-import { useModel, useSleepModel, useWakeModel, useDeleteModel } from '../../hooks/useModels';
+import {
+  useModel,
+  useSleepModel,
+  useWakeModel,
+  useDeleteModel,
+  useStopModel,
+  useStartModel,
+  useAddInstance,
+  useDeleteInstance,
+  useSleepInstance,
+  useWakeInstance,
+} from '../../hooks/useModels';
 import { ApiError } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
 import { DeployLogsModal } from '../../components/DeployLogsModal';
@@ -47,12 +59,20 @@ export function ModelDetail() {
   const sleepModel = useSleepModel();
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
+  const stopModel = useStopModel();
+  const startModel = useStartModel();
+  const addInstance = useAddInstance();
+  const deleteInstance = useDeleteInstance();
+  const sleepInstance = useSleepInstance();
+  const wakeInstance = useWakeInstance();
 
   const [showSleepModal, setShowSleepModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showStopModal, setShowStopModal] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [engineConfigExpanded, setEngineConfigExpanded] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
+  const [deleteInstanceId, setDeleteInstanceId] = useState<string | null>(null);
 
   const handleSleepConfirm = () => {
     if (!modelName) return;
@@ -79,6 +99,68 @@ export function ModelDetail() {
       onSuccess: () => void navigate('/models'),
       onSettled: () => setShowDeleteModal(false),
     });
+  };
+
+  const handleStart = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    startModel.mutate(modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Start failed'),
+    });
+  };
+
+  const handleStopConfirm = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    stopModel.mutate(modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Stop failed'),
+      onSettled: () => setShowStopModal(false),
+    });
+  };
+
+  const handleAddInstance = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    addInstance.mutate(modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Add instance failed'),
+    });
+  };
+
+  const handleSleepInstance = (instanceId: string) => {
+    if (!modelName) return;
+    setMutationError(null);
+    sleepInstance.mutate(
+      { modelName, instanceId },
+      {
+        onError: (err) =>
+          setMutationError(err instanceof Error ? err.message : 'Sleep instance failed'),
+      },
+    );
+  };
+
+  const handleWakeInstance = (instanceId: string) => {
+    if (!modelName) return;
+    setMutationError(null);
+    wakeInstance.mutate(
+      { modelName, instanceId },
+      {
+        onError: (err) =>
+          setMutationError(err instanceof Error ? err.message : 'Wake instance failed'),
+      },
+    );
+  };
+
+  const handleDeleteInstanceConfirm = () => {
+    if (!modelName || !deleteInstanceId) return;
+    setMutationError(null);
+    deleteInstance.mutate(
+      { modelName, instanceId: deleteInstanceId },
+      {
+        onError: (err) =>
+          setMutationError(err instanceof Error ? err.message : 'Delete instance failed'),
+        onSettled: () => setDeleteInstanceId(null),
+      },
+    );
   };
 
   // Loading state
@@ -117,13 +199,13 @@ export function ModelDetail() {
   const isSleeping = model.state === ModelLifecycleState.SLEEPING;
   const isError = model.state === ModelLifecycleState.ERROR;
   const isStarting = model.state === ModelLifecycleState.STARTING;
+  const isStopped = model.state === ModelLifecycleState.STOPPED;
 
-  const runnerEndpointText =
-    model.runnerEndpoint?.host && model.runnerEndpoint.port
-      ? `${model.runnerEndpoint.host}:${model.runnerEndpoint.port}`
-      : model.runnerEndpoint?.host
-        ? model.runnerEndpoint.host
-        : '—';
+  // Placement/runtime fields (worker, endpoint, memory, progress, per-instance error) live on
+  // each instance now (#120) — the model-level `state` above is the aggregate across them.
+  const instances = model.instances ?? [];
+  const errorInstance = instances.find((i) => i.state === ModelLifecycleState.ERROR);
+  const startingInstance = instances.find((i) => i.state === ModelLifecycleState.STARTING);
 
   const engineConfigJson = model.engineConfig ? JSON.stringify(model.engineConfig, null, 2) : null;
 
@@ -162,6 +244,17 @@ export function ModelDetail() {
         {isAdmin && (
           <FlexItem align={{ default: 'alignRight' }}>
             <Flex gap={{ default: 'gapSm' }}>
+              {!isStopped && (
+                <FlexItem>
+                  <Button
+                    variant="secondary"
+                    onClick={handleAddInstance}
+                    isLoading={addInstance.isPending}
+                  >
+                    {t('detail.addInstance.button')}
+                  </Button>
+                </FlexItem>
+              )}
               {isActive && (
                 <FlexItem>
                   <Button variant="secondary" onClick={() => setShowSleepModal(true)}>
@@ -173,6 +266,20 @@ export function ModelDetail() {
                 <FlexItem>
                   <Button variant="primary" onClick={handleWake} isLoading={wakeModel.isPending}>
                     {t('detail.wake.button')}
+                  </Button>
+                </FlexItem>
+              )}
+              {isStopped && (
+                <FlexItem>
+                  <Button variant="primary" onClick={handleStart} isLoading={startModel.isPending}>
+                    {t('detail.start.button')}
+                  </Button>
+                </FlexItem>
+              )}
+              {(isActive || isSleeping || isError) && (
+                <FlexItem>
+                  <Button variant="secondary" onClick={() => setShowStopModal(true)}>
+                    {t('detail.stop.button')}
                   </Button>
                 </FlexItem>
               )}
@@ -206,7 +313,7 @@ export function ModelDetail() {
       )}
 
       {/* ERROR alert */}
-      {isError && model.errorMessage && (
+      {isError && errorInstance?.errorMessage && (
         <Alert
           variant={AlertVariant.danger}
           title={t('detail.errors.modelError')}
@@ -229,23 +336,24 @@ export function ModelDetail() {
             ) : undefined
           }
         >
-          {model.errorMessage}
+          {errorInstance.errorMessage}
         </Alert>
       )}
 
-      {/* STARTING progress */}
-      {isStarting && model.progress && (
+      {/* STARTING progress (the starting instance's — with replicas, other instances may already
+          be ACTIVE and serving) */}
+      {isStarting && startingInstance?.progress && (
         <div style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
           <Progress
             aria-label={t('detail.fields.state')}
-            value={model.progress.percentComplete ?? 0}
+            value={startingInstance.progress.percentComplete ?? 0}
             title={
-              model.progress.phase
-                ? `${t('detail.progress.phasePrefix')}${model.progress.phase}`
+              startingInstance.progress.phase
+                ? `${t('detail.progress.phasePrefix')}${startingInstance.progress.phase}`
                 : tCommon('loading')
             }
           />
-          {model.progress.message && (
+          {startingInstance.progress.message && (
             <Content
               component="small"
               style={{
@@ -254,10 +362,10 @@ export function ModelDetail() {
                 color: 'var(--pf-t--global--color--nonstatus--gray--default)',
               }}
             >
-              {model.progress.message}
-              {model.progress.estimatedRemainingSeconds != null &&
+              {startingInstance.progress.message}
+              {startingInstance.progress.estimatedRemainingSeconds != null &&
                 t('detail.progress.remainingSeconds', {
-                  seconds: model.progress.estimatedRemainingSeconds,
+                  seconds: startingInstance.progress.estimatedRemainingSeconds,
                 })}
             </Content>
           )}
@@ -292,32 +400,9 @@ export function ModelDetail() {
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>{t('detail.fields.worker')}</DescriptionListTerm>
-          <DescriptionListDescription>
-            {model.workerId ? (
-              <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>{model.workerId}</Link>
-            ) : (
-              '—'
-            )}
-          </DescriptionListDescription>
-        </DescriptionListGroup>
-
-        <DescriptionListGroup>
-          <DescriptionListTerm>{t('detail.fields.runnerEndpoint')}</DescriptionListTerm>
-          <DescriptionListDescription>{runnerEndpointText}</DescriptionListDescription>
-        </DescriptionListGroup>
-
-        <DescriptionListGroup>
           <DescriptionListTerm>{t('detail.fields.requiredMemory')}</DescriptionListTerm>
           <DescriptionListDescription>
             {formatBytes(model.requiredMemory)}
-          </DescriptionListDescription>
-        </DescriptionListGroup>
-
-        <DescriptionListGroup>
-          <DescriptionListTerm>{t('detail.fields.currentMemory')}</DescriptionListTerm>
-          <DescriptionListDescription>
-            {model.currentMemory != null ? formatBytes(model.currentMemory) : '—'}
           </DescriptionListDescription>
         </DescriptionListGroup>
 
@@ -371,87 +456,118 @@ export function ModelDetail() {
         </DescriptionListGroup>
 
         <DescriptionListGroup>
-          <DescriptionListTerm>{t('detail.fields.stateChanged')}</DescriptionListTerm>
-          <DescriptionListDescription>
-            {model.stateChangedAt ? (
-              <>
-                {formatRelativeTime(model.stateChangedAt)}{' '}
-                <span style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}>
-                  ({formatDateTime(model.stateChangedAt)})
-                </span>
-              </>
-            ) : (
-              '—'
-            )}
-          </DescriptionListDescription>
-        </DescriptionListGroup>
-
-        <DescriptionListGroup>
           <DescriptionListTerm>{t('detail.fields.created')}</DescriptionListTerm>
           <DescriptionListDescription>{formatDateTime(model.createdAt)}</DescriptionListDescription>
         </DescriptionListGroup>
       </DescriptionList>
 
-      {/* State timeline */}
+      {/* Instances table (#120): each row is one runtime replica of this model — its own
+          placement, endpoint, and lifecycle state. The model-level `state` above is the
+          aggregate across these rows. */}
       <div style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
         <Title
           headingLevel="h2"
           size="md"
           style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}
         >
-          {t('detail.timeline.title')}
+          {t('detail.instances.title')}
         </Title>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--pf-t--global--spacer--sm)',
-            borderLeft: '2px solid var(--pf-t--global--border--color--default)',
-            paddingLeft: 'var(--pf-t--global--spacer--md)',
-          }}
-        >
-          {/* Created event */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <span
-              style={{
-                fontWeight: 'var(--pf-t--global--font--weight--bold)',
-                fontSize: 'var(--pf-t--global--font--size--sm)',
-              }}
-            >
-              {t('detail.timeline.deployed')}
-            </span>
-            <span
-              style={{
-                fontSize: 'var(--pf-t--global--font--size--sm)',
-                color: 'var(--pf-t--global--text--color--subtle)',
-              }}
-            >
-              {formatDateTime(model.createdAt)}
-            </span>
-          </div>
+        {instances.length === 0 ? (
+          <Content component="small">{t('detail.instances.empty')}</Content>
+        ) : (
+          <Table aria-label={t('detail.instances.title')} variant="compact">
+            <Thead>
+              <Tr>
+                <Th>{t('detail.instances.columns.instanceId')}</Th>
+                <Th>{t('detail.instances.columns.state')}</Th>
+                <Th>{t('detail.instances.columns.worker')}</Th>
+                <Th>{t('detail.instances.columns.endpoint')}</Th>
+                <Th>{t('detail.instances.columns.created')}</Th>
+                {isAdmin && <Th aria-label={t('detail.instances.columns.actions')} />}
+              </Tr>
+            </Thead>
+            <Tbody>
+              {instances.map((instance) => {
+                const instanceEndpointText =
+                  instance.runnerEndpoint?.host && instance.runnerEndpoint.port
+                    ? `${instance.runnerEndpoint.host}:${instance.runnerEndpoint.port}`
+                    : (instance.runnerEndpoint?.host ?? '—');
+                const canSleep = instance.state === ModelLifecycleState.ACTIVE;
+                const canWake = instance.state === ModelLifecycleState.SLEEPING;
 
-          {/* State changed event (if different from created) */}
-          {model.stateChangedAt && model.stateChangedAt !== model.createdAt && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <span
-                style={{
-                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                }}
-              >
-                {t('detail.timeline.stateChanged')} <StateLabel state={model.state} />
-              </span>
-              <span
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {formatDateTime(model.stateChangedAt)}
-              </span>
-            </div>
-          )}
-        </div>
+                return (
+                  <Tr key={instance.instanceId}>
+                    <Td dataLabel={t('detail.instances.columns.instanceId')}>
+                      <code style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>
+                        {instance.instanceId}
+                      </code>
+                    </Td>
+                    <Td dataLabel={t('detail.instances.columns.state')}>
+                      <StateLabel state={instance.state} isCompact />
+                    </Td>
+                    <Td dataLabel={t('detail.instances.columns.worker')}>
+                      {instance.workerId ? (
+                        <Link to={`/workers/${encodeURIComponent(instance.workerId)}`}>
+                          {instance.workerId}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </Td>
+                    <Td dataLabel={t('detail.instances.columns.endpoint')}>
+                      {instanceEndpointText}
+                    </Td>
+                    <Td dataLabel={t('detail.instances.columns.created')}>
+                      {instance.createdAt ? formatDateTime(instance.createdAt) : '—'}
+                    </Td>
+                    {isAdmin && (
+                      <Td dataLabel={t('detail.instances.columns.actions')} isActionCell>
+                        <Flex gap={{ default: 'gapSm' }}>
+                          {canSleep && (
+                            <FlexItem>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleSleepInstance(instance.instanceId)}
+                                isLoading={
+                                  sleepInstance.isPending &&
+                                  sleepInstance.variables?.instanceId === instance.instanceId
+                                }
+                              >
+                                {t('detail.instance.sleep.button')}
+                              </Button>
+                            </FlexItem>
+                          )}
+                          {canWake && (
+                            <FlexItem>
+                              <Button
+                                variant="primary"
+                                onClick={() => handleWakeInstance(instance.instanceId)}
+                                isLoading={
+                                  wakeInstance.isPending &&
+                                  wakeInstance.variables?.instanceId === instance.instanceId
+                                }
+                              >
+                                {t('detail.instance.wake.button')}
+                              </Button>
+                            </FlexItem>
+                          )}
+                          <FlexItem>
+                            <Button
+                              variant="danger"
+                              onClick={() => setDeleteInstanceId(instance.instanceId)}
+                            >
+                              {t('detail.instance.delete.button')}
+                            </Button>
+                          </FlexItem>
+                        </Flex>
+                      </Td>
+                    )}
+                  </Tr>
+                );
+              })}
+            </Tbody>
+          </Table>
+        )}
       </div>
 
       {/* Engine config expandable */}
@@ -489,6 +605,25 @@ export function ModelDetail() {
         </ModalFooter>
       </Modal>
 
+      {/* Stop confirmation modal */}
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={showStopModal}
+        onClose={() => setShowStopModal(false)}
+        aria-label={t('detail.stop.confirmTitle')}
+      >
+        <ModalHeader title={t('detail.stop.confirmTitle')} titleIconVariant="warning" />
+        <ModalBody>{t('detail.stop.confirmBody', { modelName: model.modelName })}</ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleStopConfirm} isLoading={stopModel.isPending}>
+            {t('detail.stop.button')}
+          </Button>
+          <Button variant="link" onClick={() => setShowStopModal(false)}>
+            {tCommon('actions.cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
       {/* Delete confirmation modal */}
       <Modal
         variant={ModalVariant.small}
@@ -503,6 +638,31 @@ export function ModelDetail() {
             {t('detail.delete.button')}
           </Button>
           <Button variant="link" onClick={() => setShowDeleteModal(false)}>
+            {tCommon('actions.cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Delete instance confirmation modal */}
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={deleteInstanceId !== null}
+        onClose={() => setDeleteInstanceId(null)}
+        aria-label={t('detail.instance.delete.confirmTitle')}
+      >
+        <ModalHeader title={t('detail.instance.delete.confirmTitle')} titleIconVariant="danger" />
+        <ModalBody>
+          {t('detail.instance.delete.confirmBody', { instanceId: deleteInstanceId })}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="danger"
+            onClick={handleDeleteInstanceConfirm}
+            isLoading={deleteInstance.isPending}
+          >
+            {t('detail.instance.delete.button')}
+          </Button>
+          <Button variant="link" onClick={() => setDeleteInstanceId(null)}>
             {tCommon('actions.cancel')}
           </Button>
         </ModalFooter>

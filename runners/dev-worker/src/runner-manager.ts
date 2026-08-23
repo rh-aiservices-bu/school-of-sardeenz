@@ -20,6 +20,7 @@ export function probePortAvailable(port: number): Promise<boolean> {
 
 export interface RunnerRecord {
   runnerId: string;
+  instanceId: string;
   modelName: string;
   /** Management port (runner-contract API). */
   port: number;
@@ -33,6 +34,13 @@ export interface RunnerRecord {
 
 export interface StartRunnerParams {
   modelName: string;
+  /**
+   * Control-plane-assigned instance identity (#120). Disambiguates replicas of the same model on
+   * this worker — the sole conflict/lookup key, replacing the pre-#120 one-runner-per-model rule.
+   * The route layer generates a fallback when the caller omits it (older/back-compat callers);
+   * the control plane always sends one.
+   */
+  instanceId: string;
   runnerType: string;
   modelPath: string;
   requiredMemory: number;
@@ -45,7 +53,13 @@ export interface StartRunnerParams {
 
 export class RunnerManager {
   private readonly runners = new Map<string, RunnerRecord>();
-  private readonly modelToRunner = new Map<string, string>();
+  // modelName -> runnerIds. A Set, not a single id, because #120 allows N replicas of one model
+  // on this worker; insertion order is preserved (JS Set iteration order), which
+  // getRunnerIdForModel relies on to return the most-recently-started runner.
+  private readonly modelRunners = new Map<string, Set<string>>();
+  // instanceId -> runnerId. The unambiguous lookup/conflict key — unlike modelName, an instanceId
+  // identifies exactly one runner even with replicas.
+  private readonly instanceRunners = new Map<string, string>();
   private readonly launcher: RunnerLauncher;
   private readonly logBuffer: RunnerLogBuffer;
   private readonly usedPorts = new Set<number>();
@@ -73,16 +87,23 @@ export class RunnerManager {
   async startRunner(
     params: StartRunnerParams,
   ): Promise<{ runnerId: string; host: string; port: number; enginePort: number }> {
-    if (this.modelToRunner.has(params.modelName)) {
-      throw new ConflictError(`Runner for model ${params.modelName} already exists`);
+    if (this.instanceRunners.has(params.instanceId)) {
+      throw new ConflictError(`Runner for instance ${params.instanceId} already exists`);
     }
 
     const runnerId = `runner-${randomUUID().slice(0, 8)}`;
     const { port, enginePort } = await this.allocatePorts();
 
-    // Reserve the model slot up-front so concurrent starts of the same model race to ConflictError
-    // rather than both proceeding.
-    this.modelToRunner.set(params.modelName, runnerId);
+    // Reserve the instance slot up-front so concurrent starts of the same instance race to
+    // ConflictError rather than both proceeding. Also register under modelName — a Set now
+    // (#120), since several instances of the same model may run concurrently on this worker.
+    this.instanceRunners.set(params.instanceId, runnerId);
+    let modelRunnerIds = this.modelRunners.get(params.modelName);
+    if (!modelRunnerIds) {
+      modelRunnerIds = new Set();
+      this.modelRunners.set(params.modelName, modelRunnerIds);
+    }
+    modelRunnerIds.add(runnerId);
 
     // Post-startup supervision: if the runner's process exits on its own (crash, OOM-kill, etc.)
     // rather than via a deliberate stopRunner(), reap its record and free its device memory so a
@@ -98,11 +119,15 @@ export class RunnerManager {
       }
       this.runners.delete(runnerId);
       this.usedPorts.delete(record.port);
-      this.modelToRunner.delete(record.modelName);
+      this.instanceRunners.delete(record.instanceId);
+      this.modelRunners.get(record.modelName)?.delete(runnerId);
+      if (this.modelRunners.get(record.modelName)?.size === 0) {
+        this.modelRunners.delete(record.modelName);
+      }
       this.logBuffer.markEnded(runnerId);
       this.logBuffer.retain(runnerId);
       console.log(
-        `[worker] Runner ${runnerId} (${params.modelName}) exited unexpectedly — cleaned up`,
+        `[worker] Runner ${runnerId} (${params.modelName}/${params.instanceId}) exited unexpectedly — cleaned up`,
       );
     };
 
@@ -133,6 +158,7 @@ export class RunnerManager {
 
       const record: RunnerRecord = {
         runnerId,
+        instanceId: params.instanceId,
         modelName: params.modelName,
         port: handle.port,
         enginePort: handle.enginePort,
@@ -149,15 +175,20 @@ export class RunnerManager {
       }
 
       console.log(
-        `[worker] Started runner ${runnerId} for ${params.modelName} on ${handle.host}:${handle.port}` +
+        `[worker] Started runner ${runnerId} for ${params.modelName}/${params.instanceId} on ${handle.host}:${handle.port}` +
           (handle.enginePort !== handle.port ? ` (inference on :${handle.enginePort})` : ''),
       );
 
       return { runnerId, host: handle.host, port: handle.port, enginePort: handle.enginePort };
     } catch (err) {
-      // Roll back the reserved model slot so a failed start doesn't permanently block the model.
+      // Roll back the reserved instance/model slots so a failed start doesn't permanently block
+      // either the instance id or (transitively) the model.
       this.usedPorts.delete(port);
-      this.modelToRunner.delete(params.modelName);
+      this.instanceRunners.delete(params.instanceId);
+      this.modelRunners.get(params.modelName)?.delete(runnerId);
+      if (this.modelRunners.get(params.modelName)?.size === 0) {
+        this.modelRunners.delete(params.modelName);
+      }
       // Seal the launch-log stream (any SSE client attached mid-launch gets its `end` frame) and
       // schedule the buffer for later cleanup — there's no stopRunner() call for a failed launch to
       // drop() it, so without retain() the failure logs (and their listeners) would leak forever.
@@ -200,7 +231,11 @@ export class RunnerManager {
     // the record here first makes that guard a no-op so a deliberate stop doesn't double-free memory.
     this.runners.delete(runnerId);
     this.usedPorts.delete(record.port);
-    this.modelToRunner.delete(record.modelName);
+    this.instanceRunners.delete(record.instanceId);
+    this.modelRunners.get(record.modelName)?.delete(runnerId);
+    if (this.modelRunners.get(record.modelName)?.size === 0) {
+      this.modelRunners.delete(record.modelName);
+    }
 
     for (const device of record.devices) {
       const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
@@ -214,7 +249,7 @@ export class RunnerManager {
     this.logBuffer.markEnded(runnerId);
     this.logBuffer.drop(runnerId);
 
-    console.log(`[worker] Stopped runner ${runnerId} (${record.modelName})`);
+    console.log(`[worker] Stopped runner ${runnerId} (${record.modelName}/${record.instanceId})`);
   }
 
   async stopAll(): Promise<void> {
@@ -230,11 +265,24 @@ export class RunnerManager {
   }
 
   // Resolve the runnerId for a model. Unlike getRunner() (backed by the `runners` map, which is
-  // only populated once a cold-start is *healthy*), this reads `modelToRunner`, which is set the
+  // only populated once a cold-start is *healthy*), this reads `modelRunners`, which is set the
   // instant startRunner() is entered — so a runner's logs are addressable during cold-start, which
-  // is exactly the window the deploy modal wants to stream.
+  // is exactly the window the deploy modal wants to stream. With replicas (#120), several runners
+  // may serve the same model name on this worker — returns the *most recently started* one (Set
+  // iteration order is insertion order in JS), matching the by-model logs route's documented
+  // ambiguity. Use getRunnerIdForInstance to address a specific replica unambiguously.
   getRunnerIdForModel(modelName: string): string | undefined {
-    return this.modelToRunner.get(modelName);
+    const ids = this.modelRunners.get(modelName);
+    if (!ids || ids.size === 0) return undefined;
+    let last: string | undefined;
+    for (const id of ids) last = id;
+    return last;
+  }
+
+  // Resolve the runnerId for a specific instance — unambiguous even with replicas of the same
+  // model on this worker. Like getRunnerIdForModel, set the instant startRunner() is entered.
+  getRunnerIdForInstance(instanceId: string): string | undefined {
+    return this.instanceRunners.get(instanceId);
   }
 
   getAllRunners(): RunnerRecord[] {

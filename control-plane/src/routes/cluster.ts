@@ -5,12 +5,12 @@ import type { RouteDeps } from './deps.js';
 
 export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get('/api/v1/cluster/status', async (_request, reply) => {
-    const allStates = await deps.lifecycle.getAllStates();
+    const allInstances = await deps.lifecycle.getAllInstances();
     const allWorkers = deps.workerPool.getAllWorkers();
     const memorySummary = deps.memoryBudget.getClusterSummary();
 
     const modelCounts = {
-      total: allStates.length,
+      total: allInstances.length,
       active: 0,
       sleeping: 0,
       starting: 0,
@@ -18,7 +18,7 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
       other: 0,
     };
 
-    for (const state of allStates) {
+    for (const state of allInstances) {
       switch (state.state) {
         case ModelLifecycleState.ACTIVE:
           modelCounts.active++;
@@ -53,12 +53,12 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
 
   app.get('/api/v1/cluster/memory', async (_request, reply) => {
     const allWorkers = deps.workerPool.getAllWorkers();
-    const allStates = await deps.lifecycle.getAllStates();
+    const allInstances = await deps.lifecycle.getAllInstances();
     const memorySummary = deps.memoryBudget.getClusterSummary();
 
     const workers = allWorkers.map((w) => {
       const budget = deps.memoryBudget.getWorkerBudget(w.workerId);
-      const workerModels = allStates
+      const workerModels = allInstances
         .filter(
           (s) =>
             s.workerId === w.workerId &&

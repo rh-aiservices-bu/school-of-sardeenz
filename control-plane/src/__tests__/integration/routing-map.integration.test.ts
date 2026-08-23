@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import { DeviceType, ModelLifecycleState, RunnerState } from '@sardeenz/types';
 
 import { canConnect, createHarness, type TestHarness } from './helpers/harness.js';
 import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.js';
@@ -18,11 +18,12 @@ async function deployModel(
   runner: MockRunnerServer,
   worker: MockWorkerServer,
   modelName: string,
+  instanceId: string,
 ): Promise<void> {
   await harness.registerWorker({
     workerId: WORKER_ID,
     managementUrl: worker.url,
-    devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+    devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
   });
 
   await harness.modelRepository.create({
@@ -33,13 +34,14 @@ async function deployModel(
     deviceType: 'CUDA',
   });
 
-  await harness.lifecycle.createModel(modelName, WORKER_ID);
-  await harness.lifecycle.transition(modelName, ModelLifecycleState.STARTING);
+  await harness.lifecycle.createInstance(modelName, instanceId, WORKER_ID);
+  await harness.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STARTING);
 
   runner.setHealthState(RunnerState.READY);
 
   await harness.deployOrchestration.deployModel({
     modelName,
+    instanceId,
     workerId: WORKER_ID,
     runnerType: 'vllm',
     modelPath: `/models/${modelName}`,
@@ -107,6 +109,7 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
   // pair matches the sleep-wake.integration.test.ts exemplar exactly.
   it('regression: full sleepModel round-trip encodes endpoints as [] never {}', async () => {
     const MODEL = 'sleep-roundtrip-model';
+    const INSTANCE_ID = 'inst-sleep-roundtrip';
     const HASH = redisKey(harness.keyPrefix, 'routing-map');
 
     const runner = await createMockRunner();
@@ -114,11 +117,11 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
     try {
       runner.setActiveRequests(0);
 
-      await deployModel(harness, runner, worker, MODEL);
+      await deployModel(harness, runner, worker, MODEL, INSTANCE_ID);
 
       const runnerClient = new RunnerClient({ host: runner.host, port: runner.port });
       runner.setActiveRequests(0);
-      await harness.sleepWake.sleepModel(MODEL, runnerClient);
+      await harness.sleepWake.sleepModel(MODEL, INSTANCE_ID, runnerClient);
 
       const raw = await harness.redis.hget(HASH, MODEL);
       expect(raw).not.toBeNull();
@@ -135,15 +138,19 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
 
   it('regression: transitioning with an empty deviceIndices array encodes [] never {}', async () => {
     const MODEL = 'empty-devices-model';
+    const INSTANCE_ID = 'inst-empty-devices';
     const MODEL2 = 'nonempty-devices-model';
+    const INSTANCE_ID2 = 'inst-nonempty-devices';
 
-    await harness.lifecycle.createModel(MODEL);
-    const raw = await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING, {
+    await harness.lifecycle.createInstance(MODEL, INSTANCE_ID);
+    const raw = await harness.lifecycle.transition(MODEL, INSTANCE_ID, ModelLifecycleState.STARTING, {
       deviceIndices: [],
     });
     expect(raw.deviceIndices).toEqual([]);
 
-    const rawState = await harness.redis.get(redisKey(harness.keyPrefix, 'models', MODEL));
+    const rawState = await harness.redis.get(
+      redisKey(harness.keyPrefix, 'models', MODEL, INSTANCE_ID),
+    );
     expect(rawState).not.toBeNull();
     expect(rawState).toContain('"deviceIndices":[]');
     expect(rawState).not.toContain('"deviceIndices":{}');
@@ -153,10 +160,13 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
     expect((parsed.deviceIndices as unknown[]).length).toBe(0);
 
     // Non-empty arrays must keep round-tripping correctly.
-    await harness.lifecycle.createModel(MODEL2);
-    const raw2 = await harness.lifecycle.transition(MODEL2, ModelLifecycleState.STARTING, {
-      deviceIndices: [0, 1],
-    });
+    await harness.lifecycle.createInstance(MODEL2, INSTANCE_ID2);
+    const raw2 = await harness.lifecycle.transition(
+      MODEL2,
+      INSTANCE_ID2,
+      ModelLifecycleState.STARTING,
+      { deviceIndices: [0, 1] },
+    );
     expect(raw2.deviceIndices).toEqual([0, 1]);
   });
 });

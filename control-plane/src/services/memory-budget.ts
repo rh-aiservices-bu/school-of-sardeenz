@@ -53,10 +53,11 @@ export class MemoryBudgetService {
   private readonly budgets: Map<string, WorkerBudget> = new Map();
 
   /**
-   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (modelName -> bytes).
-   * Reservations are held per-model so that co-located models on the same device do not
-   * clobber each other's reservation, and so a model's reservation can be released
-   * explicitly (on stop/evict/worker loss) without affecting other models on that device.
+   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (instanceId -> bytes).
+   * Reservations are held per-instance (#120) so that co-located instances — including two
+   * replicas of the same model on the same device — do not clobber each other's reservation,
+   * and so one instance's reservation can be released explicitly (on stop/evict/worker loss)
+   * without affecting other instances on that device.
    */
   private readonly reservations: Map<string, Map<string, number>> = new Map();
 
@@ -338,22 +339,22 @@ export class MemoryBudgetService {
   }
 
   /**
-   * Reserve capacity on a specific device for a specific model. Idempotent: calling
-   * this again for the same (workerId, deviceIndex, modelName) sets the reservation
+   * Reserve capacity on a specific device for a specific instance. Idempotent: calling
+   * this again for the same (workerId, deviceIndex, instanceId) sets the reservation
    * to `bytes` rather than accumulating it.
    *
    * The reservation is held in-memory and applied on top of the Redis-reported
    * usedBytes so that subsequent placement decisions account for in-flight
    * allocations before the worker has had a chance to report updated usage.
    */
-  reserveCapacity(workerId: string, deviceIndex: number, modelName: string, bytes: number): void {
+  reserveCapacity(workerId: string, deviceIndex: number, instanceId: string, bytes: number): void {
     const rk = this.reservationKey(workerId, deviceIndex);
-    let perModel = this.reservations.get(rk);
-    if (!perModel) {
-      perModel = new Map();
-      this.reservations.set(rk, perModel);
+    let perInstance = this.reservations.get(rk);
+    if (!perInstance) {
+      perInstance = new Map();
+      this.reservations.set(rk, perInstance);
     }
-    perModel.set(modelName, bytes);
+    perInstance.set(instanceId, bytes);
 
     // Recompute the in-memory device budget immediately so callers see the
     // updated availableBytes without waiting for the next refreshWorkerBudget.
@@ -361,15 +362,15 @@ export class MemoryBudgetService {
   }
 
   /**
-   * Release all reservations held by a model, across every device on every worker.
-   * Called on terminal lifecycle transitions (stop, evict) so a model's reserved
+   * Release all reservations held by an instance, across every device on every worker.
+   * Called on terminal lifecycle transitions (stop, evict) so an instance's reserved
    * capacity is never leaked once it is no longer running or about to run.
    */
-  releaseModelReservations(modelName: string): void {
-    for (const [rk, perModel] of this.reservations) {
-      if (!perModel.has(modelName)) continue;
-      perModel.delete(modelName);
-      if (perModel.size === 0) {
+  releaseInstanceReservations(instanceId: string): void {
+    for (const [rk, perInstance] of this.reservations) {
+      if (!perInstance.has(instanceId)) continue;
+      perInstance.delete(instanceId);
+      if (perInstance.size === 0) {
         this.reservations.delete(rk);
       }
 

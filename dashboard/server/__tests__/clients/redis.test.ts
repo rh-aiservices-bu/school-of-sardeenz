@@ -143,20 +143,24 @@ function getStore(reader: InstanceType<typeof RedisReader>): Map<string, string>
 // ---------------------------------------------------------------------------
 
 /**
- * Seed a model into the store using the exact shape and key pattern written
- * by ModelLifecycleService.createModel / .transition.
+ * Seed a model instance into the store using the exact shape and key pattern written by
+ * ModelLifecycleService.createInstance / .transition (#120: one blob per instance, at
+ * `{prefix}:models:{modelName}:{instanceId}`, not one blob per model).
  */
 function seedModel(
   store: Map<string, string>,
   opts: {
     modelName: string;
     state: ModelLifecycleState;
+    instanceId?: string;
     workerId?: string | null;
     stateChangedAt?: string;
     lastInferenceAt?: string | null;
   },
 ): void {
+  const instanceId = opts.instanceId ?? `inst-${opts.modelName}`;
   const blob = {
+    instanceId,
     modelName: opts.modelName,
     state: opts.state,
     workerId: opts.workerId ?? null,
@@ -167,7 +171,7 @@ function seedModel(
     stateChangedAt: opts.stateChangedAt ?? '2026-01-01T00:00:00.000Z',
     errorMessage: null,
   };
-  store.set(`${PREFIX}:models:${opts.modelName}`, JSON.stringify(blob));
+  store.set(`${PREFIX}:models:${opts.modelName}:${instanceId}`, JSON.stringify(blob));
 }
 
 /**
@@ -308,8 +312,13 @@ describe('RedisReader — model fallback (control-plane-compatible keys)', () =>
 
   it('falls back to ERROR for unknown state values', async () => {
     store.set(
-      `${PREFIX}:models:bad-model`,
-      JSON.stringify({ modelName: 'bad-model', state: 'INVALID_STATE', workerId: null }),
+      `${PREFIX}:models:bad-model:inst-bad-model`,
+      JSON.stringify({
+        instanceId: 'inst-bad-model',
+        modelName: 'bad-model',
+        state: 'INVALID_STATE',
+        workerId: null,
+      }),
     );
 
     const model = await reader.getModel('bad-model');
@@ -319,7 +328,7 @@ describe('RedisReader — model fallback (control-plane-compatible keys)', () =>
   });
 
   it('returns null for malformed JSON', async () => {
-    store.set(`${PREFIX}:models:broken`, 'not valid json');
+    store.set(`${PREFIX}:models:broken:inst-broken`, 'not valid json');
 
     const model = await reader.getModel('broken');
 
@@ -333,6 +342,80 @@ describe('RedisReader — model fallback (control-plane-compatible keys)', () =>
     const names = await reader.getModelNames();
 
     expect(names.sort()).toEqual(['alpha', 'beta']);
+  });
+
+  // #120: a model can have N instance blobs; getModel aggregates them.
+  describe('multi-instance aggregation (#120)', () => {
+    it('reports instanceCount and aggregate ACTIVE when one instance is ACTIVE and one is ERROR', async () => {
+      seedModel(store, {
+        modelName: 'replica-model',
+        instanceId: 'inst-a',
+        state: ModelLifecycleState.ACTIVE,
+        workerId: 'worker-a',
+      });
+      seedModel(store, {
+        modelName: 'replica-model',
+        instanceId: 'inst-b',
+        state: ModelLifecycleState.ERROR,
+        workerId: 'worker-b',
+      });
+
+      const model = await reader.getModel('replica-model');
+
+      expect(model).not.toBeNull();
+      expect(model!.instanceCount).toBe(2);
+      expect(model!.state).toBe(ModelLifecycleState.ACTIVE);
+      // workerId is ambiguous with 2 instances — must not pick one arbitrarily.
+      expect(model!.workerId).toBeUndefined();
+    });
+
+    it('reports workerId only when the model has exactly one instance', async () => {
+      seedModel(store, {
+        modelName: 'single-instance-model',
+        state: ModelLifecycleState.ACTIVE,
+        workerId: 'worker-solo',
+      });
+
+      const model = await reader.getModel('single-instance-model');
+
+      expect(model!.instanceCount).toBe(1);
+      expect(model!.workerId).toBe('worker-solo');
+    });
+
+    it('getModelNames deduplicates model names across multiple instance keys', async () => {
+      seedModel(store, {
+        modelName: 'dup-name-model',
+        instanceId: 'inst-a',
+        state: ModelLifecycleState.ACTIVE,
+      });
+      seedModel(store, {
+        modelName: 'dup-name-model',
+        instanceId: 'inst-b',
+        state: ModelLifecycleState.ACTIVE,
+      });
+
+      const names = await reader.getModelNames();
+
+      expect(names).toEqual(['dup-name-model']);
+    });
+
+    it('listModels counts each logical model once regardless of instance count', async () => {
+      seedModel(store, {
+        modelName: 'replica-model',
+        instanceId: 'inst-a',
+        state: ModelLifecycleState.ACTIVE,
+      });
+      seedModel(store, {
+        modelName: 'replica-model',
+        instanceId: 'inst-b',
+        state: ModelLifecycleState.ACTIVE,
+      });
+      seedModel(store, { modelName: 'solo-model', state: ModelLifecycleState.SLEEPING });
+
+      const models = await reader.listModels();
+
+      expect(models).toHaveLength(2);
+    });
   });
 });
 

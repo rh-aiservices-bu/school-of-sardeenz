@@ -19,7 +19,10 @@ export type paths = {
          *     The worker allocates a port, starts the runner, waits for the runner's
          *     health endpoint to respond, and returns the runner's endpoint.
          *
-         *     Returns `409` if a runner for the same model name is already running
+         *     Multiple runners for the same model name may run concurrently on one
+         *     worker (replicas) as long as each has a distinct `instanceId`.
+         *
+         *     Returns `409` if a runner for the same `instanceId` is already running
          *     on this worker. Returns `503` if the worker has no capacity to start
          *     another runner.
          */
@@ -106,10 +109,47 @@ export type paths = {
          *     start command is received, so keying by model name makes a runner's logs
          *     addressable throughout cold-start.
          *
+         *     With replicas, more than one runner may serve the same model name on
+         *     this worker — this endpoint returns the **most-recently-started**
+         *     runner for the model; use `GET /runners/by-instance/{instanceId}/logs`
+         *     to address a specific replica unambiguously.
+         *
          *     Returns `404` until the worker has actually received the start command
          *     for this model (the control plane retries).
          */
         get: operations["streamRunnerLogsByModel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runners/by-instance/{instanceId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream a runner's captured logs, addressed by instance id
+         * @description Same SSE stream as `GET /runners/{runnerId}/logs`, but addressed by
+         *     the control-plane-assigned `instanceId` instead of the worker-assigned
+         *     `runnerId`.
+         *
+         *     Unambiguous even when multiple runners serve the same model name on
+         *     this worker (replicas): unlike `GET /runners/by-model/{modelName}/logs`,
+         *     which resolves to the most-recently-started runner, this always
+         *     targets the one instance requested. The control plane mints
+         *     `instanceId` before calling `POST /runners`, so it is addressable
+         *     throughout cold-start, before the worker returns a `runnerId`.
+         *
+         *     Returns `404` until the worker has actually received the start command
+         *     for this instance (the control plane retries).
+         */
+        get: operations["streamRunnerLogsByInstance"];
         put?: never;
         post?: never;
         delete?: never;
@@ -134,6 +174,12 @@ export type components = {
              *     engine binary to launch.
              */
             runnerType: string;
+            /**
+             * @description Control-plane-assigned instance identity; disambiguates replicas
+             *     of one model on one worker. Optional/back-compat: when absent the
+             *     worker generates one.
+             */
+            instanceId?: string;
             /**
              * @description Runtime module the worker must exec to serve this model, as
              *     `<engine>-<version>` (e.g., "vllm-0.21"). The production
@@ -407,7 +453,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A runner for this model is already running */
+            /** @description A runner for this instanceId is already running */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -538,6 +584,47 @@ export interface operations {
                 };
             };
             /** @description No runner for this model (not started yet) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal worker error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    streamRunnerLogsByInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Instance identifier whose runner logs to stream. */
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE log stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["RunnerLogLine"];
+                };
+            };
+            /** @description No runner for this instance (not started yet) */
             404: {
                 headers: {
                     [name: string]: unknown;

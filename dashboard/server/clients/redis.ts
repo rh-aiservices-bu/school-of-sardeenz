@@ -56,79 +56,136 @@ export class RedisReader {
   }
 
   /**
-   * Extract model name from a `{prefix}:models:{modelName}` key.
-   *
-   * The control plane stores each model as a single JSON blob at
-   * `{prefix}:models:{modelName}`.  The model name may itself contain
-   * colons so we strip the known prefix and return the rest.
+   * Extract `{modelName, instanceId}` from a `{prefix}:models:{modelName}:{instanceId}` key
+   * (#120: model state moved from one blob per model to one blob per instance). Neither
+   * modelName nor instanceId can contain `:` (see `MODEL_NAME_PATTERN` / `mintInstanceId` in
+   * control-plane/src/routes/models.ts), so splitting on the last `:` is unambiguous even though
+   * modelName itself may contain other characters.
    */
-  private modelNameFromKey(key: string): string {
+  private parseInstanceKey(key: string): { modelName: string; instanceId: string } | null {
     const modelsPrefix = `${this.prefix}:models:`;
-    return key.slice(modelsPrefix.length);
+    if (!key.startsWith(modelsPrefix)) return null;
+    const rest = key.slice(modelsPrefix.length);
+    const sep = rest.lastIndexOf(':');
+    if (sep < 0) return null;
+    return { modelName: rest.slice(0, sep), instanceId: rest.slice(sep + 1) };
   }
 
   async getModelNames(): Promise<string[]> {
     const keys = await this.scanKeys(`${this.prefix}:models:*`);
-    return keys.map((k) => this.modelNameFromKey(k));
+    const names = new Set<string>();
+    for (const key of keys) {
+      const parsed = this.parseInstanceKey(key);
+      if (parsed) names.add(parsed.modelName);
+    }
+    return [...names];
   }
 
   /**
-   * Read a single model's state from Redis.
+   * Aggregate a logical model's state from the states of all of its instance blobs, mirroring
+   * `deriveAggregateState` in control-plane/src/services/model-lifecycle.ts (ACTIVE outranks
+   * ERROR — one healthy replica masks a broken one). Duplicated here rather than imported: this
+   * is the dashboard BFF's degraded-mode Redis-fallback path, a separate deployable from the
+   * control plane.
+   */
+  private static readonly AGGREGATE_PRECEDENCE: readonly ModelLifecycleState[] = [
+    ModelLifecycleState.ACTIVE,
+    ModelLifecycleState.STARTING,
+    ModelLifecycleState.DRAINING,
+    ModelLifecycleState.SLEEPING,
+    ModelLifecycleState.PENDING,
+    ModelLifecycleState.STOPPING,
+    ModelLifecycleState.ERROR,
+  ];
+
+  private deriveAggregateState(states: ModelLifecycleState[]): ModelLifecycleState {
+    // Explicit Set<ModelLifecycleState> annotation: TS's inferred-predicate narrowing would
+    // otherwise type this as Set<Exclude<ModelLifecycleState, 'STOPPED'>>, which rejects the
+    // full-enum-typed AGGREGATE_PRECEDENCE candidates below at .has().
+    const present: Set<ModelLifecycleState> = new Set(
+      states.filter((s) => s !== ModelLifecycleState.STOPPED),
+    );
+    for (const candidate of RedisReader.AGGREGATE_PRECEDENCE) {
+      if (present.has(candidate)) return candidate;
+    }
+    return ModelLifecycleState.ERROR;
+  }
+
+  /**
+   * Read a logical model's aggregate state from Redis by scanning all of its instance blobs.
    *
-   * The control plane persists model state as a single JSON blob at
-   * `{prefix}:models:{modelName}` with the shape defined by
-   * `ModelLifecycleService.ModelState` (modelName, state, workerId,
-   * runnerHost, runnerPort, runnerId, lastInferenceAt, stateChangedAt,
-   * errorMessage).
+   * The control plane persists each instance's state as a JSON blob at
+   * `{prefix}:models:{modelName}:{instanceId}` with the shape defined by
+   * `ModelLifecycleService.InstanceState` (instanceId, modelName, state, workerId, runnerHost,
+   * runnerPort, runnerId, lastInferenceAt, stateChangedAt, errorMessage). A model with zero
+   * instance blobs doesn't exist in this fallback view (nothing to reconstruct from — the
+   * PostgreSQL config record isn't reachable from here).
    *
    * Last-inference timestamps are stored separately at
-   * `{prefix}:inference:last:{modelName}` — the blob's own
-   * `lastInferenceAt` may lag behind, so we prefer the dedicated key
-   * when available.
+   * `{prefix}:inference:last:{modelName}` — the blob's own `lastInferenceAt` may lag behind, so
+   * we prefer the dedicated key when available.
    */
   async getModel(name: string): Promise<ModelInfo | null> {
-    const raw = await this.client.get(`${this.prefix}:models:${name}`);
-    if (raw === null) return null;
+    const keys = await this.scanKeys(`${this.prefix}:models:${name}:*`);
+    if (keys.length === 0) return null;
 
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (parsed === null || typeof parsed !== 'object') return null;
-
-      const blob = parsed as Record<string, unknown>;
-
-      // Validate state — fall back to ERROR for unknown values.
-      const stateRaw = blob['state'];
-      const state =
-        typeof stateRaw === 'string' &&
-        Object.values(ModelLifecycleState).includes(stateRaw as ModelLifecycleState)
-          ? (stateRaw as ModelLifecycleState)
-          : ModelLifecycleState.ERROR;
-
-      const model: ModelInfo = {
-        modelName: name,
-        state,
-        // The control plane blob doesn't carry runnerType — it's stored in
-        // PostgreSQL.  Fall back to 'unknown' for the Redis-only path.
-        runnerType: typeof blob['runnerType'] === 'string' ? blob['runnerType'] : 'unknown',
-        createdAt:
-          typeof blob['stateChangedAt'] === 'string'
-            ? blob['stateChangedAt']
-            : new Date(0).toISOString(),
-      };
-
-      if (typeof blob['workerId'] === 'string') model.workerId = blob['workerId'];
-
-      // Prefer the dedicated inference timestamp key over the blob field.
-      const inferenceRaw = await this.client.get(`${this.prefix}:inference:last:${name}`);
-      const lastInferenceAt =
-        inferenceRaw ??
-        (typeof blob['lastInferenceAt'] === 'string' ? blob['lastInferenceAt'] : null);
-      if (lastInferenceAt) model.lastInferenceAt = lastInferenceAt;
-
-      return model;
-    } catch {
-      return null;
+    const pipeline = this.client.pipeline();
+    for (const key of keys) {
+      pipeline.get(key);
     }
+    const results = await pipeline.exec();
+    if (!results) return null;
+
+    const blobs: Record<string, unknown>[] = [];
+    for (const [err, raw] of results) {
+      if (err || typeof raw !== 'string') continue;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed !== null && typeof parsed === 'object') {
+          blobs.push(parsed as Record<string, unknown>);
+        }
+      } catch {
+        // Skip malformed entries
+      }
+    }
+    if (blobs.length === 0) return null;
+
+    const states = blobs.map((blob) => {
+      const stateRaw = blob['state'];
+      return typeof stateRaw === 'string' &&
+        Object.values(ModelLifecycleState).includes(stateRaw as ModelLifecycleState)
+        ? (stateRaw as ModelLifecycleState)
+        : ModelLifecycleState.ERROR;
+    });
+
+    const model: ModelInfo = {
+      modelName: name,
+      state: this.deriveAggregateState(states),
+      // The control plane blobs don't carry runnerType — it's stored in
+      // PostgreSQL.  Fall back to 'unknown' for the Redis-only path.
+      runnerType: 'unknown',
+      instanceCount: blobs.length,
+      createdAt:
+        typeof blobs[0]['stateChangedAt'] === 'string'
+          ? blobs[0]['stateChangedAt']
+          : new Date(0).toISOString(),
+    };
+
+    // Unambiguous only with exactly one instance.
+    if (blobs.length === 1 && typeof blobs[0]['workerId'] === 'string') {
+      model.workerId = blobs[0]['workerId'];
+    }
+
+    // Prefer the dedicated inference timestamp key over any blob field.
+    const inferenceRaw = await this.client.get(`${this.prefix}:inference:last:${name}`);
+    const lastInferenceAt =
+      inferenceRaw ??
+      blobs.map((b) => (typeof b['lastInferenceAt'] === 'string' ? b['lastInferenceAt'] : null))
+        .find((v): v is string => v !== null) ??
+      null;
+    if (lastInferenceAt) model.lastInferenceAt = lastInferenceAt;
+
+    return model;
   }
 
   async listModels(): Promise<ModelInfo[]> {

@@ -3,11 +3,15 @@ import pg from 'pg';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { WorkerAgentComponents } from '@sardeenz/types';
+import { ModelType, SleepLevel } from '@sardeenz/types';
+
 import { loadRootEnv } from '../../../load-env.js';
 
 import { redisKey } from '../../../clients/redis.js';
 import { runMigrations } from '../../../clients/migrations.js';
 import { ModelRepository } from '../../../services/model-repository.js';
+import { InstanceRepository } from '../../../services/instance-repository.js';
 import { ModelLifecycleService } from '../../../services/model-lifecycle.js';
 import { MemoryBudgetService } from '../../../services/memory-budget.js';
 import { WorkerPoolService } from '../../../services/worker-pool.js';
@@ -118,6 +122,7 @@ export interface TestHarness {
   db: pg.Pool;
   keyPrefix: string;
   modelRepository: ModelRepository;
+  instanceRepository: InstanceRepository;
   lifecycle: ModelLifecycleService;
   memoryBudget: MemoryBudgetService;
   workerPool: WorkerPoolService;
@@ -131,10 +136,19 @@ export interface TestHarness {
   teardown(): Promise<void>;
 }
 
+// Current WorkerInfo/WorkerMemoryReport contract shape (packages/contracts/specs/worker-agent.yaml),
+// validated at the Redis boundary by WorkerPoolService (control-plane/src/services/worker-pool.ts).
+// Typing the fixture against the generated contract types (rather than ad-hoc shapes) means a future
+// contract change that this fixture doesn't account for fails typecheck instead of silently rotting
+// until the next live-stack integration run (see #141).
+type WorkerInfoPayload = WorkerAgentComponents['schemas']['WorkerInfo'];
+type WorkerDeviceInfo = WorkerAgentComponents['schemas']['WorkerDeviceInfo'];
+type WorkerMemoryReportPayload = WorkerAgentComponents['schemas']['WorkerMemoryReport'];
+
 export interface RegisterWorkerOpts {
   workerId: string;
   managementUrl: string;
-  devices: { deviceIndex: number; deviceType: string; memoryTotalBytes: number }[];
+  devices: WorkerDeviceInfo[];
   runnerType?: string;
 }
 
@@ -170,6 +184,7 @@ export function createHarness(): TestHarness {
   });
 
   const modelRepository = new ModelRepository(db);
+  const instanceRepository = new InstanceRepository(db);
   const lifecycle = new ModelLifecycleService(redis, keyPrefix);
   const memoryBudget = new MemoryBudgetService(redis, keyPrefix, 30);
   const workerPool = new WorkerPoolService(redis, keyPrefix, 300);
@@ -198,14 +213,16 @@ export function createHarness(): TestHarness {
     const heartbeatKey = redisKey(keyPrefix, 'workers', opts.workerId, 'heartbeat');
     const memoryKey = redisKey(keyPrefix, 'workers', opts.workerId, 'memory');
 
-    const info = {
+    const info: WorkerInfoPayload = {
       capabilities: [
         {
           runnerType: opts.runnerType ?? 'vllm',
           engineName: 'vLLM',
-          supportedModelTypes: ['text-generation'],
+          supportedModelTypes: [ModelType.LLM],
           supportedDeviceTypes: opts.devices.map((d) => d.deviceType),
-          supportedSleepLevels: ['L1_HOST_RAM'],
+          supportedSleepLevels: [SleepLevel.L1_HOST_RAM],
+          maxTensorParallelism: 1,
+          kvCacheElasticSharing: false,
         },
       ],
       devices: opts.devices.map((d) => ({
@@ -216,7 +233,7 @@ export function createHarness(): TestHarness {
       managementUrl: opts.managementUrl,
     };
 
-    const memoryReport = {
+    const memoryReport: WorkerMemoryReportPayload = {
       devices: opts.devices.map((d) => ({
         deviceIndex: d.deviceIndex,
         deviceType: d.deviceType,
@@ -256,7 +273,7 @@ export function createHarness(): TestHarness {
       'migrations',
     );
     await runMigrations(db, migrationsDir);
-    await db.query('TRUNCATE models, memory_profiles, benchmarks, settings CASCADE');
+    await db.query('TRUNCATE models, instances, memory_profiles, benchmarks, settings CASCADE');
   }
 
   async function teardown(): Promise<void> {
@@ -267,7 +284,7 @@ export function createHarness(): TestHarness {
     redis.disconnect();
     // Leave no residue behind, so the last test of a run doesn't linger in the test DB (this is the
     // very failure mode that seeded herd-model/stuck-model into the dev DB before this fix).
-    await db.query('TRUNCATE models, memory_profiles, benchmarks, settings CASCADE');
+    await db.query('TRUNCATE models, instances, memory_profiles, benchmarks, settings CASCADE');
     await db.end();
   }
 
@@ -276,6 +293,7 @@ export function createHarness(): TestHarness {
     db,
     keyPrefix,
     modelRepository,
+    instanceRepository,
     lifecycle,
     memoryBudget,
     workerPool,
