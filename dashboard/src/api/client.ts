@@ -330,4 +330,7 @@ export const api = {
     chat: (body: ChatCompletionBody, callbacks: ChatStreamCallbacks, signal: AbortSignal) =>
       streamChatCompletion(body, callbacks, signal),
   },
+  config: {
+    get: (signal?: AbortSignal) => request<{ inferenceUrl: string }>('/config', { signal }),
+  },
 };

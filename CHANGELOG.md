@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Home placement board with cluster inference URL (#124).** The cluster overview home page is now
+  a v1-style Model Placement Management view: per-worker placement board composing the reusable
+  per-GPU memory sections (#123) plus a placement summary — per-GPU rows, tensor-parallel models
+  listed once with a TP×N badge, an Unplaced group, a placement-not-tracked fallback, and an
+  empty-cluster state with a deploy call-to-action. A copyable inference URL banner
+  (from `SARDEENZ_INFERENCE_URL` via the new authenticated BFF `GET /api/config` — response built
+  field-by-field, never exposing secrets, with a leak-guard test) and a per-model curl snippet on
+  the model detail page (OpenAI base = inference URL + `/v1`, routing name = model name — never
+  `window.location.origin`). The move-model action is deferred to a follow-up issue per the
+  project-lead decision; no move control is rendered. `/models` and `/gpu-memory` are unchanged.
+
 - **GPU memory visualization — per-GPU stacked per-model VRAM bars, grouped by worker (#123).** New
   `/gpu-memory` dashboard page (v1 parity): each worker section renders one bar per GPU with stacked
   per-model segments (deterministic PF6 chart-token colors, stable per model across workers), a

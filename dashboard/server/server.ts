@@ -17,6 +17,7 @@ import { registerModelLogRoutes } from './routes/model-logs.js';
 import { registerInferenceRoutes } from './routes/inference.js';
 import { registerWorkerRoutes } from './routes/workers.js';
 import { registerClusterRoutes } from './routes/cluster.js';
+import { registerConfigRoutes } from './routes/config.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerEventRoutes } from './routes/events.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
@@ -83,6 +84,7 @@ export async function buildServer(deps: ServerDeps) {
   registerInferenceRoutes(app, deps.routes);
   registerWorkerRoutes(app, deps.routes);
   registerClusterRoutes(app, deps.routes);
+  registerConfigRoutes(app, deps.routes);
   registerMetricsRoutes(app, deps.routes);
   registerEventRoutes(app, deps.routes);
   registerNotificationRoutes(app, deps.routes);

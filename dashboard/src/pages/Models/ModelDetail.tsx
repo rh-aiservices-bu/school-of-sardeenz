@@ -24,7 +24,9 @@ import {
   Flex,
   FlexItem,
   CodeBlock,
+  CodeBlockAction,
   CodeBlockCode,
+  ClipboardCopyButton,
   Title,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
@@ -47,6 +49,8 @@ import { StateLabel } from '../../components/StateLabel';
 import { DeployLogsModal } from '../../components/DeployLogsModal';
 import { formatBytes, formatRelativeTime, formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
+import { useConfig } from '../../hooks/useConfig';
+import { buildChatCurl } from '../../utils/inference';
 
 export function ModelDetail() {
   const { t } = useTranslation('models');
@@ -56,6 +60,7 @@ export function ModelDetail() {
   const { isAdmin } = useAuth();
 
   const { data: model, isLoading, error } = useModel(modelName ?? '');
+  const { data: cfg } = useConfig();
   const sleepModel = useSleepModel();
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
@@ -73,6 +78,7 @@ export function ModelDetail() {
   const [engineConfigExpanded, setEngineConfigExpanded] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [deleteInstanceId, setDeleteInstanceId] = useState<string | null>(null);
+  const [curlCopied, setCurlCopied] = useState(false);
 
   const handleSleepConfirm = () => {
     if (!modelName) return;
@@ -460,6 +466,51 @@ export function ModelDetail() {
           <DescriptionListDescription>{formatDateTime(model.createdAt)}</DescriptionListDescription>
         </DescriptionListGroup>
       </DescriptionList>
+
+      {/* Per-model inference snippet: base URL from GET /api/config + the model's routing name
+          (= modelName, what the proxy dispatches on). */}
+      {cfg?.inferenceUrl && (
+        <div style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
+          <Title
+            headingLevel="h2"
+            size="md"
+            style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}
+          >
+            {t('detail.inference.title')}
+          </Title>
+          <Content
+            component="small"
+            style={{ display: 'block', marginBottom: 'var(--pf-t--global--spacer--sm)' }}
+          >
+            {t('detail.inference.description')}
+          </Content>
+          <CodeBlock
+            actions={
+              <CodeBlockAction>
+                <ClipboardCopyButton
+                  id="model-curl-copy-button"
+                  textId="model-curl-code-content"
+                  aria-label={t('detail.inference.curlAria')}
+                  onClick={() => {
+                    void navigator.clipboard.writeText(
+                      buildChatCurl(cfg.inferenceUrl, model.modelName),
+                    );
+                    setCurlCopied(true);
+                  }}
+                  exitDelay={curlCopied ? 1500 : 600}
+                  onTooltipHidden={() => setCurlCopied(false)}
+                >
+                  {curlCopied ? t('detail.inference.curlCopied') : t('detail.inference.curlCopy')}
+                </ClipboardCopyButton>
+              </CodeBlockAction>
+            }
+          >
+            <CodeBlockCode id="model-curl-code-content">
+              {buildChatCurl(cfg.inferenceUrl, model.modelName)}
+            </CodeBlockCode>
+          </CodeBlock>
+        </div>
+      )}
 
       {/* Instances table (#120): each row is one runtime replica of this model — its own
           placement, endpoint, and lifecycle state. The model-level `state` above is the

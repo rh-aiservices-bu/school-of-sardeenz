@@ -212,6 +212,13 @@
     },
     "viewLogs": {
       "button": "View starting logs"
+    },
+    "inference": {
+      "title": "Inference",
+      "description": "Paste-ready request using this model's routing name.",
+      "curlCopy": "Copy",
+      "curlCopied": "Copied",
+      "curlAria": "Copy curl snippet"
     }
   },
   "logs": {
