@@ -209,6 +209,13 @@ export function AppLayout({ children }: AppLayoutProps) {
               {t('nav.workers')}
             </NavItem>
             <NavItem
+              itemId="/gpu-memory"
+              isActive={location.pathname.startsWith('/gpu-memory')}
+              onClick={() => navigate('/gpu-memory')}
+            >
+              {t('nav.gpuMemory')}
+            </NavItem>
+            <NavItem
               itemId="/catalog"
               isActive={location.pathname.startsWith('/catalog')}
               onClick={() => navigate('/catalog')}

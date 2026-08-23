@@ -56,6 +56,11 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
     const allInstances = await deps.lifecycle.getAllInstances();
     const memorySummary = deps.memoryBudget.getClusterSummary();
 
+    const allRecords = await deps.modelRepository.findAll();
+    const requiredByModel = new Map(
+      allRecords.filter((r) => r.requiredMemory != null).map((r) => [r.name, r.requiredMemory!]),
+    );
+
     const workers = allWorkers.map((w) => {
       const budget = deps.memoryBudget.getWorkerBudget(w.workerId);
       const workerModels = allInstances
@@ -69,6 +74,9 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
           modelName: s.modelName,
           state: s.state,
           deviceIndices: s.deviceIndices ?? undefined,
+          // Configured requirement, not a measured value — see #123 blueprint §3. This is the
+          // seam where a genuine runner-reported per-model measurement would later replace it.
+          memoryUsedBytes: requiredByModel.get(s.modelName) ?? undefined,
         }));
 
       return {

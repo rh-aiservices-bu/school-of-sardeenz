@@ -62,12 +62,19 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
     }
 
     const allInstances = await deps.lifecycle.getAllInstances();
+    const allRecords = await deps.modelRepository.findAll();
+    const requiredByModel = new Map(
+      allRecords.filter((r) => r.requiredMemory != null).map((r) => [r.name, r.requiredMemory!]),
+    );
     const workerModels = allInstances
       .filter((s) => s.workerId === workerId && s.state !== ModelLifecycleState.STOPPED)
       .map((s) => ({
         modelName: s.modelName,
         state: s.state,
         deviceIndices: s.deviceIndices ?? undefined,
+        // Configured requirement, not a measured value — see #123 blueprint §3. This is the
+        // seam where a genuine runner-reported per-model measurement would later replace it.
+        memoryUsedBytes: requiredByModel.get(s.modelName) ?? undefined,
       }));
 
     const budget = deps.memoryBudget.getWorkerBudget(workerId);

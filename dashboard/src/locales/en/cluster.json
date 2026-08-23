@@ -69,7 +69,21 @@
       "legend": {
         "used": "Used",
         "reserved": "Reserved",
-        "available": "Available"
+        "available": "Available",
+        "other": "Other",
+        "sleeping": "Sleeping"
+      },
+      "page": {
+        "title": "GPU Memory"
+      },
+      "tooltip": {
+        "model": "{{model}}: {{memory}} (reserved)",
+        "modelEstimate": "{{model}}: {{memory}} (estimated, reserved)",
+        "sleeping": "{{model}}: {{memory}} (sleeping, reserved)",
+        "estimateNote": "per-device split estimated"
+      },
+      "aria": {
+        "deviceBreakdown": "GPU {{index}}: {{summary}}"
       }
     }
   }

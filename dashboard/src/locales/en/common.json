@@ -3,6 +3,7 @@
     "clusterOverview": "Cluster Overview",
     "models": "Models",
     "workers": "Workers",
+    "gpuMemory": "GPU Memory",
     "catalog": "Runner Catalog",
     "metrics": "Metrics",
     "playground": "Playground"

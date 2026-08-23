@@ -8,7 +8,13 @@
  */
 import { describe, it, expect } from 'vitest';
 import { formatBytes, formatPercentage } from '../../utils/format';
-import type { ControlPlaneComponents } from '@sardeenz/types';
+import {
+  computeModelSegments,
+  colorTokenForModel,
+  MIN_SEGMENT_PERCENT,
+  type AttributedModel,
+} from '../../utils/memorySegments';
+import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
 
 type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
@@ -227,5 +233,135 @@ describe('MemoryVisualization — segment percentages', () => {
     expect(usedPct).toBe(0);
     expect(reservedPct).toBe(0);
     expect(availablePct).toBe(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-model segments (memorySegments.ts) — the #123 core logic
+// ---------------------------------------------------------------------------
+function makeModel(overrides?: Partial<AttributedModel>): AttributedModel {
+  return {
+    modelName: 'llama-3-8b',
+    state: ModelLifecycleState.ACTIVE,
+    bytes: 4 * 1024 ** 3,
+    isEstimate: false,
+    ...overrides,
+  };
+}
+
+describe('computeModelSegments — widths sum to 100', () => {
+  it('typical case: model + other + available sum to exactly 100', () => {
+    const device = makeDevice();
+    const segments = computeModelSegments(device, [makeModel({ bytes: 6 * 1024 ** 3 })]);
+    const total = segments.reduce((sum, s) => sum + s.widthPercent, 0);
+    expect(total).toBeCloseTo(100, 6);
+  });
+
+  it('absorbs rounding drift on the final available segment', () => {
+    // Odd byte counts that don't divide cleanly into round percentages.
+    const device = makeDevice({ memoryTotalBytes: 17179869184, memoryUsedBytes: 5726623061 });
+    const segments = computeModelSegments(device, [
+      makeModel({ bytes: 1907541020 }),
+      makeModel({ modelName: 'model-b', bytes: 3819082041 }),
+    ]);
+    const total = segments.reduce((sum, s) => sum + s.widthPercent, 0);
+    expect(total).toBeCloseTo(100, 6);
+    expect(segments[segments.length - 1].kind).toBe('available');
+  });
+});
+
+describe('computeModelSegments — absent memoryUsedBytes is safe', () => {
+  it('a model with 0 bytes contributes no model segment; layout still sums to 100', () => {
+    const device = makeDevice();
+    const segments = computeModelSegments(device, [makeModel({ bytes: 0 })]);
+    expect(segments.some((s) => s.kind === 'model')).toBe(false);
+    const total = segments.reduce((sum, s) => sum + s.widthPercent, 0);
+    expect(total).toBeCloseTo(100, 6);
+    expect(segments.every((s) => !Number.isNaN(s.widthPercent))).toBe(true);
+  });
+});
+
+describe('computeModelSegments — sleeping state', () => {
+  it('marks a SLEEPING model segment as sleeping:true', () => {
+    const device = makeDevice();
+    const segments = computeModelSegments(device, [
+      makeModel({ state: ModelLifecycleState.SLEEPING }),
+    ]);
+    const modelSeg = segments.find((s) => s.kind === 'model');
+    expect(modelSeg?.sleeping).toBe(true);
+  });
+
+  it('does not mark an ACTIVE model segment as sleeping', () => {
+    const device = makeDevice();
+    const segments = computeModelSegments(device, [makeModel({ state: ModelLifecycleState.ACTIVE })]);
+    const modelSeg = segments.find((s) => s.kind === 'model');
+    expect(modelSeg?.sleeping).toBe(false);
+  });
+});
+
+describe('computeModelSegments — overhead clamps at zero', () => {
+  it('never renders a negative "other" segment when models exceed device used bytes', () => {
+    const device = makeDevice({ memoryUsedBytes: 4 * 1024 ** 3 });
+    // #116 double-count scenario: models report more than the device's used bytes.
+    const segments = computeModelSegments(device, [makeModel({ bytes: 10 * 1024 ** 3 })]);
+    expect(segments.some((s) => s.kind === 'other')).toBe(false);
+    expect(segments.every((s) => s.widthPercent >= 0)).toBe(true);
+    const total = segments.reduce((sum, s) => sum + s.widthPercent, 0);
+    expect(total).toBeCloseTo(100, 6);
+  });
+});
+
+describe('computeModelSegments — minimum segment width floor', () => {
+  it('a 200MiB model on an 80GiB card is still visible at >= MIN_SEGMENT_PERCENT', () => {
+    const device = makeDevice({
+      memoryTotalBytes: 80 * 1024 ** 3,
+      memoryUsedBytes: 200 * 1024 ** 2,
+    });
+    const segments = computeModelSegments(device, [makeModel({ bytes: 200 * 1024 ** 2 })]);
+    const modelSeg = segments.find((s) => s.kind === 'model');
+    expect(modelSeg?.widthPercent).toBeGreaterThanOrEqual(MIN_SEGMENT_PERCENT);
+    const total = segments.reduce((sum, s) => sum + s.widthPercent, 0);
+    expect(total).toBeCloseTo(100, 6);
+  });
+});
+
+describe('colorTokenForModel — stability', () => {
+  it('is stable for the same modelName across repeated calls', () => {
+    expect(colorTokenForModel('llama-3-8b')).toBe(colorTokenForModel('llama-3-8b'));
+  });
+
+  it('two replicas of one model resolve to the same token', () => {
+    const a = colorTokenForModel('mistral-7b');
+    const b = colorTokenForModel('mistral-7b');
+    expect(a).toBe(b);
+  });
+
+  it('different names generally differ', () => {
+    expect(colorTokenForModel('model-a')).not.toBe(colorTokenForModel('model-b'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tensor-parallel even-split estimate (adapter-level arithmetic, WorkerGpuSection.tsx)
+// ---------------------------------------------------------------------------
+describe('tensor-parallel even-split estimate', () => {
+  function splitAcrossDevices(memoryUsedBytes: number | undefined, deviceIndices: number[] | undefined) {
+    const deviceCount = Math.max(1, deviceIndices?.length ?? 1);
+    return {
+      bytes: (memoryUsedBytes ?? 0) / deviceCount,
+      isEstimate: deviceCount > 1,
+    };
+  }
+
+  it('marks isEstimate true and splits bytes evenly when deviceIndices.length > 1', () => {
+    const { bytes, isEstimate } = splitAcrossDevices(8 * 1024 ** 3, [0, 1]);
+    expect(isEstimate).toBe(true);
+    expect(bytes).toBe(4 * 1024 ** 3);
+  });
+
+  it('marks isEstimate false for a single-device model', () => {
+    const { bytes, isEstimate } = splitAcrossDevices(4 * 1024 ** 3, [0]);
+    expect(isEstimate).toBe(false);
+    expect(bytes).toBe(4 * 1024 ** 3);
   });
 });

@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **GPU memory visualization — per-GPU stacked per-model VRAM bars, grouped by worker (#123).** New
+  `/gpu-memory` dashboard page (v1 parity): each worker section renders one bar per GPU with stacked
+  per-model segments (deterministic PF6 chart-token colors, stable per model across workers), a
+  distinct hatch pattern for SLEEPING models (reclaimable VRAM), reserved colors for Other/Available,
+  minimum segment width, and overhead clamped at zero. Segments are labeled "(reserved)" — the
+  control plane now populates `WorkerModelInfo.memoryUsedBytes` (declared but never populated
+  before) from the model's configured `requiredMemory` in the cluster-memory and worker-detail
+  mappers, the only per-model figure the system has (no measured per-model VRAM exists yet; the
+  mappers are the seam for future real measurement). Tensor-parallel models are shown as an
+  even per-device split marked "(estimated)". The per-worker→per-GPU section is extracted into a
+  reusable `WorkerGpuSection` component (composed by the cluster overview, designed for the #124
+  placement board). Pure segment/color logic in `memorySegments.ts` with unit tests; live updates
+  via existing SSE; no chart library, no contract change.
+
 - **Chatbot Playground — multi-pane inference workspace routed through the proxy (#122).** New
   admin-only `/playground` page (v1 parity, custom PatternFly 6 components — no chatbot library):
   1–2 panes with independent chat sessions, model sidebar listing ACTIVE and SLEEPING models
