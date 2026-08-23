@@ -210,13 +210,17 @@ paths:
       operationId: deleteModel
       summary: Stop and remove a model
       description: |
-        Initiates model removal. The control plane transitions the model
-        through `DRAINING` → `STOPPING` → `STOPPED`, then removes it from
-        the routing map and PostgreSQL.
+        Stops the model's runner **and removes its configuration record**. The
+        control plane transitions the model through `DRAINING` → `STOPPING` →
+        `STOPPED`, then removes it from the routing map and PostgreSQL.
 
-        If the model is `SLEEPING`, it transitions directly to `STOPPING`.
-        If it is `ACTIVE`, it drains first to allow in-flight requests to
-        complete.
+        If the model is `SLEEPING`, it transitions directly to `STOPPING`. If it
+        is `ACTIVE`, it drains first to allow in-flight requests to complete. If
+        the model has no runtime state (already stopped, record only), the record
+        is removed directly.
+
+        Unlike `POST /api/v1/models/{modelName}/stop`, which keeps the record for a
+        later restart, `DELETE` is permanent.
 
         Returns `202` immediately — the removal happens asynchronously.
       tags:
@@ -409,6 +413,144 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/stop:
+    post:
+      operationId: stopModel
+      summary: Stop a model but keep its record
+      description: |
+        Stops the model's runner while retaining its configuration record.
+        The control plane drains in-flight requests (if `ACTIVE`), stops the
+        runner, removes the model from the routing map, and clears its runtime
+        state — but keeps the PostgreSQL record so the model can be started
+        again later with `POST /api/v1/models/{modelName}/start`.
+
+        This is distinct from `DELETE`, which also removes the record. Use Stop
+        to park a configured model; use Delete to remove it entirely.
+
+        Returns `202` immediately; the stop completes asynchronously.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Stop request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelActionResponse"
+        "404":
+          description: Model not found or not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model is already stopping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            No worker has sufficient capacity even after eviction, or the
+            control plane cannot accept the request (not leader)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/start:
+    post:
+      operationId: startModel
+      summary: Start a previously stopped model
+      description: |
+        Starts a stopped model from its stored configuration. The control plane
+        re-runs the placement pipeline using the configuration persisted in the
+        model record (runner type, model path, required memory, device type,
+        tensor parallelism, engine config, runtime module) — no request body is
+        needed.
+
+        Because placement re-runs, the model may be placed on a different worker
+        than before: the record stores no worker affinity. This is intended.
+
+        Valid only when the model has no runtime state (it is stopped). Returns
+        `409` if the model is already running or transitioning, and `404` if no
+        record exists. Returns `202` immediately; deployment proceeds
+        asynchronously through `STARTING` → `ACTIVE` (or `PENDING` while capacity
+        is reclaimed).
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: The model name (routing key)
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Start request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelActionResponse"
+        "400":
+          description: Invalid deployment request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No model record exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model already has runtime state (running or transitioning)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            No worker has sufficient capacity even after eviction, or the
+            control plane cannot accept the request (not leader)
           content:
             application/json:
               schema:
@@ -1017,7 +1159,9 @@ components:
         - `DRAINING` — model is being drained before sleep or shutdown
         - `SLEEPING` — model weights offloaded, runner idle
         - `STOPPING` — runner is being stopped
-        - `STOPPED` — runner stopped, model removed from routing
+        - `STOPPED` — configured but not running: no runner exists. The model
+          record is retained and can be started again or deleted. This value is
+          synthesized by the read routes for records with no runtime state.
         - `ERROR` — unrecoverable error, requires operator intervention
       enum:
         - PENDING
@@ -1192,7 +1336,7 @@ components:
     ModelActionResponse:
       type: object
       description: |
-        Response for model lifecycle actions (sleep, wake, delete).
+        Response for model lifecycle actions (stop, start, sleep, wake, delete).
       required:
         - modelName
         - state

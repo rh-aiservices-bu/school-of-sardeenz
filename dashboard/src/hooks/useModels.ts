@@ -151,6 +151,34 @@ export function useWakeModel() {
   );
 }
 
+export function useStopModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.stop(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
+        ),
+    ),
+  );
+}
+
+export function useStartModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.start(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STARTING } : m,
+        ),
+    ),
+  );
+}
+
 export function useDeleteModel() {
   const queryClient = useQueryClient();
   return useMutation(

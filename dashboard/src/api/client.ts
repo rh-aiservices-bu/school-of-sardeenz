@@ -136,6 +136,10 @@ export const api = {
       request<unknown>(`/models/${encodeURIComponent(name)}/sleep`, { method: 'POST' }),
     wake: (name: string) =>
       request<unknown>(`/models/${encodeURIComponent(name)}/wake`, { method: 'POST' }),
+    stop: (name: string) =>
+      request<unknown>(`/models/${encodeURIComponent(name)}/stop`, { method: 'POST' }),
+    start: (name: string) =>
+      request<unknown>(`/models/${encodeURIComponent(name)}/start`, { method: 'POST' }),
   },
   workers: {
     list: (signal?: AbortSignal) => request<{ workers: WorkerInfo[] }>('/workers', { signal }),

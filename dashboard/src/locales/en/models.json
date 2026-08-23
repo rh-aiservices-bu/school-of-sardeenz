@@ -104,6 +104,14 @@
     },
     "wake": {
       "menuItem": "Wake"
+    },
+    "start": {
+      "menuItem": "Start"
+    },
+    "stop": {
+      "menuItem": "Stop",
+      "confirmTitle": "Stop model?",
+      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Its configuration is kept, so it can be started again later."
     }
   },
   "detail": {
@@ -151,6 +159,14 @@
     },
     "wake": {
       "button": "Wake"
+    },
+    "start": {
+      "button": "Start"
+    },
+    "stop": {
+      "button": "Stop",
+      "confirmTitle": "Stop model?",
+      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Its configuration is kept, so it can be started again later."
     },
     "delete": {
       "button": "Delete",

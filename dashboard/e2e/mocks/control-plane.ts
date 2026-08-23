@@ -206,6 +206,20 @@ export class MockControlPlane {
       return reply.send(model);
     });
 
+    app.post<{ Params: { name: string } }>('/api/v1/models/:name/stop', async (req, reply) => {
+      const model = this.state.models.find((m) => m.modelName === req.params.name);
+      if (!model) return reply.code(404).send({ error: 'not found' });
+      model.state = 'STOPPED';
+      return reply.send(model);
+    });
+
+    app.post<{ Params: { name: string } }>('/api/v1/models/:name/start', async (req, reply) => {
+      const model = this.state.models.find((m) => m.modelName === req.params.name);
+      if (!model) return reply.code(404).send({ error: 'not found' });
+      model.state = 'STARTING';
+      return reply.send(model);
+    });
+
     // Workers
     app.get('/api/v1/workers', async (_req, reply) => {
       return reply.send({ workers: this.state.workers });

@@ -10,11 +10,11 @@ The dashboard BFF enforces secure authentication defaults at startup:
 
 ### Required environment variables by auth mode
 
-| Auth Mode | Required Variables                                                                                                                     |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                                              |
-| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `SARDEENZ_PUBLIC_URL`, `JWT_SECRET=<non-empty>`         |
-| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                                                  |
+| Auth Mode | Required Variables                                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                                       |
+| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `SARDEENZ_PUBLIC_URL`, `JWT_SECRET=<non-empty>` |
+| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                                           |
 
 ### Example production configuration
 
@@ -56,6 +56,7 @@ Any caller with network access to the control plane can:
 | Deploy models         | `POST /api/v1/models`                          | Allocates GPU resources            |
 | Delete models         | `DELETE /api/v1/models/:name`                  | Frees GPU resources, stops runners |
 | Sleep / wake models   | `POST /api/v1/models/:name/sleep\|wake`        | Changes resource allocation        |
+| Stop / start models   | `POST /api/v1/models/:name/stop\|start`        | Changes resource allocation        |
 | Read cluster topology | `GET /api/v1/workers`, `GET /api/v1/cluster/*` | Reveals infrastructure details     |
 | Read routing map      | `GET /api/v1/models`                           | Reveals model endpoints            |
 | Scrape metrics        | `GET /metrics`                                 | Prometheus operational data        |
@@ -76,11 +77,11 @@ The worker agent's management API (`POST/DELETE /runners`, `GET /runners/*/logs`
 
 Any caller with network access to a worker agent can:
 
-| Operation         | Endpoint                                | Impact                                 |
-| ------------------ | ---------------------------------------- | --------------------------------------- |
-| Start a runner      | `POST /runners`                          | Launches an engine process, consumes GPU memory |
-| Stop a runner       | `DELETE /runners/:runnerId`              | Kills an in-flight runner               |
-| Read runner logs    | `GET /runners/:runnerId/logs`, `GET /runners/by-model/:modelName/logs` | Reveals model/engine operational data |
+| Operation        | Endpoint                                                               | Impact                                          |
+| ---------------- | ---------------------------------------------------------------------- | ----------------------------------------------- |
+| Start a runner   | `POST /runners`                                                        | Launches an engine process, consumes GPU memory |
+| Stop a runner    | `DELETE /runners/:runnerId`                                            | Kills an in-flight runner                       |
+| Read runner logs | `GET /runners/:runnerId/logs`, `GET /runners/by-model/:modelName/logs` | Reveals model/engine operational data           |
 
 ### Recommended deployment constraints
 

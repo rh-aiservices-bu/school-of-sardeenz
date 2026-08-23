@@ -106,6 +106,131 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     expect(entry!.endpoints[0].port).toBe(runner.port);
   });
 
+  it('stop retains the record and the model can be started again', async () => {
+    const WORKER_ID = 'w3';
+    const MODEL = 'stoppable-model';
+    const MEM = 8_000_000_000;
+
+    await harness.registerWorker({
+      workerId: WORKER_ID,
+      managementUrl: worker.url,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+    });
+
+    // Deploy to ACTIVE, same shape as the happy-path test above.
+    await harness.modelRepository.create({
+      name: MODEL,
+      runnerType: 'vllm',
+      modelPath: '/models/stoppable',
+      requiredMemory: MEM,
+      deviceType: 'CUDA',
+      runtimeModule: 'vllm-0.21',
+    });
+
+    await harness.lifecycle.createModel(MODEL, WORKER_ID);
+
+    const workers = harness.workerPool.getAllWorkers();
+    const budgets = new Map(harness.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
+    const result = harness.placement.place(
+      {
+        modelName: MODEL,
+        runnerType: 'vllm',
+        requiredMemory: MEM,
+        deviceType: 'CUDA',
+        tensorParallel: 1,
+      },
+      workers,
+      budgets,
+    );
+    expect(result).not.toBeNull();
+
+    harness.memoryBudget.reserveCapacity(WORKER_ID, 0, MODEL, MEM);
+    await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING);
+
+    runner.setHealthState(RunnerState.STARTING);
+    setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
+
+    await harness.deployOrchestration.deployModel({
+      modelName: MODEL,
+      workerId: WORKER_ID,
+      runnerType: 'vllm',
+      modelPath: '/models/stoppable',
+      requiredMemory: MEM,
+      tensorParallel: 1,
+      runtimeModule: 'vllm-0.21',
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    const activeState = await harness.lifecycle.getState(MODEL);
+    expect(activeState?.state).toBe(ModelLifecycleState.ACTIVE);
+
+    // Stop: drives runtime state to STOPPED then clears it, but keeps the DB row (registry
+    // semantics, #121) — mirrors the stop route's background sequence minus modelRepository.delete.
+    await harness.sleepWake.stopModel(MODEL, null);
+    await harness.lifecycle.removeModel(MODEL);
+
+    const recordAfterStop = await harness.modelRepository.findByName(MODEL);
+    expect(recordAfterStop).not.toBeNull();
+    const stateAfterStop = await harness.lifecycle.getState(MODEL);
+    expect(stateAfterStop).toBeNull();
+
+    // Start: re-run the placement pipeline from the stored record — no worker affinity is kept.
+    const rec = await harness.modelRepository.findByName(MODEL);
+    expect(rec).not.toBeNull();
+
+    await harness.memoryBudget.refreshAll();
+    const refreshedBudgets = new Map(
+      harness.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]),
+    );
+    const restartResult = harness.placement.place(
+      {
+        modelName: rec!.name,
+        runnerType: rec!.runnerType,
+        requiredMemory: rec!.requiredMemory!,
+        deviceType: rec!.deviceType ?? undefined,
+        tensorParallel: rec!.tensorParallel,
+      },
+      workers,
+      refreshedBudgets,
+    );
+    expect(restartResult).not.toBeNull();
+
+    harness.memoryBudget.reserveCapacity(
+      restartResult!.workerId,
+      restartResult!.devices[0].deviceIndex,
+      rec!.name,
+      rec!.requiredMemory!,
+    );
+    await harness.lifecycle.createModel(MODEL);
+    await harness.lifecycle.transition(MODEL, ModelLifecycleState.STARTING, {
+      workerId: restartResult!.workerId,
+      deviceIndices: restartResult!.devices.map((d) => d.deviceIndex),
+    });
+
+    runner.setHealthState(RunnerState.STARTING);
+    setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
+
+    await harness.deployOrchestration.deployModel({
+      modelName: rec!.name,
+      workerId: restartResult!.workerId,
+      runnerType: rec!.runnerType,
+      modelPath: rec!.modelPath,
+      requiredMemory: rec!.requiredMemory!,
+      tensorParallel: rec!.tensorParallel,
+      runtimeModule: rec!.runtimeModule ?? undefined,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    const restartedState = await harness.lifecycle.getState(MODEL);
+    expect(restartedState?.state).toBe(ModelLifecycleState.ACTIVE);
+    expect(restartedState?.modelName).toBe(MODEL);
+
+    // Still a single row — Start deployed from the existing record, not a new one.
+    const finalRecord = await harness.modelRepository.findByName(MODEL);
+    expect(finalRecord).not.toBeNull();
+    expect(finalRecord!.name).toBe(MODEL);
+  });
+
   it(
     'deploy timeout: runner stays STARTING → model transitions to ERROR',
     { timeout: 15_000 },

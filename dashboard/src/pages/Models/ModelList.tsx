@@ -37,7 +37,14 @@ import {
 import { Table, Thead, Tbody, Tr, Th, Td, type ThProps } from '@patternfly/react-table';
 import { EllipsisVIcon, LockIcon, CubesIcon } from '@patternfly/react-icons';
 import { ModelLifecycleState } from '@sardeenz/types';
-import { useModels, useSleepModel, useWakeModel, useDeleteModel } from '../../hooks/useModels';
+import {
+  useModels,
+  useSleepModel,
+  useWakeModel,
+  useDeleteModel,
+  useStopModel,
+  useStartModel,
+} from '../../hooks/useModels';
 import type { ModelInfo } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
@@ -105,6 +112,8 @@ export function ModelList() {
   const sleepModel = useSleepModel();
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
+  const stopModel = useStopModel();
+  const startModel = useStartModel();
 
   // Sorting
   const [sortField, setSortField] = useState<SortField>('modelName');
@@ -139,6 +148,7 @@ export function ModelList() {
   // Modals
   const [sleepConfirmModel, setSleepConfirmModel] = useState<ModelInfo | null>(null);
   const [deleteConfirmModel, setDeleteConfirmModel] = useState<ModelInfo | null>(null);
+  const [stopConfirmModel, setStopConfirmModel] = useState<ModelInfo | null>(null);
 
   // Mutation error
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -271,6 +281,22 @@ export function ModelList() {
     deleteModel.mutate(deleteConfirmModel.modelName, {
       onError: (err) => setMutationError(err instanceof Error ? err.message : 'Delete failed'),
       onSettled: () => setDeleteConfirmModel(null),
+    });
+  };
+
+  const handleStart = (model: ModelInfo) => {
+    setMutationError(null);
+    startModel.mutate(model.modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Start failed'),
+    });
+  };
+
+  const handleStopConfirm = () => {
+    if (!stopConfirmModel) return;
+    setMutationError(null);
+    stopModel.mutate(stopConfirmModel.modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Stop failed'),
+      onSettled: () => setStopConfirmModel(null),
     });
   };
 
@@ -700,6 +726,30 @@ export function ModelList() {
                                 {t('list.wake.menuItem')}
                               </DropdownItem>
                             )}
+                            {model.state === ModelLifecycleState.STOPPED && (
+                              <DropdownItem
+                                key="start"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  handleStart(model);
+                                }}
+                              >
+                                {t('list.start.menuItem')}
+                              </DropdownItem>
+                            )}
+                            {(model.state === ModelLifecycleState.ACTIVE ||
+                              model.state === ModelLifecycleState.SLEEPING ||
+                              model.state === ModelLifecycleState.ERROR) && (
+                              <DropdownItem
+                                key="stop"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  setStopConfirmModel(model);
+                                }}
+                              >
+                                {t('list.stop.menuItem')}
+                              </DropdownItem>
+                            )}
                             <DropdownItem
                               key="delete"
                               isDanger
@@ -741,6 +791,25 @@ export function ModelList() {
             {t('list.sleep.menuItem')}
           </Button>
           <Button variant="link" onClick={() => setSleepConfirmModel(null)}>
+            {tCommon('actions.cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Stop confirmation modal */}
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={stopConfirmModel !== null}
+        onClose={() => setStopConfirmModel(null)}
+        aria-label={t('list.stop.confirmTitle')}
+      >
+        <ModalHeader title={t('list.stop.confirmTitle')} titleIconVariant="warning" />
+        <ModalBody>{t('list.stop.confirmBody', { modelName: stopConfirmModel?.modelName })}</ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleStopConfirm} isLoading={stopModel.isPending}>
+            {t('list.stop.menuItem')}
+          </Button>
+          <Button variant="link" onClick={() => setStopConfirmModel(null)}>
             {tCommon('actions.cancel')}
           </Button>
         </ModalFooter>

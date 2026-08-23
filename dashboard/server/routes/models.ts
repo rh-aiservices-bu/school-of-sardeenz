@@ -85,4 +85,24 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       return reply.code(status).send(data);
     },
   );
+
+  // POST /api/models/:name/stop — write op: no Redis fallback
+  app.post<{ Params: { name: string } }>(
+    '/api/models/:name/stop',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.stopModel(request.params.name);
+      return reply.code(status).send(data);
+    },
+  );
+
+  // POST /api/models/:name/start — write op: no Redis fallback
+  app.post<{ Params: { name: string } }>(
+    '/api/models/:name/start',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.startModel(request.params.name);
+      return reply.code(status).send(data);
+    },
+  );
 }

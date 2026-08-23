@@ -122,15 +122,15 @@ The frontend never constructs PromQL queries. The BFF owns the query templates a
 
 ### Route structure
 
-| Path                 | Component          | View                                          |
-| -------------------- | ------------------ | --------------------------------------------- |
-| `/`                  | `ClusterOverview`  | Cluster health dashboard (landing page)       |
-| `/models`            | `ModelList`        | Model management table with filtering/sorting |
-| `/models/deploy`     | `ModelDeploy`      | Deploy form (full page)                       |
-| `/models/:modelName` | `ModelDetail`      | Model detail with progress/error display      |
-| `/workers`           | `WorkerList`       | Worker list table                             |
-| `/workers/:workerId` | `WorkerDetail`     | Per-worker GPU memory breakdown               |
-| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts          |
+| Path                 | Component          | View                                                                              |
+| -------------------- | ------------------ | --------------------------------------------------------------------------------- |
+| `/`                  | `ClusterOverview`  | Cluster health dashboard (landing page)                                           |
+| `/models`            | `ModelList`        | Model management table (configured models, running or not) with filtering/sorting |
+| `/models/deploy`     | `ModelDeploy`      | Deploy form (full page)                                                           |
+| `/models/:modelName` | `ModelDetail`      | Model detail with progress/error display                                          |
+| `/workers`           | `WorkerList`       | Worker list table                                                                 |
+| `/workers/:workerId` | `WorkerDetail`     | Per-worker GPU memory breakdown                                                   |
+| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts                                              |
 
 ### State management
 
@@ -167,15 +167,16 @@ In degraded state, the `DegradedBanner` component shows a persistent warning: "R
 
 Consistent across all views:
 
-| State                  | PF6 Label color | Semantic meaning                    |
-| ---------------------- | --------------- | ----------------------------------- |
-| `ACTIVE`               | green           | Healthy, serving inference          |
-| `SLEEPING`             | blue            | Weights offloaded, can be woken     |
-| `STARTING`             | teal            | Loading weights, spinner icon       |
-| `DRAINING`             | orange          | Completing in-flight requests       |
-| `ERROR`                | red             | Requires operator intervention      |
-| `STOPPING` / `STOPPED` | grey            | Being removed or removed            |
-| `PENDING`              | yellow          | Deployment accepted, not yet placed |
+| State      | PF6 Label color | Semantic meaning                                      |
+| ---------- | --------------- | ----------------------------------------------------- |
+| `ACTIVE`   | green           | Healthy, serving inference                            |
+| `SLEEPING` | blue            | Weights offloaded, can be woken                       |
+| `STARTING` | teal            | Loading weights, spinner icon                         |
+| `DRAINING` | orange          | Completing in-flight requests                         |
+| `ERROR`    | red             | Requires operator intervention                        |
+| `STOPPING` | grey            | Being torn down                                       |
+| `STOPPED`  | grey            | Configured but not running; can be started or deleted |
+| `PENDING`  | yellow          | Deployment accepted, not yet placed                   |
 
 ## BFF Architecture
 

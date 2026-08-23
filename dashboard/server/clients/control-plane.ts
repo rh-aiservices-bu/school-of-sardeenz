@@ -80,6 +80,14 @@ export class ControlPlaneClient {
     return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/wake`);
   }
 
+  async stopModel(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/stop`);
+  }
+
+  async startModel(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/start`);
+  }
+
   async browseWeights(path?: string): Promise<ProxyResult> {
     const qs = path ? `?path=${encodeURIComponent(path)}` : '';
     return this.request('GET', `/api/v1/weights${qs}`);

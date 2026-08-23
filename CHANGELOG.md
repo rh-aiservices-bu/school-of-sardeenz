@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Stop/Start model lifecycle operations (model record = configuration registry).** Decision on
+  #121 (option A): a model record is a configuration registry entry that outlives its runner —
+  Stop (`POST /api/v1/models/{modelName}/stop`) tears down the runner and keeps the record; Start
+  (`POST /api/v1/models/{modelName}/start`) re-deploys from the stored configuration (placement
+  re-runs, so the model may land on a different worker); Delete remains the record-removing
+  teardown. Stop is valid only from settled states (`ACTIVE`/`SLEEPING`/`ERROR`) and rejects
+  transient states with 409, with a synchronous claim closing the double-Stop race; Start re-validates
+  weights-path containment and 409s when runtime state already exists. The deploy pipeline is
+  extracted into a shared `deployFromRecord` helper used by both deploy and Start. Dashboard adds
+  per-state Start/Stop actions (list + detail, confirm modals, i18n); contract and docs now describe
+  `STOPPED` as "configured but not running — record retained, can be started or deleted" instead of
+  teardown framing. (#121)
+
 ### Fixed
 
 - **Integration harness worker fixture updated to the current WorkerInfo contract.** The M6

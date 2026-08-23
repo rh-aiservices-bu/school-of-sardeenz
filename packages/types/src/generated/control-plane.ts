@@ -60,13 +60,17 @@ export type paths = {
         post?: never;
         /**
          * Stop and remove a model
-         * @description Initiates model removal. The control plane transitions the model
-         *     through `DRAINING` → `STOPPING` → `STOPPED`, then removes it from
-         *     the routing map and PostgreSQL.
+         * @description Stops the model's runner **and removes its configuration record**. The
+         *     control plane transitions the model through `DRAINING` → `STOPPING` →
+         *     `STOPPED`, then removes it from the routing map and PostgreSQL.
          *
-         *     If the model is `SLEEPING`, it transitions directly to `STOPPING`.
-         *     If it is `ACTIVE`, it drains first to allow in-flight requests to
-         *     complete.
+         *     If the model is `SLEEPING`, it transitions directly to `STOPPING`. If it
+         *     is `ACTIVE`, it drains first to allow in-flight requests to complete. If
+         *     the model has no runtime state (already stopped, record only), the record
+         *     is removed directly.
+         *
+         *     Unlike `POST /api/v1/models/{modelName}/stop`, which keeps the record for a
+         *     later restart, `DELETE` is permanent.
          *
          *     Returns `202` immediately — the removal happens asynchronously.
          */
@@ -155,6 +159,68 @@ export type paths = {
          *     `STARTING` state return `202` idempotently.
          */
         post: operations["wakeModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop a model but keep its record
+         * @description Stops the model's runner while retaining its configuration record.
+         *     The control plane drains in-flight requests (if `ACTIVE`), stops the
+         *     runner, removes the model from the routing map, and clears its runtime
+         *     state — but keeps the PostgreSQL record so the model can be started
+         *     again later with `POST /api/v1/models/{modelName}/start`.
+         *
+         *     This is distinct from `DELETE`, which also removes the record. Use Stop
+         *     to park a configured model; use Delete to remove it entirely.
+         *
+         *     Returns `202` immediately; the stop completes asynchronously.
+         */
+        post: operations["stopModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a previously stopped model
+         * @description Starts a stopped model from its stored configuration. The control plane
+         *     re-runs the placement pipeline using the configuration persisted in the
+         *     model record (runner type, model path, required memory, device type,
+         *     tensor parallelism, engine config, runtime module) — no request body is
+         *     needed.
+         *
+         *     Because placement re-runs, the model may be placed on a different worker
+         *     than before: the record stores no worker affinity. This is intended.
+         *
+         *     Valid only when the model has no runtime state (it is stopped). Returns
+         *     `409` if the model is already running or transitioning, and `404` if no
+         *     record exists. Returns `202` immediately; deployment proceeds
+         *     asynchronously through `STARTING` → `ACTIVE` (or `PENDING` while capacity
+         *     is reclaimed).
+         */
+        post: operations["startModel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -463,7 +529,9 @@ export type components = {
          *     - `DRAINING` — model is being drained before sleep or shutdown
          *     - `SLEEPING` — model weights offloaded, runner idle
          *     - `STOPPING` — runner is being stopped
-         *     - `STOPPED` — runner stopped, model removed from routing
+         *     - `STOPPED` — configured but not running: no runner exists. The model
+         *       record is retained and can be started again or deleted. This value is
+         *       synthesized by the read routes for records with no runtime state.
          *     - `ERROR` — unrecoverable error, requires operator intervention
          * @enum {string}
          */
@@ -572,7 +640,7 @@ export type components = {
             /** @description Human-readable status message. */
             message?: string;
         };
-        /** @description Response for model lifecycle actions (sleep, wake, delete). */
+        /** @description Response for model lifecycle actions (stop, start, sleep, wake, delete). */
         ModelActionResponse: {
             /** @description The affected model name. */
             modelName: string;
@@ -1555,6 +1623,157 @@ export interface operations {
             };
             /** @description Internal control plane error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stopModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stop request accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model not found or not running */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model is already stopping */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description No worker has sufficient capacity even after eviction, or the
+             *     control plane cannot accept the request (not leader)
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    startModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The model name (routing key) */
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Start request accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Invalid deployment request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No model record exists */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model already has runtime state (running or transitioning) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /**
+             * @description No worker has sufficient capacity even after eviction, or the
+             *     control plane cannot accept the request (not leader)
+             */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

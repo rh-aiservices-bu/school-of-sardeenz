@@ -18,6 +18,12 @@ const VALID_TRANSITIONS: ReadonlyMap<ModelLifecycleState, readonly ModelLifecycl
       [ModelLifecycleState.STARTING, ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
     ],
     [ModelLifecycleState.STOPPING, [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR]],
+    // STOPPED has no outgoing edges on purpose. Under the registry model (#121), a "stopped"
+    // model is represented by the *absence* of a Redis lifecycle record, not by a persisted
+    // STOPPED record: Stop calls removeModel() (deletes the key) and Start calls createModel()
+    // (writes a fresh PENDING key). The read routes synthesize the STOPPED value for DB rows
+    // with no runtime state (routes/models.ts state?.state ?? STOPPED). A STOPPED → STARTING
+    // edge would therefore never be exercised — do not add one.
     [ModelLifecycleState.STOPPED, []],
     [ModelLifecycleState.ERROR, [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING]],
   ],

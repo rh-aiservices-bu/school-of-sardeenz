@@ -77,6 +77,7 @@ interface DeployOverrides {
   refreshAll?: ReturnType<typeof vi.fn>;
   deployModel?: ReturnType<typeof vi.fn>;
   findAll?: ReturnType<typeof vi.fn>;
+  findByName?: ReturnType<typeof vi.fn>;
   createModelRecord?: ReturnType<typeof vi.fn>;
   setModelState?: ReturnType<typeof vi.fn>;
 }
@@ -92,8 +93,29 @@ function buildDeployApp(over: DeployOverrides = {}): {
     config: { weightsDir: '/weights' },
     leaderElection: { isLeader: true },
     modelRepository: {
-      create: over.createModelRecord ?? vi.fn(() => Promise.resolve()),
+      // Default mirrors ModelRepository.create: echoes params back as a ModelRecord, filling in
+      // column defaults for anything the caller didn't set. deployFromRecord (shared by deploy and
+      // start) reads every one of these fields off the returned record.
+      create:
+        over.createModelRecord ??
+        vi.fn((params: Record<string, unknown>) =>
+          Promise.resolve({
+            id: 'rec-1',
+            name: params.name,
+            runnerType: params.runnerType,
+            modelPath: params.modelPath,
+            requiredMemory: (params.requiredMemory as number | undefined) ?? null,
+            deviceType: (params.deviceType as string | undefined) ?? null,
+            tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
+            engineConfig: (params.engineConfig as Record<string, unknown> | undefined) ?? null,
+            runtimeModule: (params.runtimeModule as string | undefined) ?? null,
+            pinned: (params.pinned as boolean | undefined) ?? false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }),
+        ),
       findAll: over.findAll ?? vi.fn(() => Promise.resolve([])),
+      findByName: over.findByName ?? vi.fn(() => Promise.resolve(null)),
       delete: vi.fn(() => Promise.resolve()),
     },
     lifecycle: {
@@ -395,5 +417,196 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+});
+
+describe('POST /api/v1/models/:modelName/stop', () => {
+  it('stop on an ACTIVE model returns 202 and keeps the record', async () => {
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const removeModel = vi.fn(() => Promise.resolve());
+    const stopModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({ deleteModel, removeModel, stopModel });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ state: string; previousState: string }>()).toMatchObject({
+      modelName: 'm1',
+      state: ModelLifecycleState.STOPPING,
+      previousState: ModelLifecycleState.ACTIVE,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopModel).toHaveBeenCalledWith('m1', expect.anything());
+    expect(removeModel).toHaveBeenCalledWith('m1');
+    expect(deleteModel).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the model has no runtime state', async () => {
+    const { app } = buildApp({ getState: vi.fn(() => Promise.resolve(null)) });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ code: string }>().code).toBe('MODEL_NOT_FOUND');
+  });
+
+  it.each([
+    ModelLifecycleState.PENDING,
+    ModelLifecycleState.STARTING,
+    ModelLifecycleState.DRAINING,
+    ModelLifecycleState.STOPPING,
+  ])('returns 409 when the model is %s (transient state)', async (state) => {
+    const { app } = buildApp({
+      getState: vi.fn(() => Promise.resolve({ ...ACTIVE_STATE, state })),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('rejects a concurrent second Stop while the first is still backgrounding', async () => {
+    const { app } = buildApp();
+
+    const [first, second] = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' }),
+      app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' }),
+    ]);
+
+    const statusCodes = [first.statusCode, second.statusCode].sort((a, b) => a - b);
+    expect(statusCodes).toEqual([202, 409]);
+
+    const rejected = first.statusCode === 409 ? first : second;
+    expect(rejected.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('survives a background stopModel rejection', async () => {
+    const { app, logError } = buildApp({
+      stopModel: vi.fn(() => Promise.reject(new Error('runner gone'))),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logError).toHaveBeenCalledWith(
+      { err: expect.any(Error) as Error, modelName: 'm1' },
+      'Background model stop failed',
+    );
+  });
+});
+
+describe('POST /api/v1/models/:modelName/start', () => {
+  const STOPPED_RECORD = {
+    name: 'm1',
+    runnerType: 'vllm',
+    modelPath: '/weights/m1',
+    requiredMemory: 8e9,
+    deviceType: 'CUDA',
+    tensorParallel: 1,
+    engineConfig: null,
+    runtimeModule: 'vllm-0.21',
+    pinned: false,
+  };
+
+  it('deploys from the stored record', async () => {
+    const deployModel = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      getState: vi.fn(() => Promise.resolve(null)),
+      findByName: vi.fn(() => Promise.resolve(STOPPED_RECORD)),
+      place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      deployModel,
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ state: string; previousState: string }>()).toMatchObject({
+      modelName: 'm1',
+      state: ModelLifecycleState.STARTING,
+      previousState: ModelLifecycleState.STOPPED,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Params come from the stored record, not a request body — start takes no body.
+    expect(deployModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelName: 'm1',
+        modelPath: '/weights/m1',
+        requiredMemory: 8e9,
+        runtimeModule: 'vllm-0.21',
+      }),
+    );
+  });
+
+  it('returns 409 when the model already has runtime state', async () => {
+    const deployModel = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      getState: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
+      findByName: vi.fn(() => Promise.resolve(STOPPED_RECORD)),
+      deployModel,
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+    expect(deployModel).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when no record exists', async () => {
+    const { app } = buildDeployApp({
+      getState: vi.fn(() => Promise.resolve(null)),
+      findByName: vi.fn(() => Promise.resolve(null)),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ code: string }>().code).toBe('MODEL_NOT_FOUND');
+  });
+
+  it('rejects Start when the stored modelPath escapes the weights directory', async () => {
+    const { app } = buildDeployApp({
+      getState: vi.fn(() => Promise.resolve(null)),
+      findByName: vi.fn(() =>
+        Promise.resolve({ ...STOPPED_RECORD, modelPath: '/etc/passwd' }),
+      ),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+
+  it('reclaims capacity via eviction when no worker has room', async () => {
+    const victim = {
+      modelName: 'old-model',
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'w1',
+      memoryBytes: 8e9,
+      lastInferenceAt: null,
+      pinned: false,
+    };
+    const { app } = buildDeployApp({
+      getState: vi.fn(() => Promise.resolve(null)),
+      findByName: vi.fn(() => Promise.resolve(STOPPED_RECORD)),
+      place: vi.fn(() => null),
+      selectVictims: vi.fn(() => [victim]),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ state: string }>()).toMatchObject({
+      modelName: 'm1',
+      state: ModelLifecycleState.PENDING,
+    });
   });
 });

@@ -29,7 +29,14 @@ import {
 } from '@patternfly/react-core';
 import { LockIcon } from '@patternfly/react-icons';
 import { ModelLifecycleState } from '@sardeenz/types';
-import { useModel, useSleepModel, useWakeModel, useDeleteModel } from '../../hooks/useModels';
+import {
+  useModel,
+  useSleepModel,
+  useWakeModel,
+  useDeleteModel,
+  useStopModel,
+  useStartModel,
+} from '../../hooks/useModels';
 import { ApiError } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
 import { DeployLogsModal } from '../../components/DeployLogsModal';
@@ -47,9 +54,12 @@ export function ModelDetail() {
   const sleepModel = useSleepModel();
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
+  const stopModel = useStopModel();
+  const startModel = useStartModel();
 
   const [showSleepModal, setShowSleepModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showStopModal, setShowStopModal] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [engineConfigExpanded, setEngineConfigExpanded] = useState(false);
   const [showLogsModal, setShowLogsModal] = useState(false);
@@ -78,6 +88,23 @@ export function ModelDetail() {
       onError: (err) => setMutationError(err instanceof Error ? err.message : 'Delete failed'),
       onSuccess: () => void navigate('/models'),
       onSettled: () => setShowDeleteModal(false),
+    });
+  };
+
+  const handleStart = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    startModel.mutate(modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Start failed'),
+    });
+  };
+
+  const handleStopConfirm = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    stopModel.mutate(modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Stop failed'),
+      onSettled: () => setShowStopModal(false),
     });
   };
 
@@ -117,6 +144,7 @@ export function ModelDetail() {
   const isSleeping = model.state === ModelLifecycleState.SLEEPING;
   const isError = model.state === ModelLifecycleState.ERROR;
   const isStarting = model.state === ModelLifecycleState.STARTING;
+  const isStopped = model.state === ModelLifecycleState.STOPPED;
 
   const runnerEndpointText =
     model.runnerEndpoint?.host && model.runnerEndpoint.port
@@ -173,6 +201,20 @@ export function ModelDetail() {
                 <FlexItem>
                   <Button variant="primary" onClick={handleWake} isLoading={wakeModel.isPending}>
                     {t('detail.wake.button')}
+                  </Button>
+                </FlexItem>
+              )}
+              {isStopped && (
+                <FlexItem>
+                  <Button variant="primary" onClick={handleStart} isLoading={startModel.isPending}>
+                    {t('detail.start.button')}
+                  </Button>
+                </FlexItem>
+              )}
+              {(isActive || isSleeping || isError) && (
+                <FlexItem>
+                  <Button variant="secondary" onClick={() => setShowStopModal(true)}>
+                    {t('detail.stop.button')}
                   </Button>
                 </FlexItem>
               )}
@@ -484,6 +526,25 @@ export function ModelDetail() {
             {t('detail.sleep.button')}
           </Button>
           <Button variant="link" onClick={() => setShowSleepModal(false)}>
+            {tCommon('actions.cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Stop confirmation modal */}
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={showStopModal}
+        onClose={() => setShowStopModal(false)}
+        aria-label={t('detail.stop.confirmTitle')}
+      >
+        <ModalHeader title={t('detail.stop.confirmTitle')} titleIconVariant="warning" />
+        <ModalBody>{t('detail.stop.confirmBody', { modelName: model.modelName })}</ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleStopConfirm} isLoading={stopModel.isPending}>
+            {t('detail.stop.button')}
+          </Button>
+          <Button variant="link" onClick={() => setShowStopModal(false)}>
             {tCommon('actions.cancel')}
           </Button>
         </ModalFooter>

@@ -4,6 +4,7 @@ import { ModelLifecycleState, ModelState } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
 import { isContainedIn } from '../utils/path-containment.js';
+import type { ModelRecord } from '../services/model-repository.js';
 
 interface DeployBody {
   modelName: string;
@@ -23,7 +24,243 @@ const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
 // Mirrors ModelDeploymentRequest.modelName in packages/contracts/specs/control-plane.yaml.
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
 
+// Stop is only valid from these settled states. Every other state (PENDING, STARTING, DRAINING,
+// STOPPING, and the synthetic STOPPED) is transient or already-terminal background work in
+// flight — interrupting it would race the fire-and-forget deploy/start/wake orchestration and
+// leave an orphaned runner holding VRAM the budget no longer accounts for. ERROR is included
+// deliberately: the dashboard offers Stop from it, and sleepWake.stopModel already knows how to
+// tear an ERROR-state model down (see VALID_TRANSITIONS in model-lifecycle.ts).
+const STOPPABLE_STATES: ReadonlySet<ModelLifecycleState> = new Set([
+  ModelLifecycleState.ACTIVE,
+  ModelLifecycleState.SLEEPING,
+  ModelLifecycleState.ERROR,
+]);
+
+/**
+ * Runs the placement → reserve → transition → dispatch pipeline for a stored model record.
+ * Shared by `POST /api/v1/models` (record just created) and `POST /api/v1/models/:modelName/start`
+ * (record already existed, no runtime state). Owns only the Redis state it creates — on synchronous
+ * failure it removes that Redis key, but never touches the Postgres row; the caller decides what
+ * happens to the row.
+ */
+async function deployFromRecord(
+  app: FastifyInstance,
+  deps: RouteDeps,
+  record: ModelRecord,
+): Promise<{ state: ModelLifecycleState; message: string }> {
+  // Re-checked here (not just at deploy time) so a stored modelPath that predates a narrowed
+  // weightsDir, or that reached the table by any path other than the validated deploy route,
+  // is still rejected before a runner is launched from it. Deploy's own pre-create check
+  // (below, in the POST /api/v1/models handler) becomes a redundant first check for that path;
+  // this is the single source of truth for both callers.
+  if (!isContainedIn(record.modelPath, deps.config.weightsDir)) {
+    throw ControlPlaneError.invalidRequest(
+      `Model ${record.name} has a stored modelPath outside the weights directory`,
+    );
+  }
+
+  if (record.requiredMemory === null || record.requiredMemory <= 0) {
+    throw ControlPlaneError.invalidRequest(
+      `Model ${record.name} has no stored requiredMemory; cannot start`,
+    );
+  }
+  const requiredMemory = record.requiredMemory;
+  const tensorParallel = record.tensorParallel;
+
+  let redisCreated = false;
+  try {
+    await deps.lifecycle.createModel(record.name);
+    redisCreated = true;
+
+    const workers = deps.workerPool.getAllWorkers();
+    const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
+
+    const placementRequest = {
+      modelName: record.name,
+      runnerType: record.runnerType,
+      requiredMemory,
+      deviceType: record.deviceType ?? undefined,
+      tensorParallel,
+    };
+
+    const result = deps.placement.place(placementRequest, workers, budgets);
+
+    if (result) {
+      for (const device of result.devices) {
+        deps.memoryBudget.reserveCapacity(
+          result.workerId,
+          device.deviceIndex,
+          record.name,
+          requiredMemory / tensorParallel,
+        );
+      }
+
+      await deps.lifecycle.transition(record.name, ModelLifecycleState.STARTING, {
+        workerId: result.workerId,
+        deviceIndices: result.devices.map((d) => d.deviceIndex),
+      });
+
+      deps.deployOrchestration
+        .deployModel({
+          modelName: record.name,
+          workerId: result.workerId,
+          runnerType: record.runnerType,
+          modelPath: record.modelPath,
+          requiredMemory,
+          deviceType: record.deviceType ?? undefined,
+          tensorParallel,
+          engineConfig: record.engineConfig ?? undefined,
+          runtimeModule: record.runtimeModule ?? undefined,
+          devices: result.devices,
+        })
+        .catch((err: unknown) => {
+          app.log.error({ err, modelName: record.name }, 'Background deploy orchestration failed');
+        });
+
+      return { state: ModelLifecycleState.STARTING, message: `Placed on worker ${result.workerId}` };
+    }
+
+    const eligibleWorkerIds = deps.placement.eligibleWorkerIds(placementRequest, workers);
+    if (eligibleWorkerIds.size === 0) {
+      throw ControlPlaneError.placementFailed(record.name, 'No worker with sufficient capacity');
+    }
+
+    const allStates = await deps.lifecycle.getAllStates();
+    const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
+      allStates.map((s) => s.modelName),
+    );
+    for (const s of allStates) {
+      s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+    }
+    const allRecords = await deps.modelRepository.findAll();
+    const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
+    const memoryByModel = new Map(
+      allRecords.filter((r) => r.requiredMemory !== null).map((r) => [r.name, r.requiredMemory!]),
+    );
+
+    const victims = deps.eviction.selectVictims(
+      allStates,
+      pinnedModels,
+      requiredMemory,
+      eligibleWorkerIds,
+      memoryByModel,
+    );
+
+    if (victims.length === 0) {
+      throw ControlPlaneError.placementFailed(record.name, 'No worker with sufficient capacity');
+    }
+
+    void (async () => {
+      try {
+        const stopTimer = deps.eviction.startTimer();
+        for (const victim of victims) {
+          const victimState = await deps.lifecycle.getState(victim.modelName);
+          const victimRunner =
+            victimState?.runnerHost && victimState.runnerPort
+              ? deps.createRunnerClient(victimState.runnerHost, victimState.runnerPort)
+              : null;
+          await deps.sleepWake.stopModel(victim.modelName, victimRunner);
+          // Registry semantics: DB row kept; only Redis lifecycle cleared (see #121).
+          await deps.lifecycle.removeModel(victim.modelName);
+          deps.eviction.recordEviction('capacity');
+        }
+        stopTimer();
+
+        await deps.memoryBudget.refreshAll();
+        const refreshedBudgets = new Map(
+          deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]),
+        );
+        const reclaimed = deps.placement.place(placementRequest, workers, refreshedBudgets);
+
+        if (!reclaimed) {
+          throw ControlPlaneError.placementFailed(
+            record.name,
+            'No worker with sufficient capacity after capacity reclamation',
+          );
+        }
+
+        for (const device of reclaimed.devices) {
+          deps.memoryBudget.reserveCapacity(
+            reclaimed.workerId,
+            device.deviceIndex,
+            record.name,
+            requiredMemory / tensorParallel,
+          );
+        }
+
+        await deps.lifecycle.transition(record.name, ModelLifecycleState.STARTING, {
+          workerId: reclaimed.workerId,
+          deviceIndices: reclaimed.devices.map((d) => d.deviceIndex),
+        });
+
+        deps.deployOrchestration
+          .deployModel({
+            modelName: record.name,
+            workerId: reclaimed.workerId,
+            runnerType: record.runnerType,
+            modelPath: record.modelPath,
+            requiredMemory,
+            deviceType: record.deviceType ?? undefined,
+            tensorParallel,
+            engineConfig: record.engineConfig ?? undefined,
+            runtimeModule: record.runtimeModule ?? undefined,
+            devices: reclaimed.devices,
+          })
+          .catch((err: unknown) => {
+            app.log.error(
+              { err, modelName: record.name },
+              'Background deploy orchestration failed',
+            );
+          });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        app.log.error({ err, modelName: record.name }, 'Background capacity reclamation failed');
+
+        try {
+          await deps.lifecycle.transition(record.name, ModelLifecycleState.ERROR, {
+            errorMessage: message,
+          });
+          await deps.routingMap.setModelState(record.name, ModelState.ERROR);
+        } catch {
+          // Intentionally swallowed — do not mask the original error.
+        }
+
+        deps.notifications
+          .createNotification({
+            title: 'Model deployment failed',
+            description: `${record.name}: ${message}`,
+            variant: 'danger',
+            source: { type: 'model', name: record.name },
+          })
+          .catch((notifyErr: unknown) => {
+            app.log.debug(
+              { err: notifyErr, modelName: record.name },
+              'Failed to create failure notification',
+            );
+          });
+      }
+    })();
+
+    return { state: ModelLifecycleState.PENDING, message: 'Capacity reclamation in progress' };
+  } catch (err) {
+    if (redisCreated) {
+      await deps.lifecycle.removeModel(record.name).catch(() => {});
+    }
+    throw err;
+  }
+}
+
 export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  // Model names with a Stop synchronously claimed but not yet backgrounded-complete. Closes the
+  // double-Stop race: two concurrent Stop calls can both read the same settled state before
+  // either mutates anything, since Stop's teardown is fully backgrounded and none of ACTIVE/
+  // SLEEPING/ERROR has a uniform valid edge straight to STOPPING in VALID_TRANSITIONS (only
+  // SLEEPING and DRAINING do — see model-lifecycle.ts), so a synchronous state transition can't
+  // serve as the claim for all three. This in-process set does instead; it never touches
+  // VALID_TRANSITIONS. Only the leader instance runs mutating routes, so per-process state is
+  // sufficient — no cross-instance coordination needed.
+  const stoppingInFlight = new Set<string>();
+
   app.post<{ Body: DeployBody }>('/api/v1/models', async (request, reply) => {
     if (!deps.leaderElection.isLeader) {
       throw ControlPlaneError.notLeader();
@@ -71,11 +308,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       );
     }
 
-    let dbCreated = false;
-    let redisCreated = false;
-
+    let record: ModelRecord;
     try {
-      await deps.modelRepository.create({
+      record = await deps.modelRepository.create({
         name: body.modelName,
         runnerType: body.runnerType,
         modelPath: body.modelPath,
@@ -86,7 +321,6 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         runtimeModule: body.runtimeModule,
         pinned: body.pinned,
       });
-      dbCreated = true;
     } catch (err) {
       if (err instanceof Error && err.message.includes('unique')) {
         throw ControlPlaneError.modelAlreadyExists(body.modelName);
@@ -95,206 +329,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     }
 
     try {
-      await deps.lifecycle.createModel(body.modelName);
-      redisCreated = true;
-
-      const workers = deps.workerPool.getAllWorkers();
-      const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
-
-      const placementRequest = {
-        modelName: body.modelName,
-        runnerType: body.runnerType,
-        requiredMemory: body.requiredMemory,
-        deviceType: body.deviceType,
-        tensorParallel: body.tensorParallel ?? 1,
-      };
-
-      const result = deps.placement.place(placementRequest, workers, budgets);
-
-      if (result) {
-        for (const device of result.devices) {
-          deps.memoryBudget.reserveCapacity(
-            result.workerId,
-            device.deviceIndex,
-            body.modelName,
-            body.requiredMemory / (body.tensorParallel ?? 1),
-          );
-        }
-
-        await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
-          workerId: result.workerId,
-          deviceIndices: result.devices.map((d) => d.deviceIndex),
-        });
-
-        deps.deployOrchestration
-          .deployModel({
-            modelName: body.modelName,
-            workerId: result.workerId,
-            runnerType: body.runnerType,
-            modelPath: body.modelPath,
-            requiredMemory: body.requiredMemory,
-            deviceType: body.deviceType,
-            tensorParallel: body.tensorParallel ?? 1,
-            engineConfig: body.engineConfig,
-            runtimeModule: body.runtimeModule,
-            devices: result.devices,
-          })
-          .catch((err: unknown) => {
-            app.log.error(
-              { err, modelName: body.modelName },
-              'Background deploy orchestration failed',
-            );
-          });
-
-        return reply.code(202).send({
-          modelName: body.modelName,
-          state: ModelLifecycleState.STARTING,
-          message: `Placed on worker ${result.workerId}`,
-        });
-      }
-
-      const eligibleWorkerIds = deps.placement.eligibleWorkerIds(placementRequest, workers);
-      if (eligibleWorkerIds.size === 0) {
-        throw ControlPlaneError.placementFailed(
-          body.modelName,
-          'No worker with sufficient capacity',
-        );
-      }
-
-      const allStates = await deps.lifecycle.getAllStates();
-      const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
-        allStates.map((s) => s.modelName),
-      );
-      for (const s of allStates) {
-        s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
-      }
-      const allRecords = await deps.modelRepository.findAll();
-      const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
-      const memoryByModel = new Map(
-        allRecords.filter((r) => r.requiredMemory !== null).map((r) => [r.name, r.requiredMemory!]),
-      );
-
-      const victims = deps.eviction.selectVictims(
-        allStates,
-        pinnedModels,
-        body.requiredMemory,
-        eligibleWorkerIds,
-        memoryByModel,
-      );
-
-      if (victims.length === 0) {
-        throw ControlPlaneError.placementFailed(
-          body.modelName,
-          'No worker with sufficient capacity',
-        );
-      }
-
-      void (async () => {
-        try {
-          const stopTimer = deps.eviction.startTimer();
-          for (const victim of victims) {
-            const victimState = await deps.lifecycle.getState(victim.modelName);
-            const victimRunner =
-              victimState?.runnerHost && victimState.runnerPort
-                ? deps.createRunnerClient(victimState.runnerHost, victimState.runnerPort)
-                : null;
-            await deps.sleepWake.stopModel(victim.modelName, victimRunner);
-            // Registry semantics: DB row kept; only Redis lifecycle cleared (see #121).
-            await deps.lifecycle.removeModel(victim.modelName);
-            deps.eviction.recordEviction('capacity');
-          }
-          stopTimer();
-
-          await deps.memoryBudget.refreshAll();
-          const refreshedBudgets = new Map(
-            deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]),
-          );
-          const reclaimed = deps.placement.place(placementRequest, workers, refreshedBudgets);
-
-          if (!reclaimed) {
-            throw ControlPlaneError.placementFailed(
-              body.modelName,
-              'No worker with sufficient capacity after capacity reclamation',
-            );
-          }
-
-          for (const device of reclaimed.devices) {
-            deps.memoryBudget.reserveCapacity(
-              reclaimed.workerId,
-              device.deviceIndex,
-              body.modelName,
-              body.requiredMemory / (body.tensorParallel ?? 1),
-            );
-          }
-
-          await deps.lifecycle.transition(body.modelName, ModelLifecycleState.STARTING, {
-            workerId: reclaimed.workerId,
-            deviceIndices: reclaimed.devices.map((d) => d.deviceIndex),
-          });
-
-          deps.deployOrchestration
-            .deployModel({
-              modelName: body.modelName,
-              workerId: reclaimed.workerId,
-              runnerType: body.runnerType,
-              modelPath: body.modelPath,
-              requiredMemory: body.requiredMemory,
-              deviceType: body.deviceType,
-              tensorParallel: body.tensorParallel ?? 1,
-              engineConfig: body.engineConfig,
-              runtimeModule: body.runtimeModule,
-              devices: reclaimed.devices,
-            })
-            .catch((err: unknown) => {
-              app.log.error(
-                { err, modelName: body.modelName },
-                'Background deploy orchestration failed',
-              );
-            });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          app.log.error(
-            { err, modelName: body.modelName },
-            'Background capacity reclamation failed',
-          );
-
-          try {
-            await deps.lifecycle.transition(body.modelName, ModelLifecycleState.ERROR, {
-              errorMessage: message,
-            });
-            await deps.routingMap.setModelState(body.modelName, ModelState.ERROR);
-          } catch {
-            // Intentionally swallowed — do not mask the original error.
-          }
-
-          deps.notifications
-            .createNotification({
-              title: 'Model deployment failed',
-              description: `${body.modelName}: ${message}`,
-              variant: 'danger',
-              source: { type: 'model', name: body.modelName },
-            })
-            .catch((notifyErr: unknown) => {
-              app.log.debug(
-                { err: notifyErr, modelName: body.modelName },
-                'Failed to create failure notification',
-              );
-            });
-        }
-      })();
-
-      return reply.code(202).send({
-        modelName: body.modelName,
-        state: ModelLifecycleState.PENDING,
-        message: 'Capacity reclamation in progress',
-      });
+      const { state, message } = await deployFromRecord(app, deps, record);
+      return reply.code(202).send({ modelName: record.name, state, message });
     } catch (err) {
-      if (redisCreated) {
-        await deps.lifecycle.removeModel(body.modelName).catch(() => {});
-      }
-      if (dbCreated) {
-        await deps.modelRepository.delete(body.modelName).catch(() => {});
-      }
+      // Placement failed synchronously — roll back the DB row so the name is free to retry.
+      await deps.modelRepository.delete(record.name).catch(() => {});
       throw err;
     }
   });
@@ -617,6 +656,103 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         state: ModelLifecycleState.STARTING,
         previousState: ModelLifecycleState.SLEEPING,
         message: 'Wake initiated',
+      });
+    },
+  );
+
+  app.post<{ Params: { modelName: string } }>(
+    '/api/v1/models/:modelName/stop',
+    async (request, reply) => {
+      if (!deps.leaderElection.isLeader) {
+        throw ControlPlaneError.notLeader();
+      }
+
+      const { modelName } = request.params;
+
+      const state = await deps.lifecycle.getState(modelName);
+      if (!state) {
+        // No runtime state = nothing to stop. Mirrors sleep/wake. A record with no
+        // runtime state is already "stopped"; use start or delete on it instead.
+        throw ControlPlaneError.modelNotFound(modelName);
+      }
+
+      if (!STOPPABLE_STATES.has(state.state)) {
+        throw ControlPlaneError.invalidState(modelName, state.state, 'stop');
+      }
+
+      if (stoppingInFlight.has(modelName)) {
+        throw ControlPlaneError.invalidState(modelName, state.state, 'stop');
+      }
+      stoppingInFlight.add(modelName);
+
+      const runnerClient =
+        state.runnerHost && state.runnerPort
+          ? deps.createRunnerClient(state.runnerHost, state.runnerPort)
+          : null;
+
+      deps.notifications
+        .createNotification({
+          title: 'Model stop initiated',
+          description: `${modelName} is stopping`,
+          variant: 'info',
+          source: { type: 'model', name: modelName },
+        })
+        .catch((err: unknown) => {
+          app.log.debug({ err, modelName }, 'Failed to create stop notification');
+        });
+
+      void (async () => {
+        try {
+          await deps.sleepWake.stopModel(modelName, runnerClient);
+          await deps.lifecycle.removeModel(modelName);
+          // Record deliberately retained — this is Stop, not Delete (see #121).
+          app.log.info({ modelName }, 'Model stopped');
+        } catch (err: unknown) {
+          app.log.error({ err, modelName }, 'Background model stop failed');
+        } finally {
+          stoppingInFlight.delete(modelName);
+        }
+      })();
+
+      return reply.code(202).send({
+        modelName,
+        state: ModelLifecycleState.STOPPING,
+        previousState: state.state,
+        message: 'Stop initiated',
+      });
+    },
+  );
+
+  app.post<{ Params: { modelName: string } }>(
+    '/api/v1/models/:modelName/start',
+    async (request, reply) => {
+      if (!deps.leaderElection.isLeader) {
+        throw ControlPlaneError.notLeader();
+      }
+
+      const { modelName } = request.params;
+
+      const [state, record] = await Promise.all([
+        deps.lifecycle.getState(modelName),
+        deps.modelRepository.findByName(modelName),
+      ]);
+
+      if (!record) {
+        throw ControlPlaneError.modelNotFound(modelName);
+      }
+
+      if (state) {
+        // Runtime state exists — the model is running or transitioning, not stopped.
+        throw ControlPlaneError.invalidState(modelName, state.state, 'start');
+      }
+
+      const { state: newState, message } = await deployFromRecord(app, deps, record);
+
+      return reply.code(202).send({
+        modelName,
+        state: newState,
+        previousState: ModelLifecycleState.STOPPED,
+        message,
       });
     },
   );
