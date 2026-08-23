@@ -1,0 +1,45 @@
+{
+  "page": {
+    "title": "Chatbot Playground",
+    "subtitle": "Chat directly with deployed models, routed through the proxy."
+  },
+  "sidebar": {
+    "title": "Models",
+    "empty": "No active or sleeping models.",
+    "sleepingMarker": "Sleeping",
+    "ariaLabel": "Model list",
+    "selectModel": "Open a chat session with {{modelName}}"
+  },
+  "layout": {
+    "single": "1 pane",
+    "split": "2 panes",
+    "ariaLabel": "Workspace layout"
+  },
+  "pane": {
+    "emptyTitle": "No model selected",
+    "emptyBody": "Select a model from the sidebar to start a chat session in this pane.",
+    "sessionSelectorAriaLabel": "Select session",
+    "closeAriaLabel": "Close session"
+  },
+  "chat": {
+    "inputPlaceholder": "Send a message...",
+    "inputAriaLabel": "Message input",
+    "send": "Send",
+    "stop": "Stop",
+    "stopAriaLabel": "Stop generating",
+    "waking": "Waking model...",
+    "emptyConversation": "No messages yet. Say hello!",
+    "roles": {
+      "user": "You",
+      "assistant": "Assistant"
+    },
+    "error": {
+      "title": "Something went wrong",
+      "generic": "The chat request failed. Try again."
+    }
+  },
+  "params": {
+    "temperature": "Temperature",
+    "maxTokens": "Max tokens"
+  }
+}

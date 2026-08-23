@@ -13,6 +13,7 @@ const mockConfig: Config = {
   redisUrl: 'redis://localhost:6379',
   redisKeyPrefix: 'sardeenz',
   prometheusUrl: 'http://prom.test',
+  inferenceUrl: 'http://inference.test',
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -62,6 +63,10 @@ function buildDeps(): RouteDeps {
       queryInstant: vi.fn(),
       isHealthy: vi.fn(),
     } as unknown as RouteDeps['prometheus'],
+    inference: {
+      chatCompletions: vi.fn(),
+      isHealthy: vi.fn(),
+    } as unknown as RouteDeps['inference'],
   };
 }
 

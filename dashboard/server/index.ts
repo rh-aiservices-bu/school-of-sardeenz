@@ -4,6 +4,7 @@ import { buildServer } from './server.js';
 import { ControlPlaneClient } from './clients/control-plane.js';
 import { RedisReader } from './clients/redis.js';
 import { PrometheusClient } from './clients/prometheus.js';
+import { InferenceClient } from './clients/inference.js';
 
 async function main(): Promise<void> {
   loadRootEnv();
@@ -13,10 +14,11 @@ async function main(): Promise<void> {
   const controlPlane = new ControlPlaneClient(config);
   const redis = new RedisReader(config);
   const prometheus = new PrometheusClient(config);
+  const inference = new InferenceClient(config);
 
   const app = await buildServer({
     config,
-    routes: { config, controlPlane, redis, prometheus },
+    routes: { config, controlPlane, redis, prometheus, inference },
   });
 
   const shutdown = async (signal: string) => {
@@ -36,6 +38,7 @@ async function main(): Promise<void> {
       controlPlaneUrl: redactUrl(config.controlPlaneUrl),
       redisUrl: redactUrl(config.redisUrl),
       prometheusUrl: redactUrl(config.prometheusUrl),
+      inferenceUrl: redactUrl(config.inferenceUrl),
     },
     'Dashboard BFF started',
   );

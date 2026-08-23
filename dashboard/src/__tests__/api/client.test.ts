@@ -162,6 +162,115 @@ describe('api.models', () => {
   });
 });
 
+describe('api.inference.chat', () => {
+  function makeStreamResponse(frames: string[], status = 200): Response {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const frame of frames) {
+          controller.enqueue(encoder.encode(frame));
+        }
+        controller.close();
+      },
+    });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      body: stream,
+      json: () => Promise.resolve({}),
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('delivers accumulated deltas via onChunk and calls onDone with the full text', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeStreamResponse([
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hel' } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'lo!' } }] })}\n\n`,
+        'data: [DONE]\n\n',
+      ]),
+    );
+
+    const onChunk = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const controller = new AbortController();
+
+    await api.inference.chat(
+      { model: 'llama-3', messages: [{ role: 'user', content: 'hi' }] },
+      { onChunk, onDone, onError },
+      controller.signal,
+    );
+
+    expect(onChunk).toHaveBeenNthCalledWith(1, 'Hel');
+    expect(onChunk).toHaveBeenNthCalledWith(2, 'lo!');
+    expect(onDone).toHaveBeenCalledWith('Hello!');
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('clears the token and dispatches auth:unauthorized on a real 401', async () => {
+    sessionStorage.setItem('sardeenz_auth_token', 'stale-token');
+    mockFetch.mockResolvedValueOnce(makeStreamResponse([], 401));
+
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    const onError = vi.fn();
+    const controller = new AbortController();
+
+    await api.inference.chat(
+      { model: 'llama-3', messages: [] },
+      { onChunk: vi.fn(), onDone: vi.fn(), onError },
+      controller.signal,
+    );
+
+    expect(sessionStorage.getItem('sardeenz_auth_token')).toBeNull();
+    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'auth:unauthorized' }));
+    expect(onError).toHaveBeenCalled();
+  });
+
+  it('a non-401 upstream error calls onError WITHOUT dispatching auth:unauthorized', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      body: null,
+      json: () => Promise.resolve({ error: 'bad gateway' }),
+    });
+
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    const onError = vi.fn();
+    const controller = new AbortController();
+
+    await api.inference.chat(
+      { model: 'llama-3', messages: [] },
+      { onChunk: vi.fn(), onDone: vi.fn(), onError },
+      controller.signal,
+    );
+
+    expect(onError).toHaveBeenCalled();
+    expect(dispatchSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'auth:unauthorized' }));
+  });
+
+  it('an aborted request is swallowed — no onError, no auth:unauthorized', async () => {
+    const abortError = new DOMException('The operation was aborted', 'AbortError');
+    mockFetch.mockRejectedValueOnce(abortError);
+
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    const onError = vi.fn();
+    const controller = new AbortController();
+
+    await api.inference.chat(
+      { model: 'llama-3', messages: [] },
+      { onChunk: vi.fn(), onDone: vi.fn(), onError },
+      controller.signal,
+    );
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(dispatchSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'auth:unauthorized' }));
+  });
+});
+
 describe('api.workers', () => {
   it('list returns workers', async () => {
     const payload = { workers: [{ id: 'w1', status: 'ONLINE' }] };

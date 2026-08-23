@@ -8,6 +8,7 @@ export interface Config {
   readonly redisUrl: string;
   readonly redisKeyPrefix: string;
   readonly prometheusUrl: string;
+  readonly inferenceUrl: string;
   readonly authMode: AuthMode;
   readonly adminUsername: string;
   readonly adminPassword: string;
@@ -48,6 +49,7 @@ export function loadConfig(): Config {
     redisUrl: optionalEnv('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
     redisKeyPrefix: optionalEnv('SARDEENZ_REDIS_KEY_PREFIX', 'sardeenz'),
     prometheusUrl: optionalEnv('SARDEENZ_PROMETHEUS_URL', 'http://localhost:9090'),
+    inferenceUrl: optionalEnv('SARDEENZ_INFERENCE_URL', 'http://localhost:8080'),
     authMode,
     adminUsername: optionalEnv('ADMIN_USERNAME', 'admin'),
     adminPassword: optionalEnv('ADMIN_PASSWORD', ''),

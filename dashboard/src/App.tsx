@@ -16,6 +16,7 @@ import { WorkerList } from './pages/Workers/WorkerList';
 import { WorkerDetail } from './pages/Workers/WorkerDetail';
 import { RunnerCatalog } from './pages/Catalog/RunnerCatalog';
 import { MetricsDashboard } from './pages/Metrics/MetricsDashboard';
+import { Playground } from './pages/Playground/Playground';
 import { Login } from './pages/Login/Login';
 import { OAuthCallback } from './pages/Login/OAuthCallback';
 
@@ -142,6 +143,14 @@ export function App() {
                         <Route path="/workers/:workerId" element={<WorkerDetail />} />
                         <Route path="/catalog" element={<RunnerCatalog />} />
                         <Route path="/metrics" element={<MetricsDashboard />} />
+                        <Route
+                          path="/playground"
+                          element={
+                            <AdminRoute>
+                              <Playground />
+                            </AdminRoute>
+                          }
+                        />
                         <Route path="*" element={<NotFoundPage />} />
                       </Routes>
                     </ErrorBoundary>

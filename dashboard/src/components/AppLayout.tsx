@@ -222,6 +222,13 @@ export function AppLayout({ children }: AppLayoutProps) {
             >
               {t('nav.metrics')}
             </NavItem>
+            <NavItem
+              itemId="/playground"
+              isActive={location.pathname.startsWith('/playground')}
+              onClick={() => navigate('/playground')}
+            >
+              {t('nav.playground')}
+            </NavItem>
           </NavList>
         </Nav>
         <aside

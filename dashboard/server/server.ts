@@ -14,6 +14,7 @@ import { registerProbes } from './health/probes.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerModelLogRoutes } from './routes/model-logs.js';
+import { registerInferenceRoutes } from './routes/inference.js';
 import { registerWorkerRoutes } from './routes/workers.js';
 import { registerClusterRoutes } from './routes/cluster.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
@@ -79,6 +80,7 @@ export async function buildServer(deps: ServerDeps) {
   registerAuthRoutes(app, deps.config);
   registerModelRoutes(app, deps.routes);
   registerModelLogRoutes(app, deps.routes);
+  registerInferenceRoutes(app, deps.routes);
   registerWorkerRoutes(app, deps.routes);
   registerClusterRoutes(app, deps.routes);
   registerMetricsRoutes(app, deps.routes);

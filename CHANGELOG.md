@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Chatbot Playground — multi-pane inference workspace routed through the proxy (#122).** New
+  admin-only `/playground` page (v1 parity, custom PatternFly 6 components — no chatbot library):
+  1–2 panes with independent chat sessions, model sidebar listing ACTIVE and SLEEPING models
+  (sleeping marked, wake-on-request indicator while the proxy parks the first request), token-by-token
+  streaming, and Stop/abort that cancels the generation end-to-end. The BFF gains
+  `POST /api/inference/chat/completions` (JWT `admin` role required; 403 for `admin-readonly`),
+  a streaming passthrough to the proxy's OpenAI-compatible endpoint — client disconnect aborts the
+  upstream request so no runner generates tokens for nobody. New `SARDEENZ_INFERENCE_URL` config
+  (default `http://localhost:8080`), shared SSE frame parser, new `playground` i18n namespace.
+
 - **Deploy form runner & device options now come from live worker capabilities (#67).** `WorkerInfo`
   (`control-plane.yaml`) gains optional `runnerCapabilities`; `GET /api/v1/workers` returns it per
   worker (mirroring `GET /api/v1/workers/{workerId}`). The dashboard deploy form lists exactly the

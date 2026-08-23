@@ -4,7 +4,8 @@
     "models": "Models",
     "workers": "Workers",
     "catalog": "Runner Catalog",
-    "metrics": "Metrics"
+    "metrics": "Metrics",
+    "playground": "Playground"
   },
   "brand": "Sardeenz",
   "actions": {
