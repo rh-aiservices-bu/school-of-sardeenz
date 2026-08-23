@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -27,23 +27,18 @@ import {
 } from '@patternfly/react-core';
 import { useDeployModel } from '../../hooks/useModels';
 import { useCatalog } from '../../hooks/useCatalog';
+import {
+  useRunnerTypes,
+  useWorkerCapabilities,
+  computeDeviceOptions,
+  reconcileRunnerType,
+  reconcileDeviceType,
+} from '../../hooks/useWorkers';
 import { WeightsBrowserModal } from './WeightsBrowserModal';
 import { DeployLogsModal } from '../../components/DeployLogsModal';
 import type { ModelDeploymentRequest } from '../../api/client';
 
 const GIB = 1024 ** 3;
-
-const RUNNER_OPTIONS = [
-  { value: 'vllm', label: 'vLLM' },
-  { value: 'triton', label: 'Triton' },
-];
-
-const DEVICE_OPTIONS = [
-  { value: '', label: 'Any' },
-  { value: 'CUDA', label: 'CUDA' },
-  { value: 'ROCM', label: 'ROCM' },
-  { value: 'CPU', label: 'CPU' },
-];
 
 // Mirrors the runtimeModule pattern in the control-plane/worker contracts (it becomes a SIF
 // filename segment: /modules/<runtimeModule>.sif).
@@ -149,6 +144,8 @@ export function ModelDeploy() {
   const navigate = useNavigate();
   const deployModel = useDeployModel();
   const { data: catalog } = useCatalog();
+  const { options: runnerOptions, isFallback: runnerFallback } = useRunnerTypes();
+  const { capabilities } = useWorkerCapabilities();
 
   const [form, setForm] = useState<FormState>({
     modelName: '',
@@ -181,11 +178,48 @@ export function ModelDeploy() {
     [catalog, form.runnerType],
   );
 
+  const deviceOptions = useMemo(
+    () =>
+      computeDeviceOptions(capabilities, form.runnerType, t('deploy.fields.deviceTypeAny')).options,
+    [capabilities, form.runnerType, t],
+  );
+
+  // Reconcile the default/selected runnerType against live options so the form never
+  // submits a runner no worker can serve. Guarded: leaves a still-valid choice intact.
+  useEffect(() => {
+    setForm((prev) => {
+      const next = reconcileRunnerType(prev.runnerType, runnerOptions);
+      if (next === prev.runnerType) return prev;
+      // Runner changed → its runtimeModule selection is no longer valid (modules are
+      // runner-specific), mirroring the reset in `set()` for manual runner changes. Same
+      // for deviceType: recompute the new runner's device options and drop the selection
+      // if it no longer applies (e.g. was 'CUDA', new runner is CPU-only).
+      const nextDeviceOptions = computeDeviceOptions(
+        capabilities,
+        next,
+        t('deploy.fields.deviceTypeAny'),
+      ).options;
+      return {
+        ...prev,
+        runnerType: next,
+        runtimeModule: '',
+        deviceType: reconcileDeviceType(prev.deviceType, nextDeviceOptions),
+      };
+    });
+  }, [runnerOptions, capabilities, t]);
+
   const set = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     const updated = { ...form, [field]: value };
-    // Modules are runner-specific, so a runner change invalidates the current selection.
+    // Modules and deviceType are runner-specific, so a runner change invalidates
+    // selections that don't apply to the new runner.
     if (field === 'runnerType') {
       updated.runtimeModule = '';
+      const nextDeviceOptions = computeDeviceOptions(
+        capabilities,
+        value as FormState['runnerType'],
+        t('deploy.fields.deviceTypeAny'),
+      ).options;
+      updated.deviceType = reconcileDeviceType(form.deviceType, nextDeviceOptions);
     }
     setForm(updated);
     if (submitted) {
@@ -265,10 +299,19 @@ export function ModelDeploy() {
                 onChange={(_ev, val) => set('runnerType', val)}
                 aria-label={t('deploy.fields.runnerType')}
               >
-                {RUNNER_OPTIONS.map((opt) => (
+                {runnerOptions.map((opt) => (
                   <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
                 ))}
               </FormSelect>
+              {runnerFallback && (
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem variant="warning">
+                      {t('deploy.hints.runnerTypeFallback')}
+                    </HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              )}
               <FieldHelper error={errors.runnerType} showError={submitted} fieldId="runner-type" />
             </FormGroup>
 
@@ -379,7 +422,7 @@ export function ModelDeploy() {
                 onChange={(_ev, val) => set('deviceType', val)}
                 aria-label={t('deploy.fields.deviceType')}
               >
-                {DEVICE_OPTIONS.map((opt) => (
+                {deviceOptions.map((opt) => (
                   <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
                 ))}
               </FormSelect>

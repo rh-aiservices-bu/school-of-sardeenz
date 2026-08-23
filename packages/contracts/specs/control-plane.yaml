@@ -1844,6 +1844,11 @@ components:
           type: integer
           minimum: 0
           description: Number of models currently deployed on this worker.
+        runnerCapabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerRunnerCapability"
+          description: Runner types available on this worker.
         lastHeartbeatAt:
           type: string
           format: date-time

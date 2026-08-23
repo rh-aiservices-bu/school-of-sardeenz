@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Deploy form runner & device options now come from live worker capabilities (#67).** `WorkerInfo`
+  (`control-plane.yaml`) gains optional `runnerCapabilities`; `GET /api/v1/workers` returns it per
+  worker (mirroring `GET /api/v1/workers/{workerId}`). The dashboard deploy form lists exactly the
+  runner types advertised by online workers (deduped, labelled by engine name) and derives Device
+  Type options from the selected runner's `supportedDeviceTypes`, falling back to the previous
+  hardcoded lists (with a helper message) when no capability data is available; runner and device
+  selections are reconciled against live options on change. New reusable `useRunnerTypes()` /
+  `useWorkerCapabilities()` hooks.
+
 - **Logical model vs. instance split — N replicas per model (ADR-019).** A model name is now a
   logical model (unique config in Postgres `models`) served by N instances (new `instances` table,
   migration 003; instance-keyed Redis lifecycle state `models:{name}:{instanceId}` with

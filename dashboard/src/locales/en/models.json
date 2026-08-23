@@ -12,7 +12,8 @@
       "runtimeModule": "Runtime Module",
       "runtimeModulePlaceholder": "Select a runtime module",
       "pinned": "Pinned",
-      "engineConfig": "Engine Config (JSON)"
+      "engineConfig": "Engine Config (JSON)",
+      "deviceTypeAny": "Any"
     },
     "hints": {
       "modelPath": "Absolute path to model weights on shared storage.",
@@ -22,7 +23,8 @@
       "runtimeModule": "Installed SIF the worker execs (→ /modules/<name>.sif), filtered to the selected runner.",
       "runtimeModuleNone": "No runtime modules for this runner are installed. Import one from the Runner Catalog to deploy.",
       "pinned": "Pinned models cannot be evicted by the LRU eviction engine.",
-      "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided."
+      "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided.",
+      "runnerTypeFallback": "No worker capabilities are available yet — showing default runner types. The list will update once workers come online."
     },
     "validation": {
       "modelNameRequired": "Model name is required.",

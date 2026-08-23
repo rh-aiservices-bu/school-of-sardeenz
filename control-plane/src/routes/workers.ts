@@ -36,6 +36,16 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
           memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
         })),
         modelCount: instanceCountByWorker.get(w.workerId) ?? 0,
+        runnerCapabilities:
+          w.capabilities && w.capabilities.length > 0
+            ? w.capabilities.map((c) => ({
+                runnerType: c.runnerType,
+                engineName: c.engineName,
+                supportedModelTypes: c.supportedModelTypes,
+                supportedDeviceTypes: c.supportedDeviceTypes,
+                supportedSleepLevels: c.supportedSleepLevels,
+              }))
+            : undefined,
         lastHeartbeatAt: w.lastHeartbeatAt ?? undefined,
       };
     });

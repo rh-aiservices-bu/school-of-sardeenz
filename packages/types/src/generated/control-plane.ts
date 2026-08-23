@@ -948,6 +948,8 @@ export type components = {
             devices: components["schemas"]["DeviceInfo"][];
             /** @description Number of models currently deployed on this worker. */
             modelCount?: number;
+            /** @description Runner types available on this worker. */
+            runnerCapabilities?: components["schemas"]["WorkerRunnerCapability"][];
             /**
              * Format: date-time
              * @description Timestamp of the last heartbeat from this worker.
