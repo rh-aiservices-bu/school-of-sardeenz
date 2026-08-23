@@ -7,6 +7,7 @@ import {
   NotificationDrawerListItem,
   NotificationDrawerListItemBody,
   NotificationDrawerListItemHeader,
+  Alert,
   EmptyState,
   EmptyStateBody,
   EmptyStateVariant,
@@ -23,7 +24,7 @@ import { useNotifications } from '../contexts/NotificationContext';
 
 export function NotificationDrawer() {
   const { t } = useTranslation('common');
-  const { notifications, markAsRead, markAllAsRead, removeNotification, clearAll } =
+  const { notifications, historyError, markAsRead, markAllAsRead, removeNotification, clearAll } =
     useNotifications();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
@@ -87,6 +88,14 @@ export function NotificationDrawer() {
         </Dropdown>
       </NotificationDrawerHeader>
       <NotificationDrawerBody>
+        {historyError && (
+          <Alert
+            variant="danger"
+            isInline
+            title={t('notifications.loadError')}
+            className="pf-v6-u-mb-md"
+          />
+        )}
         {notifications.length === 0 ? (
           <EmptyState variant={EmptyStateVariant.sm} titleText={t('notifications.noNotifications')}>
             <BellIcon

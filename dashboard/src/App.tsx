@@ -4,6 +4,7 @@ import { Bullseye, EmptyState, EmptyStateBody, PageSection, Spinner } from '@pat
 import { useTranslation, withTranslation, type WithTranslation } from 'react-i18next';
 import { useAuth } from './contexts/AuthContext';
 import { DegradedProvider } from './contexts/DegradedContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import { DegradedBanner } from './components/DegradedBanner';
 import { AppLayout } from './components/AppLayout';
 import { EventStreamContext, useEventStreamConnection } from './hooks/useEventStream';
@@ -122,28 +123,30 @@ export function App() {
             <DegradedProvider>
               <DegradedBanner />
               <EventStreamProvider>
-                <AppLayout>
-                  <ErrorBoundary>
-                    <Routes>
-                      <Route path="/" element={<ClusterOverview />} />
-                      <Route path="/models" element={<ModelList />} />
-                      <Route
-                        path="/models/deploy"
-                        element={
-                          <AdminRoute>
-                            <ModelDeploy />
-                          </AdminRoute>
-                        }
-                      />
-                      <Route path="/models/:modelName" element={<ModelDetail />} />
-                      <Route path="/workers" element={<WorkerList />} />
-                      <Route path="/workers/:workerId" element={<WorkerDetail />} />
-                      <Route path="/catalog" element={<RunnerCatalog />} />
-                      <Route path="/metrics" element={<MetricsDashboard />} />
-                      <Route path="*" element={<NotFoundPage />} />
-                    </Routes>
-                  </ErrorBoundary>
-                </AppLayout>
+                <NotificationProvider>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <Routes>
+                        <Route path="/" element={<ClusterOverview />} />
+                        <Route path="/models" element={<ModelList />} />
+                        <Route
+                          path="/models/deploy"
+                          element={
+                            <AdminRoute>
+                              <ModelDeploy />
+                            </AdminRoute>
+                          }
+                        />
+                        <Route path="/models/:modelName" element={<ModelDetail />} />
+                        <Route path="/workers" element={<WorkerList />} />
+                        <Route path="/workers/:workerId" element={<WorkerDetail />} />
+                        <Route path="/catalog" element={<RunnerCatalog />} />
+                        <Route path="/metrics" element={<MetricsDashboard />} />
+                        <Route path="*" element={<NotFoundPage />} />
+                      </Routes>
+                    </ErrorBoundary>
+                  </AppLayout>
+                </NotificationProvider>
               </EventStreamProvider>
             </DegradedProvider>
           </ProtectedRoute>

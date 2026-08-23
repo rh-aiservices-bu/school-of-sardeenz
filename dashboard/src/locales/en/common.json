@@ -58,7 +58,8 @@
     "clearAll": "Clear all",
     "noNotifications": "No notifications",
     "noNotificationsBody": "You have no notifications at this time.",
-    "actions": "Notification actions"
+    "actions": "Notification actions",
+    "loadError": "Failed to load notification history. Some past notifications may be missing."
   },
   "userMenu": {
     "logout": "Logout"

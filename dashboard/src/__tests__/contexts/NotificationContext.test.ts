@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const DEDUP_WINDOW_MS = 500;
+const MAX_NOTIFICATIONS = 200;
 
 // ---------------------------------------------------------------------------
 // State machine simulator — mirrors the logic in NotificationContext.tsx
@@ -68,7 +69,7 @@ class NotificationStateMachine {
       description: notification.description,
       timestamp: now,
     };
-    this.notifications = [notification, ...this.notifications];
+    this.notifications = [notification, ...this.notifications].slice(0, MAX_NOTIFICATIONS);
     this.toastNotifications = [
       ...this.toastNotifications,
       {
@@ -126,6 +127,10 @@ function makeNotification(overrides?: Partial<Notification>): Notification {
 describe('NotificationContext constants', () => {
   it('DEDUP_WINDOW_MS is 500ms', () => {
     expect(DEDUP_WINDOW_MS).toBe(500);
+  });
+
+  it('MAX_NOTIFICATIONS is 200 and matches the history fetch limit', () => {
+    expect(MAX_NOTIFICATIONS).toBe(200);
   });
 });
 
@@ -393,5 +398,32 @@ describe('NotificationContext unread count', () => {
     state.markAllAsRead();
 
     expect(state.unreadCount).toBe(0);
+  });
+});
+
+describe('NotificationContext live-list cap', () => {
+  let state: NotificationStateMachine;
+
+  beforeEach(() => {
+    state = new NotificationStateMachine();
+  });
+
+  it('caps the live list at MAX_NOTIFICATIONS', () => {
+    for (let i = 0; i < 205; i++) {
+      state.addNotification(makeNotification({ id: `n${i}`, title: `Alert ${i}` }), 1000 + i);
+    }
+
+    expect(state.notifications).toHaveLength(MAX_NOTIFICATIONS);
+  });
+
+  it('drops the oldest entry when the cap is exceeded', () => {
+    for (let i = 0; i < 200; i++) {
+      state.addNotification(makeNotification({ id: `n${i}`, title: `Alert ${i}` }), 1000 + i);
+    }
+    state.addNotification(makeNotification({ id: 'n200', title: 'Alert 200' }), 1200);
+
+    expect(state.notifications.some((n) => n.id === 'n0')).toBe(false);
+    expect(state.notifications[0].id).toBe('n200');
+    expect(state.notifications).toHaveLength(MAX_NOTIFICATIONS);
   });
 });

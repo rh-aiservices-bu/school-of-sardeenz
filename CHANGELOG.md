@@ -47,6 +47,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard: notification history now loads after login (#106).** `NotificationProvider` moved
+  inside the auth gate (`ProtectedRoute`) so its history fetch fires only when authenticated and
+  refetches on each login; the live list is capped at 200 (drop-oldest); previously-swallowed
+  notification API errors are now logged and history-load failures surfaced in the drawer.
+
 - **Integration harness worker fixture updated to the current WorkerInfo contract.** The M6
   Redis-boundary validation (#83) silently rejected the harness's `registerWorker` fixture
   (`supportedModelTypes: ['text-generation']` is not a `ModelType` member), failing 8 of 11
