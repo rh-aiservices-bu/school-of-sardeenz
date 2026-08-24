@@ -18,8 +18,8 @@
 >   don't gate the general result (see the storage-goal note in §2).
 > - **Field finding (confirmed on a live 4.21 cluster):** `hostUsers: false` + a network RWX
 >   PVC (EFS/NFSv4 here) fails at container create with `mount_setattr … doesn't support idmap
->   mounts on this kernel` — pod-level userns needs idmapped volume mounts that NFS/EFS (and
->   CephFS on current RHCOS kernels) can't provide, and `nested-container` *requires* pod-level
+mounts on this kernel` — pod-level userns needs idmapped volume mounts that NFS/EFS (and
+>   CephFS on current RHCOS kernels) can't provide, and `nested-container` _requires_ pod-level
 >   userns. The in-container-userns path (above) sidesteps it and was verified: Gate 0
 >   fingerprint clean (`Seccomp: 0`, `max_user_namespaces > 0`, `/dev/fuse` present) and Gate 1
 >   passed (`unshare --user --map-root-user` → `uid=0(root)`). See §9.3.
@@ -36,7 +36,7 @@
 >   after both fixes.
 > - **Method correction — Gate 3 no-copy evidence.** The `squashfuse_ll` mount lives in
 >   Apptainer's **session mount namespace**, and the container root is a read-only `overlay`
->   whose `lowerdir` is that squashfuse rootfs — so it's invisible in *both* the parent shell's
+>   whose `lowerdir` is that squashfuse rootfs — so it's invisible in _both_ the parent shell's
 >   and the container's own `/proc/mounts`, and the old grep false-reports "no mount." Gate 3
 >   now proves no-copy via the running `squashfuse_ll` process (serving the SIF read-only via
 >   an fd) + zero scratch growth across many runs. Confirmed on OKD 4.21: SIF runs in place off
@@ -54,8 +54,8 @@
 >   on both Deployments and verified in Gate 0.
 > - **Storage guidance folded in** (§12): SIFs world-readable under user-namespace UID
 >   mapping, scratch kept off the network volume, SELinux/label caveats, versioned filenames
->   + write-new-then-symlink so in-flight SIFs aren't replaced under running pods, and the
->   librarian-writes / consumer-reads-`readOnly` split for production.
+>   - write-new-then-symlink so in-flight SIFs aren't replaced under running pods, and the
+>     librarian-writes / consumer-reads-`readOnly` split for production.
 >
 > **What carried over from v2:** the seccomp reasoning (why `restricted-v2` can't do userns),
 > Gate 3's mount-backend evidence standard, the three GPU gates (namespace-sharing, kvcached
@@ -91,7 +91,7 @@ and the implementation plan live in the canonical docs — read these together:
 
 Sardeenz runs AI inference engines (vLLM, Triton, MLServer, …) as **runners** — one process
 per model, on a **worker** (a Pod with GPUs). The open question for **Phase 4** is purely
-about *how the engine's software gets onto the worker*:
+about _how the engine's software gets onto the worker_:
 
 - **The usual way — bake the engine into a container image.** Painful: images are 10–20 GB,
   cold starts wait on the pull, every version bump is a rebuild, and running two versions
@@ -101,8 +101,8 @@ about *how the engine's software gets onto the worker*:
   Great runtime story, but it means owning a from-source compilation stack and authoring
   build recipes for every engine/version. That's a heavy lift for whoever provisions a runner.
 
-**What we actually want:** treat an engine runtime like a *module you drop onto a shared
-volume and point a launcher at* — no per-host copy, no rebuild-the-world, versions living
+**What we actually want:** treat an engine runtime like a _module you drop onto a shared
+volume and point a launcher at_ — no per-host copy, no rebuild-the-world, versions living
 side by side, and new runtimes added **without recycling worker Pods**.
 
 **The idea this spike tests:** package each runtime as an **Apptainer SIF** (a single
@@ -118,20 +118,20 @@ this model a "runner module" is just a `.sif` file:
 ```
 
 If it works, we get container-level packaging convenience (build any image, convert to SIF —
-**no EasyBuild required**) *and* the HPC runtime benefits (shared storage, no local copy,
+**no EasyBuild required**) _and_ the HPC runtime benefits (shared storage, no local copy,
 hot-swappable versions), and — because a SIF is one squashfs file — we sidestep the CephFS
 metadata-storm problem that plagues running a Python runtime directly off network storage.
 
 ## What this test intends to prove — or disprove
 
 The whole approach hinges on one thing: **can an unprivileged process run Apptainer inside an
-OpenShift Pod on the platform's supported user-namespace path?** OpenShift's *default* posture
+OpenShift Pod on the platform's supported user-namespace path?** OpenShift's _default_ posture
 (`restricted-v2`: non-root, arbitrary UID, no privilege escalation, **seccomp
 `RuntimeDefault`**) deliberately blocks the user-namespace / FUSE machinery Apptainer needs —
 that's not in question, the 4.21 capability matrix already settles it (§9). The way we opt in
 that works with a shared network RWX PVC is a **custom seccomp SCC** (permitting `Unconfined`) +
 the `/dev/fuse` CRI-O annotation, letting **Apptainer create its own userns inside the
-container** — *not* `hostUsers: false`, which breaks network RWX mounts (§5 field finding, §9.3).
+container** — _not_ `hostUsers: false`, which breaks network RWX mounts (§5 field finding, §9.3).
 So this spike answers, concretely:
 
 1. **Can we run a SIF at all** on that path, and **is that privilege cost acceptable for a
@@ -154,7 +154,7 @@ So this spike answers, concretely:
 > **Prediction, updated with field results:** on the network-FS-compatible path (custom seccomp
 > SCC + `/dev/fuse` annotation, in-container userns, no `hostUsers: false`) **Gate 0 and Gate 1
 > passed on a live 4.21 cluster** — clean fingerprint (`Seccomp: 0`, `max_user_namespaces >
-> 0`, `/dev/fuse` present) and `unshare --user --map-root-user` → `uid=0(root)`. So "does
+0`, `/dev/fuse` present) and `unshare --user --map-root-user` → `uid=0(root)`. So "does
 > userns work" is settled; the remaining open risks are: (a) does direct SIF mount actually use
 > squashfuse and not fall back to extraction (Gate 3), (b) does GPU + kvcached survive the SIF
 > boundary (Gates 8–9), and (c) does cold-start economics beat an image pull (Gate 10). We do
@@ -163,10 +163,10 @@ So this spike answers, concretely:
 
 **Bottom line it delivers:** a go / no-go on building Phase 4 on Apptainer/SIF, and — if it's
 "go" — the **exact SCC + Pod securityContext** required. On a network RWX volume that turned
-out to be a custom seccomp SCC (seccomp `Unconfined`) + the `/dev/fuse` annotation — a *mild*
+out to be a custom seccomp SCC (seccomp `Unconfined`) + the `/dev/fuse` annotation — a _mild_
 SCC (no capabilities, no privileged), but a **custom one**, not a stock/shipped SCC, since
 `nested-container` can't be used with network RWX-backed volumes here. If it's a "no-go," the gates
-tell us *where* it broke so we can pivot (§13: `zstd:chunked` lazy pulls, ImageVolumes,
+tell us _where_ it broke so we can pivot (§13: `zstd:chunked` lazy pulls, ImageVolumes,
 bubblewrap, EasyBuild modules).
 
 **Goal of the runbook below:** find out whether we can run engine runtimes as **Apptainer SIF
@@ -176,7 +176,7 @@ add of new modules without recycling the Pod.
 
 The spike is **fail-fast**: each gate isolates one risk. We deploy onto the network-FS-compatible
 path up front (§5), so a gate failing there is a real signal, not a rung to climb — stop and
-jump to the **Playbook** (§9), which also documents how to *trim* privileges to find the true
+jump to the **Playbook** (§9), which also documents how to _trim_ privileges to find the true
 minimum. The single most important thing to record is **the SCC + securityContext** each gate
 actually needs — that decides whether this is a mild-SCC product default or a lab trick.
 
@@ -199,6 +199,7 @@ heavyweight, Sardeenz-specific gates — budget most of your wall-clock time the
 ## 1. Prerequisites
 
 `# [LAPTOP]`
+
 ```bash
 # You need the OpenShift CLI and an active login with rights to create a project,
 # PVCs, builds, and (for the escalation steps) SCCs.
@@ -211,12 +212,13 @@ You do **not** need Docker/Podman or Apptainer on your laptop — the worker ima
 **in-cluster**, and the SIFs are built **inside the Pod**.
 
 You **do** need:
+
 - **OpenShift 4.15+** (tested on OKD **4.21**). The `/dev/fuse` annotation needs 4.15+; the
   in-container-userns approach only needs the kernel to permit unprivileged user namespaces
   (`/proc/sys/user/max_user_namespaces > 0`, checked in Gate 0).
 - Rights to **create a custom SCC** (the runbook creates `apptainer-spike-seccomp` in §5) and
   bind it to the project's service account. Note: the shipped **`nested-container` SCC is
-  *not* used** — it requires pod-level user namespaces (`hostUsers: false`), which break
+  _not_ used** — it requires pod-level user namespaces (`hostUsers: false`), which break
   network RWX PVC mounts (no idmapped mounts on NFS/EFS, nor CephFS on current RHCOS kernels)
   (§5 field finding, §9.3).
 - **`crun` as the container runtime** (it's the default on modern 4.x and is the runtime with
@@ -225,7 +227,7 @@ You **do** need:
 - **`/dev/fuse` access — no device plugin needed on 4.21.** On OpenShift/OKD **4.15+**,
   `/dev/fuse` is exposed to an unprivileged Pod simply by the annotation
   `io.kubernetes.cri-o.Devices: "/dev/fuse"` (it's even available by default on recent
-  releases). Without `/dev/fuse`, *direct SIF mount* (Gate 3, the no-copy promise) cannot work
+  releases). Without `/dev/fuse`, _direct SIF mount_ (Gate 3, the no-copy promise) cannot work
   — only extraction. §5/§8 set the annotation; Gate 0 verifies the device appears. (On
   clusters older than 4.15, an admin must first allow it via a CRI-O MachineConfig — see §9.4.
   This whole mechanism is unavailable on Managed OpenShift — ROSA/ARO — which forbids custom
@@ -240,7 +242,7 @@ You **do** need:
   accordingly — Apptainer reads registry credentials from `APPTAINER_DOCKER_USERNAME` /
   `APPTAINER_DOCKER_PASSWORD` or `apptainer remote login` if the registry/mirror needs auth.
 
-> **UID-range caveat (only relevant to the unused `hostUsers: false` path):** *pod-level* user
+> **UID-range caveat (only relevant to the unused `hostUsers: false` path):** _pod-level_ user
 > namespaces require the project's `openshift.io/sa.scc.uid-range` to fit in ≤ 65535. Our
 > in-container-userns path doesn't hit this (Apptainer uses single-UID mapping), so you can
 > ignore it unless you experiment with `hostUsers: false` — see §9.8.
@@ -250,6 +252,7 @@ You **do** need:
 ## 2. Set variables (run once per shell)
 
 `# [LAPTOP]`
+
 ```bash
 export PROJECT=apptainer-spike
 export RUNNER_PVC=runner-modules     # RWX volume that holds the .sif "modules"
@@ -267,14 +270,14 @@ export IMAGE=image-registry.openshift-image-registry.svc:5000/${PROJECT}/worker-
 > **any RWX volume** it's given, not one specific filesystem. CephFS (Highlander on ODF) is a
 > priority backend, but not the only one. **This spike run was executed on AWS EFS** (an
 > `efs.csi` RWX class), which mounts as **NFSv4 over a localhost `stunnel` proxy**
-> (`127.0.0.1:/…` — that's why the mount table shows `nfs4`). EFS is therefore a *first-class
-> proof point*, not a stand-in: passing here proves the approach on a real, common RWX class.
+> (`127.0.0.1:/…` — that's why the mount table shows `nfs4`). EFS is therefore a _first-class
+> proof point_, not a stand-in: passing here proves the approach on a real, common RWX class.
 > The findings are deliberately written as **network-FS-general** and hold for any NFS-class RWX
 > (incl. EFS, and CephFS on current RHCOS kernels): unprivileged userns works, `hostUsers:
-> false` fails (no idmapped mounts), the OCI→SIF unpack must use node-local scratch, and
+false` fails (no idmapped mounts), the OCI→SIF unpack must use node-local scratch, and
 > squashfuse runs the SIF in place. **Worth re-checking per backend** (desirable follow-up, not
 > a blocker for the general result): (a) whether a newer-kernel CephFS + CSI supports idmapped
-> mounts (which would re-open the `nested-container`/`hostUsers` path *on that backend*), and
+> mounts (which would re-open the `nested-container`/`hostUsers` path _on that backend_), and
 > (b) **Gate 10 economics per FS** — EFS is NFS-grade; CephFS/ODF may do better (Fable's point),
 > so treat EFS cold-start numbers as a solid-but-not-best-case data point. CephFS validation
 > needs a separate cluster.
@@ -287,11 +290,13 @@ export IMAGE=image-registry.openshift-image-registry.svc:5000/${PROJECT}/worker-
 ## 3. Create the project and the shared volumes
 
 `# [LAPTOP]`
+
 ```bash
 oc new-project ${PROJECT} 2>/dev/null || oc project ${PROJECT}
 ```
 
 `# [LAPTOP]`
+
 ```bash
 # Module store (RWX): where the final .sif files live and are executed from.
 # NOTE: the OCI->SIF *conversion* scratch (cache + unpack tmp) does NOT go here — it must be
@@ -315,6 +320,7 @@ EOF
 ```
 
 `# [LAPTOP]`
+
 ```bash
 # Fake "model weights" volume (RWX). 20Gi leaves room for a small real model in Gate 9.
 cat <<EOF | oc apply -f -
@@ -333,6 +339,7 @@ EOF
 ```
 
 `# [LAPTOP]`
+
 ```bash
 oc get pvc -n ${PROJECT}     # both should reach STATUS=Bound
 ```
@@ -345,6 +352,7 @@ This is the first real content for `containers/worker-base/`. We build it **in-c
 you need no local container tooling.
 
 `# [LAPTOP]`
+
 ```bash
 mkdir -p /tmp/worker-base && cd /tmp/worker-base
 cat > Containerfile <<'EOF'
@@ -379,6 +387,7 @@ EOF
 ```
 
 `# [LAPTOP]`
+
 ```bash
 # Create a binary Docker-strategy build and run it from the current dir.
 oc new-build --name worker-base --binary --strategy=docker -n ${PROJECT} 2>/dev/null || true
@@ -386,6 +395,7 @@ oc start-build worker-base --from-dir=. --follow -n ${PROJECT}
 ```
 
 `# [LAPTOP]`
+
 ```bash
 oc get istag worker-base:latest -n ${PROJECT}   # confirm the image tag exists
 ```
@@ -403,12 +413,12 @@ oc get istag worker-base:latest -n ${PROJECT}   # confirm the image tag exists
 > that (nor does CephFS on current RHCOS kernels), so mounting the RWX PVC fails hard at
 > container create:
 > `mount_setattr /runner (… doesn't support idmap mounts on this kernel): Invalid argument`.
-> The `nested-container` SCC *requires* pod-level userns (`userNamespaceLevel:
-> RequirePodLevel`), so it's unusable for our shared-RWX design on this platform. See §9.3.
+> The `nested-container` SCC _requires_ pod-level userns (`userNamespaceLevel:
+RequirePodLevel`), so it's unusable for our shared-RWX design on this platform. See §9.3.
 
 So we deploy onto the **network-FS-compatible path**: a **custom seccomp SCC** that permits
 `seccompProfile: Unconfined` + the `/dev/fuse` CRI-O annotation, and we let **Apptainer create
-its own user namespace *inside* the container** (rootless nested) rather than a pod-level one.
+its own user namespace _inside_ the container** (rootless nested) rather than a pod-level one.
 The container stays in the host userns, so the network RWX PVC mounts normally. This clears
 `restricted-v2`'s only real blocker (its `RuntimeDefault` seccomp filter) without any added
 capability, `procMount`, `hostUsers`, or privileged. A writable `HOME`/cache/tmp on the RWX
@@ -424,6 +434,7 @@ to stop/start the environment, edit the template and re-roll, and keep a stable 
 capabilities, no `RunAsAny`, no privilege escalation):
 
 `# [LAPTOP]`
+
 ```bash
 cat <<'EOF' | oc apply -f -
 apiVersion: security.openshift.io/v1
@@ -454,6 +465,7 @@ oc adm policy add-scc-to-user apptainer-spike-seccomp -z default -n ${PROJECT}
 ```
 
 `# [LAPTOP]`
+
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: apps/v1
@@ -518,6 +530,7 @@ EOF
 > node-local scratch, and consumer workers that only `exec` SIFs need little or no scratch.
 
 `# [LAPTOP]`
+
 ```bash
 oc rollout status deployment/spike -n ${PROJECT} --timeout=120s
 # Record which SCC the Pod was actually admitted under — it should be apptainer-spike-seccomp:
@@ -533,6 +546,7 @@ oc get pod -n ${PROJECT} -l app=apptainer-spike \
 **Start / stop / re-roll the environment (why it's a Deployment):**
 
 `# [LAPTOP]`
+
 ```bash
 oc scale deployment/spike -n ${PROJECT} --replicas=0    # stop (frees the node, keeps PVCs)
 oc scale deployment/spike -n ${PROJECT} --replicas=1    # start again
@@ -542,6 +556,7 @@ oc rollout restart deployment/spike -n ${PROJECT}       # re-roll after editing 
 Enter the running Pod (stable name via the Deployment):
 
 `# [LAPTOP]`
+
 ```bash
 oc rsh -n ${PROJECT} deploy/spike
 ```
@@ -553,6 +568,7 @@ Everything from here to §7 runs **inside** that shell.
 ## 6. One-time setup inside the Pod
 
 `# [POD]`
+
 ```bash
 mkdir -p /runner/home /runner/sifs   # HOME + module store on the RWX volume
 mkdir -p /scratch/cache              # node-local conversion cache (APPTAINER_TMPDIR=/scratch)
@@ -586,6 +602,7 @@ ls -l /dev/fuse 2>/dev/null || echo "no /dev/fuse in this Pod"
 ### Gate 1 — User namespace probe (THE gate)
 
 `# [POD]`
+
 ```bash
 # The minimal thing Apptainer needs: a user namespace with a mount namespace inside it.
 unshare --user --map-root-user --mount --pid --fork id
@@ -594,6 +611,7 @@ unshare --user --map-root-user --mount --pid --fork id
 # from "userns is fine but pid/mount stacking is blocked":
 unshare --user --map-root-user id
 ```
+
 **Pass (confirmed on OKD 4.21):** prints `uid=0(root) gid=0(root) ...` — Apptainer's own
 user+mount+pid namespace was created inside the container. This is the make-or-break gate and
 it passes on the seccomp-SCC path with no `hostUsers`/`procMount`/added-caps.
@@ -612,6 +630,7 @@ and it still fails, go to **§9.1**. Record the exact errno.
 ### Gate 2 — Build/obtain a SIF and execute it
 
 `# [POD]`
+
 ```bash
 # Convert a tiny public image to a SIF, entirely inside the Pod.
 # (Needs egress to docker.io — on a disconnected cluster point this at your mirror.)
@@ -620,6 +639,7 @@ apptainer pull /runner/sifs/hello.sif docker://busybox:latest
 # Execute it:
 apptainer exec /runner/sifs/hello.sif echo "hello from inside the SIF"
 ```
+
 **Pass (confirmed on OKD 4.21):** the `pull` converts and the `exec` prints the hello line.
 **Fail on `pull` with `unpriv.link … too many links`:** `APPTAINER_TMPDIR` is on the network
 RWX volume — the hardlink-heavy OCI unpack can't run there (seen on EFS/NFSv4). It must be
@@ -633,6 +653,7 @@ node-local (the §5 `scratch` emptyDir); verify `echo $APPTAINER_TMPDIR` points 
 Record **how** it mounted — this becomes the authoritative input to Gate 3:
 
 `# [POD]`
+
 ```bash
 apptainer --debug exec /runner/sifs/hello.sif true 2>&1 \
   | grep -iE "mount|squashfuse|fuse|extract|image driver" | head
@@ -646,12 +667,13 @@ The SIF already lives on the RWX PVC (`/runner/sifs`). Prove it's mounted **in p
 (squashfuse), not silently extracted somewhere per run.
 
 > **Method corrections learned in this spike — the mount is NOT where you'd look:**
+>
 > 1. **The squashfuse mount is invisible in every `/proc/*/mounts` you'd naturally check.**
 >    Apptainer mounts `squashfuse_ll` in its **session mount namespace**, then presents the
 >    container root as a **read-only `overlay` whose `lowerdir` is that squashfuse rootfs**
 >    (observed on OKD 4.21):
 >    `overlay / overlay ro,…lowerdir=…/session/overlay-lowerdir:…/session/rootfs`.
->    So the parent shell's `/proc/mounts` shows nothing, *and* the container's own
+>    So the parent shell's `/proc/mounts` shows nothing, _and_ the container's own
 >    `/proc/self/mounts` shows the root as `overlay`, not `fuse`. The reliable positive signal
 >    is the **running `squashfuse_ll` process** (see below), not any mount-table grep.
 > 2. **`df -h /` alone is a false pass** — it only catches extraction onto the ephemeral disk.
@@ -659,6 +681,7 @@ The SIF already lives on the RWX PVC (`/runner/sifs`). Prove it's mounted **in p
 >    `/scratch`, where any sandbox extraction would land) across many runs.
 
 `# [POD]`
+
 ```bash
 du -sh /runner/sifs/hello.sif        # size of the module on shared storage
 du -sh /scratch                      # baseline the place an extraction would land (TMPDIR)
@@ -681,6 +704,7 @@ for i in $(seq 1 20); do apptainer exec /runner/sifs/hello.sif true; done
 du -sh /scratch
 df -h / | tail -1
 ```
+
 **Pass (confirmed on OKD 4.21):** a `squashfuse_ll` process is serving the SIF read-only
 during exec, the root is a read-only overlay over that rootfs, and `/scratch` (+ ephemeral
 disk) does **not** grow across 20 runs → running in place off the shared volume, no per-run
@@ -693,6 +717,7 @@ is extracting (FUSE unavailable). Works, but forfeits the "no copy" promise — 
 ### Gate 4 — Model / filesystem access from inside the SIF
 
 `# [POD]`
+
 ```bash
 # Create a fake weight file on the weights volume:
 echo "pretend-safetensors-bytes" > /weights/probe.safetensors
@@ -703,16 +728,18 @@ apptainer pull /runner/sifs/py.sif docker://python:3.12-slim
 apptainer exec --bind /weights:/weights /runner/sifs/py.sif \
   python3 -c "import sys,os; print('python', sys.version.split()[0]); print(open('/weights/probe.safetensors').read())"
 ```
+
 **Pass:** prints the Python version and the file contents.
 **Fail:** bind or read error → note whether it's a mount permission (SCC) or fsGroup/write
 issue on the PVC (`ls -ld /weights`; the gid should be group-writable, typically gid 0).
 
-*(Optional storm signal — how many stat/open syscalls a real import costs over the network FS.
+_(Optional storm signal — how many stat/open syscalls a real import costs over the network FS.
 `strace` is in the image; on our path (`seccompProfile: Unconfined`) `ptrace`
 should be allowed, but if you ever run this under a tighter profile and get an EPERM from
-ptrace, just skip it — it's informational only:)*
+ptrace, just skip it — it's informational only:)_
 
 `# [POD]`
+
 ```bash
 strace -f -e trace=stat,statx,openat -c \
   apptainer exec /runner/sifs/py.sif python3 -c "import json,http,urllib,email,xml" 2>&1 | tail -5
@@ -727,6 +754,7 @@ when told to** — the exact contract our worker `runner-manager` needs (SIGTERM
 drain, no orphaned inner processes, no zombies).
 
 `# [POD]`
+
 ```bash
 # A tiny "runner" that exposes /health, written onto the module volume:
 cat > /runner/sifs/server.py <<'PY'
@@ -758,12 +786,13 @@ pgrep -af "server.py" && echo "FAIL: inner process survived SIGTERM (orphan)" \
 # 5c — zombie check (a runner-manager forking many of these must not accumulate zombies):
 ps -eo pid,ppid,stat,comm | awk '$3 ~ /Z/' | grep -v awk || echo "no zombies"
 ```
+
 **Pass:** curl returns `{"state":"READY","activeRequests":0}`, the inner process exits on
 SIGTERM to the launcher, and no zombies remain.
 **Fail 5a:** process won't stay up or port unreachable → note the error (localhost within
 the Pod should always work; anything else points at the SIF's userland, not networking).
 **Fail 5b:** the inner process orphans → record it. This is survivable (the runner-manager
-can signal the process group instead: `kill -TERM -- -<pgid>`), but it must be a *known*
+can signal the process group instead: `kill -TERM -- -<pgid>`), but it must be a _known_
 behavior before Phase 4 design, not a surprise in production.
 
 ---
@@ -771,6 +800,7 @@ behavior before Phase 4 design, not a surprise in production.
 ### Gate 6 — Multiple versions in parallel + dynamic add (no Pod restart)
 
 `# [POD]`
+
 ```bash
 # Two "versions" side by side:
 cp /runner/sifs/hello.sif /runner/sifs/vllm-0.20.sif
@@ -788,6 +818,7 @@ apptainer exec /runner/sifs/vllm-0.20.sif sleep 5 &
 apptainer exec /runner/sifs/vllm-0.20.sif echo "concurrent reader ok"
 wait
 ```
+
 **Pass:** all echo lines print, including the concurrent one. This is the operational win —
 parallel versions, hot-add, and shared-file concurrency with no Pod recycle.
 
@@ -805,6 +836,7 @@ Run these in a **separate** Deployment scheduled on a GPU node. Leave the `oc rs
 > granted to the `default` SA from §5.
 
 `# [LAPTOP]`
+
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: apps/v1
@@ -867,7 +899,8 @@ oc rsh -n ${PROJECT} deploy/spike-gpu
 
 ### Gate 7 — GPU visible inside the SIF via `--nv`
 
-`# [POD]`  (inside spike-gpu)
+`# [POD]` (inside spike-gpu)
+
 ```bash
 export HOME=/runner/home
 # First confirm the GPU is visible to the container itself (injected by the GPU Operator):
@@ -877,6 +910,7 @@ nvidia-smi || echo "no nvidia-smi on the container PATH — check GPU Operator i
 apptainer pull /runner/sifs/cuda.sif docker://nvidia/cuda:12.4.1-base-ubi9
 apptainer exec --nv /runner/sifs/cuda.sif nvidia-smi
 ```
+
 **Pass (confirmed on OKD 4.21 / NVIDIA L4):** `nvidia-smi` prints the GPU table from inside
 the SIF — worked with no `ldconfig`/`nvidia-container-cli` tweak.
 **Two benign warnings you can ignore:** `WARNING: Could not remount /.singularity.d/libs
@@ -885,7 +919,7 @@ re-mount as hardening needs `CAP_SYS_ADMIN` we don't grant — cosmetic, libs st
 during `pull`, `rootless{newgidmap/newuidmap} … harmless EPERM on setxattr security.capability`
 (can't set file-cap xattrs on the setuid id-map helpers — unused in single-UID mode).
 **Fail:** `--nv` couldn't find driver libs → note it. The GPU Operator injects the driver
-userland into the *outer* container; `--nv` discovers libs via `ldconfig` and known paths,
+userland into the _outer_ container; `--nv` discovers libs via `ldconfig` and known paths,
 so a miss is usually fixed by running `ldconfig` in the outer container first, or by
 pointing Apptainer at `nvidia-container-cli` (`use nvidia-container-cli = yes` in
 `apptainer.conf`) — record which was needed.
@@ -897,16 +931,18 @@ pointing Apptainer at `nvidia-container-cli` (`use nvidia-container-cli = yes` i
 Sardeenz's packing model depends on kvcached coordinating GPU memory **across runner
 processes** on the same node — CUDA IPC and shared-memory machinery that is sensitive to
 PID/IPC namespace isolation. Apptainer's default is to isolate **only the mount (and user)
-namespace** and *share* PID, IPC, and network with the host — exactly what we need. This
+namespace** and _share_ PID, IPC, and network with the host — exactly what we need. This
 gate proves that assumption holds under the SCC we landed on, before spending time on the
 full kvcached test.
 
 `# [POD]`
+
 ```bash
 for ns in ipc pid net; do echo -n "pod  $ns: "; readlink /proc/self/ns/$ns; done
 apptainer exec /runner/sifs/cuda.sif \
   sh -c 'for ns in ipc pid net; do echo -n "sif  $ns: "; readlink /proc/self/ns/$ns; done'
 ```
+
 **Pass:** the `ipc`, `pid`, and `net` inode numbers are **identical** inside and outside the
 SIF. (`mnt` — and `user`, in rootless mode — will differ; that's expected and fine.)
 **Fail:** any of the three differ → something (SCC, `hostUsers`, or an apptainer.conf
@@ -923,6 +959,7 @@ if every mechanical gate passes, Phase 4 is dead on arrival if two SIF-launched 
 processes can't share GPU memory through kvcached. Budget real time here.
 
 `# [POD]`
+
 ```bash
 # 9a — Convert the real engine image. This is the big one (~5.8 GB compressed OCI → SIF); it
 #      also produces the artifact Gate 10 measures. Time it — conversion cost is a Phase 4
@@ -1017,6 +1054,7 @@ kill %1 %2; wait
 # the kvcached telemetry you already use in the dashboard that memory is actually being
 # SHARED (elastic), not statically partitioned like 9c.
 ```
+
 **Pass:** 9c serves from both endpoints; 9d serves from both **and** shows kvcached's
 elastic sharing behavior between the two SIF-launched processes.
 **Fail 9c:** a plain engine won't run from the SIF (CUDA init, shm, or host-RAM OOM) → note
@@ -1025,11 +1063,11 @@ error) → stagger the starts as above, or raise the Pod memory limit (§8); (b)
 generous `/dev/shm` — check `df -h /dev/shm` (§5/§8 mount a `medium: Memory` emptyDir there);
 (c) `CUDA out of memory` → lower `--gpu-memory-utilization` per engine.
 **Fail 9d only:** first rule out the trivial cause — **did you use a kvcached SIF?** If both
-engines still show a *static* split like 9c, kvcached almost certainly isn't in the image (or
+engines still show a _static_ split like 9c, kvcached almost certainly isn't in the image (or
 `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH` weren't set) — check `apptainer exec vllm-kvcached.sif
 python3 -c "import kvcached"`. Only if kvcached is present and enabled but sharing still fails
 is it a real SIF-boundary problem → **Red-level finding regardless of SCCs**. Re-run Gate 8,
-then test the same two-process kvcached launch *without* Apptainer (directly in the Pod) to
+then test the same two-process kvcached launch _without_ Apptainer (directly in the Pod) to
 isolate whether SIF wrapping is the variable. Record everything — this single result reshapes
 Phase 4 more than any SCC does.
 
@@ -1039,7 +1077,7 @@ Phase 4 more than any SCC does.
 > `pip install`ed on top, enabled at runtime via `ENABLE_KVCACHED=true` + `KVCACHED_AUTOPATCH=1`
 > (kvcached autopatches vLLM at import — vLLM itself is not statically patched). Ref: v1
 > `docker/Containerfile`. **This is required whether you deploy as a SIF or a plain OCI
-> container**, so it is *not* a strike against the SIF design — it just means the Phase 4
+> container**, so it is _not_ a strike against the SIF design — it just means the Phase 4
 > pipeline builds a custom OCI image (base + kvcached wheel) in a librarian/CI job and converts
 > that to SIF; you never `apptainer pull` an upstream vLLM for a kvcached runner. Engines that
 > don't use kvcached still convert from stock images (Gates 2–9c).
@@ -1050,29 +1088,31 @@ Phase 4 more than any SCC does.
 
 > **What the economics actually are (reframed).** The one-time image→SIF **conversion** is a
 > build-side, amortized cost — the librarian does it once, and a container-based approach pays
-> the same pull to populate a node anyway — so "conversion time vs. image-pull time" is *not*
+> the same pull to populate a node anyway — so "conversion time vs. image-pull time" is _not_
 > the decision-relevant comparison. What matters is the **runtime, per-worker** behavior:
+>
 > - **No per-node image pull, ever.** The image is materialized once (centrally) → SIF on the
->   RWX volume; every worker — including brand-new nodes and every *additional* engine version —
+>   RWX volume; every worker — including brand-new nodes and every _additional_ engine version —
 >   starts from the shared SIF with **no registry pull and no local image copy** (Gate 3). The
 >   container approach pays a per-node, per-version pull (~150s-class for 5.8 GB) on first use.
 > - **Cold spawn from the shared SIF** — the number to record (below): ~19s here, mostly the
 >   unavoidable CPU-bound `import`.
 > - Plus hot-add of versions with no pod recycle (Gate 6).
 >
-> The `crictl pull` baseline below is therefore **optional** — only useful to *quantify* the
+> The `crictl pull` baseline below is therefore **optional** — only useful to _quantify_ the
 > per-node pull you're avoiding, not a gate.
 
-The *argument* for SIF-on-shared-storage is that a large runtime lazily pages in over the
+The _argument_ for SIF-on-shared-storage is that a large runtime lazily pages in over the
 network and — critically — is materialized **once** for the whole fleet. Measure the cold spawn
 and (if you have the nodes) the fan-out.
 
 > **Read these numbers as EFS/NFS-grade.** This spike ran on AWS EFS (§2), which Fable flagged
-> as *weaker* than CephFS/ODF for squashfuse-over-network. So treat the cold-start figures as a
+> as _weaker_ than CephFS/ODF for squashfuse-over-network. So treat the cold-start figures as a
 > **solid data point for EFS** and a likely floor for other RWX backends — re-run per backend
 > you intend to support (CephFS is the obvious next one) to characterize each.
 
 `# [POD]`
+
 ```bash
 # Cold import (run this as the FIRST vllm exec after the Pod starts — page cache empty).
 # You cannot drop the page cache unprivileged, so "cold" = fresh Pod / fresh node.
@@ -1082,7 +1122,8 @@ time apptainer exec --nv /runner/sifs/vllm.sif python3 -c "import vllm; print(vl
 time apptainer exec --nv /runner/sifs/vllm.sif python3 -c "import vllm"
 ```
 
-`# [LAPTOP]`  (fan-out: a second Pod on a **different** node, same SIF, same moment)
+`# [LAPTOP]` (fan-out: a second Pod on a **different** node, same SIF, same moment)
+
 ```bash
 # Copy the §8 Deployment as spike-gpu-2 with a nodeSelector/antiAffinity pinning it to another
 # GPU node, rsh in (oc rsh deploy/spike-gpu-2), and run the same cold-import 'time' command
@@ -1094,16 +1135,17 @@ time apptainer exec --nv /runner/sifs/vllm.sif python3 -c "import vllm"
 ```
 
 **Record (don't pass/fail — this gate is a measurement):**
+
 - SIF conversion time (from 9a) and final SIF size vs. OCI image size.
-  *Observed (OKD 4.21, L4, EFS):* conversion **~13m44s**, **SIF 5.8 GB ≈ compressed OCI 5.8 GB**
+  _Observed (OKD 4.21, L4, EFS):_ conversion **~13m44s**, **SIF 5.8 GB ≈ compressed OCI 5.8 GB**
   (so on-volume footprint ≈ registry footprint; the SIF pages in lazily rather than pre-pulling).
 - Cold import, warm import, and (if you have the nodes) 2-node simultaneous cold import.
-  *Observed (EFS, freshly-restarted Pod = cold):* cold `import vllm` **~19.1s**, warm **~10.2s**
+  _Observed (EFS, freshly-restarted Pod = cold):_ cold `import vllm` **~19.1s**, warm **~10.2s**
   (CPU-bound — the python import cost any packaging pays); so ~9s is first-touch EFS page-in.
-  (Caveat: if the fresh Pod reschedules to the *same* node, node-level page cache may persist, so
+  (Caveat: if the fresh Pod reschedules to the _same_ node, node-level page cache may persist, so
   a truly cold node could be ≥ this.) NB: `import vllm` pages only the import path — a full
-  `vllm serve` cold start touches much more, so this is a *lower bound* on runner spawn cost.
-- *Optional* — the per-node `crictl pull` baseline, only to **quantify the per-node pull you
+  `vllm serve` cold start touches much more, so this is a _lower bound_ on runner spawn cost.
+- _Optional_ — the per-node `crictl pull` baseline, only to **quantify the per-node pull you
   avoid** (not a gate; the SIF is built once and never pulled per node). Measure with
   `oc debug node/<n> -- chroot /host time crictl pull …` if you want the number; at ~39 MiB/s
   the 5.8 GB image is ~150s just to download+unpack.
@@ -1114,6 +1156,7 @@ is ~19s (mostly CPU-bound import), and versions hot-add without a pod recycle (G
 (Measured on EFS; re-run per RWX backend you support for exact page-in numbers.)
 
 `# [LAPTOP]`
+
 ```bash
 exit   # leave the pod shell when done
 ```
@@ -1133,15 +1176,15 @@ the spike.
 The two rightmost columns describe our **in-container-userns** path (Apptainer's own userns,
 no `hostUsers: false`) — the only one compatible with a network RWX PVC here (tested on EFS).
 The `nested-container` + `hostUsers: false` "Kubernetes-native pod-userns" alternative would
-give the same capabilities *in theory* but is **blocked by the RWX FS lacking idmapped mounts**
+give the same capabilities _in theory_ but is **blocked by the RWX FS lacking idmapped mounts**
 (§9.3), so it's not a usable column for us.
 
-| Capability | `restricted-v2` (stock) | seccomp SCC (`Unconfined`), in-container userns | + `/dev/fuse` (CRI-O annotation) |
-|---|---|---|---|
-| SIF sandbox **extraction** (local copy) | ✅ | ✅ | ✅ |
-| **Namespaced containers** (`--userns`) | ❌ | ✅ (Gate 1 confirmed) | ✅ |
-| **Direct SIF mount** (squashfuse, no-copy) | ❌ | ❌ | ✅ (verify at Gate 3) |
-| `--fakeroot`, overlays, `apptainer build` | ❌ | partial | likely (may want unmasked `/proc`) |
+| Capability                                 | `restricted-v2` (stock) | seccomp SCC (`Unconfined`), in-container userns | + `/dev/fuse` (CRI-O annotation)   |
+| ------------------------------------------ | ----------------------- | ----------------------------------------------- | ---------------------------------- |
+| SIF sandbox **extraction** (local copy)    | ✅                      | ✅                                              | ✅                                 |
+| **Namespaced containers** (`--userns`)     | ❌                      | ✅ (Gate 1 confirmed)                           | ✅                                 |
+| **Direct SIF mount** (squashfuse, no-copy) | ❌                      | ❌                                              | ✅ (verify at Gate 3)              |
+| `--fakeroot`, overlays, `apptainer build`  | ❌                      | partial                                         | likely (may want unmasked `/proc`) |
 
 Read this before running anything: the "no local copy" promise (Gate 3) lives in the
 **rightmost** column — that's why §5 sets the `/dev/fuse` annotation from the start.
@@ -1152,7 +1195,7 @@ Read this before running anything: the "no local copy" promise (Gate 3) lives in
 > → §9.3 (remove it). `Operation not permitted` on `unshare` despite `Seccomp: 0` → §9.1 (verify
 > the SCC bound). `newuidmap`/`newgidmap` errors → §9.2. Userns works but mounts fail / no
 > `/dev/fuse` → §9.4. Runtime is `runc` not `crun` → §9.7. PVC `Permission denied` (not
-> namespace-related) → fsGroup/UID, see §12 (and §9.6 for how to *diagnose* it, not fix it).
+> namespace-related) → fsGroup/UID, see §12 (and §9.6 for how to _diagnose_ it, not fix it).
 
 ### 9.1 The seccomp SCC (the path §5 uses — network-FS-compatible)
 
@@ -1161,10 +1204,11 @@ This is the SCC §5 already creates and binds; it's reproduced here as the canon
 creation — **no capability grant fixes that**; the Pod must be allowed `seccompProfile:
 Unconfined`. The SCC below is `restricted-v2` with exactly one change (the `seccompProfiles`
 list) — no added capabilities, no `RunAsAny`, no privilege escalation, no `hostUsers`/
-`procMount` — so it's the strongest "mild SCC" claim available *and* it mounts network RWX PVCs
+`procMount` — so it's the strongest "mild SCC" claim available _and_ it mounts network RWX PVCs
 normally (unlike `nested-container`, which forces pod-level userns → §9.3):
 
 `# [LAPTOP]`
+
 ```bash
 cat <<'EOF' | oc apply -f -
 apiVersion: security.openshift.io/v1
@@ -1199,12 +1243,13 @@ EOF
 oc adm policy add-scc-to-user apptainer-spike-seccomp -z default -n ${PROJECT}
 ```
 
-The SCC only *permits* unconfined — the Deployment's Pod template also **requests** it
+The SCC only _permits_ unconfined — the Deployment's Pod template also **requests** it
 (§5's `seccompProfile: { type: Unconfined }`). If you ever find the Pod admitted under the
 wrong SCC (`Seccomp: 2` in the Gate 0 fingerprint), confirm this SCC is bound to the SA and
 re-roll:
 
 `# [LAPTOP]`
+
 ```bash
 oc rollout restart deployment/spike -n ${PROJECT}
 # Then verify the admitted SCC is apptainer-spike-seccomp, and re-run Gate 1:
@@ -1225,6 +1270,7 @@ usually unnecessary, and granting them preemptively muddies the "minimum SCC" re
 them **only** if the error text names `newuidmap`/`newgidmap`/subuid:
 
 `# [LAPTOP]`
+
 ```bash
 # Clone §9.1's SCC as apptainer-spike-idmap with these two deltas, then bind and recreate:
 #   allowedCapabilities: [NET_BIND_SERVICE, SETUID, SETGID]
@@ -1234,7 +1280,7 @@ them **only** if the error text names `newuidmap`/`newgidmap`/subuid:
 
 ### 9.3 Why we do NOT use `hostUsers: false` / `nested-container` (field finding)
 
-`hostUsers: false` (and the `nested-container` SCC, which *requires* it via
+`hostUsers: false` (and the `nested-container` SCC, which _requires_ it via
 `userNamespaceLevel: RequirePodLevel`) puts the whole Pod in a **Kubernetes-level** user
 namespace created by CRI-O. The kubelet then has to bring each volume into that namespace
 using **idmapped mounts** — and the RWX filesystem must support them. Result, observed on a
@@ -1246,12 +1292,12 @@ Error: container create failed: mount_setattr `/runner`
 ```
 
 NFS/EFS does not support idmapped mounts, full stop. **Kernel CephFS** gained idmapped-mount
-support in Linux 6.7, so on a *new enough* kernel + CSI it *might* work — but RHCOS on current
+support in Linux 6.7, so on a _new enough_ kernel + CSI it _might_ work — but RHCOS on current
 4.x ships ~5.14, so in practice CephFS-on-RHCOS won't either today. Treat this as a general
 "the RWX backend can't idmap" constraint and **re-test on CephFS** if that path ever matters.
 
 **The fix / design decision:** don't use pod-level userns for a PVC-backed workload. Let
-*Apptainer* create its own user namespace *inside* the container (rootless nested), which
+_Apptainer_ create its own user namespace _inside_ the container (rootless nested), which
 needs only the seccomp SCC (§9.1) and mounts the RWX volume normally. That's what §5 does, and
 Gates 0 and 1 confirm it works.
 
@@ -1270,10 +1316,11 @@ requires **no device plugin** — §5/§8 set the `io.kubernetes.cri-o.Devices: 
 annotation on the Pod template and CRI-O exposes the device. This subsection is for when it's
 **not** showing up (`# [POD] ls -l /dev/fuse` → not found).
 
-**On 4.15+ (OKD 4.21):** confirm the annotation actually landed on the *Pod* (not just the
+**On 4.15+ (OKD 4.21):** confirm the annotation actually landed on the _Pod_ (not just the
 Deployment) and re-roll:
 
 `# [LAPTOP]`
+
 ```bash
 oc get pod -n ${PROJECT} -l app=apptainer-spike \
   -o jsonpath='{.items[0].metadata.annotations.io\.kubernetes\.cri-o\.Devices}{"\n"}'
@@ -1281,6 +1328,7 @@ oc get pod -n ${PROJECT} -l app=apptainer-spike \
 # spec.template.metadata.annotations block in §5/§8 and re-roll:
 oc rollout restart deployment/spike -n ${PROJECT}
 ```
+
 Verify `/dev/fuse` appears in the Pod: `# [POD]  ls -l /dev/fuse`
 
 **On clusters older than 4.15:** the annotation alone isn't honored — an admin must first
@@ -1288,6 +1336,7 @@ allow the device in CRI-O via a MachineConfig (this triggers a rolling node rebo
 **not** possible on Managed OpenShift / ROSA / ARO):
 
 `# [LAPTOP]`
+
 ```bash
 # MachineConfig drops /etc/crio/crio.conf.d/99-podman-fuse with:
 #   [crio.runtime.workloads.podman-fuse]
@@ -1303,25 +1352,29 @@ allow the device in CRI-O via a MachineConfig (this triggers a rolling node rebo
 **Fallback — extract to sandbox (no FUSE, but local copy + metadata storm returns):**
 
 `# [POD]`
+
 ```bash
 apptainer build --sandbox /runner/sifs/hello.sandbox docker://busybox:latest
 apptainer exec /runner/sifs/hello.sandbox echo "ran from sandbox dir (no FUSE)"
 ```
+
 If you land here, mark Gate 3 **failed** on the scorecard even though things "work" — the
 no-copy property is the point, and (per the §5 note) the sandbox is quietly living on your
 PVC where `df /` never sees it.
 
 ### 9.5 Last resort — privileged
 
-Add `securityContext: { privileged: true }` to the container. If *only* this works, the
+Add `securityContext: { privileged: true }` to the container. If _only_ this works, the
 design is Amber (trusted clusters only). Record it and stop — and weigh §13 seriously.
 
 ### 9.6 `anyuid` — mostly a red herring for this spike
 
 `# [LAPTOP]`
+
 ```bash
 oc adm policy add-scc-to-user anyuid -z default -n ${PROJECT}
 ```
+
 Running as UID 0 in the container grants **no capabilities and no seccomp relief** — it
 will not unblock Gate 1, and testing it there wastes a Pod cycle. Its one legitimate use in
 this spike is diagnosing PVC **permission** failures (fsGroup/arbitrary-UID write issues):
@@ -1335,6 +1388,7 @@ differ. Verify, and if needed pin `crun` on the worker pool via a `ContainerRunt
 (this triggers a rolling MachineConfig update of the pool — plan for the node reboots):
 
 `# [LAPTOP]`
+
 ```bash
 # Check the runtime a worker node is using:
 oc get node <a-worker-node> -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}{"\n"}'
@@ -1362,6 +1416,7 @@ with `hostUsers: false` (§9.3), which requires the project's in-namespace UID r
 `openshift.io/sa.scc.uid-range` annotation is outside what userns allows.
 
 `# [LAPTOP]`
+
 ```bash
 # Inspect the current range:
 oc get ns ${PROJECT} -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}{"\n"}'
@@ -1378,28 +1433,29 @@ oc rollout restart deployment/spike -n ${PROJECT}
 
 ## 10. Results scorecard (fill this in)
 
-| Gate | What it proves | Result (pass/fail) | SCC / securityContext needed | Notes (backend, latency, errors) |
-|---|---|---|---|---|
-| 0 | Apptainer runs in Pod | ✅ (OKD 4.21) | apptainer-spike-seccomp | fingerprint: max_userns=506656, Seccomp=0, /dev/fuse=present |
-| 1 | User namespace allowed | ✅ (OKD 4.21) | apptainer-spike-seccomp | `unshare --user --map-root-user …` → uid=0(root); no hostUsers/procMount needed |
-| 2 | Build + exec a SIF | ✅ (OKD 4.21) | apptainer-spike-seccomp | needed node-local scratch (network-FS tmp → `unpriv.link too many links`) + `tzdata`/`/etc/localtime` in image |
-| 3 | Exec off shared FS, no copy | ✅ (OKD 4.21) | apptainer-spike-seccomp | `squashfuse_ll` serves SIF read-only via fd; root is a RO overlay over `session/rootfs`; zero scratch growth across 20 runs. NOTE: mount lives in session ns → not in parent OR container `/proc/mounts`; check the process. Test RWX = **AWS EFS (NFSv4)**, not CephFS |
-| 4 | Read weights from SIF | ✅ (OKD 4.21) | apptainer-spike-seccomp | `--bind /weights` read OK from `python3` in SIF (3.12.14); strace ran (ptrace allowed → seccomp Unconfined); 5-module import = 433 openat/192 ENOENT, all served by squashfuse from the 1 SIF file (storm avoided) |
-| 5 | Long-lived runner + HTTP + SIGTERM/reap | ✅ (OKD 4.21) | apptainer-spike-seccomp | `/health` OK from SIF-launched server; SIGTERM to launcher → inner python exits (NO orphan, no pgid workaround needed); no zombies; no squashfuse teardown warning on clean exit |
-| 6 | Parallel versions + hot-add + concurrent readers | ✅ (OKD 4.21) | apptainer-spike-seccomp | v0.20 + v0.25 side by side; hot-added mlserver.sif onto live volume + ran (no Pod restart); 2 concurrent readers of same SIF OK. (pull success re-confirms node-local scratch in effect) |
-| 7 | GPU via `--nv` | ✅ (OKD 4.21) | apptainer-spike-seccomp | `--nv nvidia-smi` shows L4 inside SIF (drv 580.126.20, CUDA 13.0); worked out of the box, NO ldconfig / nvidia-container-cli needed. Benign warnings: "could not remount /.singularity.d/libs read-only" (no CAP_SYS_ADMIN, cosmetic) + rootless newgidmap EPERM on setxattr during pull |
-| 8 | PID/IPC/net shared across SIF boundary | ✅ (OKD 4.21) | apptainer-spike-seccomp | ipc/pid/net inodes identical inside vs outside SIF (4026533918/…653/…919); only mnt+user differ. kvcached's shared-ns precondition met |
-| 9 | Two runners + kvcached on one GPU | ✅ 9c + 9d (OKD 4.21) | apptainer-spike-seccomp | 9c baseline: two EngineCore procs, static split ~6968 MiB each. **9d PASS**: with a kvcached-built image (base + wheel + ENABLE_KVCACHED/KVCACHED_AUTOPATCH), both SIF-launched engines load kvcached and share GPU memory elastically on one L4 — the Sardeenz-defining result. Needs writable cache dirs (redirect off the read-only SIF) + staggered start; benign warnings (libs remount, HOME-via-env rejected) |
-| 10 | Real-size cold start + fan-out | ✅ measured | apptainer-spike-seccomp | **cold `import vllm` ~19.1s** (fresh Pod), warm ~10.2s (CPU-bound), so ~9s first-touch EFS page-in. SIF 5.8 GB ≈ compressed OCI; conversion 13m44s (one-time, librarian). Economic win = materialized once for the whole fleet, **no per-node pull / no local copy** (Gate 3) + hot-add (Gate 6); one-time conversion is amortized so `crictl pull` baseline is optional. `import vllm` is a lower bound vs full `vllm serve` cold start. 2-node fan-out not run |
+| Gate | What it proves                                   | Result (pass/fail)    | SCC / securityContext needed | Notes (backend, latency, errors)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---- | ------------------------------------------------ | --------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Apptainer runs in Pod                            | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | fingerprint: max_userns=506656, Seccomp=0, /dev/fuse=present                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 1    | User namespace allowed                           | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | `unshare --user --map-root-user …` → uid=0(root); no hostUsers/procMount needed                                                                                                                                                                                                                                                                                                                                                                                  |
+| 2    | Build + exec a SIF                               | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | needed node-local scratch (network-FS tmp → `unpriv.link too many links`) + `tzdata`/`/etc/localtime` in image                                                                                                                                                                                                                                                                                                                                                   |
+| 3    | Exec off shared FS, no copy                      | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | `squashfuse_ll` serves SIF read-only via fd; root is a RO overlay over `session/rootfs`; zero scratch growth across 20 runs. NOTE: mount lives in session ns → not in parent OR container `/proc/mounts`; check the process. Test RWX = **AWS EFS (NFSv4)**, not CephFS                                                                                                                                                                                          |
+| 4    | Read weights from SIF                            | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | `--bind /weights` read OK from `python3` in SIF (3.12.14); strace ran (ptrace allowed → seccomp Unconfined); 5-module import = 433 openat/192 ENOENT, all served by squashfuse from the 1 SIF file (storm avoided)                                                                                                                                                                                                                                               |
+| 5    | Long-lived runner + HTTP + SIGTERM/reap          | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | `/health` OK from SIF-launched server; SIGTERM to launcher → inner python exits (NO orphan, no pgid workaround needed); no zombies; no squashfuse teardown warning on clean exit                                                                                                                                                                                                                                                                                 |
+| 6    | Parallel versions + hot-add + concurrent readers | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | v0.20 + v0.25 side by side; hot-added mlserver.sif onto live volume + ran (no Pod restart); 2 concurrent readers of same SIF OK. (pull success re-confirms node-local scratch in effect)                                                                                                                                                                                                                                                                         |
+| 7    | GPU via `--nv`                                   | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | `--nv nvidia-smi` shows L4 inside SIF (drv 580.126.20, CUDA 13.0); worked out of the box, NO ldconfig / nvidia-container-cli needed. Benign warnings: "could not remount /.singularity.d/libs read-only" (no CAP_SYS_ADMIN, cosmetic) + rootless newgidmap EPERM on setxattr during pull                                                                                                                                                                         |
+| 8    | PID/IPC/net shared across SIF boundary           | ✅ (OKD 4.21)         | apptainer-spike-seccomp      | ipc/pid/net inodes identical inside vs outside SIF (4026533918/…653/…919); only mnt+user differ. kvcached's shared-ns precondition met                                                                                                                                                                                                                                                                                                                           |
+| 9    | Two runners + kvcached on one GPU                | ✅ 9c + 9d (OKD 4.21) | apptainer-spike-seccomp      | 9c baseline: two EngineCore procs, static split ~6968 MiB each. **9d PASS**: with a kvcached-built image (base + wheel + ENABLE_KVCACHED/KVCACHED_AUTOPATCH), both SIF-launched engines load kvcached and share GPU memory elastically on one L4 — the Sardeenz-defining result. Needs writable cache dirs (redirect off the read-only SIF) + staggered start; benign warnings (libs remount, HOME-via-env rejected)                                             |
+| 10   | Real-size cold start + fan-out                   | ✅ measured           | apptainer-spike-seccomp      | **cold `import vllm` ~19.1s** (fresh Pod), warm ~10.2s (CPU-bound), so ~9s first-touch EFS page-in. SIF 5.8 GB ≈ compressed OCI; conversion 13m44s (one-time, librarian). Economic win = materialized once for the whole fleet, **no per-node pull / no local copy** (Gate 3) + hot-add (Gate 6); one-time conversion is amortized so `crictl pull` baseline is optional. `import vllm` is a lower bound vs full `vllm serve` cold start. 2-node fan-out not run |
 
 **Decision:**
+
 - **Green (mild-SCC product default)** — gates 1–9 pass on the **network-FS-compatible path**
   (custom `apptainer-spike-seccomp` SCC — seccomp `Unconfined` only — + the `/dev/fuse` CRI-O
   annotation, in-container userns, **no device plugin, no added capabilities, no `hostUsers`,
   no privileged**), **and** Gate 10's cold-start numbers beat (or at least match) the
   image-pull baseline → build Phase 4 on Apptainer/SIF. Note this needs a **custom** SCC (the
   shipped `nested-container` can't be used with a network RWX volume, §9.3); the productization
-  refinement is a scoped seccomp *profile* via the Security Profiles Operator instead of blanket
+  refinement is a scoped seccomp _profile_ via the Security Profiles Operator instead of blanket
   `Unconfined` (§9.1 note). **Caveat:** Gate 10 here is on EFS/NFS — re-check per RWX backend
   you plan to support (this is a real proof point, not a stand-in).
 - **Amber** — needs added capabilities / `privileged`, **or** Gate 10 loses to image pulls →
@@ -1453,8 +1509,8 @@ oc rollout restart deployment/spike -n ${PROJECT}
 
 ### Phase 4 provisioning model (decided — implied by the findings)
 
-The gates prove the *runtime*; the findings (custom image for kvcached, node-local build
-scratch, supply-chain gap) settle the *provisioning* side. Sardeenz owns the build pipeline:
+The gates prove the _runtime_; the findings (custom image for kvcached, node-local build
+scratch, supply-chain gap) settle the _provisioning_ side. Sardeenz owns the build pipeline:
 
 1. **Publish a `Containerfile` per runner** in-repo (e.g. `containers/runner-vllm/`,
    `containers/runner-triton/`, …) — versioned and reviewed. vLLM+kvcached is base vLLM + the
@@ -1476,6 +1532,7 @@ redirected to writable paths at exec, since the SIF root is read-only (Gate 9d n
 ## 11. Cleanup
 
 `# [LAPTOP]`
+
 ```bash
 # Deleting the project removes the Deployments (spike, spike-gpu[-2]), PVCs, and the
 # namespace-scoped SCC binding in one shot:
@@ -1507,7 +1564,7 @@ oc delete scc apptainer-spike-seccomp apptainer-spike-idmap --ignore-not-found
 - **Arbitrary UID:** OpenShift assigns a random high UID (gid 0) — on our path (no pod-level
   userns) that's the UID the RWX FS actually sees. Keeping `HOME` on the RWX PVC (§5) avoids
   "permission denied" on Apptainer's config/keys dir. If PVC writes fail, check `ls -ld
-  /runner` — it should be group-writable (gid 0); EFS/CephFS honor `fsGroup`, so a missing/odd
+/runner` — it should be group-writable (gid 0); EFS/CephFS honor `fsGroup`, so a missing/odd
   fsGroup on the Pod is the usual cause.
 - **`worker-base` must ship `/etc/localtime` (and `/etc/hosts`).** Apptainer bind-mounts both
   into every container by default; the stock UBI9 base has neither, so `apptainer exec` fails
@@ -1517,7 +1574,7 @@ oc delete scc apptainer-spike-seccomp apptainer-spike-idmap --ignore-not-found
 - **Make SIFs world-readable in production.** Because the userns UID that reads a SIF isn't
   the UID that wrote it, the robust pattern is: SIFs `chmod 644` (world-read) on the module
   PVC, written by a **librarian** job/CI that mounts the PVC read-write, while consumer
-  workers mount it `readOnly: true` and only need read. (The *spike* mounts `/runner` RW
+  workers mount it `readOnly: true` and only need read. (The _spike_ mounts `/runner` RW
   because it builds SIFs in-pod with `apptainer pull` — that's a spike convenience, not the
   Phase 4 shape.)
 - **Conversion scratch MUST be node-local — not the RWX volume (field finding, not just perf).**
@@ -1542,7 +1599,7 @@ oc delete scc apptainer-spike-seccomp apptainer-spike-idmap --ignore-not-found
   (`vllm-0.20.sif`, not `vllm-latest.sif`) and a **write-new-then-symlink** update pattern,
   garbage-collecting old versions once no pod holds them open.
 - **Sign the library:** the librarian job can `apptainer sign` SIFs and consumers
-  `apptainer verify` them (`apptainer.conf` can *require* verification) — a governance win for
+  `apptainer verify` them (`apptainer.conf` can _require_ verification) — a governance win for
   a shared, admission-bypassing store (see the supply-chain note below).
 - **`apptainer` vs `apptainer-suid`:** we install the rootless package on purpose. The setuid
   variant won't help under a restricted SCC and muddies the result.
@@ -1574,18 +1631,18 @@ A "no-go" needs a pivot, but even a "go" should beat the alternatives — and on
 two of them attack the same pain **with zero SCC changes and no container runtime inside
 the Pod**. Fill this table alongside the scorecard; §10's decision references it.
 
-| Approach | Cold start story | No per-host copy | Side-by-side versions | Hot-add w/o Pod restart | Privilege cost | Supply chain |
-|---|---|---|---|---|---|---|
-| **Apptainer SIF on shared RWX** (this spike; target CephFS, tested on EFS) | lazy page-in off the shared FS (Gate 10; EFS-grade here) | yes (Gate 3) | yes | **yes** (Gate 6) | custom seccomp SCC (`Unconfined`) + `/dev/fuse` annotation, in-container userns (no device plugin, no `hostUsers`, no privileged) | bypasses cluster policy; needs SIF signing |
-| **OCI images + `zstd:chunked`** (CRI-O partial/lazy pulls) | partial pull of only-needed chunks; local cache persists | no (per-node cache — but only touched chunks) | yes (two Deployments) | no (rollout) | **none** — stock `restricted-v2` | full existing pipeline (signing, scanning, admission) |
-| **Kubernetes ImageVolumes** (mount an OCI image as a read-only volume) | image pulled as a volume; runtimes decoupled from the worker image | per-node cache | yes (one volume per version) | no (Pod re-admit to add a volume) | none beyond the feature gate/version requirement | full existing pipeline |
-| **bubblewrap + squashfuse (hand-rolled)** | same as SIF | yes | yes | yes | similar userns/seccomp needs, minus Apptainer's tooling | roll your own |
-| **EasyBuild/Lmod modules on CephFS** (original plan) | metadata-storm risk | yes | yes | yes | none | roll your own; heavy authoring cost |
+| Approach                                                                   | Cold start story                                                   | No per-host copy                              | Side-by-side versions        | Hot-add w/o Pod restart           | Privilege cost                                                                                                                    | Supply chain                                          |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------- | ---------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Apptainer SIF on shared RWX** (this spike; target CephFS, tested on EFS) | lazy page-in off the shared FS (Gate 10; EFS-grade here)           | yes (Gate 3)                                  | yes                          | **yes** (Gate 6)                  | custom seccomp SCC (`Unconfined`) + `/dev/fuse` annotation, in-container userns (no device plugin, no `hostUsers`, no privileged) | bypasses cluster policy; needs SIF signing            |
+| **OCI images + `zstd:chunked`** (CRI-O partial/lazy pulls)                 | partial pull of only-needed chunks; local cache persists           | no (per-node cache — but only touched chunks) | yes (two Deployments)        | no (rollout)                      | **none** — stock `restricted-v2`                                                                                                  | full existing pipeline (signing, scanning, admission) |
+| **Kubernetes ImageVolumes** (mount an OCI image as a read-only volume)     | image pulled as a volume; runtimes decoupled from the worker image | per-node cache                                | yes (one volume per version) | no (Pod re-admit to add a volume) | none beyond the feature gate/version requirement                                                                                  | full existing pipeline                                |
+| **bubblewrap + squashfuse (hand-rolled)**                                  | same as SIF                                                        | yes                                           | yes                          | yes                               | similar userns/seccomp needs, minus Apptainer's tooling                                                                           | roll your own                                         |
+| **EasyBuild/Lmod modules on CephFS** (original plan)                       | metadata-storm risk                                                | yes                                           | yes                          | yes                               | none                                                                                                                              | roll your own; heavy authoring cost                   |
 
 How to read it: Apptainer/SIF's unique cell is **hot-add without Pod restart**. If Phase 4
 truly requires that (runner-manager dynamically launching engine versions the worker Pod
-has never seen), the SCC cost may be worth paying. If a Pod rollout per new *engine
-version* (not per model — model hot-load stays as-is) is acceptable, `zstd:chunked` or
+has never seen), the SCC cost may be worth paying. If a Pod rollout per new _engine
+version_ (not per model — model hot-load stays as-is) is acceptable, `zstd:chunked` or
 ImageVolumes deliver most of the same wins at zero privilege cost, inside the existing
-supply chain. Whichever way the gates land, the Phase 4 write-up should answer *that*
+supply chain. Whichever way the gates land, the Phase 4 write-up should answer _that_
 question explicitly, not just "did Apptainer run."

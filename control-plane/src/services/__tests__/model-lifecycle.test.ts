@@ -84,7 +84,10 @@ describe('deriveAggregateState', () => {
 
   it('ACTIVE beats ERROR — a healthy replica masks a broken one (M7 acceptance criterion 4)', () => {
     expect(
-      deriveAggregateState([{ state: ModelLifecycleState.ACTIVE }, { state: ModelLifecycleState.ERROR }]),
+      deriveAggregateState([
+        { state: ModelLifecycleState.ACTIVE },
+        { state: ModelLifecycleState.ERROR },
+      ]),
     ).toBe(ModelLifecycleState.ACTIVE);
   });
 
@@ -266,7 +269,10 @@ describe('getAllInstances legacy-key boundary (boundary review MEDIUM-1 / LOW-1)
   });
 
   it('getInstancesForModel never matched the legacy key shape either (pre-existing, unchanged)', async () => {
-    const legacyBlob = JSON.stringify({ modelName: 'legacy-model', state: ModelLifecycleState.ACTIVE });
+    const legacyBlob = JSON.stringify({
+      modelName: 'legacy-model',
+      state: ModelLifecycleState.ACTIVE,
+    });
     const { redis } = buildMockRedisStore({
       'test:models:legacy-model': legacyBlob,
     });
@@ -280,7 +286,10 @@ describe('getAllInstances legacy-key boundary (boundary review MEDIUM-1 / LOW-1)
 
 describe('ModelLifecycleService.pruneLegacyInstanceKeys', () => {
   it('deletes a legacy single-segment key and returns its modelName', async () => {
-    const legacyBlob = JSON.stringify({ modelName: 'legacy-model', state: ModelLifecycleState.ACTIVE });
+    const legacyBlob = JSON.stringify({
+      modelName: 'legacy-model',
+      state: ModelLifecycleState.ACTIVE,
+    });
     const { redis, store } = buildMockRedisStore({
       'test:models:legacy-model': legacyBlob,
     });
@@ -304,7 +313,10 @@ describe('ModelLifecycleService.pruneLegacyInstanceKeys', () => {
   });
 
   it('a list read after pruning agrees with a per-model detail read (no more list/detail disagreement)', async () => {
-    const legacyBlob = JSON.stringify({ modelName: 'legacy-model', state: ModelLifecycleState.ACTIVE });
+    const legacyBlob = JSON.stringify({
+      modelName: 'legacy-model',
+      state: ModelLifecycleState.ACTIVE,
+    });
     const { redis } = buildMockRedisStore({
       'test:models:legacy-model': legacyBlob,
     });

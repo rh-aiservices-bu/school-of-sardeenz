@@ -21,22 +21,16 @@ impl WakeTriggerClient {
         let url = format!("{}/api/v1/wake", self.base_url);
         let request = WakeTriggerRequest { model_name: model_name.to_string(), request_id: None };
 
-        let mut req_builder = self
-            .client
-            .post(&url)
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(5));
+        let mut req_builder =
+            self.client.post(&url).json(&request).timeout(std::time::Duration::from_secs(5));
         if let Some(ref token) = self.api_token {
             req_builder = req_builder.header("Authorization", format!("Bearer {token}"));
         }
 
-        let response = req_builder
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::warn!(model_name, error = %e, "wake trigger transport error");
-                anyhow::anyhow!("wake trigger transport error")
-            })?;
+        let response = req_builder.send().await.map_err(|e| {
+            tracing::warn!(model_name, error = %e, "wake trigger transport error");
+            anyhow::anyhow!("wake trigger transport error")
+        })?;
 
         let status = response.status();
         if status.is_success() {

@@ -106,7 +106,11 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
   });
 
   it('sleepModel removes the endpoint under the engine port, not the management port', async () => {
-    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('test-model', '10.0.0.1', 5002);
     expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalledWith(
@@ -117,9 +121,15 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
   });
 
   it('wakeModel re-registers the endpoint under the engine port', async () => {
-    mocks.lifecycle.getInstance.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
+    mocks.lifecycle.getInstance.mockResolvedValue(
+      makeState({ state: ModelLifecycleState.SLEEPING }),
+    );
 
-    await service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.wakeModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
       host: '10.0.0.1',
@@ -131,7 +141,11 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
   });
 
   it('stopModel removes the endpoint under the engine port', async () => {
-    await service.stopModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.stopModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('test-model', '10.0.0.1', 5002);
   });
@@ -142,7 +156,11 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
       makeState({ state: ModelLifecycleState.SLEEPING, runnerEnginePort: undefined }),
     );
 
-    await service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.wakeModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
       'test-model',
@@ -191,7 +209,11 @@ describe('SleepWakeService — activeRequests unknown handling (#116)', () => {
       .mockResolvedValueOnce({ state: RunnerState.READY })
       .mockResolvedValueOnce({ state: RunnerState.READY, activeRequests: 0 });
 
-    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(2);
     expect(mocks.runnerClient.sleep).toHaveBeenCalled();
@@ -208,13 +230,21 @@ describe('SleepWakeService — VRAM reservation release (#87)', () => {
   });
 
   it('stopModel releases the model reservation once the model is fully stopped', async () => {
-    await service.stopModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.stopModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
   });
 
   it('sleepModel does NOT release the reservation — a sleeping model keeps its VRAM budget', async () => {
-    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
   });
@@ -230,13 +260,21 @@ describe('SleepWakeService — timeout threading (#89)', () => {
   });
 
   it('sleepModel passes sleepTimeoutMs to runnerClient.sleep()', async () => {
-    await service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.sleepModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.runnerClient.sleep).toHaveBeenCalledWith(SleepLevel.L1_HOST_RAM, 5_000);
   });
 
   it('wakeModel does not pass a custom timeout to runnerClient.wake()', async () => {
-    await service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient);
+    await service.wakeModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
 
     expect(mocks.runnerClient.wake).toHaveBeenCalledWith();
   });
@@ -265,7 +303,9 @@ describe('SleepWakeService — RUNNER_TIMEOUT reachability (#96)', () => {
 
   it('waitForReady surfaces RUNNER_TIMEOUT, not an AbortError, when the runner never becomes ready', async () => {
     const mocks = createMocks();
-    mocks.lifecycle.getInstance.mockResolvedValue(makeState({ state: ModelLifecycleState.SLEEPING }));
+    mocks.lifecycle.getInstance.mockResolvedValue(
+      makeState({ state: ModelLifecycleState.SLEEPING }),
+    );
     mocks.runnerClient.getHealth.mockResolvedValue({
       state: RunnerState.STARTING,
       activeRequests: 0,

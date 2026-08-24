@@ -4,9 +4,7 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import { EvictionEngine, LruEvictionStrategy } from '../eviction.js';
 import type { InstanceState } from '../model-lifecycle.js';
 
-function makeModelState(
-  overrides: Partial<InstanceState> & { modelName: string },
-): InstanceState {
+function makeModelState(overrides: Partial<InstanceState> & { modelName: string }): InstanceState {
   return {
     instanceId: `inst-${overrides.modelName}`,
     state: ModelLifecycleState.ACTIVE,

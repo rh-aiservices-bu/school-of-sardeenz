@@ -91,6 +91,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Flaky module-store test fixed (CI).** The `ModuleStoreService` idempotency test started an
+  import and returned without awaiting it; the leaked async import's late `CATALOG_IMPORT_PROGRESS`
+  events could land in the next test's `events` array (the emit callback closes over the mutable
+  `events` binding), making the uninstall test's last-event assertion fail under CI load. The
+  idempotency test now drains the in-flight import before finishing.
+
+- **Redocly lint is warning-free again.** The long-standing `no-unused-components` warning for
+  `ClusterEvent` in `control-plane.yaml` is now explicitly ignored in
+  `packages/contracts/.redocly.lint-ignore.yaml` with a rationale: the schema is delivered over
+  Redis pub/sub and the BFF SSE stream, not an HTTP response, so no operation can `$ref` it,
+  yet it is used at runtime by the control plane, BFF, and frontend via the generated types.
+
 - **Engine parameters are now actually delivered to the engine — and entered as `--flag value`
   lines instead of JSON (#126).** `engineConfig` was stored but never reached the engine; the
   contract now adds `engineArgs: string[]` (deploy request, model detail, worker-agent
@@ -99,7 +111,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   worker → launcher, where the args are appended verbatim to the engine argv after the `--`
   separator (argv array, never shell-interpreted). Reserved flags (`--port`, `--host`, `--model`,
   `--served-model-name`, `--tensor-parallel-size`, `--engine-port`) are rejected in both the
-  dashboard form and the launcher — including argparse *abbreviations* of reserved flags
+  dashboard form and the launcher — including argparse _abbreviations_ of reserved flags
   (e.g. `--hos=0.0.0.0`), closing a bypass where an abbreviation would expand and override the
   shim's own binding; the control plane caps payloads (≤128 args, ≤512 chars each). The deploy
   form replaces the JSON textarea with per-line flags (comments and quoting supported, raw text
@@ -147,6 +159,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Repo-wide `make format` pass.** Prettier formatting corrections across Markdown docs and
+  TypeScript/Rust sources — whitespace, indentation, and emphasis-style normalization only, no
+  functional changes.
+
 - **`updatedAt` description corrected in proxy-control-plane contract.** The `RoutingEntry.updatedAt`
   field description previously claimed "Used by the proxy to detect stale entries," which was false —
   the proxy never consults this field for routing or staleness. Updated to state the field is
@@ -189,7 +205,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `containers/dashboard/` `.dockerignore` now exclude `.env*` (except `.env.example`), `logs`,
   `weights`, `modules`, and `scratch` from build contexts. (#119)
 - **Proxy forwarding concurrency limits.** New `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` (global) and
-  `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` (per-model) env vars cap in-flight *forwarded* requests,
+  `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` (per-model) env vars cap in-flight _forwarded_ requests,
   returning `503 overloaded` once reached (both default to `0`/unlimited). The permit is acquired
   after parking resolves and before endpoint selection — a parked request never holds one, so a
   sleep/wake pile-up cannot exhaust the limit and deadlock the proxy. Documents ingress-level rate
@@ -213,7 +229,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   worker agent: an optional shared-secret `SARDEENZ_WORKER_TOKEN` gates every dev-worker route
   except `/healthz` (checked with `timingSafeEqual`), logging a startup warning when left unset.
   The control plane's `WorkerClient` reads the same env var and attaches the `Authorization:
-  Bearer <token>` header on `startRunner`, `stopRunner`, and both SSE log-stream methods. Adds
+Bearer <token>` header on `startRunner`, `stopRunner`, and both SSE log-stream methods. Adds
   `deployment/sif-runner/networkpolicy.yaml`, restricting ingress to the worker Service to the
   control-plane pod on port 9100. Documented in `docs/usage/deployment-security.md`. (#108)
 - **Control plane API authentication + NetworkPolicy.** The control plane now supports an optional
@@ -428,13 +444,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Dev worker: failed launch leaked log buffers, hung SSE log clients, and discarded failure
   logs.** `startRunner`'s catch block rolled back the reserved model slot but never sealed or
   retained the runner's log stream, so a client attached mid-launch (`GET
-  /runners/by-model/{modelName}/logs`) hung forever waiting for an `end` frame, the log buffer and
+/runners/by-model/{modelName}/logs`) hung forever waiting for an `end` frame, the log buffer and
   its listeners stayed in memory indefinitely since there's no `stopRunner()` call to `drop()`
   them, and the failure logs became unreachable once the model slot was rolled back. `RunnerManager`
   now calls `logBuffer.markEnded(runnerId)` and the new `logBuffer.retain(runnerId)` in the catch
   block; `retain()` schedules an automatic `drop()` after a 5-minute TTL (capped at 20 retained
   buffers, evicting oldest-first) so failure logs stay retrievable via `GET
-  /runners/{runnerId}/logs` for a window without leaking forever. The SSE route's `stream()` was
+/runners/{runnerId}/logs` for a window without leaking forever. The SSE route's `stream()` was
   also hardened: `cleanup()` is now idempotent and closes the response (`reply.raw.end()`) once the
   stream ends, instead of only clearing listeners and leaving the socket open. (#112)
 - **Worker `managementUrl` no longer advertises `http://localhost:<port>` in-cluster, and the
@@ -507,7 +523,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   on capacity that was still spoken for. Conversely, a model's reservation was never released when
   it stopped, was evicted, or its worker died, permanently shrinking `availableBytes` for that
   device until the control plane restarted. Reservations are now tracked per `(workerId,
-  deviceIndex, modelName)`, `availableBytes` is `total - used - reserved` (co-located models'
+deviceIndex, modelName)`, `availableBytes` is `total - used - reserved` (co-located models'
   reservations sum rather than being collapsed via `max(used, reserved)`), and reservations are
   only ever cleared explicitly: `DeployOrchestrationService` releases a model's reservation once it
   reaches `ACTIVE` (actual usage takes over) or fails, `SleepWakeService.stopModel` releases it on

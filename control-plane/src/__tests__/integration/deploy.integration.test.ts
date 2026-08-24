@@ -258,7 +258,9 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
       await harness.registerWorker({
         workerId: WORKER_ID,
         managementUrl: worker.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
 
       await harness.modelRepository.create({

@@ -34,7 +34,7 @@ RWX volume. Three facts from the Phase 4 spike shape how those SIFs are produced
 1. **Publish a `Containerfile` per runner** in the repo under `containers/`:
    - `containers/worker-base/` — the slim worker host image (UBI + Apptainer + FUSE helpers +
      `tzdata`/`/etc/localtime`); this is what the worker Pod runs and what execs SIFs.
-   - `containers/runner-<engine>/` — the image that *becomes a SIF* (e.g. `runner-vllm/` = base
+   - `containers/runner-<engine>/` — the image that _becomes a SIF_ (e.g. `runner-vllm/` = base
      vLLM + kvcached wheel + `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`). One directory per runner
      type; versioned and reviewed.
 2. **Build the OCI images in CI** with the container toolchain (including the CUDA devel
@@ -51,14 +51,14 @@ RWX volume. Three facts from the Phase 4 spike shape how those SIFs are produced
    **verify the signature** at exec (`apptainer.conf` can require it). No pull, no `mksquashfs`,
    minimal RAM/scratch.
 
-**SIF signing keys** are a new concern this ADR owns (ADR-013 governs only env-var *application*
+**SIF signing keys** are a new concern this ADR owns (ADR-013 governs only env-var _application_
 secrets, not signing keypairs): an `apptainer key newpair` whose **private** key lives in a
 Secret mounted **only** into the librarian job, and whose **public** key is distributed to every
 worker (ConfigMap/Secret → `apptainer key import`, or baked into `worker-base`) so workers verify
 at exec. Document a rotation path (re-sign, roll the public key to workers before retiring the old
 one).
 
-**Write-protecting the module PVC needs an explicit mechanism** — Kubernetes RBAC does *not*
+**Write-protecting the module PVC needs an explicit mechanism** — Kubernetes RBAC does _not_
 restrict a PVC's mount mode by ServiceAccount, so "only the librarian writes it" must be enforced
 by one of: a ValidatingAdmissionPolicy/Kyverno rule that rejects non-librarian Pods mounting it
 read-write; a two-PVC split (librarian-only staging PVC + a separate module PVC workers mount

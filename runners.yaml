@@ -38,7 +38,7 @@ runners:
       across co-located runners on one GPU. OpenAI-compatible; supports sleep/wake.
     engine: vLLM
     runnerType: vllm
-    version: "0.21"
+    version: '0.21'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21@sha256:0000000000000000000000000000000000000000000000000000000000000000
     sifName: vllm-0.21
     tags: [llm, cuda, kvcached, openai]
@@ -62,7 +62,7 @@ runners:
       Runs side by side with newer versions — hot-add without recycling workers.
     engine: vLLM
     runnerType: vllm
-    version: "0.20"
+    version: '0.20'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20@sha256:0000000000000000000000000000000000000000000000000000000000000000
     sifName: vllm-0.20
     tags: [llm, cuda, kvcached, openai]

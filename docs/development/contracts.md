@@ -4,12 +4,12 @@ The OpenAPI specifications in `packages/contracts/` are the **single source of t
 
 ## Contract Files
 
-| File                              | Covers                           |
-| ---------------------------------- | -------------------------------- |
-| `specs/control-plane.yaml`        | Dashboard ↔ Control Plane API    |
-| `specs/proxy-control-plane.yaml`  | Proxy ↔ Control Plane API        |
-| `specs/engine-runner.yaml`        | Engine runner lifecycle contract |
-| `specs/worker-agent.yaml`         | Worker agent management API      |
+| File                             | Covers                           |
+| -------------------------------- | -------------------------------- |
+| `specs/control-plane.yaml`       | Dashboard ↔ Control Plane API    |
+| `specs/proxy-control-plane.yaml` | Proxy ↔ Control Plane API        |
+| `specs/engine-runner.yaml`       | Engine runner lifecycle contract |
+| `specs/worker-agent.yaml`        | Worker agent management API      |
 
 ## Making Changes
 

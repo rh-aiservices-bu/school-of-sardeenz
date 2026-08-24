@@ -28,15 +28,15 @@ Six feature areas spanning backend and frontend:
 
 ## Dependencies
 
-| Dependency | Status | Notes |
-|---|---|---|
-| Phase 3 dashboard | Complete | AppLayout, AuthContext, useEventStream, BFF SSE proxy all exist |
-| v1 reference code | Available | `dashboard/reference/v1/` — read-only extracts |
-| v1 SVG logo | Available | `assets/sardeenz.svg` in v1 repo |
-| v1 sidebar assets | Available | GitHub/star/fork SVGs in v1 repo |
-| PatternFly 6 | Installed | v6.0.0 — Masthead*, Drawer, NotificationDrawer, ToggleGroup all available |
-| Control plane | Complete | Redis pub/sub, SSE, model lifecycle events |
-| Dashboard BFF | Complete | Auth, SSE proxy, Redis reader |
+| Dependency        | Status    | Notes                                                                      |
+| ----------------- | --------- | -------------------------------------------------------------------------- |
+| Phase 3 dashboard | Complete  | AppLayout, AuthContext, useEventStream, BFF SSE proxy all exist            |
+| v1 reference code | Available | `dashboard/reference/v1/` — read-only extracts                             |
+| v1 SVG logo       | Available | `assets/sardeenz.svg` in v1 repo                                           |
+| v1 sidebar assets | Available | GitHub/star/fork SVGs in v1 repo                                           |
+| PatternFly 6      | Installed | v6.0.0 — Masthead\*, Drawer, NotificationDrawer, ToggleGroup all available |
+| Control plane     | Complete  | Redis pub/sub, SSE, model lifecycle events                                 |
+| Dashboard BFF     | Complete  | Auth, SSE proxy, Redis reader                                              |
 
 ## Architecture
 
@@ -91,15 +91,16 @@ Six feature areas spanning backend and frontend:
 
 ```typescript
 interface Notification {
-  id: string;                    // crypto.randomUUID()
-  title: string;                 // e.g. "Model deployed successfully"
-  description?: string;          // e.g. "meta-llama/Llama-3.1-8B is now ACTIVE on worker-01"
+  id: string; // crypto.randomUUID()
+  title: string; // e.g. "Model deployed successfully"
+  description?: string; // e.g. "meta-llama/Llama-3.1-8B is now ACTIVE on worker-01"
   variant: 'success' | 'warning' | 'danger' | 'info';
-  timestamp: string;             // ISO 8601
+  timestamp: string; // ISO 8601
   isRead: boolean;
-  source?: {                     // Links notification to its origin
+  source?: {
+    // Links notification to its origin
     type: 'model' | 'worker' | 'system';
-    name?: string;               // modelName or workerId
+    name?: string; // modelName or workerId
   };
 }
 ```
@@ -119,9 +120,11 @@ Design choice: use a Redis set `{prefix}:notifications:read` containing notifica
 Add notification schemas and endpoints to the control plane OpenAPI spec.
 
 **Files to modify:**
+
 - `packages/contracts/specs/control-plane.yaml`
 
 **Additions:**
+
 - `Notification` schema with fields: `id`, `title`, `description`, `variant`, `timestamp`, `isRead`, `source`
 - `NotificationVariant` enum: `success`, `warning`, `danger`, `info`
 - `NotificationSource` schema with fields: `type` (`model` | `worker` | `system`), `name`
@@ -141,9 +144,11 @@ Add notification schemas and endpoints to the control plane OpenAPI spec.
 Create a service that generates, stores, and publishes notifications.
 
 **Files to create:**
+
 - `control-plane/src/services/notification.ts`
 
 **Behavior:**
+
 - `createNotification(params)` — builds notification object, LPUSH to Redis list, LTRIM to cap at 200, PUBLISH to `{prefix}:notifications` channel
 - `listNotifications(limit?, offset?)` — LRANGE on the Redis list, check read-state from the `{prefix}:notifications:read` set
 - `markAsRead(id)` — SADD id to the read set
@@ -157,13 +162,16 @@ Create a service that generates, stores, and publishes notifications.
 REST endpoints for notification CRUD.
 
 **Files to create:**
+
 - `control-plane/src/routes/notifications.ts`
 
 **Files to modify:**
+
 - `control-plane/src/routes/deps.ts` — add `notifications: NotificationService`
 - `control-plane/src/server.ts` — register notification routes
 
 **Endpoints:**
+
 - `GET /api/v1/notifications` → `notificationService.listNotifications()`
 - `POST /api/v1/notifications/:id/read` → `notificationService.markAsRead(id)`
 - `POST /api/v1/notifications/read-all` → `notificationService.markAllAsRead()`
@@ -175,6 +183,7 @@ REST endpoints for notification CRUD.
 Integrate the NotificationService into the existing event publishing points.
 
 **Files to modify:**
+
 - `control-plane/src/services/reconciliation.ts` — after publishing cluster events for worker join/leave/dead-worker model errors/stuck model recovery, also call `notificationService.createNotification()`
 - `control-plane/src/services/deploy-orchestration.ts` — on successful deploy (ACTIVE transition) and on deploy failure (ERROR transition), publish notifications
 - `control-plane/src/routes/models.ts` — on successful sleep/wake initiation and on model deletion, publish notifications
@@ -197,19 +206,23 @@ Integrate the NotificationService into the existing event publishing points.
 ### Task 5: Dashboard BFF — subscribe to notification channel in SSE
 
 **Files to modify:**
+
 - `dashboard/server/routes/events.ts` — subscribe to `{prefix}:notifications` channel in addition to `routing-updates` and `cluster-events`; forward notifications as `data: {"type":"NOTIFICATION",...}`
 
 ### Task 6: Dashboard BFF — notification proxy routes
 
 **Files to create:**
+
 - `dashboard/server/routes/notifications.ts`
 
 **Files to modify:**
+
 - `dashboard/server/routes/deps.ts` — no changes needed (already has `controlPlane: ControlPlaneClient`)
 - `dashboard/server/clients/control-plane.ts` — add notification methods (list, markRead, markAllRead, remove, clearAll)
 - `dashboard/server/server.ts` — register notification routes
 
 **Proxy routes (auth-gated, admin-readonly role):**
+
 - `GET /api/notifications` → control plane `GET /api/v1/notifications`
 - `POST /api/notifications/:id/read` → control plane `POST /api/v1/notifications/:id/read`
 - `POST /api/notifications/read-all` → control plane `POST /api/v1/notifications/read-all`
@@ -221,6 +234,7 @@ Integrate the NotificationService into the existing event publishing points.
 Copy the SVG assets needed for the header and sidebar into the v2 dashboard.
 
 **Files to create:**
+
 - `dashboard/src/assets/sardeenz.svg` — main logo (from v1 repo `assets/sardeenz.svg`)
 - `dashboard/src/assets/images/github-mark.svg` — GitHub logo (light)
 - `dashboard/src/assets/images/github-mark-white.svg` — GitHub logo (dark)
@@ -235,15 +249,18 @@ Copy the SVG assets needed for the header and sidebar into the v2 dashboard.
 Create a `ThemeContext` that manages dark/light theme state.
 
 **Files to create:**
+
 - `dashboard/src/contexts/ThemeContext.tsx`
 
 **Behavior (matching v1's `App.v1.tsx` lines 81–124):**
+
 - Initialize from `localStorage('theme')`, falling back to `prefers-color-scheme: dark`
 - Toggle adds/removes `pf-v6-theme-dark` class on `document.documentElement`
 - Persist choice to `localStorage`
 - Export `useTheme()` hook returning `{ isDarkTheme, toggleTheme, setDarkTheme }`
 
 **Files to modify:**
+
 - `dashboard/src/main.tsx` — wrap `<App>` with `<ThemeProvider>`
 
 ### Task 9: Dashboard frontend — notification system
@@ -251,6 +268,7 @@ Create a `ThemeContext` that manages dark/light theme state.
 Port and extend the notification context, drawer, and toast components from v1, backed by the real API.
 
 **Files to create:**
+
 - `dashboard/src/contexts/NotificationContext.tsx`
   - `NotificationProvider`, `useNotifications()` hook
   - `Notification` and `ToastNotification` types (matching backend schema)
@@ -274,6 +292,7 @@ Port and extend the notification context, drawer, and toast components from v1, 
   - Close button per toast
 
 **Files to modify:**
+
 - `dashboard/src/main.tsx` — wrap with `<NotificationProvider>`
 - `dashboard/src/api/client.ts` — add notification API methods (list, markRead, markAllRead, remove, clearAll)
 
@@ -282,6 +301,7 @@ Port and extend the notification context, drawer, and toast components from v1, 
 Connect the notification context to the existing SSE event stream so backend-pushed notifications flow to the UI in real time.
 
 **Files to modify:**
+
 - `dashboard/src/hooks/useEventStream.ts` — detect `NOTIFICATION` event type from SSE, expose notification events alongside cluster events, or provide a callback mechanism for the NotificationContext to subscribe to
 - `dashboard/src/contexts/NotificationContext.tsx` — subscribe to EventStreamContext and handle incoming notification events
 
@@ -290,9 +310,11 @@ Connect the notification context to the existing SSE event stream so backend-pus
 Rewrite `AppLayout.tsx` to match the v1 masthead structure.
 
 **Files to modify:**
+
 - `dashboard/src/components/AppLayout.tsx` — major rewrite
 
 **Masthead structure (matching v1 `App.v1.tsx` lines 215–235):**
+
 ```
 <Masthead>
   <MastheadMain>
@@ -322,16 +344,19 @@ Rewrite `AppLayout.tsx` to match the v1 masthead structure.
 ```
 
 **Sidebar changes:**
+
 - Add `isSidebarOpen` state, pass to `<PageSidebar isSidebarOpen={...}>`
 - Add footer section at bottom with GitHub link and theme-aware icon
 
 **Page wrapper:**
+
 - Wrap page content in `<Drawer>` for the notification drawer panel
 - Mount `<AlertToastGroup>` above the `<Page>`
 
 ### Task 12: Add i18n keys
 
 **Files to modify:**
+
 - `dashboard/src/locales/en/common.json` — add keys for:
   - Header elements (theme toggle labels, notification labels, user menu)
   - Notification drawer (header, actions, empty state)
@@ -340,6 +365,7 @@ Rewrite `AppLayout.tsx` to match the v1 masthead structure.
 ### Task 13: Unit tests — backend
 
 **Files to create:**
+
 - `control-plane/src/services/__tests__/notification.test.ts`
   - Create / list / markAsRead / markAllAsRead / remove / clearAll
   - Redis list capping (max 200)
@@ -353,6 +379,7 @@ Rewrite `AppLayout.tsx` to match the v1 masthead structure.
 ### Task 14: Unit tests — frontend
 
 **Files to create:**
+
 - `dashboard/src/__tests__/contexts/ThemeContext.test.tsx`
   - Theme initialization from localStorage / media query
   - Toggle applies/removes `pf-v6-theme-dark` class
@@ -379,30 +406,31 @@ Rewrite `AppLayout.tsx` to match the v1 masthead structure.
 ### Task 15: Update documentation and changelog
 
 **Files to modify:**
+
 - `CHANGELOG.md` — add Phase 3.5 entries under `[Unreleased]`
 - `docs/project/overall-plan.md` — add Phase 3.5 summary
 - `CLAUDE.md` — update project status to reflect Phase 3.5
 
 ## Task Summary
 
-| # | Task | Layer | New files | Modified files | Est. LOC |
-|---|---|---|---|---|---|
-| 1 | OpenAPI spec + type generation | Contracts | 0 | 1 | ~80 |
-| 2 | NotificationService | Control plane | 1 | 0 | ~150 |
-| 3 | Notification routes | Control plane | 1 | 2 | ~100 |
-| 4 | Wire lifecycle → notifications | Control plane | 0 | 4 | ~120 |
-| 5 | BFF SSE notification channel | Dashboard BFF | 0 | 1 | ~20 |
-| 6 | BFF notification proxy routes | Dashboard BFF | 1 | 2 | ~80 |
-| 7 | Copy logo/sidebar assets | Dashboard | 8 | 0 | ~50 |
-| 8 | Theme context | Dashboard | 1 | 1 | ~60 |
-| 9 | Notification frontend | Dashboard | 3 | 2 | ~400 |
-| 10 | Wire SSE → notifications | Dashboard | 0 | 2 | ~60 |
-| 11 | Overhaul AppLayout | Dashboard | 0 | 1 | ~200 |
-| 12 | i18n keys | Dashboard | 0 | 1 | ~30 |
-| 13 | Backend unit tests | Tests | 3 | 0 | ~350 |
-| 14 | Frontend unit tests | Tests | 5 | 0 | ~400 |
-| 15 | Docs and changelog | Docs | 0 | 3 | ~50 |
-| **Total** | | | **23** | **20** | **~2,150** |
+| #         | Task                           | Layer         | New files | Modified files | Est. LOC   |
+| --------- | ------------------------------ | ------------- | --------- | -------------- | ---------- |
+| 1         | OpenAPI spec + type generation | Contracts     | 0         | 1              | ~80        |
+| 2         | NotificationService            | Control plane | 1         | 0              | ~150       |
+| 3         | Notification routes            | Control plane | 1         | 2              | ~100       |
+| 4         | Wire lifecycle → notifications | Control plane | 0         | 4              | ~120       |
+| 5         | BFF SSE notification channel   | Dashboard BFF | 0         | 1              | ~20        |
+| 6         | BFF notification proxy routes  | Dashboard BFF | 1         | 2              | ~80        |
+| 7         | Copy logo/sidebar assets       | Dashboard     | 8         | 0              | ~50        |
+| 8         | Theme context                  | Dashboard     | 1         | 1              | ~60        |
+| 9         | Notification frontend          | Dashboard     | 3         | 2              | ~400       |
+| 10        | Wire SSE → notifications       | Dashboard     | 0         | 2              | ~60        |
+| 11        | Overhaul AppLayout             | Dashboard     | 0         | 1              | ~200       |
+| 12        | i18n keys                      | Dashboard     | 0         | 1              | ~30        |
+| 13        | Backend unit tests             | Tests         | 3         | 0              | ~350       |
+| 14        | Frontend unit tests            | Tests         | 5         | 0              | ~400       |
+| 15        | Docs and changelog             | Docs          | 0         | 3              | ~50        |
+| **Total** |                                |               | **23**    | **20**         | **~2,150** |
 
 ## Component Architecture
 
@@ -462,6 +490,7 @@ main.tsx
 ## Acceptance Criteria
 
 ### Header / Chrome
+
 - [ ] Masthead shows the sardine SVG logo (not plain text)
 - [ ] Hamburger button toggles sidebar open/closed
 - [ ] Sun/Moon toggle switches between light and dark themes
@@ -473,6 +502,7 @@ main.tsx
 - [ ] Sidebar footer shows GitHub link with theme-aware icon
 
 ### Notifications — Backend
+
 - [ ] NotificationService stores notifications in a capped Redis list (max 200)
 - [ ] Notifications are published to Redis pub/sub on creation
 - [ ] REST endpoints for list, mark-read, mark-all-read, remove, clear-all
@@ -483,6 +513,7 @@ main.tsx
 - [ ] Sleep/wake/delete actions generate notifications
 
 ### Notifications — Frontend
+
 - [ ] Notification bell badge shows unread count
 - [ ] Clicking bell opens notification drawer with list of notifications
 - [ ] Notification history loaded from API on mount
@@ -493,6 +524,7 @@ main.tsx
 - [ ] Deduplication prevents identical notifications within 500ms
 
 ### Quality
+
 - [ ] All new strings use i18n keys
 - [ ] All unit tests pass
 - [ ] `npm run lint` and `npm run typecheck` pass across all workspaces

@@ -222,7 +222,11 @@ describe('DELETE /api/notifications', () => {
 });
 
 describe('notification route role enforcement', () => {
-  const simpleConfig: Config = { ...mockConfig, authMode: 'simple', jwtSecret: 'test-jwt-secret-that-is-long-enough' };
+  const simpleConfig: Config = {
+    ...mockConfig,
+    authMode: 'simple',
+    jwtSecret: 'test-jwt-secret-that-is-long-enough',
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();

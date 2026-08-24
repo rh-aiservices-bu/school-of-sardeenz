@@ -28,7 +28,9 @@ const defaultExec: ExecFn = (command, args) => execFileAsync(command, args, { ti
 // Query real NVIDIA GPUs via nvidia-smi. Returns null when nvidia-smi is unavailable (not a GPU
 // host / CPU box) or reports nothing parseable, so callers fall back to the configured fleet.
 // `memory.total` is emitted in MiB with `--format=csv,noheader,nounits`.
-export async function detectNvidiaDevices(exec: ExecFn = defaultExec): Promise<DetectedDevice[] | null> {
+export async function detectNvidiaDevices(
+  exec: ExecFn = defaultExec,
+): Promise<DetectedDevice[] | null> {
   let stdout: string;
   try {
     ({ stdout } = await exec('nvidia-smi', [

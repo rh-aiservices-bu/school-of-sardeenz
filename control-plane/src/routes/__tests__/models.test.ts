@@ -371,7 +371,9 @@ describe('deployFromRecord synchronous-failure reservation release (security L1)
     // Synchronous placement failure surfaces as a 500 to the caller (the DB row is rolled back).
     expect(res.statusCode).toBe(500);
 
-    const memoryBudget = deps.memoryBudget as { releaseInstanceReservations: ReturnType<typeof vi.fn> };
+    const memoryBudget = deps.memoryBudget as {
+      releaseInstanceReservations: ReturnType<typeof vi.fn>;
+    };
     expect(memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
       expect.stringMatching(/^inst-/) as string,
     );
@@ -454,7 +456,11 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
 
   it('background delete isolates a failing instance teardown and still removes the record', async () => {
     const deleteModel = vi.fn(() => Promise.resolve());
-    const { app: a, logError: err, logInfo: info } = buildApp({
+    const {
+      app: a,
+      logError: err,
+      logInfo: info,
+    } = buildApp({
       removeInstance: vi.fn(() => Promise.reject(new Error('lifecycle failure'))),
       deleteModel,
     });
@@ -490,7 +496,11 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
       return Promise.resolve();
     });
     const deleteModel = vi.fn(() => Promise.resolve());
-    const { app: a, logError: err, logInfo: info } = buildApp({
+    const {
+      app: a,
+      logError: err,
+      logInfo: info,
+    } = buildApp({
       getInstancesForModel: vi.fn(() => Promise.resolve(instances)),
       removeInstance,
       deleteModel,
@@ -731,14 +741,12 @@ describe('POST /api/v1/models/:modelName/start', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
 
     expect(res.statusCode).toBe(202);
-    expect(res.json<{ state: string; previousState: string; instanceId: string }>()).toMatchObject(
-      {
-        modelName: 'm1',
-        state: ModelLifecycleState.STARTING,
-        previousState: ModelLifecycleState.STOPPED,
-        instanceId: expect.stringMatching(/^inst-/) as string,
-      },
-    );
+    expect(res.json<{ state: string; previousState: string; instanceId: string }>()).toMatchObject({
+      modelName: 'm1',
+      state: ModelLifecycleState.STARTING,
+      previousState: ModelLifecycleState.STOPPED,
+      instanceId: expect.stringMatching(/^inst-/) as string,
+    });
 
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -784,9 +792,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
   it('rejects Start when the stored modelPath escapes the weights directory', async () => {
     const { app } = buildDeployApp({
       getInstancesForModel: vi.fn(() => Promise.resolve([])),
-      findByName: vi.fn(() =>
-        Promise.resolve({ ...STOPPED_RECORD, modelPath: '/etc/passwd' }),
-      ),
+      findByName: vi.fn(() => Promise.resolve({ ...STOPPED_RECORD, modelPath: '/etc/passwd' })),
     });
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });

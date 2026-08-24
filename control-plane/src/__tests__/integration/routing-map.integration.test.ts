@@ -143,9 +143,14 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
     const INSTANCE_ID2 = 'inst-nonempty-devices';
 
     await harness.lifecycle.createInstance(MODEL, INSTANCE_ID);
-    const raw = await harness.lifecycle.transition(MODEL, INSTANCE_ID, ModelLifecycleState.STARTING, {
-      deviceIndices: [],
-    });
+    const raw = await harness.lifecycle.transition(
+      MODEL,
+      INSTANCE_ID,
+      ModelLifecycleState.STARTING,
+      {
+        deviceIndices: [],
+      },
+    );
     expect(raw.deviceIndices).toEqual([]);
 
     const rawState = await harness.redis.get(

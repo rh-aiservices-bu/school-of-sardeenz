@@ -19,7 +19,14 @@ specs/worker-agent.yaml:
 # request body, and neither handler has a 4XX code path (catalog.ts:19-38).
 # The only failure modes are 502 and 500. Inventing a 4XX to satisfy the rule
 # would make the spec less accurate.
+#
+# ClusterEvent — delivered over Redis pub/sub and the BFF SSE stream, not a
+# JSON HTTP response, so no path can $ref it. It is used at runtime by the
+# control plane (reconciliation, module store), the dashboard BFF, and the
+# frontend via the generated types.
 specs/control-plane.yaml:
   operation-4xx-response:
     - '#/paths/~1api~1v1~1catalog/get/responses'
     - '#/paths/~1api~1v1~1catalog~1refresh/post/responses'
+  no-unused-components:
+    - '#/components/schemas/ClusterEvent'

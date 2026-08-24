@@ -447,10 +447,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     }
 
     if (body.engineArgs !== undefined) {
-      if (
-        !Array.isArray(body.engineArgs) ||
-        body.engineArgs.some((a) => typeof a !== 'string')
-      ) {
+      if (!Array.isArray(body.engineArgs) || body.engineArgs.some((a) => typeof a !== 'string')) {
         throw ControlPlaneError.invalidRequest('engineArgs must be an array of strings');
       }
       // Sanity caps, not a real security boundary (the launcher's RESERVED_ENGINE_FLAGS check is)
@@ -565,8 +562,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         requiredMemory: record?.requiredMemory ?? undefined,
         lastInferenceAt: inferenceTs.get(name) ?? undefined,
         pinned: record?.pinned ?? false,
-        createdAt:
-          record?.createdAt?.toISOString() ?? instances[0]?.stateChangedAt ?? undefined,
+        createdAt: record?.createdAt?.toISOString() ?? instances[0]?.stateChangedAt ?? undefined,
       });
     }
 
@@ -732,7 +728,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       // Atomically claim ACTIVE → DRAINING for every active instance before launching
       // background work.
       for (const instance of active) {
-        await deps.lifecycle.transition(modelName, instance.instanceId, ModelLifecycleState.DRAINING);
+        await deps.lifecycle.transition(
+          modelName,
+          instance.instanceId,
+          ModelLifecycleState.DRAINING,
+        );
       }
       await refreshModelRoutingState(deps.lifecycle, deps.routingMap, modelName);
 
@@ -749,9 +749,14 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       for (const instance of active) {
         const runnerClient = deps.createRunnerClient(instance.runnerHost!, instance.runnerPort!);
-        deps.sleepWake.sleepModel(modelName, instance.instanceId, runnerClient).catch((err: unknown) => {
-          app.log.error({ err, modelName, instanceId: instance.instanceId }, 'Background sleep failed');
-        });
+        deps.sleepWake
+          .sleepModel(modelName, instance.instanceId, runnerClient)
+          .catch((err: unknown) => {
+            app.log.error(
+              { err, modelName, instanceId: instance.instanceId },
+              'Background sleep failed',
+            );
+          });
       }
 
       return reply.code(202).send({
@@ -809,7 +814,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const claimed: InstanceState[] = [];
       for (const instance of sleeping) {
         try {
-          await deps.lifecycle.transition(modelName, instance.instanceId, ModelLifecycleState.STARTING);
+          await deps.lifecycle.transition(
+            modelName,
+            instance.instanceId,
+            ModelLifecycleState.STARTING,
+          );
           claimed.push(instance);
         } catch {
           // Lost the race on this instance — another concurrent wake claimed it first.
@@ -890,7 +899,12 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             ).length;
             if (victimFailures > 0) {
               app.log.error(
-                { modelName, instanceId: instance.instanceId, victimFailures, totalVictims: victims.length },
+                {
+                  modelName,
+                  instanceId: instance.instanceId,
+                  victimFailures,
+                  totalVictims: victims.length,
+                },
                 'Some eviction victims failed teardown during wake capacity reclamation',
               );
             }
@@ -898,9 +912,14 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         }
 
         const runnerClient = deps.createRunnerClient(instance.runnerHost!, instance.runnerPort!);
-        deps.sleepWake.wakeModel(modelName, instance.instanceId, runnerClient).catch((err: unknown) => {
-          app.log.error({ err, modelName, instanceId: instance.instanceId }, 'Background wake failed');
-        });
+        deps.sleepWake
+          .wakeModel(modelName, instance.instanceId, runnerClient)
+          .catch((err: unknown) => {
+            app.log.error(
+              { err, modelName, instanceId: instance.instanceId },
+              'Background wake failed',
+            );
+          });
       }
 
       return reply.code(202).send({
@@ -959,9 +978,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           // holding VRAM the budget no longer accounts for. Record deliberately retained — this
           // is Stop, not Delete (see #121).
           const results = await Promise.allSettled(
-            stoppable.map((instance) =>
-              teardownInstance(app, deps, modelName, instance, 'Stop'),
-            ),
+            stoppable.map((instance) => teardownInstance(app, deps, modelName, instance, 'Stop')),
           );
           const failures = results.filter(
             (r) => r.status === 'rejected' || r.value === false,
@@ -1043,7 +1060,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {
-        throw ControlPlaneError.invalidState(`${modelName}/${instanceId}`, instance.state, 'delete');
+        throw ControlPlaneError.invalidState(
+          `${modelName}/${instanceId}`,
+          instance.state,
+          'delete',
+        );
       }
       instanceOpInFlight.add(claimKey);
 

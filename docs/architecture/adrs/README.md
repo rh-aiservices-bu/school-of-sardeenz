@@ -3,7 +3,7 @@
 - [ADR-001](adr-001-l7-vram-scheduling.md) — Software-Defined VRAM Scheduling at Layer 7
 - [ADR-002](adr-002-four-component-split.md) — Four-Component Architecture Split
 - [ADR-003](adr-003-rust-proxy.md) — Rust for the Routing Proxy
-- [ADR-004](adr-004-highlander-runtime.md) — Highlander Runtime Integration with Self-Contained Easyconfigs *(superseded by ADR-015)*
+- [ADR-004](adr-004-highlander-runtime.md) — Highlander Runtime Integration with Self-Contained Easyconfigs _(superseded by ADR-015)_
 - [ADR-005](adr-005-openapi-contracts.md) — OpenAPI as Cross-Language Contract
 - [ADR-006](adr-006-new-platform.md) — New Platform vs. V1 Refactor
 - [ADR-007](adr-007-redundancy-and-scaling.md) — Redundancy and Scaling Strategy
@@ -14,8 +14,8 @@
 - [ADR-012](adr-012-typescript-stack.md) — TypeScript Stack for Control Plane and Dashboard
 - [ADR-013](adr-013-secrets-management.md) — Secrets Management Policy
 - [ADR-014](adr-014-inference-recency-tracking.md) — Inference Recency Tracking for LRU Eviction
-- [ADR-015](adr-015-sif-runtime-packaging.md) — Engine Runtime Delivery via Apptainer SIF on Shared RWX Storage *(supersedes ADR-004)*
+- [ADR-015](adr-015-sif-runtime-packaging.md) — Engine Runtime Delivery via Apptainer SIF on Shared RWX Storage _(supersedes ADR-004)_
 - [ADR-016](adr-016-sif-worker-security-posture.md) — Worker Security Posture for SIF Execution
-- [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain *(amended by ADR-018)*
-- [ADR-018](adr-018-runner-catalog-oras-distribution.md) — Runner Catalog and ORAS Distribution *(amends ADR-017)*
-- [ADR-019](adr-019-logical-model-vs-instance-split.md) — Logical Model vs. Instance Split *(refines ADR-014)*
+- [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain _(amended by ADR-018)_
+- [ADR-018](adr-018-runner-catalog-oras-distribution.md) — Runner Catalog and ORAS Distribution _(amends ADR-017)_
+- [ADR-019](adr-019-logical-model-vs-instance-split.md) — Logical Model vs. Instance Split _(refines ADR-014)_

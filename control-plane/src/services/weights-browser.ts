@@ -41,7 +41,12 @@ export class WeightsBrowserService {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT' || code === 'ENOTDIR') {
-        return { root: this.root, path: target, relativePath: relative(this.root, target), entries: [] };
+        return {
+          root: this.root,
+          path: target,
+          relativePath: relative(this.root, target),
+          entries: [],
+        };
       }
       this.logger.error(
         { dir: target, err: err instanceof Error ? err.message : String(err) },

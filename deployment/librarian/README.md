@@ -7,12 +7,12 @@ into a **signed, world-readable SIF** on the module store. It runs as a Kubernet
 
 ## Contents
 
-| File | What it is |
-|---|---|
-| `serviceaccount.yaml` | `sardeenz-librarian` SA + RBAC to `use` the `sardeenz-sif-runner` SCC (apptainer build needs userns). This SA is the one the module write-protection VAP exempts. |
-| `job.yaml` | The build Job: module PVC **read-write**, node-local `emptyDir` scratch (~50Gi), mem 8Gi/16Gi (the OCI-unpack OOM finding), private signing key from a Secret, and the build script from a ConfigMap. Edit `IMAGE_REF` + `SIF_NAME` per build. |
-| `signing-key-secret.example.yaml` | **Template** for the private-key Secret — create the real one out-of-band; never commit a key. |
-| `kustomization.yaml` | SA + Job. The build script ConfigMap is created separately from [`scripts/build-sif.sh`](../../scripts/build-sif.sh) (single source of truth — see below). |
+| File                              | What it is                                                                                                                                                                                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serviceaccount.yaml`             | `sardeenz-librarian` SA + RBAC to `use` the `sardeenz-sif-runner` SCC (apptainer build needs userns). This SA is the one the module write-protection VAP exempts.                                                                              |
+| `job.yaml`                        | The build Job: module PVC **read-write**, node-local `emptyDir` scratch (~50Gi), mem 8Gi/16Gi (the OCI-unpack OOM finding), private signing key from a Secret, and the build script from a ConfigMap. Edit `IMAGE_REF` + `SIF_NAME` per build. |
+| `signing-key-secret.example.yaml` | **Template** for the private-key Secret — create the real one out-of-band; never commit a key.                                                                                                                                                 |
+| `kustomization.yaml`              | SA + Job. The build script ConfigMap is created separately from [`scripts/build-sif.sh`](../../scripts/build-sif.sh) (single source of truth — see below).                                                                                     |
 
 ## Pipeline
 

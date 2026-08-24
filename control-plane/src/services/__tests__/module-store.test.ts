@@ -71,10 +71,13 @@ describe('ModuleStoreService with StubImporter', () => {
     expect((await leftover).filter((f) => f.startsWith('.'))).toHaveLength(0);
   });
 
-  it('is idempotent while an import is in flight', () => {
+  it('is idempotent while an import is in flight', async () => {
     const first = store.startImport(entry());
     const second = store.startImport(entry());
     expect(second).toBe(first);
+    // Drain the in-flight import: its emit callback closes over the mutable
+    // `events` binding, so a leaked late event would land in the next test's array.
+    await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
   });
 
   it('uninstall deletes the SIF and emits a removed event', async () => {

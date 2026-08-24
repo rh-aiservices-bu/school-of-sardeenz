@@ -223,17 +223,17 @@ graph LR
 
 Data is split across three purpose-matched stores:
 
-| Store              | What                                                                                                    | Why                                                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store              | What                                                                                                                 | Why                                                                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Redis / Valkey** | Routing map, instance lifecycle states, device memory budgets, worker-reported device memory usage, cluster topology | Sub-millisecond reads for the proxy. Pub/sub for state change notifications. Workers push their own device memory data, inverting v1's polling model. |
-| **PostgreSQL**     | Configurations, instance placement ledger, benchmarks, memory profiles, persistent settings                        | Durability, queryability, transactional guarantees for data that must survive restarts.                                                               |
-| **Prometheus**     | Inference metrics, device utilization, proxy stats, component health                                    | Time-series collection via scrape endpoints. Dashboard reads directly for monitoring views.                                                           |
+| **PostgreSQL**     | Configurations, instance placement ledger, benchmarks, memory profiles, persistent settings                          | Durability, queryability, transactional guarantees for data that must survive restarts.                                                               |
+| **Prometheus**     | Inference metrics, device utilization, proxy stats, component health                                                 | Time-series collection via scrape endpoints. Dashboard reads directly for monitoring views.                                                           |
 
 > See [ADR-009](adrs/adr-009-state-and-persistence.md) for the full rationale.
 
-**Logical model vs. instance.** A *logical model* (Postgres `models` — config: runner type, weights
+**Logical model vs. instance.** A _logical model_ (Postgres `models` — config: runner type, weights
 path, memory requirement, etc.; unique name, the routing key clients request) may have zero or more
-*instances* (one runner process on one worker each, with its own lifecycle state, VRAM reservation,
+_instances_ (one runner process on one worker each, with its own lifecycle state, VRAM reservation,
 and routing endpoint — identified by a control-plane-minted `instanceId`). Instance lifecycle state
 lives in Redis, one key per instance (`{prefix}:models:{modelName}:{instanceId}`); a lightweight
 Postgres `instances` table is the durable identity/placement ledger, written at instance create/
@@ -559,25 +559,25 @@ The workflow: edit the OpenAPI spec → run code generation → TypeScript types
 
 ## ADR Index
 
-| ADR                                                          | Decision                                                       |
-| ------------------------------------------------------------ | -------------------------------------------------------------- |
-| [ADR-001](adrs/adr-001-l7-vram-scheduling.md)                | Software-defined device memory scheduling at Layer 7           |
-| [ADR-002](adrs/adr-002-four-component-split.md)              | Four-component architecture split                              |
-| [ADR-003](adrs/adr-003-rust-proxy.md)                        | Rust for the routing proxy                                     |
-| [ADR-004](adrs/adr-004-highlander-runtime.md)                | Highlander runtime integration with self-contained easyconfigs *(superseded by ADR-015)* |
-| [ADR-005](adrs/adr-005-openapi-contracts.md)                 | OpenAPI as cross-language contract                             |
-| [ADR-006](adrs/adr-006-new-platform.md)                      | New platform vs. v1 refactor                                   |
-| [ADR-007](adrs/adr-007-redundancy-and-scaling.md)            | Redundancy and scaling strategy                                |
-| [ADR-008](adrs/adr-008-monorepo.md)                          | Monorepo structure                                             |
-| [ADR-009](adrs/adr-009-state-and-persistence.md)             | Shared state and persistence strategy                          |
-| [ADR-010](adrs/adr-010-engine-runners.md)                    | Engine runners                                                 |
-| [ADR-011](adrs/adr-011-worker-capabilities-and-placement.md) | Worker capabilities and workload placement                     |
-| [ADR-012](adrs/adr-012-typescript-stack.md)                  | TypeScript stack for control plane and dashboard               |
-| [ADR-013](adrs/adr-013-secrets-management.md)                | Secrets management policy                                       |
-| [ADR-014](adrs/adr-014-inference-recency-tracking.md)        | Inference recency tracking for LRU eviction                    |
-| [ADR-015](adrs/adr-015-sif-runtime-packaging.md)             | Engine runtime delivery via Apptainer SIF on shared RWX storage |
-| [ADR-016](adrs/adr-016-sif-worker-security-posture.md)       | Worker security posture for SIF execution                      |
-| [ADR-017](adrs/adr-017-runner-image-pipeline.md)             | Runner image build and supply chain                            |
+| ADR                                                          | Decision                                                                                 |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| [ADR-001](adrs/adr-001-l7-vram-scheduling.md)                | Software-defined device memory scheduling at Layer 7                                     |
+| [ADR-002](adrs/adr-002-four-component-split.md)              | Four-component architecture split                                                        |
+| [ADR-003](adrs/adr-003-rust-proxy.md)                        | Rust for the routing proxy                                                               |
+| [ADR-004](adrs/adr-004-highlander-runtime.md)                | Highlander runtime integration with self-contained easyconfigs _(superseded by ADR-015)_ |
+| [ADR-005](adrs/adr-005-openapi-contracts.md)                 | OpenAPI as cross-language contract                                                       |
+| [ADR-006](adrs/adr-006-new-platform.md)                      | New platform vs. v1 refactor                                                             |
+| [ADR-007](adrs/adr-007-redundancy-and-scaling.md)            | Redundancy and scaling strategy                                                          |
+| [ADR-008](adrs/adr-008-monorepo.md)                          | Monorepo structure                                                                       |
+| [ADR-009](adrs/adr-009-state-and-persistence.md)             | Shared state and persistence strategy                                                    |
+| [ADR-010](adrs/adr-010-engine-runners.md)                    | Engine runners                                                                           |
+| [ADR-011](adrs/adr-011-worker-capabilities-and-placement.md) | Worker capabilities and workload placement                                               |
+| [ADR-012](adrs/adr-012-typescript-stack.md)                  | TypeScript stack for control plane and dashboard                                         |
+| [ADR-013](adrs/adr-013-secrets-management.md)                | Secrets management policy                                                                |
+| [ADR-014](adrs/adr-014-inference-recency-tracking.md)        | Inference recency tracking for LRU eviction                                              |
+| [ADR-015](adrs/adr-015-sif-runtime-packaging.md)             | Engine runtime delivery via Apptainer SIF on shared RWX storage                          |
+| [ADR-016](adrs/adr-016-sif-worker-security-posture.md)       | Worker security posture for SIF execution                                                |
+| [ADR-017](adrs/adr-017-runner-image-pipeline.md)             | Runner image build and supply chain                                                      |
 
 ---
 

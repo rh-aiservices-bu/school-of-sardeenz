@@ -20,6 +20,7 @@ workers by deploying elsewhere, shifting traffic, then stopping the old placemen
 The data path was already built for this. `RoutingEntry.endpoints` is an array with per-endpoint
 `weight`/`healthy` fields (`proxy-control-plane.yaml`), and the proxy's weighted balancer
 (`proxy/src/forwarding/balancer.rs`) already selects among `endpoints.some(e => e.healthy && e.weight
+
 > 0)`. Only the control plane's model of the world — and the worker agent's, which independently
 enforced one-runner-per-model-name via `modelToRunner: Map<string, string>` — prevented it.
 
@@ -33,7 +34,7 @@ Split "model" into two concepts:
   every existing column was already configuration, not runtime state.
 - **Instance** — one runner process on one worker, with its own lifecycle state, VRAM reservation,
   and routing endpoint. Identified by a control-plane-minted `instanceId` (`"inst-" +
-  randomUUID().replace(/-/g,'').slice(0,12)`), chosen over a derived id (e.g. `modelName-N`) to
+randomUUID().replace(/-/g,'').slice(0,12)`), chosen over a derived id (e.g. `modelName-N`) to
   avoid a coordination point where two concurrent creates could pick the same suffix.
 
 Concretely:
@@ -48,7 +49,7 @@ Concretely:
    after the `models:` prefix (`models:*:*`, not a bare `models:*`) — see point 12 below.
 2. **The logical model's state is derived on read**, never stored: `deriveAggregateState` ranks a
    model's instances by precedence `ACTIVE > STARTING > DRAINING > SLEEPING > PENDING > STOPPING >
-   ERROR` and returns the highest-ranked one present (STOPPED instances don't count — they're a
+ERROR` and returns the highest-ranked one present (STOPPED instances don't count — they're a
    transient artifact between an instance's stop sequence finishing and its Redis key being
    deleted); a model with no live instances is `STOPPED`. ACTIVE outranks ERROR deliberately: one
    healthy replica must mask a broken one (M7 acceptance criterion 4). This is exactly the rule
@@ -96,11 +97,11 @@ Concretely:
    and per-model configured size stay keyed by **model name** (pinning and size are model-level
    config, inherited by every instance) while eviction picks a specific instance to stop. LRU
    ordering still uses `lastInferenceAt`, which point 8 keeps per-model — replicas of the same model
-   therefore share recency and the strategy picks a replica of the least-recently-used *model*
+   therefore share recency and the strategy picks a replica of the least-recently-used _model_
    first, which is judged acceptable for M7 (see Non-goals; refined ranking is future work).
 8. **Inference recency stays per logical model, not per instance** (refining
    [ADR-014](adr-014-inference-recency-tracking.md)): the dedicated `inference:last:{modelName}`
-   key is unchanged. A model's recency reflects inference against *any* of its replicas — correct
+   key is unchanged. A model's recency reflects inference against _any_ of its replicas — correct
    for the eviction LRU signal, which asks "is this model still being used," not "is this specific
    replica still being used."
 9. **VRAM reservations move from model-keyed to instance-keyed**
@@ -109,8 +110,8 @@ Concretely:
    one device reserve independently and releasing one doesn't touch the other's reservation.
 10. **The worker agent's one-runner-per-model-name rule is replaced with one-runner-per-instanceId.**
     `RunnerManager` changes `modelToRunner: Map<string, string>` to `modelRunners: Map<string,
-    Set<string>>` (a model name may now resolve to several runners) plus a new `instanceRunners:
-    Map<string, string>` (the unambiguous conflict/lookup key). `StartRunnerRequest.instanceId` is
+Set<string>>` (a model name may now resolve to several runners) plus a new `instanceRunners:
+Map<string, string>` (the unambiguous conflict/lookup key). `StartRunnerRequest.instanceId` is
     optional in the contract, back-compat: the worker falls back to a self-generated id when absent,
     but the control plane always sends one. `GET /runners/by-model/{modelName}/logs` now resolves
     to the **most-recently-started** runner for that model (documented ambiguity, unchanged route,

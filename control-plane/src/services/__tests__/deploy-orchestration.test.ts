@@ -88,23 +88,21 @@ function createMocks(): MockDeps {
         trackedInstance.state = to;
         return Promise.resolve({});
       }),
-      getInstancesForModel: vi.fn(
-        (): InstanceState[] => [
-          {
-            instanceId: INSTANCE_ID,
-            modelName: 'test-model',
-            state: trackedInstance.state,
-            workerId: 'worker-1',
-            runnerHost: null,
-            runnerPort: null,
-            runnerId: null,
-            deviceIndices: null,
-            lastInferenceAt: null,
-            stateChangedAt: new Date().toISOString(),
-            errorMessage: null,
-          },
-        ],
-      ),
+      getInstancesForModel: vi.fn((): InstanceState[] => [
+        {
+          instanceId: INSTANCE_ID,
+          modelName: 'test-model',
+          state: trackedInstance.state,
+          workerId: 'worker-1',
+          runnerHost: null,
+          runnerPort: null,
+          runnerId: null,
+          deviceIndices: null,
+          lastInferenceAt: null,
+          stateChangedAt: new Date().toISOString(),
+          errorMessage: null,
+        },
+      ]),
       setRunnerEndpoint: vi.fn().mockResolvedValue(undefined),
     },
     routingMap: {

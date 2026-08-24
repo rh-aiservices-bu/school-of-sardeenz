@@ -19,7 +19,10 @@ export type DisplayMode = 'bytes' | 'percent';
 const SLEEPING_HATCH_BACKGROUND =
   'repeating-linear-gradient(-45deg, transparent 0 4px, var(--pf-t--global--color--nonstatus--gray--300) 4px 6px)';
 
-function segmentLabel(t: (key: string, opts?: Record<string, unknown>) => string, seg: MemorySegment): string {
+function segmentLabel(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  seg: MemorySegment,
+): string {
   if (seg.kind === 'model') {
     const memory = formatBytes(seg.bytes);
     if (seg.sleeping) {
@@ -55,9 +58,13 @@ export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBar
   const [expanded, setExpanded] = useState(false);
   const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes } = device;
 
-  const segments = models?.length ? computeModelSegments(device, models) : computeDeviceSegments(device);
+  const segments = models?.length
+    ? computeModelSegments(device, models)
+    : computeDeviceSegments(device);
 
-  const usedPct = Math.round(Math.min(100, (memoryUsedBytes / Math.max(1, memoryTotalBytes)) * 100));
+  const usedPct = Math.round(
+    Math.min(100, (memoryUsedBytes / Math.max(1, memoryTotalBytes)) * 100),
+  );
 
   const summary = segments
     .filter((s) => s.widthPercent > 0)
@@ -219,7 +226,9 @@ export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBar
                   />
                   {seg.kind === 'model'
                     ? seg.modelName
-                    : t(`overview.vramAllocation.legend.${seg.kind === 'other' ? 'other' : seg.kind}`)}
+                    : t(
+                        `overview.vramAllocation.legend.${seg.kind === 'other' ? 'other' : seg.kind}`,
+                      )}
                   {seg.sleeping ? ` · ${t('overview.vramAllocation.legend.sleeping')}` : ''}
                   {seg.isEstimate ? ` (${t('overview.vramAllocation.tooltip.estimateNote')})` : ''}
                 </span>

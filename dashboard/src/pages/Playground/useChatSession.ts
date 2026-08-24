@@ -29,10 +29,7 @@ export function useChatSession(model: string): UseChatSessionResult {
 
   const send = useCallback(
     (userText: string, params?: { temperature?: number; max_tokens?: number }) => {
-      const nextMessages: ChatMessage[] = [
-        ...state.messages,
-        { role: 'user', content: userText },
-      ];
+      const nextMessages: ChatMessage[] = [...state.messages, { role: 'user', content: userText }];
 
       setState((prev) => beginTurn(prev, userText));
 

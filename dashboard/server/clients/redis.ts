@@ -180,7 +180,8 @@ export class RedisReader {
     const inferenceRaw = await this.client.get(`${this.prefix}:inference:last:${name}`);
     const lastInferenceAt =
       inferenceRaw ??
-      blobs.map((b) => (typeof b['lastInferenceAt'] === 'string' ? b['lastInferenceAt'] : null))
+      blobs
+        .map((b) => (typeof b['lastInferenceAt'] === 'string' ? b['lastInferenceAt'] : null))
         .find((v): v is string => v !== null) ??
       null;
     if (lastInferenceAt) model.lastInferenceAt = lastInferenceAt;

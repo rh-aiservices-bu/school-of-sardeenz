@@ -58,8 +58,14 @@ async fn test_soft_rejected_wake_fails_fast_without_leak() {
     assert!(cp.wake_count_for(model).await >= 1, "control plane should have received a wake call");
 
     let message = body["error"]["message"].as_str().unwrap_or("");
-    assert!(!message.contains("VRAM"), "client-facing error must not leak control-plane detail: {message}");
-    assert!(!message.contains("ERROR"), "client-facing error must not leak control-plane state: {message}");
+    assert!(
+        !message.contains("VRAM"),
+        "client-facing error must not leak control-plane detail: {message}"
+    );
+    assert!(
+        !message.contains("ERROR"),
+        "client-facing error must not leak control-plane state: {message}"
+    );
 }
 
 #[tokio::test]

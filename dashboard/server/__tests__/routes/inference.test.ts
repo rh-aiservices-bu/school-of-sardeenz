@@ -258,7 +258,10 @@ describe('POST /api/inference/chat/completions', () => {
 
   it('delivers the streamed body to the client in more than one chunk', async () => {
     chatCompletionsFn.mockResolvedValue(
-      makeDelayedUpstreamResponse(['data: {"choices":[{"delta":{"content":"a"}}]}\n\n', 'data: [DONE]\n\n'], 150),
+      makeDelayedUpstreamResponse(
+        ['data: {"choices":[{"delta":{"content":"a"}}]}\n\n', 'data: [DONE]\n\n'],
+        150,
+      ),
     );
 
     const app = await buildApp(makeConfig());

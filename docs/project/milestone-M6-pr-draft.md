@@ -13,15 +13,15 @@ Contracts and docs tell the truth: the docs accuracy sweep, the BUSY/weight-0 de
 
 ## Verification status
 
-| Gate | Status |
-| ---- | ------ |
-| `make typecheck` | PASS (dashboard SVG errors are pre-existing) |
-| `make lint` | PASS |
-| `cargo check` / `cargo clippy -D warnings` | PASS |
-| `cargo test` | 112/112 passed |
-| vitest (control-plane + dev-worker) | 485+ tests passed |
-| `npx redocly lint` | 1 pre-existing warning (ClusterEvent unused) |
-| Codegen drift | Clean |
+| Gate                                       | Status                                       |
+| ------------------------------------------ | -------------------------------------------- |
+| `make typecheck`                           | PASS (dashboard SVG errors are pre-existing) |
+| `make lint`                                | PASS                                         |
+| `cargo check` / `cargo clippy -D warnings` | PASS                                         |
+| `cargo test`                               | 112/112 passed                               |
+| vitest (control-plane + dev-worker)        | 485+ tests passed                            |
+| `npx redocly lint`                         | 1 pre-existing warning (ClusterEvent unused) |
+| Codegen drift                              | Clean                                        |
 
 ## Not locally verifiable
 

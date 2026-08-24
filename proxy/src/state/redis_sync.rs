@@ -13,7 +13,10 @@ use crate::state::AppState;
 /// (if any) is carried forward so a single bad write doesn't drop a
 /// previously-routable model; entries with no previous value are dropped.
 /// Either way, the failure is counted and logged.
-fn parse_routing_map(raw: HashMap<String, String>, previous: &RoutingMap) -> HashMap<String, RoutingEntry> {
+fn parse_routing_map(
+    raw: HashMap<String, String>,
+    previous: &RoutingMap,
+) -> HashMap<String, RoutingEntry> {
     let mut routing_map = HashMap::with_capacity(raw.len());
 
     for (k, v) in raw {

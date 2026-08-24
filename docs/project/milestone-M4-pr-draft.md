@@ -14,13 +14,13 @@ Five bug fixes hardening the dev-worker agent for real cluster operation: runner
 
 ## Per-issue commits
 
-| Issue | Commit | Title |
-| ----- | ------ | ----- |
-| #112 | `489f70a` | fix(dev-worker): fix failed launch log leak, SSE hang, and buffer retention |
-| #111 | `ee97e9f` | fix(dev-worker): use configurable advertise host and require managementUrl in contract |
-| #109 | `2b0a377` | fix(dev-worker): reap signal-killed runners and add post-startup supervision |
-| #114 | `9e2f8e9` | fix(dev-worker): reclaim runner ports on stop/crash, bound allocation range |
-| #118 | `dcec239` | fix(dev-worker): validate signing-key import, add K8s probes, health-gate heartbeat |
+| Issue | Commit    | Title                                                                                  |
+| ----- | --------- | -------------------------------------------------------------------------------------- |
+| #112  | `489f70a` | fix(dev-worker): fix failed launch log leak, SSE hang, and buffer retention            |
+| #111  | `ee97e9f` | fix(dev-worker): use configurable advertise host and require managementUrl in contract |
+| #109  | `2b0a377` | fix(dev-worker): reap signal-killed runners and add post-startup supervision           |
+| #114  | `9e2f8e9` | fix(dev-worker): reclaim runner ports on stop/crash, bound allocation range            |
+| #118  | `dcec239` | fix(dev-worker): validate signing-key import, add K8s probes, health-gate heartbeat    |
 
 ## Verification status
 
@@ -39,10 +39,10 @@ Five bug fixes hardening the dev-worker agent for real cluster operation: runner
 
 ## New configuration
 
-| Env var | Default | Component | Description |
-| ------- | ------- | --------- | ----------- |
+| Env var                          | Default     | Component  | Description                                                                       |
+| -------------------------------- | ----------- | ---------- | --------------------------------------------------------------------------------- |
 | `SARDEENZ_WORKER_ADVERTISE_HOST` | `localhost` | dev-worker | Advertised host for managementUrl and runner host; set from `status.podIP` in K8s |
-| `SARDEENZ_MAX_RUNNERS` | `32` | dev-worker | Max concurrent runners; bounds the port allocation range |
+| `SARDEENZ_MAX_RUNNERS`           | `32`        | dev-worker | Max concurrent runners; bounds the port allocation range                          |
 
 ## Closes
 

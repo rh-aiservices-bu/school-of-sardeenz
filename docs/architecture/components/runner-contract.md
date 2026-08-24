@@ -92,13 +92,13 @@ If all endpoints for a model reach `weight: 0`, the proxy has no routable endpoi
 
 #### Full mapping table
 
-| RunnerState | ModelState | Endpoint healthy      | Endpoint weight   | Proxy behavior                      |
-| ----------- | ---------- | --------------------- | ----------------- | ----------------------------------- |
-| `STARTING`  | `STARTING` | N/A (no endpoint yet) | N/A               | Park connections, no wake trigger   |
-| `READY`     | `ACTIVE`   | `true`                | `1`                | Forward requests (round-robin)      |
-| `BUSY`      | `ACTIVE`   | `true`                | `0`               | Target design — not implemented     |
-| `SLEEPING`  | `SLEEPING` | N/A (no endpoint)     | N/A               | Park connections, fire wake trigger |
-| `ERROR`     | `ERROR`    | N/A (no endpoint)     | N/A               | Return 503                          |
+| RunnerState | ModelState | Endpoint healthy      | Endpoint weight | Proxy behavior                      |
+| ----------- | ---------- | --------------------- | --------------- | ----------------------------------- |
+| `STARTING`  | `STARTING` | N/A (no endpoint yet) | N/A             | Park connections, no wake trigger   |
+| `READY`     | `ACTIVE`   | `true`                | `1`             | Forward requests (round-robin)      |
+| `BUSY`      | `ACTIVE`   | `true`                | `0`             | Target design — not implemented     |
+| `SLEEPING`  | `SLEEPING` | N/A (no endpoint)     | N/A             | Park connections, fire wake trigger |
+| `ERROR`     | `ERROR`    | N/A (no endpoint)     | N/A             | Return 503                          |
 
 The `DRAINING` model state is set explicitly by the control plane before sleep or shutdown — it is not derived from a runner state. During draining, endpoints remain with their current weight but the proxy stops routing new requests; in-flight requests complete normally.
 
@@ -113,7 +113,7 @@ Returns a `HealthStatus` with the current `RunnerState`, an optional human-reada
 The control plane polls this endpoint during deploy and wake operations (`SARDEENZ_HEALTH_CHECK_INTERVAL_SECS`, default 10s) to:
 
 - Detect when a `STARTING` runner becomes `READY`
-- Monitor `BUSY` ↔ `READY` transitions for routing updates *(target design — not implemented)*
+- Monitor `BUSY` ↔ `READY` transitions for routing updates _(target design — not implemented)_
 - Track in-flight request count before stopping a runner
 - Detect `ERROR` states
 

@@ -293,7 +293,9 @@ describe('computeModelSegments — sleeping state', () => {
 
   it('does not mark an ACTIVE model segment as sleeping', () => {
     const device = makeDevice();
-    const segments = computeModelSegments(device, [makeModel({ state: ModelLifecycleState.ACTIVE })]);
+    const segments = computeModelSegments(device, [
+      makeModel({ state: ModelLifecycleState.ACTIVE }),
+    ]);
     const modelSeg = segments.find((s) => s.kind === 'model');
     expect(modelSeg?.sleeping).toBe(false);
   });
@@ -345,7 +347,10 @@ describe('colorTokenForModel — stability', () => {
 // Tensor-parallel even-split estimate (adapter-level arithmetic, WorkerGpuSection.tsx)
 // ---------------------------------------------------------------------------
 describe('tensor-parallel even-split estimate', () => {
-  function splitAcrossDevices(memoryUsedBytes: number | undefined, deviceIndices: number[] | undefined) {
+  function splitAcrossDevices(
+    memoryUsedBytes: number | undefined,
+    deviceIndices: number[] | undefined,
+  ) {
     const deviceCount = Math.max(1, deviceIndices?.length ?? 1);
     return {
       bytes: (memoryUsedBytes ?? 0) / deviceCount,

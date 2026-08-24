@@ -34,7 +34,8 @@ export function ModelChatCard({ modelName, model, onClose }: ModelChatCardProps)
 
   const isTargetWaking =
     streaming &&
-    (model?.state === ModelLifecycleState.SLEEPING || model?.state === ModelLifecycleState.STARTING) &&
+    (model?.state === ModelLifecycleState.SLEEPING ||
+      model?.state === ModelLifecycleState.STARTING) &&
     !(messages[messages.length - 1]?.content ?? '');
 
   const handleSend = () => {
@@ -68,7 +69,9 @@ export function ModelChatCard({ modelName, model, onClose }: ModelChatCardProps)
             {messages.map((message, index) => (
               <FlexItem
                 key={index}
-                alignSelf={{ default: message.role === 'user' ? 'alignSelfFlexEnd' : 'alignSelfFlexStart' }}
+                alignSelf={{
+                  default: message.role === 'user' ? 'alignSelfFlexEnd' : 'alignSelfFlexStart',
+                }}
                 style={{ maxWidth: '85%' }}
               >
                 <Card isCompact isPlain={message.role === 'assistant'}>
@@ -88,7 +91,11 @@ export function ModelChatCard({ modelName, model, onClose }: ModelChatCardProps)
           </Flex>
         )}
         {isTargetWaking && (
-          <Flex alignItems={{ default: 'alignItemsCenter' }} gap={{ default: 'gapSm' }} className="pf-v6-u-mt-sm">
+          <Flex
+            alignItems={{ default: 'alignItemsCenter' }}
+            gap={{ default: 'gapSm' }}
+            className="pf-v6-u-mt-sm"
+          >
             <FlexItem>
               <Spinner size="sm" />
             </FlexItem>

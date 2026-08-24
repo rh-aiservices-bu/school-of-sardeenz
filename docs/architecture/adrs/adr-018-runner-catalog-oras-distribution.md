@@ -3,8 +3,8 @@
 ## Status
 
 Accepted. Extends [ADR-015](adr-015-sif-runtime-packaging.md) (SIF runtime delivery) and
-[ADR-017](adr-017-runner-image-pipeline.md) (build/supply chain) with a *distribution* and
-*provisioning-UX* layer. Amends ADR-017's "the librarian is the only module-store writer" premise
+[ADR-017](adr-017-runner-image-pipeline.md) (build/supply chain) with a _distribution_ and
+_provisioning-UX_ layer. Amends ADR-017's "the librarian is the only module-store writer" premise
 (see Consequences).
 
 ## Context
@@ -18,7 +18,7 @@ platform meant to be adopted, "clone the repo and rebuild every SIF" is too high
 Two facts make a lighter path possible:
 
 - **A finished SIF is a single squashfs file** — it can be stored as an **OCI artifact** and pulled
-  with `apptainer pull oras://…`. Unlike an OCI *image* → SIF *conversion* (hardlink-heavy unpack,
+  with `apptainer pull oras://…`. Unlike an OCI _image_ → SIF _conversion_ (hardlink-heavy unpack,
   node-local scratch, GBs of RAM — ADR-017), an ORAS **pull is a plain download** of the already-
   built file: no unpack, no scratch, no privilege.
 - **Sardeenz must not assume Kubernetes.** It can run as independent containers on VMs via Podman.
@@ -44,7 +44,7 @@ building your own.**
    (`CATALOG_*` events). Uninstall deletes the SIF, guarded against in-use modules.
 4. **The importer is pluggable** (`SifImporter`): `OrasImporter` (real; `apptainer pull` + verify)
    and `StubImporter` (dev/CI; writes a placeholder, no apptainer). This keeps the control plane
-   runtime-agnostic (Kubernetes PVC *or* Podman/VM bind mount) and locally testable.
+   runtime-agnostic (Kubernetes PVC _or_ Podman/VM bind mount) and locally testable.
 
 ## Consequences
 

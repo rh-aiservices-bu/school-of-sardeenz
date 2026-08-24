@@ -196,7 +196,10 @@ describe('MemoryBudgetService — vanished worker clears reservations', () => {
 
     // Worker's memory key vanishes from Redis (no longer scanned).
     scan.mockResolvedValue(['0', []]);
-    pipeline.mockReturnValue({ get: vi.fn().mockReturnThis(), exec: vi.fn().mockResolvedValue([]) });
+    pipeline.mockReturnValue({
+      get: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue([]),
+    });
 
     await service.refreshAll();
 
@@ -565,7 +568,12 @@ describe('MemoryBudgetService — parseReport validation', () => {
     const get = vi.fn().mockResolvedValue(
       JSON.stringify({
         devices: [
-          { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: -1, memoryTotalBytes: 16_000_000_000 },
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: -1,
+            memoryTotalBytes: 16_000_000_000,
+          },
         ],
       }),
     );
@@ -583,7 +591,12 @@ describe('MemoryBudgetService — parseReport validation', () => {
     const get = vi.fn().mockResolvedValue(
       JSON.stringify({
         devices: [
-          { deviceIndex: 0, deviceType: 'BOGUS', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+          {
+            deviceIndex: 0,
+            deviceType: 'BOGUS',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
         ],
       }),
     );
@@ -600,7 +613,14 @@ describe('MemoryBudgetService — parseReport validation', () => {
     const workerId = 'w1';
     const reportedAt = '2020-01-01T00:00:00.000Z';
     const report = workerMemoryReport(
-      [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+      [
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
+      ],
       reportedAt,
     );
     const get = vi.fn().mockResolvedValue(report);

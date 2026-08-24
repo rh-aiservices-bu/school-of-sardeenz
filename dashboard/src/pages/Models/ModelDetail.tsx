@@ -129,7 +129,8 @@ export function ModelDetail() {
     if (!modelName) return;
     setMutationError(null);
     addInstance.mutate(modelName, {
-      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Add instance failed'),
+      onError: (err) =>
+        setMutationError(err instanceof Error ? err.message : 'Add instance failed'),
     });
   };
 

@@ -19,15 +19,15 @@ Control-plane state stays correct under failure: crash on delete, eviction tombs
 
 ## Verification status
 
-| Gate | Result |
-| ---- | ------ |
-| `tsc --build` (TS + Rust) | PASS |
-| ESLint | PASS |
-| `cargo clippy --all-targets -- -D warnings` | PASS |
-| `make lint-specs` (Redocly) | PASS (5 pre-existing warnings) |
-| Vitest unit tests | 274/274 PASS (24 files) |
-| pytest (vLLM shim) | 17/17 PASS |
-| Vitest (dev-worker) | 129/129 PASS |
+| Gate                                        | Result                         |
+| ------------------------------------------- | ------------------------------ |
+| `tsc --build` (TS + Rust)                   | PASS                           |
+| ESLint                                      | PASS                           |
+| `cargo clippy --all-targets -- -D warnings` | PASS                           |
+| `make lint-specs` (Redocly)                 | PASS (5 pre-existing warnings) |
+| Vitest unit tests                           | 274/274 PASS (24 files)        |
+| pytest (vLLM shim)                          | 17/17 PASS                     |
+| Vitest (dev-worker)                         | 129/129 PASS                   |
 
 ### Needs host run
 

@@ -300,7 +300,8 @@ async fn test_both_replicas_recover_after_open() {
     }
 
     let client = reqwest::Client::new();
-    let payload = serde_json::json!({ "model": model, "messages": [{"role":"user","content":"Hi"}] });
+    let payload =
+        serde_json::json!({ "model": model, "messages": [{"role":"user","content":"Hi"}] });
 
     for _ in 0..(THRESHOLD * 2 + 2) {
         let _ = client

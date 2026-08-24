@@ -13,31 +13,31 @@ prints the spawn timings). The EFS column is the spike's floor.
 `apptainer exec` of the vLLM SIF off the shared RWX volume. "Cold" = first exec on a node (SIF not
 yet paged in); "warm" = repeat exec.
 
-| Metric | EFS (NFSv4) — spike floor | CephFS/ODF — target | Notes |
-|---|---|---|---|
-| Cold `apptainer exec` (trivial cmd) | _TBD (GPU gate deferred in spike)_ | _record_ | squashfuse page-in |
-| Warm `apptainer exec` (trivial cmd) | _TBD_ | _record_ | cached |
-| Cold engine cold-start to READY (real weights) | _TBD_ | _record_ | Gate 9c substrate |
-| Image-pull baseline (for comparison) | n/a | _record_ | the thing SIF-exec replaces |
+| Metric                                         | EFS (NFSv4) — spike floor          | CephFS/ODF — target | Notes                       |
+| ---------------------------------------------- | ---------------------------------- | ------------------- | --------------------------- |
+| Cold `apptainer exec` (trivial cmd)            | _TBD (GPU gate deferred in spike)_ | _record_            | squashfuse page-in          |
+| Warm `apptainer exec` (trivial cmd)            | _TBD_                              | _record_            | cached                      |
+| Cold engine cold-start to READY (real weights) | _TBD_                              | _record_            | Gate 9c substrate           |
+| Image-pull baseline (for comparison)           | n/a                                | _record_            | the thing SIF-exec replaces |
 
 ## kvcached co-tenancy (Gate 9)
 
-| Check | EFS | CephFS/ODF |
-|---|---|---|
-| Two runners share one GPU via kvcached (elastic, not static split) | _TBD_ | _record_ |
-| Concurrent cold-start OOM avoided by serialization (Gate 9c) | passed (spike, host-RAM) | _confirm_ |
+| Check                                                              | EFS                      | CephFS/ODF |
+| ------------------------------------------------------------------ | ------------------------ | ---------- |
+| Two runners share one GPU via kvcached (elastic, not static split) | _TBD_                    | _record_   |
+| Concurrent cold-start OOM avoided by serialization (Gate 9c)       | passed (spike, host-RAM) | _confirm_  |
 
 ## Backend behaviour re-check (spike §12)
 
 The in-container-userns path is FS-agnostic; confirm it is unchanged on CephFS:
 
-| Property | EFS (spike) | CephFS/ODF |
-|---|---|---|
-| Unprivileged userns works | yes | _confirm_ |
-| `hostUsers: false` unusable (no idmapped mounts) | yes | _confirm (expected yes on current RHCOS)_ |
-| OCI→SIF unpack needs node-local scratch | yes (`unpriv.link … too many links`) | _confirm_ |
-| squashfuse runs the SIF in place (no extraction) | yes | _confirm_ |
-| World-readable SIF readable under arbitrary UID (SELinux/labels) | yes | _confirm — CephFS handles labels more gracefully than NFS/EFS_ |
+| Property                                                         | EFS (spike)                          | CephFS/ODF                                                     |
+| ---------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------- |
+| Unprivileged userns works                                        | yes                                  | _confirm_                                                      |
+| `hostUsers: false` unusable (no idmapped mounts)                 | yes                                  | _confirm (expected yes on current RHCOS)_                      |
+| OCI→SIF unpack needs node-local scratch                          | yes (`unpriv.link … too many links`) | _confirm_                                                      |
+| squashfuse runs the SIF in place (no extraction)                 | yes                                  | _confirm_                                                      |
+| World-readable SIF readable under arbitrary UID (SELinux/labels) | yes                                  | _confirm — CephFS handles labels more gracefully than NFS/EFS_ |
 
 ## How to record
 

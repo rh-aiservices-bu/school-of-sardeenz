@@ -1,4 +1,11 @@
-import { Card, CardBody, ClipboardCopy, ClipboardCopyVariant, Flex, FlexItem } from '@patternfly/react-core';
+import {
+  Card,
+  CardBody,
+  ClipboardCopy,
+  ClipboardCopyVariant,
+  Flex,
+  FlexItem,
+} from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { useConfig } from '../hooks/useConfig';
 import { openaiBaseUrl } from '../utils/inference';

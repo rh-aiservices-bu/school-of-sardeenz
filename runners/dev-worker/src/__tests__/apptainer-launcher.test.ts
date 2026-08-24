@@ -178,9 +178,9 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     await expect(
       launcher.buildExecPlan(makeSpec({ runtimeModule: '../../etc/evil' })),
     ).rejects.toThrow(/Invalid runtime module/);
-    await expect(
-      launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm/0.21' })),
-    ).rejects.toThrow(/Invalid runtime module/);
+    await expect(launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm/0.21' }))).rejects.toThrow(
+      /Invalid runtime module/,
+    );
   });
 
   it('appends engineArgs verbatim after --served-model-name, in order (#126)', async () => {
@@ -209,9 +209,9 @@ describe('ApptainerLauncher.buildExecPlan', () => {
 
   it('rejects a reserved flag passed as --key=value (key normalization)', async () => {
     const { launcher } = makeLauncher();
-    await expect(
-      launcher.buildExecPlan(makeSpec({ engineArgs: ['--port=9999'] })),
-    ).rejects.toThrow(/--port/);
+    await expect(launcher.buildExecPlan(makeSpec({ engineArgs: ['--port=9999'] }))).rejects.toThrow(
+      /--port/,
+    );
   });
 
   it('rejects an unambiguous prefix abbreviation of a reserved flag (argparse allow_abbrev, #126 review)', async () => {
@@ -229,9 +229,7 @@ describe('ApptainerLauncher.buildExecPlan', () => {
 
   it('does not reject a flag that merely has a reserved flag as its own prefix (#126 review)', async () => {
     const { launcher } = makeLauncher();
-    const plan = await launcher.buildExecPlan(
-      makeSpec({ engineArgs: ['--model-impl=vllm'] }),
-    );
+    const plan = await launcher.buildExecPlan(makeSpec({ engineArgs: ['--model-impl=vllm'] }));
     const ddIdx = plan.args.indexOf('--');
     expect(plan.args.slice(ddIdx + 1)).toEqual([
       '--served-model-name',
@@ -270,9 +268,9 @@ describe('ApptainerLauncher.buildExecPlan modelPath containment', () => {
 
   it('rejects a relative modelPath', async () => {
     const { launcher } = makeLauncher();
-    await expect(
-      launcher.buildExecPlan(makeSpec({ modelPath: 'weights/llama' })),
-    ).rejects.toThrow(/absolute path/);
+    await expect(launcher.buildExecPlan(makeSpec({ modelPath: 'weights/llama' }))).rejects.toThrow(
+      /absolute path/,
+    );
   });
 
   it('rejects a modelPath that traverses out of the weights root', async () => {
@@ -304,21 +302,18 @@ describe('ApptainerLauncher.buildExecPlan modelPath containment', () => {
   });
 
   it('rejects a modelPath resolved via a symlink that escapes the weights root', async () => {
-    const { launcher } = makeLauncher(
-      {},
-      { realpath: () => Promise.resolve('/etc/passwd') },
+    const { launcher } = makeLauncher({}, { realpath: () => Promise.resolve('/etc/passwd') });
+    await expect(launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' }))).rejects.toThrow(
+      /symlink/,
     );
-    await expect(
-      launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' })),
-    ).rejects.toThrow(/symlink/);
   });
 
   it('rejects a modelPath that does not exist on disk', async () => {
     const err = Object.assign(new Error('no such file'), { code: 'ENOENT' });
     const { launcher } = makeLauncher({}, { realpath: () => Promise.reject(err) });
-    await expect(
-      launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' })),
-    ).rejects.toThrow(/does not exist/);
+    await expect(launcher.buildExecPlan(makeSpec({ modelPath: '/weights/llama' }))).rejects.toThrow(
+      /does not exist/,
+    );
   });
 });
 

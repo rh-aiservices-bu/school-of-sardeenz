@@ -72,7 +72,11 @@ const ALLOW_NON_TEST_DB = process.env['SARDEENZ_ALLOW_NON_TEST_DB'] === '1';
 const CREATE_DB_LOCK_KEY = 0x5a2d_7e57; // "SARD-TEST"
 
 async function testDatabaseReachable(): Promise<boolean> {
-  const probe = new pg.Pool({ connectionString: DATABASE_URL, max: 1, connectionTimeoutMillis: 2000 });
+  const probe = new pg.Pool({
+    connectionString: DATABASE_URL,
+    max: 1,
+    connectionTimeoutMillis: 2000,
+  });
   try {
     await probe.query('SELECT 1');
     return true;

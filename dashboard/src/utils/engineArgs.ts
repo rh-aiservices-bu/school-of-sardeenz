@@ -15,11 +15,7 @@ export type EngineArgsParseResult =
   | { ok: false; kind: 'reserved'; line: number; flag: string; abbreviates?: string };
 
 function stripOneQuoteLayer(v: string): string {
-  if (
-    v.length >= 2 &&
-    (v[0] === '"' || v[0] === "'") &&
-    v[v.length - 1] === v[0]
-  ) {
+  if (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v[v.length - 1] === v[0]) {
     return v.slice(1, -1);
   }
   return v;

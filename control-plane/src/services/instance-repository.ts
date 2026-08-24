@@ -48,12 +48,7 @@ export class InstanceRepository {
       `INSERT INTO instances (instance_id, model_name, worker_id, device_indices)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [
-        params.instanceId,
-        params.modelName,
-        params.workerId ?? null,
-        params.deviceIndices ?? null,
-      ],
+      [params.instanceId, params.modelName, params.workerId ?? null, params.deviceIndices ?? null],
     );
     return rowToRecord(result.rows[0]);
   }
@@ -77,5 +72,4 @@ export class InstanceRepository {
     ]);
     return (result.rowCount ?? 0) > 0;
   }
-
 }

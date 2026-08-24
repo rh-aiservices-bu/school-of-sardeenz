@@ -203,8 +203,7 @@ async fn test_parking_rewakes_after_concurrent_mass_cancel() {
     }
 
     assert_eq!(
-        final_wake_count,
-        2,
+        final_wake_count, 2,
         "after cancelling the entire parked herd the pending_wakes entry must be cleared so a \
          new request re-fires the wake (got {final_wake_count})"
     );
