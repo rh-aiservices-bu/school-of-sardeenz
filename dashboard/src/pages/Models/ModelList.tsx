@@ -203,6 +203,8 @@ export function ModelList() {
       let cmp = 0;
       switch (sortField) {
         case 'modelName':
+          // Sorts on the unique modelName (routing key), not displayName — displayName is
+          // presentation-only and isn't guaranteed unique or present.
           cmp = a.modelName.localeCompare(b.modelName);
           break;
         case 'state':
@@ -647,8 +649,18 @@ export function ModelList() {
                     )}
                     <Td dataLabel={t('list.table.modelName')}>
                       <Link to={`/models/${encodeURIComponent(model.modelName)}`}>
-                        {model.modelName}
+                        {model.displayName ?? model.modelName}
                       </Link>
+                      {model.displayName && (
+                        <div
+                          style={{
+                            fontSize: 'var(--pf-t--global--font--size--xs)',
+                            color: 'var(--pf-t--global--text--color--subtle)',
+                          }}
+                        >
+                          {model.modelName}
+                        </div>
+                      )}
                     </Td>
                     <Td dataLabel={t('list.table.state')}>
                       <StateLabel state={model.state} />

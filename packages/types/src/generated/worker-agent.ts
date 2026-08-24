@@ -167,8 +167,16 @@ export type components = {
          *     placement decision made by the control plane.
          */
         StartRunnerRequest: {
-            /** @description Name of the model to serve. */
+            /** @description Configuration name of the model to serve (routing key). */
             modelName: string;
+            /**
+             * @description Optional engine-reported model identity (ADR-020). When set and
+             *     different from modelName, the launcher emits --served-model-name
+             *     with both names (servedModelName first, then modelName). When
+             *     absent, the launcher uses modelName alone (previous behavior).
+             *     The stub launcher treats it as informational, like modelPath.
+             */
+            servedModelName?: string;
             /**
              * @description Runner type identifier (e.g., "vllm", "triton"). Determines which
              *     engine binary to launch.

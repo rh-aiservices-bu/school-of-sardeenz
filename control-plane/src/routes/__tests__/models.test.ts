@@ -5,6 +5,7 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import { registerModelRoutes } from '../models.js';
 import type { RouteDeps } from '../deps.js';
 import type { InstanceState } from '../../services/model-lifecycle.js';
+import { WorkerHttpError } from '../../clients/worker.js';
 
 const INSTANCE_ID = 'inst-000000000001';
 
@@ -33,15 +34,21 @@ interface Overrides {
   getInstance?: ReturnType<typeof vi.fn>;
   getInstancesForModel?: ReturnType<typeof vi.fn>;
   transition?: ReturnType<typeof vi.fn>;
+  getWorker?: ReturnType<typeof vi.fn>;
+  stopRunner?: ReturnType<typeof vi.fn>;
 }
 
 function buildApp(over: Overrides = {}): {
   app: FastifyInstance;
   logInfo: ReturnType<typeof vi.fn>;
   logError: ReturnType<typeof vi.fn>;
+  logWarn: ReturnType<typeof vi.fn>;
+  stopRunner: ReturnType<typeof vi.fn>;
+  createWorkerClient: ReturnType<typeof vi.fn>;
 } {
   const logInfo = vi.fn();
   const logError = vi.fn();
+  const logWarn = vi.fn();
 
   const getInstance = over.getInstance ?? vi.fn(() => Promise.resolve(ACTIVE_STATE));
   const getInstancesForModel =
@@ -50,6 +57,13 @@ function buildApp(over: Overrides = {}): {
       const state = (await getInstance()) as InstanceState | null;
       return state ? [state] : [];
     });
+
+  // #157: teardownInstance now reaps the runner process via workerPool.getWorker +
+  // createWorkerClient(...).stopRunner(). Default mirrors ACTIVE_STATE (workerId 'worker-1',
+  // runnerId 'runner-1') so every pre-existing teardown test still exercises (and succeeds
+  // through) the new reap step without having to opt in.
+  const stopRunner = over.stopRunner ?? vi.fn(() => Promise.resolve());
+  const createWorkerClient = vi.fn(() => ({ stopRunner }));
 
   const deps = {
     leaderElection: { isLeader: true },
@@ -79,17 +93,24 @@ function buildApp(over: Overrides = {}): {
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
     },
+    workerPool: {
+      getWorker:
+        over.getWorker ??
+        vi.fn(() => ({ workerId: 'worker-1', managementUrl: 'http://worker-1:9000' })),
+    },
     createRunnerClient: vi.fn(() => ({})),
+    createWorkerClient,
   } as unknown as RouteDeps;
 
   const app = Fastify({ logger: false });
   app.log.info = logInfo;
   app.log.error = logError;
+  app.log.warn = logWarn;
   app.setErrorHandler((error: Error & { statusCode?: number; code?: string }, _req, reply) => {
     return reply.code(error.statusCode ?? 500).send({ error: error.message, code: error.code });
   });
   registerModelRoutes(app, deps);
-  return { app, logInfo, logError };
+  return { app, logInfo, logError, logWarn, stopRunner, createWorkerClient };
 }
 
 interface DeployOverrides {
@@ -584,6 +605,156 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
   });
 });
 
+describe('teardownInstance reaps the runner process (#157)', () => {
+  it('DELETE /api/v1/models/:modelName calls stopRunner with the instance runnerId, then still cleans up state', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const deleteInstance = vi.fn(() => Promise.resolve(true));
+    const { app, stopRunner, createWorkerClient } = buildApp({ removeInstance, deleteInstance });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // ACTIVE_STATE carries workerId 'worker-1' / runnerId 'runner-1' — resolved via
+    // workerPool.getWorker('worker-1') to the worker's managementUrl, then stopRunner is called
+    // with the instance's runnerId.
+    expect(createWorkerClient).toHaveBeenCalledWith('http://worker-1:9000');
+    expect(stopRunner).toHaveBeenCalledWith('runner-1');
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(deleteInstance).toHaveBeenCalledWith(INSTANCE_ID);
+  });
+
+  it('POST /api/v1/models/:modelName/stop calls stopRunner with the instance runnerId (shared teardownInstance path)', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app, stopRunner } = buildApp({ removeInstance });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).toHaveBeenCalledWith('runner-1');
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+  });
+
+  it('tolerates a 404 from stopRunner (runner already exited and reaped) — teardown still succeeds', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const stopRunner = vi.fn(() =>
+      Promise.reject(
+        new WorkerHttpError('Worker DELETE /runners/runner-1 returned 404: gone', 404),
+      ),
+    );
+    const { app, logError } = buildApp({ removeInstance, stopRunner });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).toHaveBeenCalledWith('runner-1');
+    // Not treated as a teardown failure — cleanup proceeds and nothing is logged as an error.
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('does NOT tolerate a plain Error whose message merely contains "returned 404" (round-3 review, Low 1: typed status check, not substring match)', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    // A genuine failure (e.g. a 500 whose body happens to echo the string "returned 404") must
+    // not be misclassified as the tolerated 404 case just because the message contains that text.
+    const stopRunner = vi.fn(() =>
+      Promise.reject(
+        new Error('Worker DELETE /runners/runner-1 returned 500: body says returned 404'),
+      ),
+    );
+    const { app, logError } = buildApp({ removeInstance, stopRunner });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).toHaveBeenCalledWith('runner-1');
+    // Falls through to the ordinary failure contract — not the 404 tolerance path.
+    expect(removeInstance).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      { err: expect.any(Error) as Error, modelName: 'm1', instanceId: INSTANCE_ID },
+      'Delete: instance teardown failed',
+    );
+  });
+
+  it('propagates a non-404 stopRunner failure through the existing teardown-failure contract', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const stopRunner = vi.fn(() => Promise.reject(new Error('connect ECONNREFUSED')));
+    const { app, logError } = buildApp({ removeInstance, stopRunner });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).toHaveBeenCalledWith('runner-1');
+    // Same failure contract as any other teardown error: logged, Redis record retained. Not
+    // stranded forever — ReconciliationService.reapOrphanedInstances best-effort re-attempts the
+    // reap on a later tick before it eventually drops the orphaned record (round-3 review).
+    expect(logError).toHaveBeenCalledWith(
+      { err: expect.any(Error) as Error, modelName: 'm1', instanceId: INSTANCE_ID },
+      'Delete: instance teardown failed',
+    );
+    expect(removeInstance).not.toHaveBeenCalled();
+  });
+
+  it('skips the reap step (and never constructs a worker client) when the instance state has no runnerId', async () => {
+    const noRunner = { ...ACTIVE_STATE, runnerId: null };
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app, stopRunner, createWorkerClient, logWarn } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(noRunner)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([noRunner])),
+      removeInstance,
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(createWorkerClient).not.toHaveBeenCalled();
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(logWarn).toHaveBeenCalledWith(
+      { modelName: 'm1', instanceId: INSTANCE_ID },
+      expect.stringContaining('cannot reap runner process; no runnerId') as string,
+    );
+  });
+
+  it('warns and continues when the worker is not found in the pool', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app, stopRunner, logWarn } = buildApp({
+      getWorker: vi.fn(() => null),
+      removeInstance,
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(logWarn).toHaveBeenCalledWith(
+      { modelName: 'm1', instanceId: INSTANCE_ID, workerId: 'worker-1' },
+      expect.stringContaining('cannot reap runner process; worker unknown') as string,
+    );
+  });
+});
+
 describe('POST /api/v1/models/:modelName/stop', () => {
   it('stop on an ACTIVE model returns 202 and keeps the record', async () => {
     const deleteModel = vi.fn(() => Promise.resolve());
@@ -964,6 +1135,241 @@ describe('engineArgs (#126)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json<{ engineArgs?: string[] }>().engineArgs).toEqual(['--foo=1']);
+  });
+});
+
+describe('servedModelName (ADR-020, #154)', () => {
+  it('POST /api/v1/models rejects a servedModelName with spaces/invalid characters with 400', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, servedModelName: 'invalid name!' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('servedModelName');
+  });
+
+  it('POST /api/v1/models accepts a valid servedModelName and forwards it to the repository and deployOrchestration', async () => {
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve({
+        id: 'rec-1',
+        name: params.name,
+        runnerType: params.runnerType,
+        modelPath: params.modelPath,
+        requiredMemory: (params.requiredMemory as number | undefined) ?? null,
+        deviceType: (params.deviceType as string | undefined) ?? null,
+        tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
+        engineConfig: (params.engineConfig as Record<string, unknown> | undefined) ?? null,
+        engineArgs: (params.engineArgs as string[] | undefined) ?? null,
+        runtimeModule: (params.runtimeModule as string | undefined) ?? null,
+        servedModelName: (params.servedModelName as string | undefined) ?? null,
+        pinned: (params.pinned as boolean | undefined) ?? false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    const deployModel = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      createModelRecord,
+      place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      deployModel,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, servedModelName: 'meta-llama/Llama-3.1-8B-Instruct' },
+    });
+
+    // Same 202 the equivalent request without servedModelName would get (engineArgs test above).
+    expect(res.statusCode).toBe(202);
+    expect(createModelRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ servedModelName: 'meta-llama/Llama-3.1-8B-Instruct' }),
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(deployModel).toHaveBeenCalledWith(
+      expect.objectContaining({ servedModelName: 'meta-llama/Llama-3.1-8B-Instruct' }),
+    );
+  });
+
+  it('GET /api/v1/models/:modelName round-trips a stored servedModelName value', async () => {
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: 'CUDA',
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: 'vllm-0.21',
+          servedModelName: 'meta-llama/Llama-3.1-8B-Instruct',
+          pinned: false,
+        }),
+      ),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ servedModelName?: string }>().servedModelName).toBe(
+      'meta-llama/Llama-3.1-8B-Instruct',
+    );
+  });
+});
+
+describe('displayName (presentation-only label)', () => {
+  it('POST /api/v1/models rejects a whitespace-only displayName with 400', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, displayName: '   ' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('displayName');
+  });
+
+  it('POST /api/v1/models rejects a displayName longer than 200 characters with 400', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, displayName: 'a'.repeat(201) },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('displayName');
+  });
+
+  it('POST /api/v1/models rejects a non-string displayName with 400', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, displayName: 42 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('displayName');
+  });
+
+  it('POST /api/v1/models trims displayName, forwards the trimmed value to the repository, and never forwards it to deployOrchestration (presentation-only)', async () => {
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve({
+        id: 'rec-1',
+        name: params.name,
+        runnerType: params.runnerType,
+        modelPath: params.modelPath,
+        requiredMemory: (params.requiredMemory as number | undefined) ?? null,
+        deviceType: (params.deviceType as string | undefined) ?? null,
+        tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
+        engineConfig: (params.engineConfig as Record<string, unknown> | undefined) ?? null,
+        engineArgs: (params.engineArgs as string[] | undefined) ?? null,
+        runtimeModule: (params.runtimeModule as string | undefined) ?? null,
+        servedModelName: (params.servedModelName as string | undefined) ?? null,
+        displayName: (params.displayName as string | undefined) ?? null,
+        pinned: (params.pinned as boolean | undefined) ?? false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    const deployModel = vi.fn<(params: Record<string, unknown>) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    const { app } = buildDeployApp({
+      createModelRecord,
+      place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      deployModel,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, displayName: '  Qwen test 1  ' },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(createModelRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: 'Qwen test 1' }),
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(deployModel).toHaveBeenCalledOnce();
+    const forwardedParams = deployModel.mock.calls[0][0];
+    expect('displayName' in forwardedParams).toBe(false);
+    expect(forwardedParams.displayName).toBeUndefined();
+  });
+
+  it('GET /api/v1/models includes displayName in the list view when the record has one', async () => {
+    const { app } = buildDeployApp({
+      findAll: vi.fn(() =>
+        Promise.resolve([
+          {
+            name: 'm1',
+            runnerType: 'vllm',
+            modelPath: '/weights/m1',
+            requiredMemory: 8e9,
+            deviceType: 'CUDA',
+            tensorParallel: 1,
+            engineConfig: null,
+            engineArgs: null,
+            runtimeModule: null,
+            servedModelName: null,
+            displayName: 'Qwen test 1',
+            pinned: false,
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+          },
+        ]),
+      ),
+      getAllInstances: vi.fn(() => Promise.resolve([])),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ models: Array<{ modelName: string; displayName?: string }> }>();
+    expect(body.models).toEqual([
+      expect.objectContaining({ modelName: 'm1', displayName: 'Qwen test 1' }),
+    ]);
+  });
+
+  it('GET /api/v1/models/:modelName round-trips a stored displayName value', async () => {
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: 'CUDA',
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          displayName: 'Qwen test 1',
+          pinned: false,
+        }),
+      ),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ displayName?: string }>().displayName).toBe('Qwen test 1');
   });
 });
 

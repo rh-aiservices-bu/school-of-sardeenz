@@ -45,7 +45,12 @@ const GIB = 1024 ** 3;
 // filename segment: /modules/<runtimeModule>.sif).
 const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
+// Shared with the configuration-name alphabet (ADR-020): one already-safe alphabet is simpler
+// to reason about than two, even though servedModelName only ever lands in launcher argv.
+const SERVED_MODEL_NAME_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
+
 interface FormState {
+  displayName: string;
   modelName: string;
   runnerType: string;
   modelPath: string;
@@ -55,9 +60,11 @@ interface FormState {
   runtimeModule: string;
   pinned: boolean;
   engineArgs: string;
+  servedModelName: string;
 }
 
 interface FormErrors {
+  displayName?: string;
   modelName?: string;
   runnerType?: string;
   modelPath?: string;
@@ -65,10 +72,16 @@ interface FormErrors {
   tensorParallel?: string;
   runtimeModule?: string;
   engineArgs?: string;
+  servedModelName?: string;
 }
 
 function validate(form: FormState, t: TFunction<'models'>): FormErrors {
   const errors: FormErrors = {};
+
+  const dn = form.displayName.trim();
+  if (dn && dn.length > 200) {
+    errors.displayName = t('deploy.validation.displayNameLength');
+  }
 
   if (!form.modelName.trim()) {
     errors.modelName = t('deploy.validation.modelNameRequired');
@@ -98,6 +111,10 @@ function validate(form: FormState, t: TFunction<'models'>): FormErrors {
     errors.runtimeModule = t('deploy.validation.runtimeModuleRequired');
   } else if (!RUNTIME_MODULE_PATTERN.test(form.runtimeModule.trim())) {
     errors.runtimeModule = t('deploy.validation.runtimeModulePattern');
+  }
+
+  if (form.servedModelName.trim() && !SERVED_MODEL_NAME_PATTERN.test(form.servedModelName.trim())) {
+    errors.servedModelName = t('deploy.validation.servedModelNamePattern');
   }
 
   if (form.engineArgs.trim()) {
@@ -156,6 +173,7 @@ export function ModelDeploy() {
   const { capabilities } = useWorkerCapabilities();
 
   const [form, setForm] = useState<FormState>({
+    displayName: '',
     modelName: '',
     runnerType: 'vllm',
     modelPath: '',
@@ -165,6 +183,7 @@ export function ModelDeploy() {
     runtimeModule: '',
     pinned: false,
     engineArgs: '',
+    servedModelName: '',
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -251,12 +270,20 @@ export function ModelDeploy() {
       pinned: form.pinned,
     };
 
+    if (form.displayName.trim()) {
+      body.displayName = form.displayName.trim();
+    }
+
     if (form.deviceType) {
       body.deviceType = form.deviceType;
     }
 
     if (form.runtimeModule.trim()) {
       body.runtimeModule = form.runtimeModule.trim();
+    }
+
+    if (form.servedModelName.trim()) {
+      body.servedModelName = form.servedModelName.trim();
     }
 
     if (form.engineArgs.trim()) {
@@ -304,6 +331,124 @@ export function ModelDeploy() {
           )}
 
           <Form onSubmit={handleSubmit} noValidate>
+            {/* General fields first, then the runner section (runner type + runner-specific
+                fields) below (lead's explicit ordering for #154 increment 2). */}
+            <FormGroup label={t('deploy.fields.displayName')} fieldId="display-name">
+              <TextInput
+                id="display-name"
+                value={form.displayName}
+                onChange={(_ev, val) => set('displayName', val)}
+                aria-invalid={submitted && !!errors.displayName}
+                aria-describedby="display-name-helper"
+                placeholder="Qwen test 1"
+              />
+              <FieldHelper
+                hint={t('deploy.hints.displayName')}
+                error={errors.displayName}
+                showError={submitted}
+                fieldId="display-name"
+              />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.modelName')} isRequired fieldId="model-name">
+              <TextInput
+                id="model-name"
+                value={form.modelName}
+                onChange={(_ev, val) => set('modelName', val)}
+                isRequired
+                aria-invalid={submitted && !!errors.modelName}
+                aria-describedby="model-name-helper"
+                placeholder="meta-llama/Llama-3.1-8B-Instruct"
+              />
+              <FieldHelper
+                hint={t('deploy.hints.modelName')}
+                error={errors.modelName}
+                showError={submitted}
+                fieldId="model-name"
+              />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.modelPath')} isRequired fieldId="model-path">
+              <InputGroup>
+                <InputGroupItem isFill>
+                  <TextInput
+                    id="model-path"
+                    value={form.modelPath}
+                    onChange={(_ev, val) => set('modelPath', val)}
+                    isRequired
+                    aria-invalid={submitted && !!errors.modelPath}
+                    aria-describedby="model-path-helper"
+                    placeholder="/models/meta-llama/Llama-3.1-8B-Instruct"
+                  />
+                </InputGroupItem>
+                <InputGroupItem>
+                  <Button variant="control" onClick={() => setBrowseOpen(true)}>
+                    {t('deploy.browse.button')}
+                  </Button>
+                </InputGroupItem>
+              </InputGroup>
+              <FieldHelper
+                hint={t('deploy.hints.modelPath')}
+                error={errors.modelPath}
+                showError={submitted}
+                fieldId="model-path"
+              />
+            </FormGroup>
+
+            <FormGroup
+              label={t('deploy.fields.requiredMemory')}
+              isRequired
+              fieldId="required-memory"
+            >
+              <TextInput
+                id="required-memory"
+                type="number"
+                value={form.requiredMemoryGib}
+                onChange={(_ev, val) => set('requiredMemoryGib', val)}
+                isRequired
+                aria-invalid={submitted && !!errors.requiredMemoryGib}
+                aria-describedby="required-memory-helper"
+                placeholder="16"
+                min={0}
+                step={0.5}
+              />
+              <FieldHelper
+                hint={t('deploy.hints.requiredMemory')}
+                error={errors.requiredMemoryGib}
+                showError={submitted}
+                fieldId="required-memory"
+              />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.deviceType')} fieldId="device-type">
+              <FormSelect
+                id="device-type"
+                value={form.deviceType}
+                onChange={(_ev, val) => set('deviceType', val)}
+                aria-label={t('deploy.fields.deviceType')}
+              >
+                {deviceOptions.map((opt) => (
+                  <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
+                ))}
+              </FormSelect>
+              <FieldHelper
+                hint={t('deploy.hints.deviceType')}
+                showError={false}
+                fieldId="device-type"
+              />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.pinned')} fieldId="pinned">
+              <Switch
+                id="pinned"
+                label={t('deploy.fields.pinned')}
+                isChecked={form.pinned}
+                onChange={(_ev, checked) => set('pinned', checked)}
+              />
+              <FieldHelper hint={t('deploy.hints.pinned')} showError={false} fieldId="pinned" />
+            </FormGroup>
+
+            {/* Runner section: runner type, then runner-specific fields. */}
             <FormGroup label={t('deploy.fields.runnerType')} isRequired fieldId="runner-type">
               <FormSelect
                 id="runner-type"
@@ -362,86 +507,20 @@ export function ModelDeploy() {
               />
             </FormGroup>
 
-            <FormGroup label={t('deploy.fields.modelPath')} isRequired fieldId="model-path">
-              <InputGroup>
-                <InputGroupItem isFill>
-                  <TextInput
-                    id="model-path"
-                    value={form.modelPath}
-                    onChange={(_ev, val) => set('modelPath', val)}
-                    isRequired
-                    aria-invalid={submitted && !!errors.modelPath}
-                    aria-describedby="model-path-helper"
-                    placeholder="/models/meta-llama/Llama-3.1-8B-Instruct"
-                  />
-                </InputGroupItem>
-                <InputGroupItem>
-                  <Button variant="control" onClick={() => setBrowseOpen(true)}>
-                    {t('deploy.browse.button')}
-                  </Button>
-                </InputGroupItem>
-              </InputGroup>
-              <FieldHelper
-                hint={t('deploy.hints.modelPath')}
-                error={errors.modelPath}
-                showError={submitted}
-                fieldId="model-path"
-              />
-            </FormGroup>
-
-            <FormGroup label={t('deploy.fields.modelName')} isRequired fieldId="model-name">
+            <FormGroup label={t('deploy.fields.servedModelName')} fieldId="served-model-name">
               <TextInput
-                id="model-name"
-                value={form.modelName}
-                onChange={(_ev, val) => set('modelName', val)}
-                isRequired
-                aria-invalid={submitted && !!errors.modelName}
-                aria-describedby="model-name-helper"
+                id="served-model-name"
+                value={form.servedModelName}
+                onChange={(_ev, val) => set('servedModelName', val)}
+                aria-invalid={submitted && !!errors.servedModelName}
+                aria-describedby="served-model-name-helper"
                 placeholder="meta-llama/Llama-3.1-8B-Instruct"
               />
-              <FieldHelper error={errors.modelName} showError={submitted} fieldId="model-name" />
-            </FormGroup>
-
-            <FormGroup
-              label={t('deploy.fields.requiredMemory')}
-              isRequired
-              fieldId="required-memory"
-            >
-              <TextInput
-                id="required-memory"
-                type="number"
-                value={form.requiredMemoryGib}
-                onChange={(_ev, val) => set('requiredMemoryGib', val)}
-                isRequired
-                aria-invalid={submitted && !!errors.requiredMemoryGib}
-                aria-describedby="required-memory-helper"
-                placeholder="16"
-                min={0}
-                step={0.5}
-              />
               <FieldHelper
-                hint={t('deploy.hints.requiredMemory')}
-                error={errors.requiredMemoryGib}
+                hint={t('deploy.hints.servedModelName')}
+                error={errors.servedModelName}
                 showError={submitted}
-                fieldId="required-memory"
-              />
-            </FormGroup>
-
-            <FormGroup label={t('deploy.fields.deviceType')} fieldId="device-type">
-              <FormSelect
-                id="device-type"
-                value={form.deviceType}
-                onChange={(_ev, val) => set('deviceType', val)}
-                aria-label={t('deploy.fields.deviceType')}
-              >
-                {deviceOptions.map((opt) => (
-                  <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
-                ))}
-              </FormSelect>
-              <FieldHelper
-                hint={t('deploy.hints.deviceType')}
-                showError={false}
-                fieldId="device-type"
+                fieldId="served-model-name"
               />
             </FormGroup>
 
@@ -462,16 +541,6 @@ export function ModelDeploy() {
                 showError={submitted}
                 fieldId="tensor-parallel"
               />
-            </FormGroup>
-
-            <FormGroup label={t('deploy.fields.pinned')} fieldId="pinned">
-              <Switch
-                id="pinned"
-                label={t('deploy.fields.pinned')}
-                isChecked={form.pinned}
-                onChange={(_ev, checked) => set('pinned', checked)}
-              />
-              <FieldHelper hint={t('deploy.hints.pinned')} showError={false} fieldId="pinned" />
             </FormGroup>
 
             <FormGroup label={t('deploy.fields.engineArgs')} fieldId="engine-args">

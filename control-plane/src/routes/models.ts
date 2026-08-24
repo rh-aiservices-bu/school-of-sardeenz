@@ -5,10 +5,11 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
 import { isContainedIn } from '../utils/path-containment.js';
-import { assertValidModelName } from '../utils/model-name.js';
+import { assertValidModelName, MODEL_NAME_PATTERN } from '../utils/model-name.js';
 import type { ModelRecord } from '../services/model-repository.js';
 import { deriveAggregateState, type InstanceState } from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
+import { WorkerHttpError } from '../clients/worker.js';
 
 interface DeployBody {
   modelName: string;
@@ -20,6 +21,8 @@ interface DeployBody {
   engineConfig?: Record<string, unknown>;
   engineArgs?: string[];
   runtimeModule?: string;
+  servedModelName?: string;
+  displayName?: string;
   pinned?: boolean;
 }
 
@@ -55,6 +58,13 @@ function mintInstanceId(): string {
  * instance's teardown failure never aborts, or is even visible to, the others. Returns `true` on
  * success, `false` on failure (already logged) so the caller can count/report failures without
  * re-catching.
+ *
+ * On a non-404 `stopRunner` failure (or an unresolvable worker), the process is left running and
+ * this function returns `false` with the Redis record retained. That retained record does not
+ * strand the process forever: e.g. after Delete's unconditional model-row removal, it becomes an
+ * orphan (Redis instance, no Postgres model row), and `ReconciliationService.reapOrphanedInstances`
+ * now best-effort re-attempts `stopRunner` on it before dropping the record, rather than silently
+ * dropping a still-live process's bookkeeping (round-3 review, #157).
  */
 async function teardownInstance(
   app: FastifyInstance,
@@ -68,7 +78,47 @@ async function teardownInstance(
       instance.runnerHost && instance.runnerPort
         ? deps.createRunnerClient(instance.runnerHost, instance.runnerPort)
         : null;
+    // Grab workerId/runnerId up front — they survive stopModel's state transitions (it never
+    // clears them), but reading them here rather than after keeps the "what do we need to reap
+    // the process" and "did stopModel settle" concerns visually separate.
+    const state = await deps.lifecycle.getInstance(modelName, instance.instanceId);
     await deps.sleepWake.stopModel(modelName, instance.instanceId, runnerClient);
+
+    // #157: stopModel only updates state/routing/budget — it never terminates the runner
+    // process. Reap it here so every teardown path (delete, stop, instance-delete, eviction)
+    // actually frees the VRAM the process holds.
+    if (state?.workerId && state.runnerId) {
+      const worker = deps.workerPool.getWorker(state.workerId);
+      if (worker) {
+        try {
+          await deps.createWorkerClient(worker.managementUrl).stopRunner(state.runnerId);
+        } catch (stopErr: unknown) {
+          // The worker no longer tracks this runner (already exited and reaped) — not a
+          // failure, the process is already gone. Typed status check (round-3 review, Low 1):
+          // a response body that happens to contain the substring "returned 404" must not be
+          // misclassified as this tolerated case.
+          if (stopErr instanceof WorkerHttpError && stopErr.status === 404) {
+            app.log.debug(
+              { modelName, instanceId: instance.instanceId, runnerId: state.runnerId },
+              `${context}: runner already gone (404 from worker)`,
+            );
+          } else {
+            throw stopErr;
+          }
+        }
+      } else {
+        app.log.warn(
+          { modelName, instanceId: instance.instanceId, workerId: state.workerId },
+          `${context}: cannot reap runner process; worker unknown`,
+        );
+      }
+    } else {
+      app.log.warn(
+        { modelName, instanceId: instance.instanceId },
+        `${context}: cannot reap runner process; no runnerId (nothing dispatched yet — see #140)`,
+      );
+    }
+
     await deps.lifecycle.removeInstance(modelName, instance.instanceId);
     await deps.instanceRepository.delete(instance.instanceId).catch(() => {});
     return true;
@@ -168,6 +218,7 @@ async function deployFromRecord(
           engineConfig: record.engineConfig ?? undefined,
           engineArgs: record.engineArgs ?? undefined,
           runtimeModule: record.runtimeModule ?? undefined,
+          servedModelName: record.servedModelName ?? undefined,
           devices: result.devices,
         })
         .catch((err: unknown) => {
@@ -303,6 +354,7 @@ async function deployFromRecord(
             engineConfig: record.engineConfig ?? undefined,
             engineArgs: record.engineArgs ?? undefined,
             runtimeModule: record.runtimeModule ?? undefined,
+            servedModelName: record.servedModelName ?? undefined,
             devices: reclaimed.devices,
           })
           .catch((err: unknown) => {
@@ -465,6 +517,26 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
     }
 
+    if (
+      body.servedModelName !== undefined &&
+      (typeof body.servedModelName !== 'string' || !MODEL_NAME_PATTERN.test(body.servedModelName))
+    ) {
+      throw ControlPlaneError.invalidRequest('servedModelName must match ^[A-Za-z0-9._/-]{1,200}$');
+    }
+
+    let trimmedDisplayName: string | undefined;
+    if (body.displayName !== undefined) {
+      if (typeof body.displayName !== 'string') {
+        throw ControlPlaneError.invalidRequest('displayName must be a string');
+      }
+      trimmedDisplayName = body.displayName.trim();
+      if (trimmedDisplayName.length === 0 || trimmedDisplayName.length > 200) {
+        throw ControlPlaneError.invalidRequest(
+          'displayName must be 1–200 characters when provided',
+        );
+      }
+    }
+
     let record: ModelRecord;
     try {
       record = await deps.modelRepository.create({
@@ -477,6 +549,8 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         engineConfig: body.engineConfig,
         engineArgs: body.engineArgs,
         runtimeModule: body.runtimeModule,
+        servedModelName: body.servedModelName,
+        displayName: trimmedDisplayName,
         pinned: body.pinned,
       });
     } catch (err) {
@@ -553,6 +627,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       models.push({
         modelName: name,
+        displayName: record?.displayName ?? undefined,
         state: currentState,
         runnerType: record?.runnerType ?? 'unknown',
         instanceCount: instances.length,
@@ -592,6 +667,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const detail = {
         modelName,
+        displayName: record?.displayName ?? undefined,
         state: deriveAggregateState(instances),
         runnerType: record?.runnerType ?? 'unknown',
         modelPath: record?.modelPath ?? '',
@@ -601,6 +677,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         engineConfig: record?.engineConfig ?? undefined,
         engineArgs: record?.engineArgs ?? undefined,
         runtimeModule: record?.runtimeModule ?? undefined,
+        servedModelName: record?.servedModelName ?? undefined,
         pinned: record?.pinned ?? false,
         instances: instances.map((instance) =>
           toInstanceDetail(instance, createdAtByInstance.get(instance.instanceId)),

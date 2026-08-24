@@ -49,6 +49,8 @@ export interface StartRunnerParams {
   runtimeModule?: string;
   engineConfig?: Record<string, unknown>;
   engineArgs?: string[];
+  /** Optional engine-reported model identity (ADR-020); passed through to the launcher. */
+  servedModelName?: string;
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
@@ -145,6 +147,7 @@ export class RunnerManager {
           tensorParallel: params.tensorParallel,
           engineConfig: params.engineConfig,
           engineArgs: params.engineArgs,
+          servedModelName: params.servedModelName,
           devices: params.devices,
           port,
           enginePort,

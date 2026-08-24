@@ -172,6 +172,7 @@ async function main(): Promise<void> {
     notifications,
     instanceRepository,
     modelRepository,
+    (baseUrl) => new WorkerClient({ baseUrl, token: config.workerToken }),
   );
 
   await leaderElection.start();

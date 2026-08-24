@@ -8,6 +8,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`servedModelName` — engine-reported model identity separate from the configuration name
+  (ADR-020, #154).** Optional field on `ModelDeploymentRequest`/`ModelDetail`
+  (`control-plane.yaml`) and `StartRunnerRequest` (`worker-agent.yaml`); the Rust-mirrored
+  `proxy-control-plane.yaml` and the proxy are untouched — routing still matches the
+  configuration name only. Control plane: migration 005 (nullable `served_model_name`, not
+  unique by design), pattern validation on deploy, persisted and emitted in model detail,
+  forwarded to workers. Worker launcher: emits
+  `--served-model-name <servedModelName> <modelName>` (served name first — vLLM first-name
+  semantics put it in the response `model` field and Prometheus `model_name` tag) when set and
+  different; argv unchanged when absent. Dashboard: optional "Served model name" deploy-form
+  field, shown on model detail; "Model Name" labels relabeled "Configuration Name" per the
+  ADR-020 vocabulary. Note: when set, responses identify the served name even for clients that
+  sent the configuration name — intended.
+
+- **`displayName` — free-form dashboard label for model configurations (ADR-020, #154).** Optional
+  1–200-character label (e.g. "Qwen test 1"), stored trimmed (migration 006), not unique, and
+  presentation-only: emitted in list/detail responses but never forwarded to workers, Redis, or
+  routing (tests assert the StartRunnerRequest carries no such key). The dashboard shows it as the
+  primary name in the models list and detail header with the model name as secondary text; all
+  operations keep using the model name. The deploy form is reordered — Display Name, Model Name,
+  engine-agnostic fields, then Runner Type with its runner-specific configuration (Runtime Module,
+  Served Model Name, Engine Arguments) — and the short-lived "Configuration Name" labels revert to
+  "Model Name" (engine-agnostic API identifier clients send in the `model` field). Also fixes an
+  e2e locator ambiguity ("Served Model Name" vs "Model Name" substring match); broader e2e mock
+  gaps found during this work are tracked in #155.
+
+- **ADR-020: Configuration Name vs. Served Model Name (#154).** Decision record splitting the
+  overloaded `modelName` into three explicit concepts: the configuration name (unchanged wire field
+  — unique key, URL param, routing key), a new optional `servedModelName` (the identity the engine
+  reports in metrics and responses, registered alongside the configuration name via vLLM's
+  multi-value `--served-model-name` so the Rust proxy needs no change), and the existing
+  `modelPath` (weights). Enables serving the same model under multiple configurations (A/B testing
+  engine args) without the engine identifying as the configuration alias. Decision only —
+  implementation tracked in #154. Docs aligned in the same pass: the architecture overview's
+  logical-model section adopts the new vocabulary and its ADR index gains the missing
+  ADR-018/019/020 rows; CLAUDE.md's project status is refreshed (milestones M2–M8 merged, next M9).
+
 - **Home placement board with cluster inference URL (#124).** The cluster overview home page is now
   a v1-style Model Placement Management view: per-worker placement board composing the reusable
   per-GPU memory sections (#123) plus a placement summary — per-GPU rows, tensor-parallel models
@@ -90,6 +127,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   path that breaks worker catalog loading when launched from the root.
 
 ### Fixed
+
+- **Model delete/stop/eviction now actually terminate the runner process (#157).** The control
+  plane's teardown paths updated Redis state, removed routing, and released the VRAM budget but
+  never called the worker's `DELETE /runners/:runnerId` — `WorkerClient.stopRunner` had zero
+  production callers, so every deploy→delete cycle on a real worker leaked a live vLLM process
+  (EngineCore holding VRAM). `teardownInstance` now reaps the runner via the instance's recorded
+  `workerId`/`runnerId` after the drain settles and before state cleanup, tolerating 404 (runner
+  already exited) and warning-but-continuing when the worker or runner id is unknown; all four
+  teardown paths (delete model, stop model, delete instance, eviction reclaim) inherit the fix.
+  Integration-tested end to end: the mock worker records the stop request arriving with the
+  correct runner id over real HTTP. Round-3 review: 404 detection is now a typed `WorkerHttpError`
+  status check rather than a message-substring match, and `ReconciliationService` best-effort
+  reaps an orphaned instance's runner process before dropping its record, so a non-404
+  `stopRunner` failure retains the record for a later tick instead of silently leaking the process
+  once its model row is gone.
+
+- **Deploy-timeout integration test regex drift (#142, #150).** The stuck-STARTING test asserted
+  `.rejects.toThrow(/timeout/i)` but deploy orchestration throws "Deploy timed out after …", so
+  the assertion never matched and the test always failed when run against a live database. The
+  regex is now `/timed out/i` and the test passes end-to-end.
 
 - **Flaky module-store test fixed (CI).** The `ModuleStoreService` idempotency test started an
   import and returned without awaiting it; the leaked async import's late `CATALOG_IMPORT_PROGRESS`

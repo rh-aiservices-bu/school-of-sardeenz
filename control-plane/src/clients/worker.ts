@@ -3,6 +3,22 @@ import type { WorkerAgentComponents } from '@sardeenz/types';
 export type StartRunnerRequest = WorkerAgentComponents['schemas']['StartRunnerRequest'];
 export type StartRunnerResponse = WorkerAgentComponents['schemas']['StartRunnerResponse'];
 
+/**
+ * Thrown by `stopRunner` on a non-OK response. Carries the HTTP status so callers can distinguish
+ * "runner already gone" (404 — the worker no longer tracks it, already exited and reaped) from a
+ * genuine failure, without matching on the message text (a response body that happens to contain
+ * the substring "returned 404" must not be misclassified as the 404 case — round-3 review, #157).
+ */
+export class WorkerHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'WorkerHttpError';
+  }
+}
+
 export interface WorkerClientOptions {
   baseUrl: string;
   timeoutMs?: number;
@@ -92,7 +108,10 @@ export class WorkerClient {
     });
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Worker DELETE /runners/${runnerId} returned ${response.status}: ${body}`);
+      throw new WorkerHttpError(
+        `Worker DELETE /runners/${runnerId} returned ${response.status}: ${body}`,
+        response.status,
+      );
     }
   }
 

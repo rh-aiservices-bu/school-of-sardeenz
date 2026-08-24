@@ -15,6 +15,8 @@ import { EventEmitter } from 'node:events';
 
 export interface MockModelInfo {
   modelName: string;
+  displayName?: string;
+  servedModelName?: string;
   state: string;
   runnerType: string;
   requiredMemory: number;
@@ -191,6 +193,8 @@ export class MockControlPlane {
       if (existing) return reply.code(409).send({ error: 'already exists' });
       const newModel: MockModelInfo = {
         modelName: body.modelName,
+        displayName: body.displayName,
+        servedModelName: body.servedModelName,
         state: 'PENDING',
         runnerType: body.runnerType ?? 'vllm',
         requiredMemory: body.requiredMemory ?? 0,
@@ -254,13 +258,11 @@ export class MockControlPlane {
       instances.push(instance);
       model.instanceCount = instances.length;
       model.workerId = instances.length === 1 ? instance.workerId : undefined;
-      return reply
-        .code(202)
-        .send({
-          modelName: model.modelName,
-          instanceId: instance.instanceId,
-          state: instance.state,
-        });
+      return reply.code(202).send({
+        modelName: model.modelName,
+        instanceId: instance.instanceId,
+        state: instance.state,
+      });
     });
 
     app.delete<{ Params: { name: string; instanceId: string } }>(

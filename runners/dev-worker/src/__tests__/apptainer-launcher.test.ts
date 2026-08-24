@@ -257,6 +257,50 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     const ddIdx = plan.args.indexOf('--');
     expect(plan.args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
+
+  it('emits both names, served name first, when servedModelName is set and differs (#154, ADR-020)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(
+      makeSpec({ servedModelName: 'meta-llama/Llama-3.1-8B-Instruct' }),
+    );
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual([
+      '--served-model-name',
+      'meta-llama/Llama-3.1-8B-Instruct',
+      'llama',
+    ]);
+  });
+
+  it('dedupes to a single name when servedModelName equals modelName (#154)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ servedModelName: 'llama' }));
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
+  });
+
+  it('is byte-identical to prior behavior when servedModelName is unset (#154)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec());
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
+  });
+
+  it('appends engineArgs after the dual served names (#154)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(
+      makeSpec({
+        servedModelName: 'meta-llama/Llama-3.1-8B-Instruct',
+        engineArgs: ['--max-model-len=8192'],
+      }),
+    );
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual([
+      '--served-model-name',
+      'meta-llama/Llama-3.1-8B-Instruct',
+      'llama',
+      '--max-model-len=8192',
+    ]);
+  });
 });
 
 describe('ApptainerLauncher.buildExecPlan modelPath containment', () => {

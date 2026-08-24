@@ -1487,11 +1487,41 @@ components:
         modelName:
           type: string
           description: |
-            Model name used as the routing key. Must be unique across the
-            cluster. This is what clients specify in the `model` field of
-            OpenAI API requests.
+            Configuration name used as the routing key. Must be unique across
+            the cluster. This is what clients specify in the `model` field of
+            OpenAI API requests. The engine also registers under this name so
+            forwarded requests resolve (see servedModelName).
           pattern: '^[A-Za-z0-9._/-]{1,200}$'
           maxLength: 200
+          examples:
+            - "meta-llama/Llama-3.1-8B-Instruct"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: |
+            Optional human-friendly label for this configuration, shown in the
+            dashboard only (e.g. "Qwen test 1"). Free-form printable text. The
+            server trims surrounding whitespace and measures the 1–200 length
+            AFTER trimming; the trimmed value is what gets stored. NOT unique, NOT a routing
+            key, never sent to workers/runners, never enters Redis or the
+            routing map. Falls back to modelName in the UI when unset. No
+            pattern constraint — unlike modelName/servedModelName it never
+            reaches argv.
+          examples:
+            - "Qwen test 1"
+        servedModelName:
+          type: string
+          pattern: '^[A-Za-z0-9._/-]{1,200}$'
+          maxLength: 200
+          description: |
+            Optional model identity the engine reports in responses and
+            metrics (ADR-020). When set and different from modelName, the
+            launcher registers both names with the engine (servedModelName
+            first, then modelName) so the engine reports the served name while
+            still accepting requests that carry the configuration name.
+            Defaults to modelName when absent. Not unique — multiple
+            configurations may share one servedModelName.
           examples:
             - "meta-llama/Llama-3.1-8B-Instruct"
         runnerType:
@@ -1645,7 +1675,12 @@ components:
       properties:
         modelName:
           type: string
-          description: Model name (routing key).
+          description: Configuration name (routing key).
+        displayName:
+          type: string
+          description: |
+            Optional human-friendly label (dashboard presentation only).
+            Absent when unset; the UI falls back to modelName.
         state:
           $ref: "#/components/schemas/ModelLifecycleState"
         runnerType:
@@ -1778,7 +1813,17 @@ components:
       properties:
         modelName:
           type: string
-          description: Model name (routing key).
+          description: Configuration name (routing key).
+        displayName:
+          type: string
+          description: |
+            Optional human-friendly label (dashboard presentation only).
+            Absent when unset; the UI falls back to modelName.
+        servedModelName:
+          type: string
+          description: |
+            Engine-reported model identity, when explicitly set (ADR-020).
+            Absent means the configuration name is used (default behavior).
         state:
           $ref: "#/components/schemas/ModelLifecycleState"
         runnerType:

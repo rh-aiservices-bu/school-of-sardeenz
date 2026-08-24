@@ -280,7 +280,17 @@ components:
       properties:
         modelName:
           type: string
-          description: Name of the model to serve.
+          description: Configuration name of the model to serve (routing key).
+        servedModelName:
+          type: string
+          pattern: '^[A-Za-z0-9._/-]{1,200}$'
+          maxLength: 200
+          description: |
+            Optional engine-reported model identity (ADR-020). When set and
+            different from modelName, the launcher emits --served-model-name
+            with both names (servedModelName first, then modelName). When
+            absent, the launcher uses modelName alone (previous behavior).
+            The stub launcher treats it as informational, like modelPath.
         runnerType:
           type: string
           description: |
