@@ -91,6 +91,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Flaky module-store test fixed (CI).** The `ModuleStoreService` idempotency test started an
+  import and returned without awaiting it; the leaked async import's late `CATALOG_IMPORT_PROGRESS`
+  events could land in the next test's `events` array (the emit callback closes over the mutable
+  `events` binding), making the uninstall test's last-event assertion fail under CI load. The
+  idempotency test now drains the in-flight import before finishing.
+
+- **Redocly lint is warning-free again.** The long-standing `no-unused-components` warning for
+  `ClusterEvent` in `control-plane.yaml` is now explicitly ignored in
+  `packages/contracts/.redocly.lint-ignore.yaml` with a rationale: the schema is delivered over
+  Redis pub/sub and the BFF SSE stream, not an HTTP response, so no operation can `$ref` it,
+  yet it is used at runtime by the control plane, BFF, and frontend via the generated types.
+
 - **Engine parameters are now actually delivered to the engine — and entered as `--flag value`
   lines instead of JSON (#126).** `engineConfig` was stored but never reached the engine; the
   contract now adds `engineArgs: string[]` (deploy request, model detail, worker-agent
