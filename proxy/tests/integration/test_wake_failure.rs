@@ -125,10 +125,7 @@ async fn test_wake_transport_error_no_url_leak() {
         serde_json::from_str(&body_text).expect("response not valid JSON");
 
     let error_type = body["error"]["type"].as_str().unwrap_or("");
-    assert_eq!(
-        error_type, "model_unavailable",
-        "expected model_unavailable, got: {error_type}"
-    );
+    assert_eq!(error_type, "model_unavailable", "expected model_unavailable, got: {error_type}");
 
     assert!(
         !body_text.contains(closed_cp_url),

@@ -32,11 +32,11 @@ SARDEENZ_<COMPONENT>_<PURPOSE>_{URL|KEY|SECRET|PASSWORD|TOKEN}
 
 The suffix (`_URL`, `_KEY`, `_SECRET`, `_PASSWORD`, `_TOKEN`) marks a variable as secret-bearing. Examples:
 
-| Variable               | Component             | Contains                               |
-| ---------------------- | --------------------- | -------------------------------------- |
-| `SARDEENZ_REDIS_URL`   | Proxy, Control Plane  | Connection URL (may embed credentials) |
+| Variable               | Component             | Contains                                         |
+| ---------------------- | --------------------- | ------------------------------------------------ |
+| `SARDEENZ_REDIS_URL`   | Proxy, Control Plane  | Connection URL (may embed credentials)           |
 | `SARDEENZ_CP_API_KEY`  | Proxy → Control Plane | Inter-component auth token (not yet implemented) |
-| `SARDEENZ_DB_PASSWORD` | Control Plane         | Database password (not yet implemented) |
+| `SARDEENZ_DB_PASSWORD` | Control Plane         | Database password (not yet implemented)          |
 
 The suffix-based convention makes secrets greppable for auditing and CI checks.
 

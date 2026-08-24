@@ -6,14 +6,14 @@ spike's §5/§8 manifests as a reusable Kustomize base.
 
 ## Contents
 
-| File | What it is |
-|---|---|
-| `scc.yaml` | `sardeenz-sif-runner` SCC — restricted-v2 + seccomp `Unconfined` (the userns unlock). No privilege, no added caps. |
-| `rbac.yaml` | `sardeenz-worker` ServiceAccount + Role/RoleBinding granting `use` on the SCC. |
-| `pvcs.yaml` | RWX `sardeenz-modules` (module store) + `sardeenz-weights` claims. Set `storageClassName` per cluster. |
-| `worker-deployment.yaml` | The worker Pod: `/dev/fuse` annotation, seccomp `Unconfined`, no `hostUsers:false`, GPU limit, mem req/limit, `fsGroup:0`, `HOME=/scratch/home`, module (readOnly)/weights/scratch/`/dev/shm` mounts. Runs the agent `--mode=apptainer`. |
-| `module-pvc-write-protection.yaml` | ValidatingAdmissionPolicy denying non-librarian pods that mount the module PVC read-write (chosen mechanism; fallbacks documented inline). |
-| `containerruntimeconfig.yaml` | *Opt-in* — force `crun` if a node pool defaults to `runc`. Not in the default kustomization (triggers a MachineConfig roll). |
+| File                               | What it is                                                                                                                                                                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scc.yaml`                         | `sardeenz-sif-runner` SCC — restricted-v2 + seccomp `Unconfined` (the userns unlock). No privilege, no added caps.                                                                                                                       |
+| `rbac.yaml`                        | `sardeenz-worker` ServiceAccount + Role/RoleBinding granting `use` on the SCC.                                                                                                                                                           |
+| `pvcs.yaml`                        | RWX `sardeenz-modules` (module store) + `sardeenz-weights` claims. Set `storageClassName` per cluster.                                                                                                                                   |
+| `worker-deployment.yaml`           | The worker Pod: `/dev/fuse` annotation, seccomp `Unconfined`, no `hostUsers:false`, GPU limit, mem req/limit, `fsGroup:0`, `HOME=/scratch/home`, module (readOnly)/weights/scratch/`/dev/shm` mounts. Runs the agent `--mode=apptainer`. |
+| `module-pvc-write-protection.yaml` | ValidatingAdmissionPolicy denying non-librarian pods that mount the module PVC read-write (chosen mechanism; fallbacks documented inline).                                                                                               |
+| `containerruntimeconfig.yaml`      | _Opt-in_ — force `crun` if a node pool defaults to `runc`. Not in the default kustomization (triggers a MachineConfig roll).                                                                                                             |
 
 ## Apply
 

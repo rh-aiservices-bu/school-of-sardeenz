@@ -61,7 +61,13 @@ impl ParkingSlotGuard {
         body_len: usize,
     ) -> Self {
         gauge!("sardeenz_proxy_parked_connections", "model" => model_name.clone()).increment(1);
-        Self { parked_count, pending_wakes, model_name, park_start: std::time::Instant::now(), body_len }
+        Self {
+            parked_count,
+            pending_wakes,
+            model_name,
+            park_start: std::time::Instant::now(),
+            body_len,
+        }
     }
 }
 
@@ -143,16 +149,15 @@ impl ParkingManager {
         // under the lock BEFORE the wake trigger HTTP call, and the lock is
         // dropped BEFORE the await — so concurrent arrivals see the entry
         // immediately and skip the trigger.
-        let is_first = fire_wake
-            && {
-                let mut pending = self.pending_wakes.lock().unwrap();
-                if pending.contains_key(model_name) {
-                    false
-                } else {
-                    pending.insert(model_name.to_string(), WakeState::InFlight);
-                    true
-                }
-            };
+        let is_first = fire_wake && {
+            let mut pending = self.pending_wakes.lock().unwrap();
+            if pending.contains_key(model_name) {
+                false
+            } else {
+                pending.insert(model_name.to_string(), WakeState::InFlight);
+                true
+            }
+        };
         if is_first {
             match self.wake_client.trigger_wake(model_name).await {
                 Ok(()) => {
@@ -167,9 +172,7 @@ impl ParkingManager {
                     counter!("sardeenz_proxy_wake_triggers_total", "result" => "failed")
                         .increment(1);
                     self.pending_wakes.lock().unwrap().remove(model_name);
-                    return Err(ProxyError::ModelUnavailable(format!(
-                        "wake trigger failed: {e}"
-                    )));
+                    return Err(ProxyError::ModelUnavailable(format!("wake trigger failed: {e}")));
                 }
             }
         }
@@ -206,9 +209,7 @@ impl ParkingManager {
                 }
                 Some(entry) if entry.state == ModelState::Draining => {
                     self.pending_wakes.lock().unwrap().remove(model_name);
-                    return Err(ProxyError::ModelUnavailable(format!(
-                        "{model_name} is draining"
-                    )));
+                    return Err(ProxyError::ModelUnavailable(format!("{model_name} is draining")));
                 }
                 Some(entry) if entry.state == ModelState::Sleeping && left_sleeping => {
                     self.pending_wakes.lock().unwrap().remove(model_name);
@@ -267,7 +268,9 @@ impl ParkingManager {
         if prev_bytes + body_len > self.config.max_bytes {
             // Roll back
             self.parked_count.parked_bytes.fetch_sub(body_len, Ordering::SeqCst);
-            return Err(ProxyError::ParkingLimitReached("parking byte budget exceeded".to_string()));
+            return Err(ProxyError::ParkingLimitReached(
+                "parking byte budget exceeded".to_string(),
+            ));
         }
 
         // Atomically increment global and check

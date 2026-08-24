@@ -171,7 +171,13 @@ describe('WorkerRegistration', () => {
         kvCacheElasticSharing: true,
         features: { prefixCaching: true },
       };
-      registration = new WorkerRegistration(mockRedis as never, config, undefined, undefined, overrides);
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        overrides,
+      );
 
       await registration.register();
 
@@ -237,8 +243,8 @@ describe('WorkerRegistration', () => {
 
       expect(fetchFn).toHaveBeenCalledWith('http://127.0.0.1:9100/healthz');
 
-      const hbCalls = mockRedis.set.mock.calls.filter(
-        (c) => (c[0] as string).endsWith(':heartbeat'),
+      const hbCalls = mockRedis.set.mock.calls.filter((c) =>
+        (c[0] as string).endsWith(':heartbeat'),
       );
       expect(hbCalls.length).toBeGreaterThanOrEqual(2);
       for (const call of hbCalls) {
@@ -261,7 +267,9 @@ describe('WorkerRegistration', () => {
     });
 
     it('skips heartbeat write when healthz fetch throws', async () => {
-      const fetchFn = vi.fn(() => Promise.reject(new Error('connection refused'))) as unknown as typeof fetch;
+      const fetchFn = vi.fn(() =>
+        Promise.reject(new Error('connection refused')),
+      ) as unknown as typeof fetch;
       registration = new WorkerRegistration(mockRedis as never, config, undefined, fetchFn);
 
       registration.startHeartbeat();

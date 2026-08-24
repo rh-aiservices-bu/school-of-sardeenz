@@ -308,7 +308,8 @@ export function ModelList() {
   const handleAddInstance = (model: ModelInfo) => {
     setMutationError(null);
     addInstance.mutate(model.modelName, {
-      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Add instance failed'),
+      onError: (err) =>
+        setMutationError(err instanceof Error ? err.message : 'Add instance failed'),
     });
   };
 
@@ -833,7 +834,9 @@ export function ModelList() {
         aria-label={t('list.stop.confirmTitle')}
       >
         <ModalHeader title={t('list.stop.confirmTitle')} titleIconVariant="warning" />
-        <ModalBody>{t('list.stop.confirmBody', { modelName: stopConfirmModel?.modelName })}</ModalBody>
+        <ModalBody>
+          {t('list.stop.confirmBody', { modelName: stopConfirmModel?.modelName })}
+        </ModalBody>
         <ModalFooter>
           <Button variant="primary" onClick={handleStopConfirm} isLoading={stopModel.isPending}>
             {t('list.stop.menuItem')}

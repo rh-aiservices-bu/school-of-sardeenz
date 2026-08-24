@@ -44,9 +44,9 @@ jobs:
 
       - run: npm ci
 
-      - run: make all   # typecheck (tsc --build + cargo check) + lint (eslint + clippy + redocly)
+      - run: make all # typecheck (tsc --build + cargo check) + lint (eslint + clippy + redocly)
 
-      - run: make test  # vitest run + cargo test
+      - run: make test # vitest run + cargo test
 
       - name: Codegen drift
         run: |

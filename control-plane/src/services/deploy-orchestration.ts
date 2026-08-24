@@ -105,12 +105,17 @@ export class DeployOrchestrationService {
       };
       await this.routingMap.addEndpoint(params.modelName, endpoint);
 
-      await this.lifecycle.transition(params.modelName, params.instanceId, ModelLifecycleState.ACTIVE, {
-        runnerHost: runnerInfo.host,
-        runnerPort: runnerInfo.port,
-        runnerEnginePort: enginePort,
-        runnerId: runnerInfo.runnerId,
-      });
+      await this.lifecycle.transition(
+        params.modelName,
+        params.instanceId,
+        ModelLifecycleState.ACTIVE,
+        {
+          runnerHost: runnerInfo.host,
+          runnerPort: runnerInfo.port,
+          runnerEnginePort: enginePort,
+          runnerId: runnerInfo.runnerId,
+        },
+      );
       await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
       this.memoryBudget.releaseInstanceReservations(params.instanceId);
 

@@ -28,11 +28,11 @@ stripped to just the runtime (no Node/app):
 
 ## Pins (keep in sync; re-test on any bump)
 
-| Input | Value | Note |
-|---|---|---|
-| base image | `quay.io/vllm/vllm-cuda:0.21.0_rhaiv.8` | vetted RHAIV vLLM |
-| `KVCACHED_VERSION` | `094481f3f77c53ad2edc13369b84eb42bbf082a1` | pinned ovg-project commit |
-| CUDA -devel versions | `13.0.*` | **must match the base image's CUDA** |
+| Input                | Value                                      | Note                                 |
+| -------------------- | ------------------------------------------ | ------------------------------------ |
+| base image           | `quay.io/vllm/vllm-cuda:0.21.0_rhaiv.8`    | vetted RHAIV vLLM                    |
+| `KVCACHED_VERSION`   | `094481f3f77c53ad2edc13369b84eb42bbf082a1` | pinned ovg-project commit            |
+| CUDA -devel versions | `13.0.*`                                   | **must match the base image's CUDA** |
 
 On any bump, re-run the kvcached co-tenancy gate (spike Gate 9d) before publishing — kvcached
 compatibility is version-sensitive.
@@ -43,8 +43,8 @@ compatibility is version-sensitive.
   `FLASHINFER_WORKSPACE_DIR` under `/opt/app-root/src`, which is **read-only inside a SIF**. The
   worker agent redirects them to node-local `/scratch` at exec (spike Gate 9d).
 - **Launch:** `apptainer exec --nv --bind /weights --bind /scratch --env ENABLE_KVCACHED=true
-  --env KVCACHED_AUTOPATCH=1 --env XDG_CACHE_HOME=/scratch/cache … <sif> python3 -m
-  sardeenz_vllm_runner --model /weights/<model> --port <PORT>` (do **not** pass `--env HOME=…`;
+--env KVCACHED_AUTOPATCH=1 --env XDG_CACHE_HOME=/scratch/cache … <sif> python3 -m
+sardeenz_vllm_runner --model /weights/<model> --port <PORT>` (do **not** pass `--env HOME=…`;
   Apptainer rejects it — set `HOME=/scratch/home` as a process env). The shim launches
   `vllm serve` internally with `--enable-sleep-mode`. Cold-starts are serialized by the worker
   agent to avoid concurrent-cold-start host-RAM OOM (spike Gate 9c).

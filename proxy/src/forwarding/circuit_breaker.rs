@@ -114,9 +114,7 @@ impl CircuitBreaker {
             None => true,
             Some(c) => match c.state {
                 CircuitState::Closed => true,
-                CircuitState::Open => {
-                    c.last_state_change.elapsed() >= self.config.recovery_timeout
-                }
+                CircuitState::Open => c.last_state_change.elapsed() >= self.config.recovery_timeout,
                 CircuitState::HalfOpen => c
                     .probe_claimed_at
                     // Leak-backstop expiry, not the Open->HalfOpen recovery_timeout: a
@@ -137,9 +135,7 @@ impl CircuitBreaker {
         let mut circuits = self.circuits.lock().unwrap();
         let circuit = circuits.entry(key.to_string()).or_insert_with(EndpointCircuit::new);
         match circuit.state {
-            CircuitState::Closed => {
-                Some(ProbeGuard::noop(self.circuits.clone(), key.to_string()))
-            }
+            CircuitState::Closed => Some(ProbeGuard::noop(self.circuits.clone(), key.to_string())),
             CircuitState::Open => {
                 if circuit.last_state_change.elapsed() >= self.config.recovery_timeout {
                     let now = Instant::now();

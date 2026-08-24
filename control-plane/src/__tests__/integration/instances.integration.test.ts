@@ -62,12 +62,16 @@ describe.skipIf(!AVAILABLE)('Instances integration (#120: logical model / instan
       await harness.registerWorker({
         workerId: 'w-diff-a',
         managementUrl: workerA.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
       await harness.registerWorker({
         workerId: 'w-diff-b',
         managementUrl: workerB.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
 
       await harness.modelRepository.create({
@@ -167,12 +171,16 @@ describe.skipIf(!AVAILABLE)('Instances integration (#120: logical model / instan
       await harness.registerWorker({
         workerId: 'w-stop-a',
         managementUrl: workerA.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
       await harness.registerWorker({
         workerId: 'w-stop-b',
         managementUrl: workerB.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
 
       await harness.modelRepository.create({
@@ -223,12 +231,16 @@ describe.skipIf(!AVAILABLE)('Instances integration (#120: logical model / instan
       await harness.registerWorker({
         workerId: 'w-agg-a',
         managementUrl: workerA.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
       await harness.registerWorker({
         workerId: 'w-agg-b',
         managementUrl: workerB.url,
-        devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+        devices: [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 },
+        ],
       });
 
       await harness.modelRepository.create({

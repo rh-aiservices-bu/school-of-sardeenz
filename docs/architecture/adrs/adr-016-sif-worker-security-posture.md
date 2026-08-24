@@ -27,14 +27,14 @@ on a shared RWX volume, the pod-level-userns path is a dead end today.
 
 ## Decision
 
-Workers run SIFs via **in-container user namespaces** (Apptainer creates its own userns *inside*
+Workers run SIFs via **in-container user namespaces** (Apptainer creates its own userns _inside_
 the container, which stays in the host user namespace so RWX volumes mount normally). The
 worker Pod's security posture is:
 
 - **A mild custom SCC** — `restricted-v2` with exactly one change: `seccompProfiles` permits
   `unconfined`. **No added capabilities, no `RunAsAny`, no `allowPrivilegeEscalation`, no
   `hostUsers`/`procMount`, not privileged.** The Pod requests `seccompProfile: { type:
-  Unconfined }`.
+Unconfined }`.
 - **`/dev/fuse` via the CRI-O pod annotation** `io.kubernetes.cri-o.Devices: "/dev/fuse"` — no
   device plugin, no MachineConfig on OpenShift/OKD 4.15+ (available by default on recent
   releases).
@@ -49,7 +49,7 @@ This posture was verified on a live OKD 4.21 cluster: `Seccomp: 0`, `max_user_na
 ## Consequences
 
 - **Mild but custom.** A pass here is the strongest "mild SCC" claim available — no privileged,
-  no capabilities — but it is a *custom* SCC, not a stock/shipped one (the shipped
+  no capabilities — but it is a _custom_ SCC, not a stock/shipped one (the shipped
   `nested-container` can't be used with network RWX volumes). A security reviewer will ask about
   blanket `Unconfined`; the productization endgame is a **scoped seccomp profile**
   (`RuntimeDefault` + allow `unshare`/`clone`/`mount`/`setns`) shipped via the Security Profiles
@@ -63,7 +63,7 @@ This posture was verified on a live OKD 4.21 cluster: `Seccomp: 0`, `max_user_na
   `openshift.io/sa.scc.uid-range ≤ 65535` caveat that applies to pod-level userns does not
   apply here.
 - **Two benign warnings are expected** and documented in the spike: `Could not remount
-  /.singularity.d/libs read-only` (the `--nv` driver-lib bind; the read-only re-mount needs
+/.singularity.d/libs read-only` (the `--nv` driver-lib bind; the read-only re-mount needs
   `CAP_SYS_ADMIN` we don't grant — cosmetic), and rootless `newgidmap`/`newuidmap` EPERM on
   `setxattr` during `apptainer pull` (unused in single-UID mode).
 - **Cluster prerequisites** for a runner-hosting worker: OpenShift/OKD 4.15+ (for the `/dev/fuse`

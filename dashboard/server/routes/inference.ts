@@ -41,7 +41,9 @@ export function registerInferenceRoutes(app: FastifyInstance, deps: RouteDeps): 
         upstream = await deps.inference.chatCompletions(body, controller.signal);
       } catch (err) {
         app.log.error({ err }, 'Inference proxy unreachable');
-        return reply.code(502).send({ error: 'Inference proxy unreachable', code: 'UPSTREAM_ERROR' });
+        return reply
+          .code(502)
+          .send({ error: 'Inference proxy unreachable', code: 'UPSTREAM_ERROR' });
       }
 
       // Surface a non-OK upstream response (e.g. 400 bad/missing model) as a normal JSON reply

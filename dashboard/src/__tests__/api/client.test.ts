@@ -226,7 +226,9 @@ describe('api.inference.chat', () => {
     );
 
     expect(sessionStorage.getItem('sardeenz_auth_token')).toBeNull();
-    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'auth:unauthorized' }));
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'auth:unauthorized' }),
+    );
     expect(onError).toHaveBeenCalled();
   });
 
@@ -249,7 +251,9 @@ describe('api.inference.chat', () => {
     );
 
     expect(onError).toHaveBeenCalled();
-    expect(dispatchSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'auth:unauthorized' }));
+    expect(dispatchSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'auth:unauthorized' }),
+    );
   });
 
   it('an aborted request is swallowed — no onError, no auth:unauthorized', async () => {
@@ -267,7 +271,9 @@ describe('api.inference.chat', () => {
     );
 
     expect(onError).not.toHaveBeenCalled();
-    expect(dispatchSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'auth:unauthorized' }));
+    expect(dispatchSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'auth:unauthorized' }),
+    );
   });
 });
 

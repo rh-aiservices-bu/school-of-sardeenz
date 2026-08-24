@@ -150,7 +150,6 @@ impl RunningProxy {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
-
 }
 
 fn make_active_entry(model_name: &str, host: &str, port: u16) -> RoutingEntry {
@@ -350,11 +349,8 @@ async fn test_redis_malformed_entry_carried_forward() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Overwrite the SAME key with malformed JSON, then trigger a refresh.
-    let _: () = harness
-        .conn
-        .hset(harness.routing_map_key(), model, "not valid json {{{")
-        .await
-        .unwrap();
+    let _: () =
+        harness.conn.hset(harness.routing_map_key(), model, "not valid json {{{").await.unwrap();
     harness.publish_update("refresh").await;
 
     // Wait for the proxy to pick up the refresh.

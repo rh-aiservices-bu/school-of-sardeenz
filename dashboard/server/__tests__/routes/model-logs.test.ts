@@ -253,9 +253,12 @@ describe('GET /api/models/:name/logs', () => {
       const config = makeConfig({ authMode: 'simple' });
       const app = await buildApp(config);
 
-      const token = app.jwt.sign({ username: 'viewer', roles: [], authMode: 'simple' }, {
-        expiresIn: 3600,
-      });
+      const token = app.jwt.sign(
+        { username: 'viewer', roles: [], authMode: 'simple' },
+        {
+          expiresIn: 3600,
+        },
+      );
 
       const res = await app.inject({
         method: 'GET',

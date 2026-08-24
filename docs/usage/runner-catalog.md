@@ -23,13 +23,13 @@ The runner catalog lets operators browse a curated list of engine runners and **
 
 ## Configuration
 
-| Var                                | Purpose                                                                                                                                                                                | Default                               |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `SARDEENZ_RUNNER_CATALOG_URL`      | Catalog source — http(s) URL, local path, or `file://`                                                                                                                                | official `school-of-sardeenz` raw URL |
-| `SARDEENZ_ALLOW_INSECURE_CATALOG`  | Allow an `http://` (plaintext) catalog source. Off by default — a plaintext catalog can be rewritten in transit. Prefer `https://` or a local path/`file://` instead of enabling this | `false`                                |
-| `SARDEENZ_MODULES_DIR`             | Shared module store path                                                                                                                                                               | `/modules`                            |
-| `SARDEENZ_SIF_IMPORTER`            | `oras` (real `apptainer pull`) or `stub` (dev placeholder)                                                                                                                             | `stub`                                |
-| `SARDEENZ_VERIFY_SIF`              | `apptainer verify` SIFs — at catalog import (control plane) and at exec (worker). Set `false` for unsigned experimentation only (see below)                                           | `true`                                 |
+| Var                               | Purpose                                                                                                                                                                               | Default                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `SARDEENZ_RUNNER_CATALOG_URL`     | Catalog source — http(s) URL, local path, or `file://`                                                                                                                                | official `school-of-sardeenz` raw URL |
+| `SARDEENZ_ALLOW_INSECURE_CATALOG` | Allow an `http://` (plaintext) catalog source. Off by default — a plaintext catalog can be rewritten in transit. Prefer `https://` or a local path/`file://` instead of enabling this | `false`                               |
+| `SARDEENZ_MODULES_DIR`            | Shared module store path                                                                                                                                                              | `/modules`                            |
+| `SARDEENZ_SIF_IMPORTER`           | `oras` (real `apptainer pull`) or `stub` (dev placeholder)                                                                                                                            | `stub`                                |
+| `SARDEENZ_VERIFY_SIF`             | `apptainer verify` SIFs — at catalog import (control plane) and at exec (worker). Set `false` for unsigned experimentation only (see below)                                           | `true`                                |
 
 ORAS image references (`image: oras://...`) in the catalog must be digest-pinned
 (`oras://<registry>/<repo>:<tag>@sha256:<digest>`). A mutable tag can be repointed after a catalog

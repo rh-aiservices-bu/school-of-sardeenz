@@ -19,14 +19,14 @@ engine-agnostic (ADR-010, [phase4.md](../../docs/project/phase4.md) Task 5).
   port via the proxy — it is **not** part of this contract.
 - Serves the runner-contract management API on `--port`:
 
-  | Endpoint | Behaviour |
-  |---|---|
-  | `GET /health` | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies |
-  | `GET /capabilities` | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on |
-  | `GET /memory-report` | Best-effort per-device memory (409 while `STARTING`) |
-  | `POST /sleep` | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM) |
-  | `POST /wake` | vLLM `/wake_up` |
-  | `GET /sleep-status`, `GET /progress` | State introspection |
+  | Endpoint                             | Behaviour                                                                           |
+  | ------------------------------------ | ----------------------------------------------------------------------------------- |
+  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies |
+  | `GET /capabilities`                  | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on       |
+  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`)                                |
+  | `POST /sleep`                        | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM)                     |
+  | `POST /wake`                         | vLLM `/wake_up`                                                                     |
+  | `GET /sleep-status`, `GET /progress` | State introspection                                                                 |
 
 - On SIGTERM (uvicorn → lifespan shutdown) it SIGTERMs the vLLM process group, then SIGKILLs after
   a grace period — the whole tree drains on one signal (spike Gate 5).

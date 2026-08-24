@@ -26,12 +26,12 @@ describe('groupWorkerPlacement', () => {
 
     const placement = groupWorkerPlacement(worker);
 
-    expect(placement.byDevice.find((d) => d.deviceIndex === 0)?.models.map((m) => m.modelName)).toEqual([
-      'model-a',
-    ]);
-    expect(placement.byDevice.find((d) => d.deviceIndex === 1)?.models.map((m) => m.modelName)).toEqual([
-      'model-b',
-    ]);
+    expect(
+      placement.byDevice.find((d) => d.deviceIndex === 0)?.models.map((m) => m.modelName),
+    ).toEqual(['model-a']);
+    expect(
+      placement.byDevice.find((d) => d.deviceIndex === 1)?.models.map((m) => m.modelName),
+    ).toEqual(['model-b']);
     expect(placement.tensorParallel).toEqual([]);
     expect(placement.unplaced).toEqual([]);
     expect(placement.placementUntracked).toBe(false);
@@ -42,9 +42,7 @@ describe('groupWorkerPlacement', () => {
       workerId: 'w1',
       status: 'ONLINE',
       devices: [device(0), device(1)],
-      models: [
-        { modelName: 'model-tp', state: ModelLifecycleState.ACTIVE, deviceIndices: [0, 1] },
-      ],
+      models: [{ modelName: 'model-tp', state: ModelLifecycleState.ACTIVE, deviceIndices: [0, 1] }],
     } as unknown as MemoryWorker;
 
     const placement = groupWorkerPlacement(worker);

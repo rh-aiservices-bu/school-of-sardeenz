@@ -80,7 +80,11 @@ export class SleepWakeService {
    * Updates the routing map (per-instance endpoint removal, then a model-level aggregate
    * refresh) at each stage. Records duration in sleepDuration histogram.
    */
-  async sleepModel(modelName: string, instanceId: string, runnerClient: RunnerClient): Promise<void> {
+  async sleepModel(
+    modelName: string,
+    instanceId: string,
+    runnerClient: RunnerClient,
+  ): Promise<void> {
     const startedAt = Date.now();
 
     // Fetch current instance state for endpoint details.
@@ -136,7 +140,11 @@ export class SleepWakeService {
    * Updates the routing map (per-instance endpoint re-add, then a model-level aggregate
    * refresh) at each stage. Records duration in wakeDuration histogram.
    */
-  async wakeModel(modelName: string, instanceId: string, runnerClient: RunnerClient): Promise<void> {
+  async wakeModel(
+    modelName: string,
+    instanceId: string,
+    runnerClient: RunnerClient,
+  ): Promise<void> {
     const startedAt = Date.now();
 
     wakeTriggersTotal.inc();

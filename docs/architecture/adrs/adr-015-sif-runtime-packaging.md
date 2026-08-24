@@ -13,17 +13,17 @@ version switching, side-by-side versions, slim workers, and no per-host image co
 mechanism was **EasyBuild + Lmod modules on shared storage** (the Highlander model): worker
 containers become thin stubs that `module load <engine>/<version>` from a read-only mount.
 
-Two problems emerged with the Lmod/EasyBuild mechanism (not with ADR-004's *goals*, which
+Two problems emerged with the Lmod/EasyBuild mechanism (not with ADR-004's _goals_, which
 still stand):
 
 - **Authoring burden.** EasyBuild means owning a from-source compilation stack and writing an
   easyconfig for every engine and every version. For a GPU Python stack (vLLM + PyTorch +
   CUDA + kvcached) that is a heavy, fragile lift for whoever provisions a runtime — and it is
-  *different* work from the container images the ecosystem already ships.
+  _different_ work from the container images the ecosystem already ships.
 - **Metadata storm.** Initializing a Python runtime directly off network storage generates
   intense metadata traffic (thousands of small `stat`/`open` calls) against the storage MDS.
   ADR-004 itself flagged this and pointed at "flattened module packaging (squashfs/erofs)" as
-  the mitigation — i.e. the module should be *one file*, not a directory tree.
+  the mitigation — i.e. the module should be _one file_, not a directory tree.
 
 The Phase 4 feasibility spike ([`docs/project/phase4-apptainer-spike.md`](../../project/phase4-apptainer-spike.md))
 validated an alternative that keeps every ADR-004 benefit while removing both problems: package
@@ -75,12 +75,12 @@ runs `module load`. The worker/runner hierarchy and the runner contract are unch
   exec — [ADR-017](adr-017-runner-image-pipeline.md).
 - **kvcached (and any patched runtime) needs a custom-built image** — base engine image + the
   kvcached wheel + enablement env. This is true for a plain container deployment too, so it is
-  *SIF-neutral*; it just means the runner image is a Sardeenz-built artifact, not an upstream
+  _SIF-neutral_; it just means the runner image is a Sardeenz-built artifact, not an upstream
   pull ([ADR-017](adr-017-runner-image-pipeline.md)).
-- **Build vs. exec split.** SIF *conversion* is a one-time, resource-heavy build step (needs
+- **Build vs. exec split.** SIF _conversion_ is a one-time, resource-heavy build step (needs
   node-local scratch, several GB RAM) and belongs in a librarian/CI job — never on the serving
   worker, which only needs to `apptainer exec`.
 - **The alternatives were weighed** (OpenShift `zstd:chunked` lazy pulls, Kubernetes
   ImageVolumes, hand-rolled bubblewrap, and the original EasyBuild/Lmod). SIF's differentiator
-  is *hot-add without a Pod restart* plus *no per-node copy*; the trade is the mild SCC. See
+  is _hot-add without a Pod restart_ plus _no per-node copy_; the trade is the mild SCC. See
   §13 of the spike for the full comparison.

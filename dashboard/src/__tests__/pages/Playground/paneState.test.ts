@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { initialPanes, selectModel, closePane, resizePanes } from '../../../pages/Playground/paneState';
+import {
+  initialPanes,
+  selectModel,
+  closePane,
+  resizePanes,
+} from '../../../pages/Playground/paneState';
 
 describe('initialPanes', () => {
   it('creates one empty pane for the single layout', () => {

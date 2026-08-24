@@ -84,11 +84,7 @@ export function WeightsBrowserModal({ isOpen, onClose, onSelect }: WeightsBrowse
         {isLoading && <Spinner size="lg" aria-label={tCommon('loading')} />}
 
         {isError && (
-          <Alert
-            variant={AlertVariant.danger}
-            isInline
-            title={t('deploy.browse.error')}
-          >
+          <Alert variant={AlertVariant.danger} isInline title={t('deploy.browse.error')}>
             {error instanceof Error ? error.message : tCommon('errors.unexpected')}
           </Alert>
         )}
@@ -137,11 +133,7 @@ export function WeightsBrowserModal({ isOpen, onClose, onSelect }: WeightsBrowse
         )}
       </ModalBody>
       <ModalFooter>
-        <Button
-          variant="primary"
-          isDisabled={!data}
-          onClick={() => data && select(data.path)}
-        >
+        <Button variant="primary" isDisabled={!data} onClick={() => data && select(data.path)}>
           {t('deploy.browse.selectCurrent')}
         </Button>
         <Button variant="link" onClick={onClose}>

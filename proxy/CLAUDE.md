@@ -89,23 +89,23 @@ cargo test --lib                               # Unit tests only
 
 All env vars read at startup by `Config::from_env()`.
 
-| Variable                            | Default                  | Description                                                                 |
-| ----------------------------------- | ------------------------ | --------------------------------------------------------------------------- |
-| `SARDEENZ_PROXY_LISTEN_ADDR`        | `0.0.0.0:8080`           | Inference server bind address (falls back to legacy `SARDEENZ_LISTEN_ADDR`) |
-| `SARDEENZ_ADMIN_ADDR`               | `0.0.0.0:9099`           | Admin server (health + metrics)                                             |
-| `SARDEENZ_REDIS_URL`                | `redis://127.0.0.1:6379` | Redis/Valkey connection                                                     |
-| `SARDEENZ_CONTROL_PLANE_URL`        | `http://127.0.0.1:3000`  | Control plane for wake triggers                                             |
-| `SARDEENZ_LOG_LEVEL`                | `info`                   | Tracing log level                                                           |
-| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`    | `300`                    | Forwarded request timeout                                                   |
-| `SARDEENZ_REDIS_KEY_PREFIX`         | `sardeenz`               | Redis key/channel prefix                                                    |
-| `SARDEENZ_PARKING_TIMEOUT_SECS`     | `120`                    | Max parking wait before 503                                                 |
-| `SARDEENZ_PARKING_MAX_PER_MODEL`    | `1000`                   | Per-model parked connection limit                                           |
-| `SARDEENZ_PARKING_MAX_GLOBAL`       | `10000`                  | Global parked connection limit                                              |
-| `SARDEENZ_CB_FAILURE_THRESHOLD`     | `5`                      | Failures to trip circuit breaker                                            |
-| `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | `30`                     | Circuit breaker failure window                                              |
-| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `15`                     | Open → HalfOpen transition time                                             |
-| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` | `0` (unlimited)     | Max concurrently forwarded (in-flight upstream) requests, all models        |
-| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `0` (unlimited)    | Max concurrently forwarded requests, per model                             |
+| Variable                                  | Default                  | Description                                                                 |
+| ----------------------------------------- | ------------------------ | --------------------------------------------------------------------------- |
+| `SARDEENZ_PROXY_LISTEN_ADDR`              | `0.0.0.0:8080`           | Inference server bind address (falls back to legacy `SARDEENZ_LISTEN_ADDR`) |
+| `SARDEENZ_ADMIN_ADDR`                     | `0.0.0.0:9099`           | Admin server (health + metrics)                                             |
+| `SARDEENZ_REDIS_URL`                      | `redis://127.0.0.1:6379` | Redis/Valkey connection                                                     |
+| `SARDEENZ_CONTROL_PLANE_URL`              | `http://127.0.0.1:3000`  | Control plane for wake triggers                                             |
+| `SARDEENZ_LOG_LEVEL`                      | `info`                   | Tracing log level                                                           |
+| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`          | `300`                    | Forwarded request timeout                                                   |
+| `SARDEENZ_REDIS_KEY_PREFIX`               | `sardeenz`               | Redis key/channel prefix                                                    |
+| `SARDEENZ_PARKING_TIMEOUT_SECS`           | `120`                    | Max parking wait before 503                                                 |
+| `SARDEENZ_PARKING_MAX_PER_MODEL`          | `1000`                   | Per-model parked connection limit                                           |
+| `SARDEENZ_PARKING_MAX_GLOBAL`             | `10000`                  | Global parked connection limit                                              |
+| `SARDEENZ_CB_FAILURE_THRESHOLD`           | `5`                      | Failures to trip circuit breaker                                            |
+| `SARDEENZ_CB_FAILURE_WINDOW_SECS`         | `30`                     | Circuit breaker failure window                                              |
+| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS`       | `15`                     | Open → HalfOpen transition time                                             |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`  | `0` (unlimited)          | Max concurrently forwarded (in-flight upstream) requests, all models        |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `0` (unlimited)          | Max concurrently forwarded requests, per model                              |
 
 ## Conventions
 

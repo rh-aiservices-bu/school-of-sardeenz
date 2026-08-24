@@ -105,7 +105,8 @@ function summarizeFleet(report: DeviceReport): string {
   if (devices.length === 0) return 'no devices';
   const gib = (bytes: number): number => Math.round(bytes / (1024 * 1024 * 1024));
   const uniform = devices.every(
-    (d) => d.deviceType === devices[0].deviceType && d.memoryTotalBytes === devices[0].memoryTotalBytes,
+    (d) =>
+      d.deviceType === devices[0].deviceType && d.memoryTotalBytes === devices[0].memoryTotalBytes,
   );
   return uniform
     ? `${devices.length}x ${devices[0].deviceType} @ ${gib(devices[0].memoryTotalBytes)} GiB`
@@ -118,7 +119,9 @@ async function start(): Promise<void> {
 
   await server.listen({ port: config.workerPort, host: '0.0.0.0' });
   if (!config.workerToken) {
-    console.warn('[dev-worker] SARDEENZ_WORKER_TOKEN is not set — worker API authentication is disabled');
+    console.warn(
+      '[dev-worker] SARDEENZ_WORKER_TOKEN is not set — worker API authentication is disabled',
+    );
   }
   // Be explicit about where the fleet came from so fabricated numbers aren't read as real hardware:
   //   detected   — real GPUs from nvidia-smi (apptainer mode)

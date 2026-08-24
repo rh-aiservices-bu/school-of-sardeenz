@@ -60,10 +60,7 @@ describe('LeaderElectionService — single-instance mode', () => {
     await svc.start();
 
     expect(svc.isLeader).toBe(true);
-    expect(logger.warn).toHaveBeenCalledWith(
-      {},
-      expect.stringContaining('single-instance mode'),
-    );
+    expect(logger.warn).toHaveBeenCalledWith({}, expect.stringContaining('single-instance mode'));
   });
 
   it('self-elects as leader when SARDEENZ_SINGLE_INSTANCE=1', async () => {

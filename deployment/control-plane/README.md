@@ -25,13 +25,13 @@ store itself (no Kubernetes Job — so it works identically under Podman/VM). Th
 
 ## Environment
 
-| Var | Purpose | Default |
-|---|---|---|
-| `SARDEENZ_RUNNER_CATALOG_URL` | Catalog source (http(s) URL or local file / `file://`) | the official `school-of-sardeenz` raw URL |
-| `SARDEENZ_MODULES_DIR` | Module store mount path | `/modules` |
-| `SARDEENZ_SIF_IMPORTER` | `oras` (real: `apptainer pull`) or `stub` (dev: placeholder file) | `stub` |
-| `SARDEENZ_APPTAINER_BIN` | apptainer binary | `apptainer` |
-| `SARDEENZ_VERIFY_SIF` | `apptainer verify` pulled SIFs before publishing | `true` |
+| Var                           | Purpose                                                           | Default                                   |
+| ----------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
+| `SARDEENZ_RUNNER_CATALOG_URL` | Catalog source (http(s) URL or local file / `file://`)            | the official `school-of-sardeenz` raw URL |
+| `SARDEENZ_MODULES_DIR`        | Module store mount path                                           | `/modules`                                |
+| `SARDEENZ_SIF_IMPORTER`       | `oras` (real: `apptainer pull`) or `stub` (dev: placeholder file) | `stub`                                    |
+| `SARDEENZ_APPTAINER_BIN`      | apptainer binary                                                  | `apptainer`                               |
+| `SARDEENZ_VERIFY_SIF`         | `apptainer verify` pulled SIFs before publishing                  | `true`                                    |
 
 Set `SARDEENZ_SIF_IMPORTER=oras` in production; leave it unset (`stub`) for local dev / CI where
 apptainer isn't installed. For local dev, point `SARDEENZ_RUNNER_CATALOG_URL` at the repo's
@@ -48,9 +48,12 @@ spec:
       env:
         - { name: SARDEENZ_SIF_IMPORTER, value: oras }
         - { name: SARDEENZ_MODULES_DIR, value: /modules }
-        - { name: SARDEENZ_RUNNER_CATALOG_URL, value: "https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml" }
+        - {
+            name: SARDEENZ_RUNNER_CATALOG_URL,
+            value: 'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml',
+          }
       volumeMounts:
-        - { name: modules, mountPath: /modules }          # read-write (control plane is a writer)
+        - { name: modules, mountPath: /modules } # read-write (control plane is a writer)
         - { name: signing-key, mountPath: /etc/sardeenz/keys, readOnly: true }
   volumes:
     - name: modules

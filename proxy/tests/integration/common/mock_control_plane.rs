@@ -29,10 +29,10 @@ use sardeenz_proxy::routing::RoutingMapCache;
 
 #[derive(Clone, Copy, PartialEq)]
 enum WakeResponseMode {
-    Accept,      // default: 202 + accepted:true (+ fire wake_actions)
-    FailHttp,    // 500 + accepted:false  (current fail_wakes behavior)
-    SoftReject,  // 202 + accepted:false + currentState/message
-    Malformed,   // 202 + non-deserializable body (+ fire wake_actions)
+    Accept,     // default: 202 + accepted:true (+ fire wake_actions)
+    FailHttp,   // 500 + accepted:false  (current fail_wakes behavior)
+    SoftReject, // 202 + accepted:false + currentState/message
+    Malformed,  // 202 + non-deserializable body (+ fire wake_actions)
 }
 
 // ---------------------------------------------------------------------------

@@ -52,9 +52,7 @@ export class WorkerClient {
     });
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(
-        `Worker GET /runners/${runnerId}/logs returned ${response.status}: ${body}`,
-      );
+      throw new Error(`Worker GET /runners/${runnerId}/logs returned ${response.status}: ${body}`);
     }
     return response;
   }
@@ -98,7 +96,11 @@ export class WorkerClient {
     }
   }
 
-  private async post<T>(path: string, body: unknown, timeoutMs: number = this.timeoutMs): Promise<T> {
+  private async post<T>(
+    path: string,
+    body: unknown,
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeaders() },

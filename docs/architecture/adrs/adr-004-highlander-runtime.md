@@ -4,8 +4,8 @@
 
 **Superseded by [ADR-015](adr-015-sif-runtime-packaging.md).**
 
-The *goals* of this ADR still hold (deliver runtimes without baking them into worker images;
-fast version switching, side-by-side versions, slim workers, no per-host copy). The *mechanism*
+The _goals_ of this ADR still hold (deliver runtimes without baking them into worker images;
+fast version switching, side-by-side versions, slim workers, no per-host copy). The _mechanism_
 — EasyBuild/Lmod modules on shared storage — is replaced by **Apptainer SIF files on a shared
 RWX volume**, which keeps every benefit here while removing the from-source authoring burden and
 the metadata-storm risk (a SIF is the "flattened single-file module" this ADR's Consequences

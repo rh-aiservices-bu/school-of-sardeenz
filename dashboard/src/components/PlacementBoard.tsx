@@ -98,7 +98,9 @@ function PlacementSummary({ worker }: { worker: MemoryWorker }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--xs)' }}>
+    <div
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--xs)' }}
+    >
       {placement.byDevice
         .filter((d) => d.models.length > 0)
         .map((d) => (
@@ -121,7 +123,9 @@ function PlacementSummary({ worker }: { worker: MemoryWorker }) {
           </span>
           <div style={chipsStyle}>
             <ModelChip model={m} />
-            <Badge>{t('overview.placement.tpBadge', { count: m.deviceIndices?.length ?? 0 })}</Badge>
+            <Badge>
+              {t('overview.placement.tpBadge', { count: m.deviceIndices?.length ?? 0 })}
+            </Badge>
           </div>
         </div>
       ))}
@@ -189,7 +193,13 @@ export function PlacementBoard() {
         ) : isClusterEmpty(memory) ? (
           <EmptyPlacementState />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--pf-t--global--spacer--lg)' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--pf-t--global--spacer--lg)',
+            }}
+          >
             {memory?.workers.map((worker) => (
               <div key={worker.workerId}>
                 <div style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>

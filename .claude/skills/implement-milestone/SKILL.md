@@ -20,7 +20,7 @@ perform yourself (step 3f).
 
 **On the model chain (read this — it is deliberately honest about its limits).** This
 environment has no third model family, so the writes→reviews→accepts chain does **not**
-span three distinct models: Sonnet writes, Opus reviews, and a *fresh* Opus accepts. The
+span three distinct models: Sonnet writes, Opus reviews, and a _fresh_ Opus accepts. The
 acceptance gate therefore buys **context isolation** (a fresh agent with no memory of the
 reviews that already persuaded you) but **not** cross-model blind-spot coverage — the
 accepter shares the reviewer's model family and can share its blind spots. Because that
@@ -39,7 +39,7 @@ agent must never share context with the reviewers whose reports it audits. Keep 
 orchestrator context lean — subagents read files; you read their reports.
 
 **Report delivery:** subagents run in the background and notify you on completion. An
-agent *finishing* is not the same as its report *arriving* — before you act on any
+agent _finishing_ is not the same as its report _arriving_ — before you act on any
 completion, confirm you actually have the report's content. If a late scope addition you
 sent may have crossed with a completion, confirm the agent received it rather than
 assuming.
@@ -130,7 +130,7 @@ Launch a **planning Agent with `model: opus`**:
 >   then priority labels (`priority/P0-critical` → `P3-low`), then ascending issue
 >   number. Issues with no dependency between them and no overlapping files form a
 >   **wave** (max 3 concurrent); issues sharing files or building on shared groundwork
->   are sequenced. Flag any issue blocked by work *outside* this milestone (the
+>   are sequenced. Flag any issue blocked by work _outside_ this milestone (the
 >   milestone description names known ones).
 > - **Per issue:** affected components (`proxy` Rust / `control-plane` / `dashboard` +
 >   BFF / `runners/dev-worker` / `runners/vllm` Python / `packages/contracts`+`types` /
@@ -318,7 +318,7 @@ summary.
 
 ### 3e: Verify (Opus, on the milestone branch)
 
-Runs **after** the merge, in the main checkout — so it validates the issue *and* its
+Runs **after** the merge, in the main checkout — so it validates the issue _and_ its
 integration with everything already merged. Launch a **verification Agent with
 `model: opus`**:
 
@@ -377,7 +377,7 @@ Require `ACCEPTED` / `NOT ACCEPTED` with the failing gate named.
    the two failure modes reviews miss: something claimed in a report but absent from
    the diff, and something in the diff that neither the Blueprint nor a flagged
    deviation accounts for.
-2. **Did Opus actually review and verify?** Judge the review and verification *reports*
+2. **Did Opus actually review and verify?** Judge the review and verification _reports_
    for substance: findings must engage the actual diff (file:line references, concrete
    failure scenarios), and every PASS must quote real command output. A round with zero
    findings across all reviewers on a non-trivial diff, or a verification that asserts
@@ -441,9 +441,9 @@ When the issue list is exhausted (or the single requested issue is done):
 
 Branch: milestone-M<N> (local, not pushed — awaiting your PR decision)
 
-| Issue | Result | Review rounds | Verification | Acceptance | Commit |
-| ----- | ------ | ------------- | ------------ | ---------- | ------ |
-| #NNN  | done / partial / blocked | n | pass / pass-with-deferred | accepted / accepted-after-rework | <sha> |
+| Issue | Result                   | Review rounds | Verification              | Acceptance                       | Commit |
+| ----- | ------------------------ | ------------- | ------------------------- | -------------------------------- | ------ |
+| #NNN  | done / partial / blocked | n             | pass / pass-with-deferred | accepted / accepted-after-rework | <sha>  |
 
 - Issues completed: X of Y (blocked: list, with reasons)
 - New issues filed during execution: [list]

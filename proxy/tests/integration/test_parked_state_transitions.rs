@@ -66,10 +66,7 @@ async fn test_parked_request_sleeping_rollback_fails_fast() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["error"]["type"], "model_unavailable");
     let message = body["error"]["message"].as_str().unwrap_or("");
-    assert!(
-        message.contains("sleeping"),
-        "expected message to mention sleeping, got: {message}"
-    );
+    assert!(message.contains("sleeping"), "expected message to mention sleeping, got: {message}");
     assert!(
         elapsed < Duration::from_secs(1),
         "fast-fail expected; took {elapsed:?} (parking_timeout is 10s — unfixed code would wait it out)"
@@ -115,10 +112,7 @@ async fn test_parked_request_draining_fails_fast() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["error"]["type"], "model_unavailable");
     let message = body["error"]["message"].as_str().unwrap_or("");
-    assert!(
-        message.contains("draining"),
-        "expected message to mention draining, got: {message}"
-    );
+    assert!(message.contains("draining"), "expected message to mention draining, got: {message}");
     assert!(
         elapsed < Duration::from_secs(1),
         "fast-fail expected; took {elapsed:?} (parking_timeout is 10s — unfixed code would wait it out)"

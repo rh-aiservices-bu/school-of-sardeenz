@@ -14,9 +14,7 @@ import { deviceMemoryBytes } from '../../health/metrics.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
-function makeModelState(
-  overrides: Partial<InstanceState> & { modelName: string },
-): InstanceState {
+function makeModelState(overrides: Partial<InstanceState> & { modelName: string }): InstanceState {
   return {
     instanceId: `inst-${overrides.modelName}`,
     state: ModelLifecycleState.ACTIVE,

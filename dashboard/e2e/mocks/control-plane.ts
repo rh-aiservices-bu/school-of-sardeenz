@@ -254,7 +254,13 @@ export class MockControlPlane {
       instances.push(instance);
       model.instanceCount = instances.length;
       model.workerId = instances.length === 1 ? instance.workerId : undefined;
-      return reply.code(202).send({ modelName: model.modelName, instanceId: instance.instanceId, state: instance.state });
+      return reply
+        .code(202)
+        .send({
+          modelName: model.modelName,
+          instanceId: instance.instanceId,
+          state: instance.state,
+        });
     });
 
     app.delete<{ Params: { name: string; instanceId: string } }>(
@@ -404,9 +410,8 @@ export class MockControlPlane {
   private instancesFor(modelName: string): MockInstanceInfo[] {
     if (!this.state.modelInstances[modelName]) {
       const model = this.state.models.find((m) => m.modelName === modelName);
-      this.state.modelInstances[modelName] = model && model.state !== 'STOPPED'
-        ? [this.newInstance(model)]
-        : [];
+      this.state.modelInstances[modelName] =
+        model && model.state !== 'STOPPED' ? [this.newInstance(model)] : [];
     }
     return this.state.modelInstances[modelName];
   }
