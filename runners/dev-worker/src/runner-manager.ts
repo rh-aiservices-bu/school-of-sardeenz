@@ -48,6 +48,7 @@ export interface StartRunnerParams {
   tensorParallel: number;
   runtimeModule?: string;
   engineConfig?: Record<string, unknown>;
+  engineArgs?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
@@ -143,6 +144,7 @@ export class RunnerManager {
           requiredMemory: params.requiredMemory,
           tensorParallel: params.tensorParallel,
           engineConfig: params.engineConfig,
+          engineArgs: params.engineArgs,
           devices: params.devices,
           port,
           enginePort,

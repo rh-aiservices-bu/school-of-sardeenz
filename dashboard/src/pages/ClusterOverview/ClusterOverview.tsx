@@ -26,7 +26,8 @@ import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/type
 import { useClusterStatus } from '../../hooks/useCluster';
 import { useEventStream } from '../../hooks/useEventStream';
 import { StateLabel } from '../../components/StateLabel';
-import { MemoryVisualization } from '../../components/MemoryVisualization';
+import { PlacementBoard } from '../../components/PlacementBoard';
+import { InferenceUrlBanner } from '../../components/InferenceUrlBanner';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
@@ -688,6 +689,9 @@ export function ClusterOverview() {
           gap: 'var(--pf-t--global--spacer--lg)',
         }}
       >
+        {/* Inference URL — visible and copyable without navigation */}
+        <InferenceUrlBanner />
+
         {/* Row 1: Summary cards */}
         <SummaryCards status={status} />
 
@@ -704,8 +708,8 @@ export function ClusterOverview() {
           <ModelStateBreakdown status={status} />
         </div>
 
-        {/* Row 2.5: Per-worker VRAM breakdown */}
-        <MemoryVisualization />
+        {/* Row 2.5: Placement board — workers -> GPUs -> placed models */}
+        <PlacementBoard />
 
         {/* Row 4: Recent events */}
         <RecentEvents />

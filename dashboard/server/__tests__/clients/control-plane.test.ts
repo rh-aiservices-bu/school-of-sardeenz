@@ -12,6 +12,7 @@ const mockConfig: Config = {
   redisUrl: 'redis://localhost:6379',
   redisKeyPrefix: 'sardeenz',
   prometheusUrl: 'http://prom.test',
+  inferenceUrl: 'http://inference.test',
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',

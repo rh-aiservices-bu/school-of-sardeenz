@@ -137,6 +137,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
             deviceType: (params.deviceType as string | undefined) ?? null,
             tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
             engineConfig: (params.engineConfig as Record<string, unknown> | undefined) ?? null,
+            engineArgs: (params.engineArgs as string[] | undefined) ?? null,
             runtimeModule: (params.runtimeModule as string | undefined) ?? null,
             pinned: (params.pinned as boolean | undefined) ?? false,
             createdAt: new Date(),
@@ -713,6 +714,7 @@ describe('POST /api/v1/models/:modelName/start', () => {
     deviceType: 'CUDA',
     tensorParallel: 1,
     engineConfig: null,
+    engineArgs: null,
     runtimeModule: 'vllm-0.21',
     pinned: false,
   };
@@ -817,6 +819,145 @@ describe('POST /api/v1/models/:modelName/start', () => {
       modelName: 'm1',
       state: ModelLifecycleState.PENDING,
     });
+  });
+});
+
+describe('engineArgs (#126)', () => {
+  it('POST /api/v1/models with engineArgs persists it and forwards it to deployOrchestration', async () => {
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve({
+        id: 'rec-1',
+        name: params.name,
+        runnerType: params.runnerType,
+        modelPath: params.modelPath,
+        requiredMemory: (params.requiredMemory as number | undefined) ?? null,
+        deviceType: (params.deviceType as string | undefined) ?? null,
+        tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
+        engineConfig: (params.engineConfig as Record<string, unknown> | undefined) ?? null,
+        engineArgs: (params.engineArgs as string[] | undefined) ?? null,
+        runtimeModule: (params.runtimeModule as string | undefined) ?? null,
+        pinned: (params.pinned as boolean | undefined) ?? false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    const deployModel = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      createModelRecord,
+      place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      deployModel,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, engineArgs: ['--max-model-len=8192'] },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(createModelRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ engineArgs: ['--max-model-len=8192'] }),
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(deployModel).toHaveBeenCalledWith(
+      expect.objectContaining({ engineArgs: ['--max-model-len=8192'] }),
+    );
+  });
+
+  it('POST /api/v1/models rejects a non-array engineArgs with 400', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, engineArgs: 'not-an-array' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('engineArgs must be an array of strings');
+  });
+
+  it('POST /api/v1/models rejects engineArgs with non-string elements with 400', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, engineArgs: ['--ok', 42] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('engineArgs must be an array of strings');
+  });
+
+  it('POST /api/v1/models rejects engineArgs with more than 128 elements with 400 (#126 review)', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, engineArgs: Array.from({ length: 129 }, (_, i) => `--x${i}`) },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('at most 128 elements');
+  });
+
+  it('POST /api/v1/models rejects an engineArgs element longer than 512 characters with 400 (#126 review)', async () => {
+    const { app } = buildDeployApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, engineArgs: [`--x=${'a'.repeat(509)}`] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('at most 512 characters');
+  });
+
+  it('POST /api/v1/models accepts engineArgs at the 128-element / 512-char caps (#126 review)', async () => {
+    const { app } = buildDeployApp({
+      place: vi.fn(() => ({ workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] })),
+      deployModel: vi.fn(() => Promise.resolve()),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: {
+        ...DEPLOY_BODY,
+        engineArgs: [...Array.from({ length: 127 }, (_, i) => `--x${i}`), `--y=${'a'.repeat(508)}`],
+      },
+    });
+
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('GET /api/v1/models/:modelName round-trips a stored engineArgs value', async () => {
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: 'CUDA',
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: ['--foo=1'],
+          runtimeModule: 'vllm-0.21',
+          pinned: false,
+        }),
+      ),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ engineArgs?: string[] }>().engineArgs).toEqual(['--foo=1']);
   });
 });
 

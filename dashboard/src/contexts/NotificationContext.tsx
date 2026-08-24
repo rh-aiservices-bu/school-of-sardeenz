@@ -21,6 +21,7 @@ interface NotificationContextType {
   notifications: Notification[];
   toastNotifications: ToastNotification[];
   unreadCount: number;
+  historyError: boolean;
   addNotification: (notification: Notification) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
@@ -40,6 +41,11 @@ export function useNotifications(): NotificationContextType {
 }
 
 const DEDUP_WINDOW_MS = 500;
+const MAX_NOTIFICATIONS = 200; // matches api.notifications.list(200) history fetch below
+
+function logNotificationError(context: string, error: unknown): void {
+  console.error(`[notifications] ${context}`, error);
+}
 
 interface DedupEntry {
   title: string;
@@ -50,15 +56,20 @@ interface DedupEntry {
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [toastNotifications, setToastNotifications] = useState<ToastNotification[]>([]);
+  const [historyError, setHistoryError] = useState(false);
   const lastNotificationRef = useRef<DedupEntry | null>(null);
 
   // Fetch notification history on mount
   useEffect(() => {
     api.notifications
-      .list(200)
-      .then((data) => setNotifications(data.notifications))
-      .catch(() => {
-        // Silently fail
+      .list(MAX_NOTIFICATIONS)
+      .then((data) => {
+        setNotifications(data.notifications);
+        setHistoryError(false);
+      })
+      .catch((error) => {
+        setHistoryError(true);
+        logNotificationError('failed to load notification history', error);
       });
   }, []);
 
@@ -83,7 +94,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     };
 
     // Add to notifications list
-    setNotifications((prev) => [notification, ...prev]);
+    setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS));
 
     // Create toast notification
     const toast: ToastNotification = {
@@ -109,23 +120,23 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, [addNotification]);
 
   const markAsRead = useCallback((id: string) => {
-    api.notifications.markRead(id).catch(() => {
-      // Ignore errors
-    });
+    api.notifications
+      .markRead(id)
+      .catch((error) => logNotificationError('failed to mark notification read', error));
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
   }, []);
 
   const markAllAsRead = useCallback(() => {
-    api.notifications.markAllRead().catch(() => {
-      // Ignore errors
-    });
+    api.notifications
+      .markAllRead()
+      .catch((error) => logNotificationError('failed to mark all notifications read', error));
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   }, []);
 
   const removeNotification = useCallback((id: string) => {
-    api.notifications.remove(id).catch(() => {
-      // Ignore errors
-    });
+    api.notifications
+      .remove(id)
+      .catch((error) => logNotificationError('failed to remove notification', error));
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
@@ -134,9 +145,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearAll = useCallback(() => {
-    api.notifications.clearAll().catch(() => {
-      // Ignore errors
-    });
+    api.notifications
+      .clearAll()
+      .catch((error) => logNotificationError('failed to clear notifications', error));
     setNotifications([]);
   }, []);
 
@@ -148,6 +159,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         notifications,
         toastNotifications,
         unreadCount,
+        historyError,
         addNotification,
         markAsRead,
         markAllAsRead,

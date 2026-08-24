@@ -19,6 +19,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://prom.test',
+    inferenceUrl: 'http://inference.test',
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: 'secret123',
@@ -54,6 +55,10 @@ function buildDeps(config: Config): RouteDeps {
       getClusterMemory: vi.fn(),
       isHealthy: vi.fn(),
     } as unknown as RouteDeps['controlPlane'],
+    inference: {
+      chatCompletions: vi.fn(),
+      isHealthy: vi.fn(),
+    } as unknown as RouteDeps['inference'],
     redis: {
       listModels: vi.fn(),
       getModel: vi.fn(),

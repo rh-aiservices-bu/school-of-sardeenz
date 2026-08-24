@@ -182,6 +182,83 @@ describe('ApptainerLauncher.buildExecPlan', () => {
       launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm/0.21' })),
     ).rejects.toThrow(/Invalid runtime module/);
   });
+
+  it('appends engineArgs verbatim after --served-model-name, in order (#126)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(
+      makeSpec({ engineArgs: ['--max-model-len=8192', '--enable-prefix-caching'] }),
+    );
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual([
+      '--served-model-name',
+      'llama',
+      '--max-model-len=8192',
+      '--enable-prefix-caching',
+    ]);
+  });
+
+  it('rejects a reserved flag passed as --key value', async () => {
+    const { launcher } = makeLauncher();
+    await expect(
+      launcher.buildExecPlan(makeSpec({ engineArgs: ['--port', '9999'] })),
+    ).rejects.toThrow(/reserved/);
+    await expect(
+      launcher.buildExecPlan(makeSpec({ engineArgs: ['--port', '9999'] })),
+    ).rejects.toThrow(/--port/);
+  });
+
+  it('rejects a reserved flag passed as --key=value (key normalization)', async () => {
+    const { launcher } = makeLauncher();
+    await expect(
+      launcher.buildExecPlan(makeSpec({ engineArgs: ['--port=9999'] })),
+    ).rejects.toThrow(/--port/);
+  });
+
+  it('rejects an unambiguous prefix abbreviation of a reserved flag (argparse allow_abbrev, #126 review)', async () => {
+    const { launcher } = makeLauncher();
+    await expect(
+      launcher.buildExecPlan(makeSpec({ engineArgs: ['--hos=0.0.0.0'] })),
+    ).rejects.toThrow(/--host/);
+    await expect(
+      launcher.buildExecPlan(makeSpec({ engineArgs: ['--por', '9999'] })),
+    ).rejects.toThrow(/--port/);
+    await expect(
+      launcher.buildExecPlan(makeSpec({ engineArgs: ['--tensor-parallel'] })),
+    ).rejects.toThrow(/--tensor-parallel-size/);
+  });
+
+  it('does not reject a flag that merely has a reserved flag as its own prefix (#126 review)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(
+      makeSpec({ engineArgs: ['--model-impl=vllm'] }),
+    );
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual([
+      '--served-model-name',
+      'llama',
+      '--model-impl=vllm',
+    ]);
+  });
+
+  it('emits --tensor-parallel before the `--` separator when tensorParallel > 1 (#126 fix)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ tensorParallel: 2 }));
+    const tpIdx = plan.args.indexOf('--tensor-parallel');
+    const ddIdx = plan.args.indexOf('--');
+    expect(tpIdx).toBeGreaterThan(-1);
+    expect(plan.args[tpIdx + 1]).toBe('2');
+    // cli.py (unchanged) reads --tensor-parallel pre-`--` and maps it to vLLM's
+    // --tensor-parallel-size when >1.
+    expect(tpIdx).toBeLessThan(ddIdx);
+  });
+
+  it('byte-identical no-args regression: default spec (tensorParallel:1, no engineArgs) omits --tensor-parallel', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec());
+    expect(plan.args).not.toContain('--tensor-parallel');
+    const ddIdx = plan.args.indexOf('--');
+    expect(plan.args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
+  });
 });
 
 describe('ApptainerLauncher.buildExecPlan modelPath containment', () => {

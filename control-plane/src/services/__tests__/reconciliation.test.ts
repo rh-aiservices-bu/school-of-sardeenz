@@ -98,6 +98,7 @@ function makeModelRecord(overrides: Partial<ModelRecord> & { name: string }): Mo
     deviceType: null,
     tensorParallel: 1,
     engineConfig: null,
+    engineArgs: null,
     runtimeModule: null,
     pinned: false,
     createdAt: new Date(),

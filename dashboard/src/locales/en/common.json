@@ -3,8 +3,10 @@
     "clusterOverview": "Cluster Overview",
     "models": "Models",
     "workers": "Workers",
+    "gpuMemory": "GPU Memory",
     "catalog": "Runner Catalog",
-    "metrics": "Metrics"
+    "metrics": "Metrics",
+    "playground": "Playground"
   },
   "brand": "Sardeenz",
   "actions": {
@@ -58,7 +60,8 @@
     "clearAll": "Clear all",
     "noNotifications": "No notifications",
     "noNotificationsBody": "You have no notifications at this time.",
-    "actions": "Notification actions"
+    "actions": "Notification actions",
+    "loadError": "Failed to load notification history. Some past notifications may be missing."
   },
   "userMenu": {
     "logout": "Logout"

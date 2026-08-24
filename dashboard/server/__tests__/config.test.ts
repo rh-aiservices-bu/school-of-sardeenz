@@ -16,6 +16,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://localhost:9090',
+    inferenceUrl: 'http://localhost:8080',
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: '',
@@ -218,7 +219,13 @@ describe('validateAuthConfig', () => {
 
 describe('loadConfig auth defaults', () => {
   const savedEnv: Record<string, string | undefined> = {};
-  const envVars = ['AUTH_MODE', 'ADMIN_PASSWORD', 'JWT_SECRET', 'SARDEENZ_PUBLIC_URL'];
+  const envVars = [
+    'AUTH_MODE',
+    'ADMIN_PASSWORD',
+    'JWT_SECRET',
+    'SARDEENZ_PUBLIC_URL',
+    'SARDEENZ_INFERENCE_URL',
+  ];
 
   beforeEach(() => {
     for (const key of envVars) {
@@ -273,5 +280,16 @@ describe('loadConfig auth defaults', () => {
   it('rejects invalid AUTH_MODE values', () => {
     process.env['AUTH_MODE'] = 'kerberos';
     expect(() => loadConfig()).toThrow('Invalid AUTH_MODE: kerberos');
+  });
+
+  it('defaults SARDEENZ_INFERENCE_URL to http://localhost:8080', () => {
+    const config = loadConfig();
+    expect(config.inferenceUrl).toBe('http://localhost:8080');
+  });
+
+  it('reads SARDEENZ_INFERENCE_URL from environment', () => {
+    process.env['SARDEENZ_INFERENCE_URL'] = 'http://proxy.example.com:8080';
+    const config = loadConfig();
+    expect(config.inferenceUrl).toBe('http://proxy.example.com:8080');
   });
 });

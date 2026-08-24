@@ -14,6 +14,7 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       tensorParallel: number;
       runtimeModule?: string;
       engineConfig?: Record<string, unknown>;
+      engineArgs?: string[];
       devices: { deviceIndex: number; deviceType: string }[];
     };
   }>('/runners', async (req, reply) => {
@@ -49,6 +50,7 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
         tensorParallel: body.tensorParallel ?? 1,
         runtimeModule: body.runtimeModule,
         engineConfig: body.engineConfig,
+        engineArgs: body.engineArgs,
         devices: body.devices,
       });
       return reply.status(201).send(result);

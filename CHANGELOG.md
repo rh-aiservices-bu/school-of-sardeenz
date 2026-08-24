@@ -8,6 +8,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Home placement board with cluster inference URL (#124).** The cluster overview home page is now
+  a v1-style Model Placement Management view: per-worker placement board composing the reusable
+  per-GPU memory sections (#123) plus a placement summary — per-GPU rows, tensor-parallel models
+  listed once with a TP×N badge, an Unplaced group, a placement-not-tracked fallback, and an
+  empty-cluster state with a deploy call-to-action. A copyable inference URL banner
+  (from `SARDEENZ_INFERENCE_URL` via the new authenticated BFF `GET /api/config` — response built
+  field-by-field, never exposing secrets, with a leak-guard test) and a per-model curl snippet on
+  the model detail page (OpenAI base = inference URL + `/v1`, routing name = model name — never
+  `window.location.origin`). The move-model action is deferred to a follow-up issue per the
+  project-lead decision; no move control is rendered. `/models` and `/gpu-memory` are unchanged.
+
+- **GPU memory visualization — per-GPU stacked per-model VRAM bars, grouped by worker (#123).** New
+  `/gpu-memory` dashboard page (v1 parity): each worker section renders one bar per GPU with stacked
+  per-model segments (deterministic PF6 chart-token colors, stable per model across workers), a
+  distinct hatch pattern for SLEEPING models (reclaimable VRAM), reserved colors for Other/Available,
+  minimum segment width, and overhead clamped at zero. Segments are labeled "(reserved)" — the
+  control plane now populates `WorkerModelInfo.memoryUsedBytes` (declared but never populated
+  before) from the model's configured `requiredMemory` in the cluster-memory and worker-detail
+  mappers, the only per-model figure the system has (no measured per-model VRAM exists yet; the
+  mappers are the seam for future real measurement). Tensor-parallel models are shown as an
+  even per-device split marked "(estimated)". The per-worker→per-GPU section is extracted into a
+  reusable `WorkerGpuSection` component (composed by the cluster overview, designed for the #124
+  placement board). Pure segment/color logic in `memorySegments.ts` with unit tests; live updates
+  via existing SSE; no chart library, no contract change.
+
+- **Chatbot Playground — multi-pane inference workspace routed through the proxy (#122).** New
+  admin-only `/playground` page (v1 parity, custom PatternFly 6 components — no chatbot library):
+  1–2 panes with independent chat sessions, model sidebar listing ACTIVE and SLEEPING models
+  (sleeping marked, wake-on-request indicator while the proxy parks the first request), token-by-token
+  streaming, and Stop/abort that cancels the generation end-to-end. The BFF gains
+  `POST /api/inference/chat/completions` (JWT `admin` role required; 403 for `admin-readonly`),
+  a streaming passthrough to the proxy's OpenAI-compatible endpoint — client disconnect aborts the
+  upstream request so no runner generates tokens for nobody. New `SARDEENZ_INFERENCE_URL` config
+  (default `http://localhost:8080`), shared SSE frame parser, new `playground` i18n namespace.
+
+- **Deploy form runner & device options now come from live worker capabilities (#67).** `WorkerInfo`
+  (`control-plane.yaml`) gains optional `runnerCapabilities`; `GET /api/v1/workers` returns it per
+  worker (mirroring `GET /api/v1/workers/{workerId}`). The dashboard deploy form lists exactly the
+  runner types advertised by online workers (deduped, labelled by engine name) and derives Device
+  Type options from the selected runner's `supportedDeviceTypes`, falling back to the previous
+  hardcoded lists (with a helper message) when no capability data is available; runner and device
+  selections are reconciled against live options on change. New reusable `useRunnerTypes()` /
+  `useWorkerCapabilities()` hooks.
+
 - **Logical model vs. instance split — N replicas per model (ADR-019).** A model name is now a
   logical model (unique config in Postgres `models`) served by N instances (new `instances` table,
   migration 003; instance-keyed Redis lifecycle state `models:{name}:{instanceId}` with
@@ -46,6 +90,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   path that breaks worker catalog loading when launched from the root.
 
 ### Fixed
+
+- **Engine parameters are now actually delivered to the engine — and entered as `--flag value`
+  lines instead of JSON (#126).** `engineConfig` was stored but never reached the engine; the
+  contract now adds `engineArgs: string[]` (deploy request, model detail, worker-agent
+  StartRunnerRequest — `engineConfig` kept but marked deprecated), persisted in a new
+  `engine_args text[]` column (migration 004) and threaded deploy → record → orchestration →
+  worker → launcher, where the args are appended verbatim to the engine argv after the `--`
+  separator (argv array, never shell-interpreted). Reserved flags (`--port`, `--host`, `--model`,
+  `--served-model-name`, `--tensor-parallel-size`, `--engine-port`) are rejected in both the
+  dashboard form and the launcher — including argparse *abbreviations* of reserved flags
+  (e.g. `--hos=0.0.0.0`), closing a bypass where an abbreviation would expand and override the
+  shim's own binding; the control plane caps payloads (≤128 args, ≤512 chars each). The deploy
+  form replaces the JSON textarea with per-line flags (comments and quoting supported, raw text
+  preserved on validation errors) and the model detail page shows the configured args. Also fixes
+  the folded-in **tensorParallel wiring bug**: `--tensor-parallel` was never emitted to the shim,
+  so multi-GPU deployments silently ran single-GPU; it now precedes the `--` separator and maps to
+  vLLM's `--tensor-parallel-size`. No-args deployments produce a byte-identical engine command
+  line (regression-tested).
+
+- **Dashboard: notification history now loads after login (#106).** `NotificationProvider` moved
+  inside the auth gate (`ProtectedRoute`) so its history fetch fires only when authenticated and
+  refetches on each login; the live list is capped at 200 (drop-oldest); previously-swallowed
+  notification API errors are now logged and history-load failures surfaced in the drawer.
 
 - **Integration harness worker fixture updated to the current WorkerInfo contract.** The M6
   Redis-boundary validation (#83) silently rejected the harness's `registerWorker` fixture

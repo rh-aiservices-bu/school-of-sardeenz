@@ -1,4 +1,6 @@
 import { type ControlPlaneComponents } from '@sardeenz/types';
+import type { ChatCompletionBody } from '../pages/Playground/types';
+import { parseSseBuffer, extractDelta } from '../utils/parseSse';
 
 type ModelInfo = ControlPlaneComponents['schemas']['ModelInfo'];
 type ModelDetail = ControlPlaneComponents['schemas']['ModelDetail'];
@@ -98,6 +100,114 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return res.json() as T;
+}
+
+export interface ChatStreamCallbacks {
+  onChunk: (delta: string) => void;
+  onDone: (fullText: string) => void;
+  onError: (err: ApiError | Error) => void;
+}
+
+// A `fetch` abort surfaces as a `DOMException` named 'AbortError', NOT an `Error` instance — so
+// `err instanceof Error` alone misses it. Check `.name` directly regardless of the error's type.
+function isAbortError(err: unknown): boolean {
+  return (err as { name?: unknown } | null)?.name === 'AbortError';
+}
+
+/**
+ * Streams a chat completion from `POST /api/inference/chat/completions`. Cannot go through
+ * `request()`, which always calls `res.json()` — the response here is an SSE stream read
+ * incrementally via `fetch` + a manual reader (EventSource is GET-only and cannot send a body or
+ * an Authorization header).
+ *
+ * On a real 401 the token is cleared and `auth:unauthorized` is dispatched, same as `request()`.
+ * On any other failure — including an aborted generation — only `onError` fires; an aborted
+ * generation must NOT log the user out.
+ */
+export async function streamChatCompletion(
+  body: ChatCompletionBody,
+  callbacks: ChatStreamCallbacks,
+  signal: AbortSignal,
+): Promise<void> {
+  const { onChunk, onDone, onError } = callbacks;
+
+  let res: Response;
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    res = await fetch(`${BASE_URL}/inference/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...body, stream: true }),
+      signal,
+    });
+  } catch (err) {
+    if (isAbortError(err)) return;
+    onError(err instanceof Error ? err : new Error(String(err)));
+    return;
+  }
+
+  if (res.status === 401) {
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch {
+      /* ignore */
+    }
+    window.dispatchEvent(new Event('auth:unauthorized'));
+    onError(new ApiError(401, 'Unauthorized', 'UNAUTHORIZED'));
+    return;
+  }
+
+  if (!res.ok || !res.body) {
+    let errorMessage = `HTTP ${res.status}`;
+    let code: string | undefined;
+    let details: Record<string, unknown> | undefined;
+    try {
+      const errBody = (await res.json()) as ErrorResponse;
+      errorMessage = errBody.error ?? errorMessage;
+      code = errBody.code;
+      details = errBody.details;
+    } catch {
+      // Ignore parse errors
+    }
+    onError(new ApiError(res.status, errorMessage, code, details));
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const fullText: string[] = [];
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const { rest, events } = parseSseBuffer(buffer);
+      buffer = rest;
+
+      for (const line of events) {
+        const { content, done: isDone } = extractDelta(line);
+        if (isDone) {
+          onDone(fullText.join(''));
+          return;
+        }
+        if (content) {
+          fullText.push(content);
+          onChunk(content);
+        }
+      }
+    }
+    onDone(fullText.join(''));
+  } catch (err) {
+    if (isAbortError(err)) return;
+    onError(err instanceof Error ? err : new Error(String(err)));
+  }
 }
 
 interface MetricsParams {
@@ -215,5 +325,12 @@ export const api = {
     remove: (id: string) =>
       request<void>(`/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     clearAll: () => request<void>('/notifications', { method: 'DELETE' }),
+  },
+  inference: {
+    chat: (body: ChatCompletionBody, callbacks: ChatStreamCallbacks, signal: AbortSignal) =>
+      streamChatCompletion(body, callbacks, signal),
+  },
+  config: {
+    get: (signal?: AbortSignal) => request<{ inferenceUrl: string }>('/config', { signal }),
   },
 };

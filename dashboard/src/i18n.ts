@@ -2,12 +2,14 @@
  * i18next configuration for the Sardeenz dashboard.
  *
  * Uses a namespace-per-page pattern:
- *   common  — shared strings (nav, actions, status labels)
- *   cluster — Cluster Overview page
- *   models  — Model list, detail, and deploy pages
- *   workers — Worker list and detail pages
- *   metrics — Metrics dashboard
- *   auth    — Login and OAuth callback
+ *   common     — shared strings (nav, actions, status labels)
+ *   cluster    — Cluster Overview page
+ *   models     — Model list, detail, and deploy pages
+ *   workers    — Worker list and detail pages
+ *   metrics    — Metrics dashboard
+ *   auth       — Login and OAuth callback
+ *   catalog    — Runner catalog page
+ *   playground — Chatbot Playground page
  */
 
 import i18n from 'i18next';
@@ -21,6 +23,7 @@ import workersEn from './locales/en/workers.json';
 import metricsEn from './locales/en/metrics.json';
 import authEn from './locales/en/auth.json';
 import catalogEn from './locales/en/catalog.json';
+import playgroundEn from './locales/en/playground.json';
 
 void i18n
   .use(LanguageDetector)
@@ -28,7 +31,7 @@ void i18n
   .init({
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'cluster', 'models', 'workers', 'metrics', 'auth', 'catalog'],
+    ns: ['common', 'cluster', 'models', 'workers', 'metrics', 'auth', 'catalog', 'playground'],
     resources: {
       en: {
         common: commonEn,
@@ -38,6 +41,7 @@ void i18n
         metrics: metricsEn,
         auth: authEn,
         catalog: catalogEn,
+        playground: playgroundEn,
       },
     },
     interpolation: {

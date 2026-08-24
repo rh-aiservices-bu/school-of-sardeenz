@@ -725,13 +725,27 @@ export type components = {
              */
             tensorParallel: number;
             /**
-             * @description Engine-specific configuration passed through to the runner.
+             * @deprecated
+             * @description DEPRECATED — use engineArgs for engine parameters and runtimeModule
+             *     for version selection. Retained for pre-existing rows; still stored
+             *     and forwarded unchanged. Removal tracked in #15.
+             *     Engine-specific configuration passed through to the runner.
              *     The control plane does not interpret this — it is stored in
              *     PostgreSQL and forwarded when starting the runner.
              */
             engineConfig?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Ordered CLI tokens passed verbatim to the engine, appended after the
+             *     runner shim's `--` separator (e.g.
+             *     ["--max-model-len=8192", "--enable-prefix-caching"]). Never
+             *     shell-interpreted — delivered as a spawn argv array. Flags the
+             *     platform controls (--port, --host, --model, --served-model-name,
+             *     --tensor-parallel-size, --engine-port) are reserved and rejected at
+             *     deploy time.
+             */
+            engineArgs?: string[];
             /**
              * @description Runtime module the worker execs to serve this model, as
              *     `<engine>-<version>` (e.g., "vllm-0.21"). The control plane
@@ -905,10 +919,15 @@ export type components = {
             deviceType?: string;
             /** @description Tensor parallelism degree. */
             tensorParallel?: number;
-            /** @description Engine-specific configuration. */
+            /**
+             * @deprecated
+             * @description Engine-specific configuration (deprecated — see engineArgs).
+             */
             engineConfig?: {
                 [key: string]: unknown;
             };
+            /** @description Ordered CLI tokens passed verbatim to the engine. */
+            engineArgs?: string[];
             /**
              * @description Runtime module the worker execs (`<engine>-<version>`, e.g.
              *     "vllm-0.21"), resolved to `/modules/<runtimeModule>.sif`.
@@ -948,6 +967,8 @@ export type components = {
             devices: components["schemas"]["DeviceInfo"][];
             /** @description Number of models currently deployed on this worker. */
             modelCount?: number;
+            /** @description Runner types available on this worker. */
+            runnerCapabilities?: components["schemas"]["WorkerRunnerCapability"][];
             /**
              * Format: date-time
              * @description Timestamp of the last heartbeat from this worker.

@@ -255,12 +255,23 @@ describe('DeployOrchestrationService', () => {
         deviceType: 'CUDA',
         tensorParallel: 2,
         engineConfig: { maxModelLen: 4096 },
+        engineArgs: undefined,
         runtimeModule: undefined,
         devices: [
           { deviceIndex: 0, deviceType: 'CUDA' },
           { deviceIndex: 1, deviceType: 'CUDA' },
         ],
       });
+    });
+
+    it('forwards engineArgs to the worker client (#126)', async () => {
+      const params = makeParams({ engineArgs: ['--a', 'b'] });
+
+      await service.deployModel(params);
+
+      expect(mocks.workerClient.startRunner).toHaveBeenCalledWith(
+        expect.objectContaining({ engineArgs: ['--a', 'b'] }),
+      );
     });
   });
 

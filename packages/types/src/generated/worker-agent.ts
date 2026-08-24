@@ -215,12 +215,18 @@ export type components = {
              */
             tensorParallel: number;
             /**
-             * @description Engine-specific configuration passed through to the runner process.
-             *     The worker does not interpret this — it forwards it as-is.
+             * @deprecated
+             * @description DEPRECATED — see engineArgs. Engine-specific configuration passed
+             *     through to the runner process. The worker forwards it as-is.
              */
             engineConfig?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Ordered CLI tokens the worker appends verbatim to the engine argv
+             *     after the shim's `--` separator. Never shell-interpreted.
+             */
+            engineArgs?: string[];
             /**
              * @description Devices assigned to this runner by the placement pipeline. Each
              *     entry specifies a device index and type on this worker.

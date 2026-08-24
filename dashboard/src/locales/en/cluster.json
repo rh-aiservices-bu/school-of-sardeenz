@@ -69,7 +69,45 @@
       "legend": {
         "used": "Used",
         "reserved": "Reserved",
-        "available": "Available"
+        "available": "Available",
+        "other": "Other",
+        "sleeping": "Sleeping"
+      },
+      "page": {
+        "title": "GPU Memory"
+      },
+      "tooltip": {
+        "model": "{{model}}: {{memory}} (reserved)",
+        "modelEstimate": "{{model}}: {{memory}} (estimated, reserved)",
+        "sleeping": "{{model}}: {{memory}} (sleeping, reserved)",
+        "estimateNote": "per-device split estimated"
+      },
+      "aria": {
+        "deviceBreakdown": "GPU {{index}}: {{summary}}"
+      }
+    },
+    "inferenceUrl": {
+      "label": "Inference URL:",
+      "description": "Paste this into any OpenAI-compatible client.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyAria": "Copy inference URL"
+    },
+    "placement": {
+      "title": "Placement",
+      "loading": "Loading placement data",
+      "gpu": "GPU {{index}}",
+      "tensorParallel": "Tensor-parallel · GPUs {{indices}}",
+      "tpBadge": "TP×{{count}}",
+      "unplaced": "Unplaced",
+      "unplacedHint": "Deployed before device-attribution tracking — GPU placement unknown.",
+      "placementUnknown": "Placement not tracked",
+      "noModels": "No models on this worker.",
+      "viewModel": "View {{model}} details",
+      "empty": {
+        "title": "No models placed yet",
+        "body": "Deploy a model to see it placed on a worker's GPUs here.",
+        "deployButton": "Deploy a model"
       }
     }
   }
