@@ -29,6 +29,13 @@ export interface LaunchSpec {
   tensorParallel: number;
   engineConfig?: Record<string, unknown>;
   engineArgs?: string[];
+  /**
+   * Optional engine-reported model identity (ADR-020). When set and different
+   * from `modelName`, `buildExecPlan` emits `--served-model-name
+   * <servedModelName> <modelName>` so the engine reports the served name while
+   * still accepting the configuration name. When absent, modelName alone.
+   */
+  servedModelName?: string;
   devices: DeviceRef[];
   /** Management port for the runner-contract API (health/sleep/wake/progress). */
   port: number;

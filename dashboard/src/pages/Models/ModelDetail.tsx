@@ -238,7 +238,17 @@ export function ModelDetail() {
         gap={{ default: 'gapMd' }}
       >
         <FlexItem>
-          <Title headingLevel="h1">{model.modelName}</Title>
+          <Title headingLevel="h1">{model.displayName ?? model.modelName}</Title>
+          {model.displayName && (
+            <div
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--sm)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
+            >
+              {model.modelName}
+            </div>
+          )}
         </FlexItem>
         <FlexItem>
           <StateLabel state={model.state} />
@@ -387,6 +397,13 @@ export function ModelDetail() {
         horizontalTermWidthModifier={{ default: '20ch' }}
         style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}
       >
+        {model.displayName && (
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('detail.fields.displayName')}</DescriptionListTerm>
+            <DescriptionListDescription>{model.displayName}</DescriptionListDescription>
+          </DescriptionListGroup>
+        )}
+
         <DescriptionListGroup>
           <DescriptionListTerm>{t('detail.fields.state')}</DescriptionListTerm>
           <DescriptionListDescription>
@@ -407,6 +424,17 @@ export function ModelDetail() {
             </code>
           </DescriptionListDescription>
         </DescriptionListGroup>
+
+        {model.servedModelName && (
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('detail.fields.servedModelName')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              <code style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>
+                {model.servedModelName}
+              </code>
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+        )}
 
         <DescriptionListGroup>
           <DescriptionListTerm>{t('detail.fields.requiredMemory')}</DescriptionListTerm>

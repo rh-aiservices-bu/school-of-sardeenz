@@ -687,12 +687,36 @@ export type components = {
          */
         ModelDeploymentRequest: {
             /**
-             * @description Model name used as the routing key. Must be unique across the
-             *     cluster. This is what clients specify in the `model` field of
-             *     OpenAI API requests.
+             * @description Configuration name used as the routing key. Must be unique across
+             *     the cluster. This is what clients specify in the `model` field of
+             *     OpenAI API requests. The engine also registers under this name so
+             *     forwarded requests resolve (see servedModelName).
              * @example meta-llama/Llama-3.1-8B-Instruct
              */
             modelName: string;
+            /**
+             * @description Optional human-friendly label for this configuration, shown in the
+             *     dashboard only (e.g. "Qwen test 1"). Free-form printable text. The
+             *     server trims surrounding whitespace and measures the 1–200 length
+             *     AFTER trimming; the trimmed value is what gets stored. NOT unique, NOT a routing
+             *     key, never sent to workers/runners, never enters Redis or the
+             *     routing map. Falls back to modelName in the UI when unset. No
+             *     pattern constraint — unlike modelName/servedModelName it never
+             *     reaches argv.
+             * @example Qwen test 1
+             */
+            displayName?: string;
+            /**
+             * @description Optional model identity the engine reports in responses and
+             *     metrics (ADR-020). When set and different from modelName, the
+             *     launcher registers both names with the engine (servedModelName
+             *     first, then modelName) so the engine reports the served name while
+             *     still accepting requests that carry the configuration name.
+             *     Defaults to modelName when absent. Not unique — multiple
+             *     configurations may share one servedModelName.
+             * @example meta-llama/Llama-3.1-8B-Instruct
+             */
+            servedModelName?: string;
             /**
              * @description Required runner type. Must match a registered runner type in the
              *     worker pool (e.g., `vllm`, `triton`, `mlserver`).
@@ -806,8 +830,13 @@ export type components = {
          *     even if another instance of the same model is in `ERROR`.
          */
         ModelInfo: {
-            /** @description Model name (routing key). */
+            /** @description Configuration name (routing key). */
             modelName: string;
+            /**
+             * @description Optional human-friendly label (dashboard presentation only).
+             *     Absent when unset; the UI falls back to modelName.
+             */
+            displayName?: string;
             state: components["schemas"]["ModelLifecycleState"];
             /** @description Runner type serving this model. */
             runnerType: string;
@@ -903,8 +932,18 @@ export type components = {
          *     it. `state` is the aggregate across `instances` (see `ModelInfo`).
          */
         ModelDetail: {
-            /** @description Model name (routing key). */
+            /** @description Configuration name (routing key). */
             modelName: string;
+            /**
+             * @description Optional human-friendly label (dashboard presentation only).
+             *     Absent when unset; the UI falls back to modelName.
+             */
+            displayName?: string;
+            /**
+             * @description Engine-reported model identity, when explicitly set (ADR-020).
+             *     Absent means the configuration name is used (default behavior).
+             */
+            servedModelName?: string;
             state: components["schemas"]["ModelLifecycleState"];
             /** @description Runner type serving this model. */
             runnerType: string;

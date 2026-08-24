@@ -15,6 +15,7 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       runtimeModule?: string;
       engineConfig?: Record<string, unknown>;
       engineArgs?: string[];
+      servedModelName?: string;
       devices: { deviceIndex: number; deviceType: string }[];
     };
   }>('/runners', async (req, reply) => {
@@ -51,6 +52,7 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
         runtimeModule: body.runtimeModule,
         engineConfig: body.engineConfig,
         engineArgs: body.engineArgs,
+        servedModelName: body.servedModelName,
         devices: body.devices,
       });
       return reply.status(201).send(result);

@@ -27,6 +27,7 @@ export interface DeployModelParams {
   engineConfig?: Record<string, unknown>;
   engineArgs?: string[];
   runtimeModule?: string;
+  servedModelName?: string;
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
@@ -63,6 +64,7 @@ export class DeployOrchestrationService {
       const workerClient = this.createWorkerClient(worker.managementUrl);
       const startRequest: StartRunnerRequest = {
         modelName: params.modelName,
+        servedModelName: params.servedModelName,
         instanceId: params.instanceId,
         runnerType: params.runnerType,
         modelPath: params.modelPath,

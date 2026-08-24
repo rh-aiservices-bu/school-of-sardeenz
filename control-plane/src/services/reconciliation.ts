@@ -11,6 +11,8 @@ import type { NotificationService } from './notification.js';
 import type { InstanceRepository } from './instance-repository.js';
 import type { ModelRepository } from './model-repository.js';
 import { refreshModelRoutingState } from './sleep-wake.js';
+import type { WorkerClient } from '../clients/worker.js';
+import { WorkerHttpError } from '../clients/worker.js';
 import {
   reconciliationTicksTotal,
   reconciliationStuckModelsTotal,
@@ -65,6 +67,11 @@ export class ReconciliationService {
     private readonly notifications?: NotificationService,
     private readonly instanceRepository?: InstanceRepository,
     private readonly modelRepository?: ModelRepository,
+    // #157 round-3: lets reapOrphanedInstances reach the owning worker and terminate an orphan's
+    // runner process before dropping its Redis record, instead of silently leaking it. Optional
+    // (like instanceRepository/modelRepository above) so existing tests that don't wire it are
+    // unaffected — reapOrphanedInstances itself already no-ops without modelRepository.
+    private readonly createWorkerClient?: (baseUrl: string) => WorkerClient,
   ) {
     this.clusterEventsChannel = redisKey(keyPrefix, CLUSTER_EVENTS_CHANNEL);
   }
@@ -409,6 +416,14 @@ export class ReconciliationService {
    * even started — so the later Postgres read, which starts after the Redis read completes, is
    * guaranteed to see it. Belt-and-braces: a per-candidate `findByName` re-check immediately before
    * reaping catches the row even if this ordering invariant is ever broken by future code.
+   *
+   * Round-3 review (#157, Medium): dropping the Redis record here is not just bookkeeping — it's
+   * also the last chance to terminate the runner process. `teardownInstance` (routes/models.ts)
+   * already attempts this itself and retains the record on a non-404 failure specifically so this
+   * method gets another shot; when `createWorkerClient` is wired, each candidate's `stopRunner` is
+   * best-effort re-attempted before its record is dropped, and a non-404 failure here skips the
+   * whole cleanup for that candidate (record retained, retried next tick) rather than dropping the
+   * bookkeeping while the process stays alive and VRAM stays held.
    */
   private async reapOrphanedInstances(): Promise<void> {
     if (!this.modelRepository) return;
@@ -430,6 +445,43 @@ export class ReconciliationService {
             'Skipping reap: model row now exists (race with concurrent deploy)',
           );
           continue;
+        }
+
+        // Round-3 review (Medium): before dropping this orphan's record, best-effort terminate
+        // its runner process — teardownInstance's own reap can fail non-404 and retain the
+        // record for exactly this step to retry, and reconciliation was previously the dead end
+        // where that retained record silently vanished next tick with the process still alive.
+        if (instance.workerId && instance.runnerId && this.createWorkerClient) {
+          const worker = this.workerPool.getWorker(instance.workerId);
+          if (worker) {
+            try {
+              await this.createWorkerClient(worker.managementUrl).stopRunner(instance.runnerId);
+            } catch (stopErr) {
+              if (stopErr instanceof WorkerHttpError && stopErr.status === 404) {
+                // Already gone — fall through to the usual cleanup below.
+              } else {
+                this.logger.warn(
+                  {
+                    modelName: instance.modelName,
+                    instanceId: instance.instanceId,
+                    workerId: instance.workerId,
+                    err: stopErr instanceof Error ? stopErr.message : String(stopErr),
+                  },
+                  'Failed to reap orphan runner process — retaining record for retry next tick',
+                );
+                continue;
+              }
+            }
+          } else {
+            this.logger.debug(
+              {
+                modelName: instance.modelName,
+                instanceId: instance.instanceId,
+                workerId: instance.workerId,
+              },
+              'Cannot reap orphan runner process; worker not in pool — dropping record anyway',
+            );
+          }
         }
 
         this.memoryBudget.releaseInstanceReservations(instance.instanceId);

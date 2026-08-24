@@ -271,6 +271,26 @@ describe('DeployOrchestrationService', () => {
         expect.objectContaining({ engineArgs: ['--a', 'b'] }),
       );
     });
+
+    it('forwards servedModelName to the worker client (ADR-020, #154)', async () => {
+      const params = makeParams({ servedModelName: 'meta-llama/Llama-3.1-8B-Instruct' });
+
+      await service.deployModel(params);
+
+      expect(mocks.workerClient.startRunner).toHaveBeenCalledWith(
+        expect.objectContaining({ servedModelName: 'meta-llama/Llama-3.1-8B-Instruct' }),
+      );
+    });
+
+    it('sends servedModelName: undefined to the worker client when unset (ADR-020, #154)', async () => {
+      const params = makeParams();
+
+      await service.deployModel(params);
+
+      expect(mocks.workerClient.startRunner).toHaveBeenCalledWith(
+        expect.objectContaining({ servedModelName: undefined }),
+      );
+    });
   });
 
   describe('deployModel — runner placement persistence', () => {

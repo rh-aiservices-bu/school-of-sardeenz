@@ -278,8 +278,16 @@ export class ApptainerLauncher implements RunnerLauncher {
     // resolve — otherwise inference that reaches the engine 404s with "model does not exist". Using
     // the passthrough (rather than a dedicated shim flag) keeps this working with already-built SIFs,
     // whose baked-in shim CLI wouldn't recognise a new flag. Must come last: everything after `--`
-    // goes to vLLM.
-    args.push('--', '--served-model-name', spec.modelName);
+    // goes to vLLM. When `servedModelName` is set and differs from `modelName`, both names are
+    // emitted with the served name first — vLLM's first-name semantics make the engine report the
+    // served name in the response `model` field and the Prometheus `model_name` tag, while still
+    // accepting the configuration name so forwarded requests resolve (ADR-020). Argv is
+    // byte-identical to prior behavior when `servedModelName` is unset or equal to `modelName`.
+    const servedNames: string[] =
+      spec.servedModelName && spec.servedModelName !== spec.modelName
+        ? [spec.servedModelName, spec.modelName]
+        : [spec.modelName];
+    args.push('--', '--served-model-name', ...servedNames);
     // Verbatim user engine args, appended after --served-model-name so vllm serve receives them
     // (cli.py forwards everything after `--`). Reject reserved flags the platform controls, matching
     // on the key half so `--port=9999` can't slip past. Thrown here (before spawn) so the deploy

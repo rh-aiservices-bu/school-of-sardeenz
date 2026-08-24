@@ -117,7 +117,10 @@ test.describe('Model Management', () => {
   test.describe('Deploy Form', () => {
     test('deploy form has model name field', async ({ page, bffPort }) => {
       await page.goto(bffUrl(bffPort, '/models/deploy'));
-      await expect(page.getByLabel('Model Name')).toBeVisible();
+      // #model-name, not getByLabel — "Served Model Name" (ADR-020) is a substring superset of
+      // "Model Name", and the required-field "*" suffix in the accessible name defeats exact
+      // matching too, so an id locator is the unambiguous choice here.
+      await expect(page.locator('#model-name')).toBeVisible();
     });
 
     test('deploy form has runner type field', async ({ page, bffPort }) => {
@@ -168,7 +171,7 @@ test.describe('Model Management', () => {
 
       await page.goto(bffUrl(bffPort, '/models/deploy'));
 
-      await page.getByLabel('Model Name').fill('test-model/7b');
+      await page.locator('#model-name').fill('test-model/7b');
       await page.getByLabel('Model Path').fill('/models/test-model/7b');
       await page.getByLabel('Required Memory (GiB)').fill('8');
 
@@ -304,6 +307,39 @@ test.describe('Model Management', () => {
       await page.goto(bffUrl(bffPort, `/models/${encodedName}`));
 
       await expect(page.getByText(ACTIVE_MODEL.modelName)).toBeVisible();
+    });
+  });
+
+  test.describe('Display Name', () => {
+    // fixme(#155): the mock control plane has no catalog route, so the required
+    // Runtime Module dropdown is empty and every deploy submission is blocked in
+    // this harness. Assertions are correct; un-fixme once the mock serves a catalog.
+    test.fixme('deploying with a display name shows it primary in the list and detail header, with modelName as the secondary identifier', async ({
+      page,
+      bffPort,
+      mockControlPlane,
+    }) => {
+      mockControlPlane.setModels([]);
+
+      await page.goto(bffUrl(bffPort, '/models/deploy'));
+
+      await page.getByLabel('Display Name').fill('Qwen test 1');
+      await page.locator('#model-name').fill('test-model/displayname');
+      await page.getByLabel('Model Path').fill('/models/test-model/displayname');
+      await page.getByLabel('Required Memory (GiB)').fill('8');
+
+      await page.getByRole('button', { name: 'Deploy' }).click();
+
+      await expect(page).toHaveURL(/\/models\/test-model/, { timeout: 10_000 });
+
+      // Detail header shows the display name; modelName still appears (subtitle + breadcrumb).
+      await expect(page.getByRole('heading', { name: 'Qwen test 1' })).toBeVisible();
+      await expect(page.getByText('test-model/displayname').first()).toBeVisible();
+
+      // List shows the display name as the primary/linked text, modelName as a secondary line.
+      await page.goto(bffUrl(bffPort, '/models'));
+      await expect(page.getByRole('link', { name: 'Qwen test 1' })).toBeVisible();
+      await expect(page.getByText('test-model/displayname')).toBeVisible();
     });
   });
 });

@@ -11,6 +11,7 @@ import type { RoutingMapService } from '../routing-map.js';
 import type { ModelRepository, ModelRecord } from '../model-repository.js';
 import type { Redis } from '../../clients/redis.js';
 import { deviceMemoryBytes } from '../../health/metrics.js';
+import { WorkerHttpError, type WorkerClient } from '../../clients/worker.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
@@ -57,6 +58,7 @@ interface MockDeps {
     getDeadWorkers: ReturnType<typeof vi.fn>;
     getAllWorkers: ReturnType<typeof vi.fn>;
     removeWorker: ReturnType<typeof vi.fn>;
+    getWorker: ReturnType<typeof vi.fn>;
   };
   memoryBudget: {
     refreshAll: ReturnType<typeof vi.fn>;
@@ -85,6 +87,9 @@ interface MockDeps {
     findAll: ReturnType<typeof vi.fn>;
     findByName: ReturnType<typeof vi.fn>;
   };
+  workerClient: {
+    stopRunner: ReturnType<typeof vi.fn>;
+  };
 }
 
 function makeModelRecord(overrides: Partial<ModelRecord> & { name: string }): ModelRecord {
@@ -98,6 +103,8 @@ function makeModelRecord(overrides: Partial<ModelRecord> & { name: string }): Mo
     engineConfig: null,
     engineArgs: null,
     runtimeModule: null,
+    servedModelName: null,
+    displayName: null,
     pinned: false,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -132,6 +139,10 @@ function createMocks(): MockDeps {
       getDeadWorkers: vi.fn().mockReturnValue([]),
       getAllWorkers: vi.fn().mockReturnValue([]),
       removeWorker: vi.fn(),
+      // Defaults to "no worker" — matches the pre-#157-round-3 orphan-reap tests, none of which
+      // set a runnerId on their fixtures (see makeModelState's default `runnerId: null` below),
+      // so the new reap-attempt branch never engages unless a test opts in explicitly.
+      getWorker: vi.fn().mockReturnValue(null),
     },
     memoryBudget: {
       refreshAll: vi.fn().mockResolvedValue(undefined),
@@ -162,12 +173,15 @@ function createMocks(): MockDeps {
       // tests exercising the race set this explicitly.
       findByName: vi.fn().mockResolvedValue(null),
     },
+    workerClient: {
+      stopRunner: vi.fn().mockResolvedValue(undefined),
+    },
   };
 }
 
 function createService(
   mocks: MockDeps,
-  options: { withModelRepository?: boolean } = {},
+  options: { withModelRepository?: boolean; withWorkerClient?: boolean } = {},
 ): ReconciliationService {
   return new ReconciliationService(
     mocks.lifecycle as unknown as ModelLifecycleService,
@@ -186,6 +200,8 @@ function createService(
     // instances but never set up modelRepository — aren't affected by the new orphan-reap step.
     // Only the dedicated describe block below opts in.
     options.withModelRepository ? (mocks.modelRepository as unknown as ModelRepository) : undefined,
+    // Same rationale — only the round-3 reap-attempt tests opt in.
+    options.withWorkerClient ? () => mocks.workerClient as unknown as WorkerClient : undefined,
   );
 }
 
@@ -706,6 +722,137 @@ describe('ReconciliationService', () => {
         }),
         'Failed to reap orphaned instance',
       );
+    });
+
+    describe('reaping the orphan runner process before dropping its record (round-3 review, Medium)', () => {
+      it('resolves the worker and calls stopRunner with the runnerId before removing the record', async () => {
+        mocks.lifecycle.getAllInstances.mockResolvedValue([
+          makeModelState({
+            modelName: 'deleted-model',
+            instanceId: 'inst-orphan',
+            workerId: 'w1',
+            runnerId: 'runner-1',
+          }),
+        ]);
+        mocks.modelRepository.findAll.mockResolvedValue([]);
+        mocks.workerPool.getWorker.mockReturnValue(
+          makeWorker({ workerId: 'w1', managementUrl: 'http://w1:9000' }),
+        );
+        const orphanService = createService(mocks, {
+          withModelRepository: true,
+          withWorkerClient: true,
+        });
+
+        await orphanService.tick();
+
+        expect(mocks.workerPool.getWorker).toHaveBeenCalledWith('w1');
+        expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-1');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+      });
+
+      it('still removes the record when stopRunner reports 404 (runner already gone)', async () => {
+        mocks.lifecycle.getAllInstances.mockResolvedValue([
+          makeModelState({
+            modelName: 'deleted-model',
+            instanceId: 'inst-orphan',
+            workerId: 'w1',
+            runnerId: 'runner-1',
+          }),
+        ]);
+        mocks.modelRepository.findAll.mockResolvedValue([]);
+        mocks.workerPool.getWorker.mockReturnValue(
+          makeWorker({ workerId: 'w1', managementUrl: 'http://w1:9000' }),
+        );
+        mocks.workerClient.stopRunner.mockRejectedValueOnce(
+          new WorkerHttpError('Worker DELETE /runners/runner-1 returned 404: gone', 404),
+        );
+        const orphanService = createService(mocks, {
+          withModelRepository: true,
+          withWorkerClient: true,
+        });
+
+        await orphanService.tick();
+
+        expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-1');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+      });
+
+      it('retains the record this tick on a non-404 stopRunner failure, without affecting other orphans in the same tick', async () => {
+        mocks.lifecycle.getAllInstances.mockResolvedValue([
+          makeModelState({
+            modelName: 'stuck-orphan',
+            instanceId: 'inst-stuck',
+            workerId: 'w1',
+            runnerId: 'runner-stuck',
+          }),
+          makeModelState({
+            modelName: 'clean-orphan',
+            instanceId: 'inst-clean',
+            workerId: null,
+            runnerId: null,
+          }),
+        ]);
+        mocks.modelRepository.findAll.mockResolvedValue([]);
+        mocks.workerPool.getWorker.mockReturnValue(
+          makeWorker({ workerId: 'w1', managementUrl: 'http://w1:9000' }),
+        );
+        mocks.workerClient.stopRunner.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+        const orphanService = createService(mocks, {
+          withModelRepository: true,
+          withWorkerClient: true,
+        });
+
+        await orphanService.tick();
+
+        expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-stuck');
+        // Reap failed — the whole cleanup for this orphan is skipped, not just removeInstance, so
+        // a later tick redoes it cleanly rather than double-releasing budget/routing.
+        expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalledWith(
+          'inst-stuck',
+        );
+        expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalledWith(
+          'stuck-orphan',
+          'inst-stuck',
+        );
+        expect(mocks.logger.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ modelName: 'stuck-orphan', instanceId: 'inst-stuck' }),
+          'Failed to reap orphan runner process — retaining record for retry next tick',
+        );
+        // Isolated per-instance: the other orphan in the same tick is still fully processed.
+        expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith('inst-clean');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('clean-orphan', 'inst-clean');
+      });
+
+      it('removes the record without attempting stopRunner when the worker is not in the pool', async () => {
+        mocks.lifecycle.getAllInstances.mockResolvedValue([
+          makeModelState({
+            modelName: 'deleted-model',
+            instanceId: 'inst-orphan',
+            workerId: 'w-gone',
+            runnerId: 'runner-1',
+          }),
+        ]);
+        mocks.modelRepository.findAll.mockResolvedValue([]);
+        mocks.workerPool.getWorker.mockReturnValue(null);
+        const orphanService = createService(mocks, {
+          withModelRepository: true,
+          withWorkerClient: true,
+        });
+
+        await orphanService.tick();
+
+        expect(mocks.workerPool.getWorker).toHaveBeenCalledWith('w-gone');
+        expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+        expect(mocks.logger.debug).toHaveBeenCalledWith(
+          expect.objectContaining({
+            modelName: 'deleted-model',
+            instanceId: 'inst-orphan',
+            workerId: 'w-gone',
+          }),
+          'Cannot reap orphan runner process; worker not in pool — dropping record anyway',
+        );
+      });
     });
   });
 

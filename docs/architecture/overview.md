@@ -231,11 +231,16 @@ Data is split across three purpose-matched stores:
 
 > See [ADR-009](adrs/adr-009-state-and-persistence.md) for the full rationale.
 
-**Logical model vs. instance.** A _logical model_ (Postgres `models` — config: runner type, weights
-path, memory requirement, etc.; unique name, the routing key clients request) may have zero or more
-_instances_ (one runner process on one worker each, with its own lifecycle state, VRAM reservation,
-and routing endpoint — identified by a control-plane-minted `instanceId`). Instance lifecycle state
-lives in Redis, one key per instance (`{prefix}:models:{modelName}:{instanceId}`); a lightweight
+**Model configuration (logical model) vs. instance.** A _model configuration_ (Postgres `models` —
+config: runner type, weights path, memory requirement, etc.) may have zero or more _instances_ (one
+runner process on one worker each, with its own lifecycle state, VRAM reservation, and routing
+endpoint — identified by a control-plane-minted `instanceId`). A configuration carries distinct
+name concepts: its unique _configuration name_ (wire field `modelName` — the routing key clients
+send in the OpenAI `model` field), an optional _served model name_ (the identity the engine
+reports in metrics and responses; defaults to the configuration name), an optional _display name_
+(free-form dashboard label, presentation only), and the _model path_ (the weights reference) — see
+[ADR-020](adrs/adr-020-config-name-vs-served-model-name.md).
+Instance lifecycle state lives in Redis, one key per instance (`{prefix}:models:{modelName}:{instanceId}`); a lightweight
 Postgres `instances` table is the durable identity/placement ledger, written at instance create/
 delete. The model's own state (`ACTIVE`, `SLEEPING`, etc., as surfaced by the API and dashboard) is
 derived from its instances on read — the highest-precedence state present, with `ACTIVE` outranking
@@ -577,7 +582,10 @@ The workflow: edit the OpenAPI spec → run code generation → TypeScript types
 | [ADR-014](adrs/adr-014-inference-recency-tracking.md)        | Inference recency tracking for LRU eviction                                              |
 | [ADR-015](adrs/adr-015-sif-runtime-packaging.md)             | Engine runtime delivery via Apptainer SIF on shared RWX storage                          |
 | [ADR-016](adrs/adr-016-sif-worker-security-posture.md)       | Worker security posture for SIF execution                                                |
-| [ADR-017](adrs/adr-017-runner-image-pipeline.md)             | Runner image build and supply chain                                                      |
+| [ADR-017](adrs/adr-017-runner-image-pipeline.md)             | Runner image build and supply chain _(amended by ADR-018)_                               |
+| [ADR-018](adrs/adr-018-runner-catalog-oras-distribution.md)  | Runner catalog and ORAS distribution _(amends ADR-017)_                                  |
+| [ADR-019](adrs/adr-019-logical-model-vs-instance-split.md)   | Logical model vs. instance split _(refines ADR-014)_                                     |
+| [ADR-020](adrs/adr-020-config-name-vs-served-model-name.md)  | Configuration name vs. served model name _(refines ADR-019)_                             |
 
 ---
 

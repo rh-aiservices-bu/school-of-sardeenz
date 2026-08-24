@@ -5,6 +5,8 @@ export interface MockWorkerServer {
   url: string;
   /** Bodies of every POST /runners (start-runner) call, in order — for asserting forwarded fields. */
   startRequests: Array<Record<string, unknown>>;
+  /** runnerId path params of every DELETE /runners/:runnerId (stop-runner) call, in order (#157). */
+  stopRequests: string[];
   close(): Promise<void>;
 }
 
@@ -22,6 +24,7 @@ export async function createMockWorker(
   let nextRunnerIndex = 0;
   const runners = Array.isArray(runner) ? runner : [runner];
   const startRequests: Array<Record<string, unknown>> = [];
+  const stopRequests: string[] = [];
 
   const app = Fastify({ logger: false });
 
@@ -38,7 +41,8 @@ export async function createMockWorker(
     };
   });
 
-  app.delete<{ Params: { runnerId: string } }>('/runners/:runnerId', async (_req, reply) => {
+  app.delete<{ Params: { runnerId: string } }>('/runners/:runnerId', async (req, reply) => {
+    stopRequests.push(req.params.runnerId);
     await reply.status(204).send();
   });
 
@@ -49,6 +53,7 @@ export async function createMockWorker(
   return {
     url: `http://127.0.0.1:${port}`,
     startRequests,
+    stopRequests,
     close: () => app.close(),
   };
 }
