@@ -46,10 +46,21 @@ function workerMemoryReport(
     deviceType: string;
     memoryUsedBytes: number;
     memoryTotalBytes: number;
+    memoryMeasuredUsedBytes?: number;
   }>,
   reportedAt?: string,
+  instances?: Array<{
+    instanceId: string;
+    modelName: string;
+    deviceIndex: number;
+    memoryMeasuredUsedBytes: number;
+  }>,
 ): string {
-  return JSON.stringify({ devices, reportedAt: reportedAt ?? new Date().toISOString() });
+  return JSON.stringify({
+    devices,
+    ...(instances !== undefined ? { instances } : {}),
+    reportedAt: reportedAt ?? new Date().toISOString(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -630,5 +641,326 @@ describe('MemoryBudgetService — parseReport validation', () => {
     const budget = await service.refreshWorkerBudget(workerId);
 
     expect(budget?.lastReportAt).toBe(reportedAt);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #163: measured (NVML) telemetry fields — never fed into placement/eviction math
+// ---------------------------------------------------------------------------
+
+describe('MemoryBudgetService — measured memory parsing', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('carries a valid memoryMeasuredUsedBytes through to the device budget', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport([
+      {
+        deviceIndex: 0,
+        deviceType: 'CUDA',
+        memoryUsedBytes: 8_000_000_000,
+        memoryTotalBytes: 16_000_000_000,
+        memoryMeasuredUsedBytes: 9_000_000_000,
+      },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget?.devices[0]?.measuredUsedBytes).toBe(9_000_000_000);
+    // Ledger-based availableBytes must be unaffected by the measured value.
+    expect(budget?.devices[0]?.availableBytes).toBe(16_000_000_000 - 8_000_000_000);
+  });
+
+  it('leaves measuredUsedBytes absent when the device omits it', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport([
+      { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget?.devices[0]?.measuredUsedBytes).toBeUndefined();
+  });
+
+  it('drops a malformed memoryMeasuredUsedBytes (negative) but keeps the core device report', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport([
+      {
+        deviceIndex: 0,
+        deviceType: 'CUDA',
+        memoryUsedBytes: 0,
+        memoryTotalBytes: 16_000_000_000,
+        memoryMeasuredUsedBytes: -1,
+      },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.devices[0]?.measuredUsedBytes).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('memoryMeasuredUsedBytes'));
+  });
+
+  it('drops a malformed memoryMeasuredUsedBytes (non-integer) but keeps the core device report', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+            memoryMeasuredUsedBytes: '9000000000',
+          },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.devices[0]?.measuredUsedBytes).toBeUndefined();
+  });
+
+  it('carries valid instances[] measurements through to instanceMeasurements', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport(
+      [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+      undefined,
+      [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 5e9 }],
+    );
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget?.instanceMeasurements).toEqual([
+      { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, measuredUsedBytes: 5e9 },
+    ]);
+  });
+
+  it('drops a malformed instances entry but keeps the core report and any valid siblings', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+        ],
+        instances: [
+          { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 5e9 },
+          { instanceId: 'inst-b', modelName: 'model-b', deviceIndex: 0 }, // missing measurement
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.instanceMeasurements).toEqual([
+      { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, measuredUsedBytes: 5e9 },
+    ]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('instances[1]'));
+  });
+
+  it('drops a non-array instances field but keeps the core report', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+        ],
+        instances: 'not-an-array',
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.instanceMeasurements).toBeUndefined();
+  });
+});
+
+describe('MemoryBudgetService — getClusterSummary measuredUsedBytes', () => {
+  it('is undefined when no device reported a measurement', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport([
+        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+      ]),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+
+    expect(service.getClusterSummary().measuredUsedBytes).toBeUndefined();
+  });
+
+  it('sums measuredUsedBytes across devices/workers that reported one, ignoring those that did not', async () => {
+    const { redis } = makeMockRedis({
+      [workerKey('w1')]: workerMemoryReport([
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+          memoryMeasuredUsedBytes: 3_000_000_000,
+        },
+      ]),
+      [workerKey('w2')]: workerMemoryReport([
+        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+      ]),
+      [workerKey('w3')]: workerMemoryReport([
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+          memoryMeasuredUsedBytes: 2_000_000_000,
+        },
+      ]),
+    });
+    const service = makeService(redis);
+
+    await service.refreshAll();
+
+    expect(service.getClusterSummary().measuredUsedBytes).toBe(5_000_000_000);
+  });
+
+  it('excludes stale workers from measuredUsedBytes', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport(
+        [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+            memoryMeasuredUsedBytes: 3_000_000_000,
+          },
+        ],
+        '2000-01-01T00:00:00.000Z', // long stale
+      ),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = new MemoryBudgetService(redis, KEY_PREFIX, 1); // 1s heartbeat timeout
+
+    await service.refreshWorkerBudget(workerId);
+
+    expect(service.getClusterSummary().measuredUsedBytes).toBeUndefined();
+  });
+});
+
+describe('MemoryBudgetService — getMeasuredByInstance', () => {
+  it('aggregates one instance measured across two devices on the same worker', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport(
+      [
+        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+        { deviceIndex: 1, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+      ],
+      undefined,
+      [
+        { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 4e9 },
+        { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 1, memoryMeasuredUsedBytes: 4e9 },
+      ],
+    );
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+
+    const byInstance = service.getMeasuredByInstance();
+    expect(byInstance.get('inst-a')).toBe(8e9);
+  });
+
+  it('aggregates the same instanceId across two workers', async () => {
+    const { redis } = makeMockRedis({
+      [workerKey('w1')]: workerMemoryReport(
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+        undefined,
+        [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 3e9 }],
+      ),
+      [workerKey('w2')]: workerMemoryReport(
+        [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+        undefined,
+        [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 2e9 }],
+      ),
+    });
+    const service = makeService(redis);
+
+    await service.refreshAll();
+
+    expect(service.getMeasuredByInstance().get('inst-a')).toBe(5e9);
+  });
+
+  it('returns an empty map when no worker reported instance measurements', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport([
+        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+      ]),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    await service.refreshWorkerBudget(workerId);
+
+    expect(service.getMeasuredByInstance().size).toBe(0);
+  });
+});
+
+describe('MemoryBudgetService — writeClusterMemorySnapshot measured content', () => {
+  it('includes per-device memoryMeasuredUsedBytes and summary measuredUsedBytes in the snapshot written to Redis', async () => {
+    const { redis, set } = makeMockRedis({
+      [workerKey('w1')]: workerMemoryReport([
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+          memoryMeasuredUsedBytes: 6_000_000_000,
+        },
+      ]),
+    });
+    const service = makeService(redis);
+
+    await service.refreshAll();
+
+    expect(set).toHaveBeenCalledTimes(1);
+    const [key, payload] = set.mock.calls[0] as [string, string];
+    expect(key).toBe(`${KEY_PREFIX}:cluster:memory`);
+    const snapshot = JSON.parse(payload) as {
+      workers: Array<{ devices: Array<{ memoryMeasuredUsedBytes?: number }> }>;
+      summary: { measuredUsedBytes?: number };
+    };
+    expect(snapshot.workers[0]?.devices[0]?.memoryMeasuredUsedBytes).toBe(6_000_000_000);
+    expect(snapshot.summary.measuredUsedBytes).toBe(6_000_000_000);
   });
 });

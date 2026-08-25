@@ -10,6 +10,17 @@ export interface DeviceBudget {
   usedBytes: number;
   reservedBytes: number;
   availableBytes: number; // totalBytes - usedBytes - reservedBytes
+  /** NVML-measured device bytes in use, including non-Sardeenz processes. Telemetry only —
+   *  never fed into availableBytes/placement math. Absent when the worker couldn't measure. */
+  measuredUsedBytes?: number;
+}
+
+/** Measured bytes attributed to one instance on one device (NVML process-list attribution). */
+export interface InstanceMeasurement {
+  instanceId: string;
+  modelName: string;
+  deviceIndex: number;
+  measuredUsedBytes: number;
 }
 
 export interface WorkerBudget {
@@ -17,6 +28,8 @@ export interface WorkerBudget {
   devices: DeviceBudget[];
   lastReportAt: string;
   stale: boolean;
+  /** Per-instance measured bytes from this worker's last report. Telemetry only. */
+  instanceMeasurements?: InstanceMeasurement[];
 }
 
 interface ClusterSummary {
@@ -24,11 +37,15 @@ interface ClusterSummary {
   usedBytes: number;
   availableBytes: number;
   reservedBytes: number;
+  /** Sum of measuredUsedBytes across non-stale workers' devices. Absent when no device
+   *  reported a measurement (distinct from a real 0). */
+  measuredUsedBytes?: number;
 }
 
 /** Shape of the JSON object workers push to Redis. */
 type WorkerMemoryReport = WorkerAgentComponents['schemas']['WorkerMemoryReport'];
 type WorkerDeviceMemory = WorkerAgentComponents['schemas']['WorkerDeviceMemory'];
+type InstanceMemoryMeasurement = WorkerAgentComponents['schemas']['InstanceMemoryMeasurement'];
 
 const WORKER_MEMORY_SUBKEY = 'memory';
 
@@ -140,11 +157,88 @@ export class MemoryBudgetService {
       return null;
     }
 
+    // Telemetry-tolerant: memoryMeasuredUsedBytes is optional and, unlike the ledger fields
+    // above, a malformed value is dropped (with a warning) rather than rejecting the whole
+    // device/report — a bad NVML reading must never take down placement/eviction math.
+    let memoryMeasuredUsedBytes: number | undefined;
+    if (d.memoryMeasuredUsedBytes !== undefined) {
+      if (
+        typeof d.memoryMeasuredUsedBytes === 'number' &&
+        Number.isInteger(d.memoryMeasuredUsedBytes) &&
+        d.memoryMeasuredUsedBytes >= 0
+      ) {
+        memoryMeasuredUsedBytes = d.memoryMeasuredUsedBytes;
+      } else {
+        console.warn(
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.memoryMeasuredUsedBytes — must be an integer >= 0, core report kept`,
+        );
+      }
+    }
+
     return {
       deviceIndex: d.deviceIndex,
       deviceType: d.deviceType,
       memoryUsedBytes: d.memoryUsedBytes,
       memoryTotalBytes: d.memoryTotalBytes,
+      ...(memoryMeasuredUsedBytes !== undefined ? { memoryMeasuredUsedBytes } : {}),
+    };
+  }
+
+  /**
+   * Validate a single `instances[]` measurement entry. Telemetry-tolerant like
+   * `memoryMeasuredUsedBytes` above: a malformed entry is dropped (with a warning) rather than
+   * rejecting the whole report.
+   */
+  private validateInstanceMeasurement(
+    raw: unknown,
+    workerId: string,
+    index: number,
+  ): InstanceMemoryMeasurement | null {
+    const field = `instances[${index}]`;
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      console.warn(
+        `[memory-budget] parseReport dropped workerId=${workerId}: ${field} — must be an object`,
+      );
+      return null;
+    }
+    const m = raw as Record<string, unknown>;
+
+    if (typeof m.instanceId !== 'string' || m.instanceId.length === 0) {
+      console.warn(
+        `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.instanceId — must be a non-empty string`,
+      );
+      return null;
+    }
+    if (typeof m.modelName !== 'string' || m.modelName.length === 0) {
+      console.warn(
+        `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.modelName — must be a non-empty string`,
+      );
+      return null;
+    }
+    if (!(typeof m.deviceIndex === 'number' && Number.isInteger(m.deviceIndex) && m.deviceIndex >= 0)) {
+      console.warn(
+        `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.deviceIndex — must be an integer >= 0`,
+      );
+      return null;
+    }
+    if (
+      !(
+        typeof m.memoryMeasuredUsedBytes === 'number' &&
+        Number.isInteger(m.memoryMeasuredUsedBytes) &&
+        m.memoryMeasuredUsedBytes >= 0
+      )
+    ) {
+      console.warn(
+        `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.memoryMeasuredUsedBytes — must be an integer >= 0`,
+      );
+      return null;
+    }
+
+    return {
+      instanceId: m.instanceId,
+      modelName: m.modelName,
+      deviceIndex: m.deviceIndex,
+      memoryMeasuredUsedBytes: m.memoryMeasuredUsedBytes,
     };
   }
 
@@ -181,6 +275,25 @@ export class MemoryBudgetService {
       validatedDevices.push(device);
     }
 
+    // Telemetry-tolerant, like memoryMeasuredUsedBytes: `instances` as a whole is optional, and a
+    // malformed `instances` (wrong type, or individual bad entries) is dropped without rejecting
+    // the core report — the ledger fields above have already been validated by this point.
+    let instanceMeasurements: InstanceMemoryMeasurement[] | undefined;
+    if (report.instances !== undefined) {
+      if (!Array.isArray(report.instances)) {
+        console.warn(
+          `[memory-budget] parseReport dropped workerId=${workerId}: instances — must be an array, core report kept`,
+        );
+      } else {
+        const validated: InstanceMemoryMeasurement[] = [];
+        for (let i = 0; i < report.instances.length; i++) {
+          const measurement = this.validateInstanceMeasurement(report.instances[i], workerId, i);
+          if (measurement) validated.push(measurement);
+        }
+        instanceMeasurements = validated;
+      }
+    }
+
     const lastReportAt =
       typeof report.reportedAt === 'string' ? report.reportedAt : new Date().toISOString();
 
@@ -194,6 +307,9 @@ export class MemoryBudgetService {
         usedBytes: d.memoryUsedBytes,
         reservedBytes,
         availableBytes: Math.max(0, availableBytes),
+        ...(d.memoryMeasuredUsedBytes !== undefined
+          ? { measuredUsedBytes: d.memoryMeasuredUsedBytes }
+          : {}),
       };
     });
 
@@ -202,6 +318,16 @@ export class MemoryBudgetService {
       devices,
       lastReportAt,
       stale: false, // freshly read from Redis — not stale
+      ...(instanceMeasurements !== undefined
+        ? {
+            instanceMeasurements: instanceMeasurements.map((m) => ({
+              instanceId: m.instanceId,
+              modelName: m.modelName,
+              deviceIndex: m.deviceIndex,
+              measuredUsedBytes: m.memoryMeasuredUsedBytes,
+            })),
+          }
+        : {}),
     };
   }
 
@@ -313,6 +439,9 @@ export class MemoryBudgetService {
         memoryUsedBytes: d.usedBytes,
         memoryAvailableBytes: d.availableBytes,
         memoryReservedBytes: d.reservedBytes,
+        ...(d.measuredUsedBytes !== undefined
+          ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
+          : {}),
       })),
     }));
 
@@ -387,6 +516,8 @@ export class MemoryBudgetService {
     let usedBytes = 0;
     let availableBytes = 0;
     let reservedBytes = 0;
+    let measuredUsedBytes = 0;
+    let sawMeasurement = false;
 
     for (const budget of this.getAllBudgets()) {
       if (budget.stale) continue;
@@ -395,10 +526,38 @@ export class MemoryBudgetService {
         usedBytes += device.usedBytes;
         availableBytes += device.availableBytes;
         reservedBytes += device.reservedBytes;
+        if (device.measuredUsedBytes !== undefined) {
+          sawMeasurement = true;
+          measuredUsedBytes += device.measuredUsedBytes;
+        }
       }
     }
 
-    return { totalBytes, usedBytes, availableBytes, reservedBytes };
+    return {
+      totalBytes,
+      usedBytes,
+      availableBytes,
+      reservedBytes,
+      ...(sawMeasurement ? { measuredUsedBytes } : {}),
+    };
+  }
+
+  /**
+   * Aggregate measured bytes by instanceId across every non-stale worker/device. Telemetry only
+   * — used by the models routes to populate `currentMemory`, never by placement/eviction.
+   */
+  getMeasuredByInstance(): Map<string, number> {
+    const byInstance = new Map<string, number>();
+    for (const budget of this.getAllBudgets()) {
+      if (budget.stale) continue;
+      for (const measurement of budget.instanceMeasurements ?? []) {
+        byInstance.set(
+          measurement.instanceId,
+          (byInstance.get(measurement.instanceId) ?? 0) + measurement.measuredUsedBytes,
+        );
+      }
+    }
+    return byInstance;
   }
 
   // ---------------------------------------------------------------------------

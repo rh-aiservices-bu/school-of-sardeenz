@@ -34,6 +34,9 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
           memoryUsedBytes: 'usedBytes' in d ? d.usedBytes : 0,
           memoryAvailableBytes: 'availableBytes' in d ? d.availableBytes : 0,
           memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
+          ...('measuredUsedBytes' in d && d.measuredUsedBytes !== undefined
+            ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
+            : {}),
         })),
         modelCount: instanceCountByWorker.get(w.workerId) ?? 0,
         runnerCapabilities:
@@ -89,6 +92,9 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
         memoryUsedBytes: 'usedBytes' in d ? d.usedBytes : 0,
         memoryAvailableBytes: 'availableBytes' in d ? d.availableBytes : 0,
         memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
+        ...('measuredUsedBytes' in d && d.measuredUsedBytes !== undefined
+          ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
+          : {}),
       })),
       models: workerModels,
       runnerCapabilities: worker.capabilities.map((c) => ({

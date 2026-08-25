@@ -140,3 +140,71 @@ describe('GET /api/v1/workers/:workerId — memoryUsedBytes population', () => {
     expect('memoryUsedBytes' in (model as Record<string, unknown>)).toBe(false);
   });
 });
+
+describe('measured memory (#163)', () => {
+  const measuredBudget = {
+    workerId: 'w1',
+    devices: [
+      {
+        deviceIndex: 0,
+        deviceType: 'CUDA',
+        totalBytes: 16 * 1024 ** 3,
+        usedBytes: 0,
+        reservedBytes: 0,
+        availableBytes: 16 * 1024 ** 3,
+        measuredUsedBytes: 7 * 1024 ** 3,
+      },
+    ],
+    lastReportAt: new Date().toISOString(),
+    stale: false,
+  };
+
+  it('GET /api/v1/workers includes per-device memoryMeasuredUsedBytes when the budget has one', async () => {
+    const deps = {
+      workerPool: { getAllWorkers: vi.fn(() => [workerWithCaps, workerWithoutCaps]) },
+      lifecycle: { getAllInstances: vi.fn(() => Promise.resolve([])) },
+      memoryBudget: {
+        getWorkerBudget: vi.fn((workerId: string) =>
+          workerId === 'w1' ? measuredBudget : undefined,
+        ),
+      },
+    } as unknown as RouteDeps;
+
+    const app = Fastify({ logger: false });
+    app.setErrorHandler((error: Error & { statusCode?: number; code?: string }, _req, reply) => {
+      return reply.code(error.statusCode ?? 500).send({ error: error.message, code: error.code });
+    });
+    registerWorkerRoutes(app, deps);
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      workers: Array<{ workerId: string; devices: Array<{ memoryMeasuredUsedBytes?: number }> }>;
+    }>();
+    const w1 = body.workers.find((w) => w.workerId === 'w1');
+    expect(w1?.devices[0]?.memoryMeasuredUsedBytes).toBe(7 * 1024 ** 3);
+
+    const w2 = body.workers.find((w) => w.workerId === 'w2');
+    expect('memoryMeasuredUsedBytes' in (w2?.devices[0] as Record<string, unknown>)).toBe(false);
+  });
+
+  it('GET /api/v1/workers/:workerId includes per-device memoryMeasuredUsedBytes when the budget has one', async () => {
+    const deps = {
+      workerPool: { getWorker: vi.fn(() => workerWithCaps) },
+      lifecycle: { getAllInstances: vi.fn(() => Promise.resolve([])) },
+      modelRepository: { findAll: vi.fn(() => Promise.resolve([])) },
+      memoryBudget: { getWorkerBudget: vi.fn(() => measuredBudget) },
+    } as unknown as RouteDeps;
+
+    const app = Fastify({ logger: false });
+    app.setErrorHandler((error: Error & { statusCode?: number; code?: string }, _req, reply) => {
+      return reply.code(error.statusCode ?? 500).send({ error: error.message, code: error.code });
+    });
+    registerWorkerRoutes(app, deps);
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers/w1' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ devices: Array<{ memoryMeasuredUsedBytes?: number }> }>();
+    expect(body.devices[0]?.memoryMeasuredUsedBytes).toBe(7 * 1024 ** 3);
+  });
+});

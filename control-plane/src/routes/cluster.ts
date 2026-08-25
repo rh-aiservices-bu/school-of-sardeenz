@@ -47,6 +47,9 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
         usedBytes: memorySummary.usedBytes,
         availableBytes: memorySummary.availableBytes,
         reservedBytes: memorySummary.reservedBytes,
+        ...(memorySummary.measuredUsedBytes !== undefined
+          ? { measuredUsedBytes: memorySummary.measuredUsedBytes }
+          : {}),
       },
     });
   });
@@ -88,6 +91,9 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
           memoryUsedBytes: 'usedBytes' in d ? d.usedBytes : 0,
           memoryAvailableBytes: 'availableBytes' in d ? d.availableBytes : 0,
           memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
+          ...('measuredUsedBytes' in d && d.measuredUsedBytes !== undefined
+            ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
+            : {}),
         })),
         models: workerModels,
       };
@@ -100,6 +106,9 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
         usedBytes: memorySummary.usedBytes,
         availableBytes: memorySummary.availableBytes,
         reservedBytes: memorySummary.reservedBytes,
+        ...(memorySummary.measuredUsedBytes !== undefined
+          ? { measuredUsedBytes: memorySummary.measuredUsedBytes }
+          : {}),
       },
     });
   });

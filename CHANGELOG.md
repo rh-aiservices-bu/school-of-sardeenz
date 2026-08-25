@@ -17,6 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ModelSummary`/`InstanceDetail` re-documented as the measured per-model/per-instance value
   sourced from the worker's NVML report. Ledger field descriptions clarified as budgeting
   figures, not measurements.
+- **Measured GPU memory telemetry (#163) — control plane.** `MemoryBudgetService` ingests the
+  measured fields telemetry-tolerantly (malformed measured values/instances entries are
+  dropped with a warning; the core ledger report is never rejected for them) and carries them
+  through `DeviceBudget.measuredUsedBytes`, `WorkerBudget.instanceMeasurements`, the cluster
+  summary (`measuredUsedBytes`, absent when no device measured), and the BFF Redis snapshot.
+  New `getMeasuredByInstance()` accessor; `GET /api/v1/models` and
+  `GET /api/v1/models/{modelName}` now populate `currentMemory` (per-model sum / per-instance
+  value) — previously defined in the contract but never emitted. Cluster/workers routes expose
+  per-device `memoryMeasuredUsedBytes`. Placement, reservation, and eviction math are
+  untouched — measured values are telemetry only.
 - **MLServer engine runner and protocol-family proxy surface (ADR-021, #125).** Second engine
   runner proving the abstraction beyond vLLM. Proxy: inference routes move to protocol-family
   prefixes — `/openai/v1/*` (OpenAI surface) and `/oip/v2/*` (KServe V2 Open Inference
