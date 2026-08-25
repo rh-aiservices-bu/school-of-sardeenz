@@ -632,8 +632,9 @@ export function ModelList() {
             <Tbody>
               {paginatedModels.map((model) => {
                 const required = model.requiredMemory ?? 0;
-                const current = model.currentMemory ?? 0;
-                const ratio = required > 0 ? current / required : 0;
+                const current = model.currentMemory;
+                const hasCurrent = current != null;
+                const ratio = required > 0 && hasCurrent ? current / required : 0;
                 const memVariant = getMemoryVariant(ratio);
 
                 return (
@@ -683,12 +684,14 @@ export function ModelList() {
                     <Td dataLabel={t('list.table.memory')} style={{ minWidth: '160px' }}>
                       {required > 0 ? (
                         <div>
-                          <Progress
-                            value={Math.min(100, ratio * 100)}
-                            size={ProgressSize.sm}
-                            variant={memVariant}
-                            aria-label={t('list.table.memory')}
-                          />
+                          {hasCurrent && (
+                            <Progress
+                              value={Math.min(100, ratio * 100)}
+                              size={ProgressSize.sm}
+                              variant={memVariant}
+                              aria-label={t('list.table.memory')}
+                            />
+                          )}
                           <div
                             style={{
                               fontSize: 'var(--pf-t--global--font--size--xs)',
@@ -696,7 +699,7 @@ export function ModelList() {
                               marginTop: 'var(--pf-t--global--spacer--xs)',
                             }}
                           >
-                            {formatBytes(current)} / {formatBytes(required)}
+                            {hasCurrent ? formatBytes(current) : '—'} / {formatBytes(required)}
                           </div>
                         </div>
                       ) : (

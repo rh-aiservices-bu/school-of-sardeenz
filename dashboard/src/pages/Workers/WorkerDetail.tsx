@@ -54,9 +54,12 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
     memoryUsedBytes,
     memoryAvailableBytes,
     memoryReservedBytes,
+    memoryMeasuredUsedBytes,
   } = device;
+  const hasMeasured = memoryMeasuredUsedBytes != null;
+  const primaryUsedBytes = hasMeasured ? memoryMeasuredUsedBytes : memoryUsedBytes;
   const usedPercent =
-    memoryTotalBytes > 0 ? Math.round((memoryUsedBytes / memoryTotalBytes) * 100) : 0;
+    memoryTotalBytes > 0 ? Math.round((primaryUsedBytes / memoryTotalBytes) * 100) : 0;
 
   return (
     <Card isCompact>
@@ -82,7 +85,9 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
             }}
           >
             <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-              {t('detail.memory.used', { value: formatBytes(memoryUsedBytes) })}
+              {hasMeasured
+                ? t('detail.memory.usedMeasured', { value: formatBytes(memoryMeasuredUsedBytes) })
+                : t('detail.memory.allocated', { value: formatBytes(memoryUsedBytes) })}
             </span>
             <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
               {t('detail.memory.total', { value: formatBytes(memoryTotalBytes) })}
@@ -97,6 +102,9 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
               color: 'var(--pf-t--global--text--color--subtle)',
             }}
           >
+            {hasMeasured && (
+              <div>{t('detail.memory.allocated', { value: formatBytes(memoryUsedBytes) })}</div>
+            )}
             <div>{t('detail.memory.available', { value: formatBytes(memoryAvailableBytes) })}</div>
             {memoryReservedBytes != null && memoryReservedBytes > 0 && (
               <div>{t('detail.memory.reserved', { value: formatBytes(memoryReservedBytes) })}</div>

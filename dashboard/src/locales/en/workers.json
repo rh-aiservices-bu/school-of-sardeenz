@@ -55,7 +55,8 @@
       "workers": "Workers"
     },
     "memory": {
-      "used": "{{value}} used",
+      "usedMeasured": "{{value}} used (measured)",
+      "allocated": "{{value}} allocated (estimate)",
       "total": "{{value}} total",
       "available": "Available: {{value}}",
       "reserved": "Reserved: {{value}}"

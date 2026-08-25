@@ -518,7 +518,9 @@ export function ModelDetail() {
             style={{ display: 'block', marginBottom: 'var(--pf-t--global--spacer--sm)' }}
           >
             {t(
-              protocol === 'oip' ? 'detail.inference.descriptionOip' : 'detail.inference.description',
+              protocol === 'oip'
+                ? 'detail.inference.descriptionOip'
+                : 'detail.inference.description',
             )}
           </Content>
           <CodeBlock
@@ -573,6 +575,7 @@ export function ModelDetail() {
                 <Th>{t('detail.instances.columns.instanceId')}</Th>
                 <Th>{t('detail.instances.columns.state')}</Th>
                 <Th>{t('detail.instances.columns.worker')}</Th>
+                <Th>{t('detail.instances.columns.memory')}</Th>
                 <Th>{t('detail.instances.columns.endpoint')}</Th>
                 <Th>{t('detail.instances.columns.created')}</Th>
                 {isAdmin && <Th aria-label={t('detail.instances.columns.actions')} />}
@@ -605,6 +608,9 @@ export function ModelDetail() {
                       ) : (
                         '—'
                       )}
+                    </Td>
+                    <Td dataLabel={t('detail.instances.columns.memory')}>
+                      {instance.currentMemory != null ? formatBytes(instance.currentMemory) : '—'}
                     </Td>
                     <Td dataLabel={t('detail.instances.columns.endpoint')}>
                       {instanceEndpointText}

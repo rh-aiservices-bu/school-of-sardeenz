@@ -214,7 +214,15 @@ function seedWorkerDetail(
   opts: {
     workerId: string;
     status: WorkerStatus;
-    devices: Array<{ deviceIndex: number; deviceType: string; memoryTotalBytes: number }>;
+    devices: Array<{
+      deviceIndex: number;
+      deviceType: string;
+      memoryTotalBytes: number;
+      memoryUsedBytes?: number;
+      memoryAvailableBytes?: number;
+      memoryReservedBytes?: number;
+      memoryMeasuredUsedBytes?: number;
+    }>;
     lastHeartbeatAt?: string | null;
     joinedAt?: string;
     capabilities?: Array<{
@@ -598,11 +606,13 @@ describe('RedisReader — cluster status fallback', () => {
     expect(status.workerCount).toBe(2);
     expect(status.workersOnline).toBe(1);
     // Memory sums — detail snapshots carry memoryTotalBytes only, so
-    // used/available default to 0.
+    // used/available/reserved default to 0 and measuredUsedBytes is omitted
+    // (no device in this fixture reports an NVML measurement).
     expect(status.memory).toEqual({
       totalBytes: 24_000_000_000,
       usedBytes: 0,
       availableBytes: 0,
+      reservedBytes: 0,
     });
   });
 
@@ -611,6 +621,60 @@ describe('RedisReader — cluster status fallback', () => {
 
     expect(status.modelCounts!.total).toBe(0);
     expect(status.workerCount).toBe(0);
+  });
+
+  it('sums reservedBytes and measuredUsedBytes across devices that report them (#163)', async () => {
+    seedWorkerDetail(store, {
+      workerId: 'w1',
+      status: WorkerStatus.ONLINE,
+      devices: [
+        {
+          deviceIndex: 0,
+          deviceType: 'GPU',
+          memoryTotalBytes: 16_000_000_000,
+          memoryUsedBytes: 4_000_000_000,
+          memoryAvailableBytes: 10_000_000_000,
+          memoryReservedBytes: 2_000_000_000,
+          memoryMeasuredUsedBytes: 5_000_000_000,
+        },
+      ],
+    });
+    seedWorkerDetail(store, {
+      workerId: 'w2',
+      status: WorkerStatus.ONLINE,
+      devices: [
+        {
+          deviceIndex: 0,
+          deviceType: 'GPU',
+          memoryTotalBytes: 8_000_000_000,
+          memoryUsedBytes: 1_000_000_000,
+          memoryAvailableBytes: 7_000_000_000,
+          // No measurement reported for this device — must not zero out the aggregate.
+        },
+      ],
+    });
+
+    const status = await reader.getClusterStatus();
+
+    expect(status.memory).toEqual({
+      totalBytes: 24_000_000_000,
+      usedBytes: 5_000_000_000,
+      availableBytes: 17_000_000_000,
+      reservedBytes: 2_000_000_000,
+      measuredUsedBytes: 5_000_000_000,
+    });
+  });
+
+  it('omits measuredUsedBytes entirely when no device reports a measurement', async () => {
+    seedWorkerDetail(store, {
+      workerId: 'w1',
+      status: WorkerStatus.ONLINE,
+      devices: [{ deviceIndex: 0, deviceType: 'GPU', memoryTotalBytes: 16_000_000_000 }],
+    });
+
+    const status = await reader.getClusterStatus();
+
+    expect(status.memory).not.toHaveProperty('measuredUsedBytes');
   });
 });
 

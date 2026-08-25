@@ -8,6 +8,7 @@ type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
 type WorkerDetail = ControlPlaneComponents['schemas']['WorkerDetail'];
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
 type ClusterMemory = ControlPlaneComponents['schemas']['ClusterMemory'];
+type ClusterMemorySummary = ControlPlaneComponents['schemas']['ClusterMemorySummary'];
 
 /**
  * Derive worker status from heartbeat age.  Mirrors the logic in
@@ -393,20 +394,31 @@ export class RedisReader {
     let totalBytes = 0;
     let usedBytes = 0;
     let availableBytes = 0;
+    let reservedBytes = 0;
+    let measuredUsedBytes = 0;
+    let anyMeasured = false;
 
     for (const w of workers) {
       for (const d of w.devices) {
         totalBytes += d.memoryTotalBytes ?? 0;
         usedBytes += d.memoryUsedBytes ?? 0;
         availableBytes += d.memoryAvailableBytes ?? 0;
+        reservedBytes += d.memoryReservedBytes ?? 0;
+        if (d.memoryMeasuredUsedBytes != null) {
+          anyMeasured = true;
+          measuredUsedBytes += d.memoryMeasuredUsedBytes;
+        }
       }
     }
+
+    const memory: ClusterMemorySummary = { totalBytes, usedBytes, availableBytes, reservedBytes };
+    if (anyMeasured) memory.measuredUsedBytes = measuredUsedBytes;
 
     return {
       workerCount,
       workersOnline,
       modelCounts: counts,
-      memory: { totalBytes, usedBytes, availableBytes },
+      memory,
     };
   }
 

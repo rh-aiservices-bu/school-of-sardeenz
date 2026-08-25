@@ -36,6 +36,8 @@ export interface MockInstanceInfo {
   workerId?: string;
   runnerEndpoint?: { host: string; port: number };
   createdAt?: string;
+  /** NVML-measured device memory for this instance (#163). Absent when unmeasured. */
+  currentMemory?: number;
 }
 
 export interface MockDeviceInfo {
@@ -45,6 +47,8 @@ export interface MockDeviceInfo {
   memoryUsedBytes: number;
   memoryAvailableBytes: number;
   memoryReservedBytes?: number;
+  /** NVML-measured device memory in use (#163). Absent when the worker cannot measure. */
+  memoryMeasuredUsedBytes?: number;
 }
 
 export interface MockWorkerInfo {
@@ -81,6 +85,9 @@ export interface MockClusterStatus {
     totalBytes: number;
     usedBytes: number;
     availableBytes: number;
+    reservedBytes?: number;
+    /** Aggregate NVML-measured usage across devices that reported one (#163). */
+    measuredUsedBytes?: number;
   };
 }
 
@@ -198,7 +205,8 @@ export class MockControlPlane {
         state: 'PENDING',
         runnerType: body.runnerType ?? 'vllm',
         requiredMemory: body.requiredMemory ?? 0,
-        currentMemory: 0,
+        // currentMemory intentionally absent (not 0) — mirrors the real contract, where it's
+        // only populated once the worker reports a measurement (#163).
         instanceCount: 1,
         createdAt: new Date().toISOString(),
       };
@@ -518,11 +526,19 @@ export class MockControlPlane {
     let totalBytes = 0;
     let usedBytes = 0;
     let availableBytes = 0;
+    let reservedBytes = 0;
+    let measuredUsedBytes = 0;
+    let anyMeasured = false;
     for (const w of workers) {
       for (const d of w.devices) {
         totalBytes += d.memoryTotalBytes;
         usedBytes += d.memoryUsedBytes;
         availableBytes += d.memoryAvailableBytes;
+        reservedBytes += d.memoryReservedBytes ?? 0;
+        if (d.memoryMeasuredUsedBytes != null) {
+          anyMeasured = true;
+          measuredUsedBytes += d.memoryMeasuredUsedBytes;
+        }
       }
     }
 
@@ -530,7 +546,13 @@ export class MockControlPlane {
       workerCount: workers.length,
       workersOnline,
       modelCounts: counts,
-      memory: { totalBytes, usedBytes, availableBytes },
+      memory: {
+        totalBytes,
+        usedBytes,
+        availableBytes,
+        reservedBytes,
+        ...(anyMeasured ? { measuredUsedBytes } : {}),
+      },
     };
   }
 }

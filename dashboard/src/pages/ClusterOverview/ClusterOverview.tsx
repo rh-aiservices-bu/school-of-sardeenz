@@ -130,8 +130,13 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
 // ---------------------------------------------------------------------------
 function GpuMemoryCard({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
-  const { totalBytes, usedBytes, availableBytes } = status.memory;
-  const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+  const { totalBytes, reservedBytes, measuredUsedBytes } = status.memory;
+  // Ledger ("allocated") value used as the headline when no NVML measurement exists (stub/CPU).
+  const allocatedBytes = status.memory.usedBytes;
+  const hasMeasured = measuredUsedBytes != null;
+  const headlineBytes = hasMeasured ? measuredUsedBytes : allocatedBytes;
+  const percent = totalBytes > 0 ? Math.round((headlineBytes / totalBytes) * 100) : 0;
+  const reserved = reservedBytes ?? 0;
 
   return (
     <Card isCompact>
@@ -153,7 +158,9 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
           {percent}%
         </span>
         <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-          {t('overview.cards.gpuMemory.used')}
+          {hasMeasured
+            ? t('overview.cards.gpuMemory.usedMeasured')
+            : t('overview.cards.gpuMemory.allocated')}
         </span>
         <Progress
           value={percent}
@@ -167,10 +174,17 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
             color: 'var(--pf-t--global--text--color--subtle)',
           }}
         >
-          {t('overview.cards.gpuMemory.available', {
-            value: formatBytes(availableBytes),
-            total: formatBytes(totalBytes),
-          })}
+          {hasMeasured
+            ? t('overview.cards.gpuMemory.breakdownMeasured', {
+                used: formatBytes(measuredUsedBytes),
+                reserved: formatBytes(reserved),
+                total: formatBytes(totalBytes),
+              })
+            : t('overview.cards.gpuMemory.breakdownAllocated', {
+                used: formatBytes(allocatedBytes),
+                reserved: formatBytes(reserved),
+                total: formatBytes(totalBytes),
+              })}
         </div>
       </CardBody>
     </Card>
@@ -259,13 +273,59 @@ function SummaryCards({ status }: { status: ClusterStatus }) {
 // ---------------------------------------------------------------------------
 function MemoryDonutChart({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
-  const { totalBytes, usedBytes, availableBytes } = status.memory;
-  const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+  const { totalBytes, usedBytes, availableBytes, reservedBytes, measuredUsedBytes } = status.memory;
+  const hasMeasured = measuredUsedBytes != null;
+  const reserved = reservedBytes ?? 0;
+  const headlineBytes = hasMeasured ? measuredUsedBytes : usedBytes;
+  const percent = totalBytes > 0 ? Math.round((headlineBytes / totalBytes) * 100) : 0;
+  // Measured mode: Free = total minus measured-used minus reserved, clamped so it never goes
+  // negative (a device can be simultaneously measured-full and still carry reservations).
+  const freeBytes = hasMeasured
+    ? Math.max(0, totalBytes - measuredUsedBytes - reserved)
+    : availableBytes;
 
-  const data = [
-    { x: t('overview.vramUsage.used'), y: usedBytes },
-    { x: t('overview.vramUsage.available'), y: availableBytes },
-  ];
+  const data = hasMeasured
+    ? [
+        { x: t('overview.vramUsage.usedMeasured'), y: measuredUsedBytes },
+        { x: t('overview.vramUsage.reserved'), y: reserved },
+        { x: t('overview.vramUsage.free'), y: freeBytes },
+      ]
+    : [
+        { x: t('overview.vramUsage.allocated'), y: usedBytes },
+        { x: t('overview.vramUsage.available'), y: availableBytes },
+      ];
+
+  const colorScale = hasMeasured
+    ? [
+        'var(--pf-t-chart-color-blue-300)',
+        'var(--pf-t-chart-color-orange-300)',
+        'var(--pf-t-chart-color-blue-100)',
+      ]
+    : ['var(--pf-t-chart-color-blue-300)', 'var(--pf-t-chart-color-blue-100)'];
+
+  const legendData = hasMeasured
+    ? [
+        { name: `${t('overview.vramUsage.usedMeasured')}: ${formatBytes(measuredUsedBytes)}` },
+        { name: `${t('overview.vramUsage.reserved')}: ${formatBytes(reserved)}` },
+        { name: `${t('overview.vramUsage.free')}: ${formatBytes(freeBytes)}` },
+      ]
+    : [
+        { name: `${t('overview.vramUsage.allocated')}: ${formatBytes(usedBytes)}` },
+        { name: `${t('overview.vramUsage.available')}: ${formatBytes(availableBytes)}` },
+      ];
+
+  // Stat rows below the donut — mirror the segments shown in the chart, plus Total always.
+  const statRows = hasMeasured
+    ? [
+        { label: t('overview.vramUsage.usedMeasured'), value: formatBytes(measuredUsedBytes) },
+        { label: t('overview.vramUsage.reserved'), value: formatBytes(reserved) },
+        { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
+      ]
+    : [
+        { label: t('overview.vramUsage.allocated'), value: formatBytes(usedBytes) },
+        { label: t('overview.vramUsage.available'), value: formatBytes(availableBytes) },
+        { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
+      ];
 
   return (
     <Card>
@@ -287,12 +347,12 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               height={200}
               width={200}
               title={`${percent}%`}
-              subTitle={t('overview.cards.gpuMemory.used').trim()}
-              colorScale={['var(--pf-t-chart-color-blue-300)', 'var(--pf-t-chart-color-blue-100)']}
-              legendData={[
-                { name: `${t('overview.vramUsage.used')}: ${formatBytes(usedBytes)}` },
-                { name: `${t('overview.vramUsage.available')}: ${formatBytes(availableBytes)}` },
-              ]}
+              subTitle={(hasMeasured
+                ? t('overview.vramUsage.usedMeasured')
+                : t('overview.vramUsage.allocated')
+              ).trim()}
+              colorScale={colorScale}
+              legendData={legendData}
               legendOrientation="vertical"
               legendPosition="right"
             />
@@ -304,55 +364,28 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               gap: 'var(--pf-t--global--spacer--sm)',
             }}
           >
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {t('overview.vramUsage.used')}
+            {statRows.map((row) => (
+              <div key={row.label}>
+                <div
+                  style={{
+                    fontSize: 'var(--pf-t--global--font--size--sm)',
+                    color: 'var(--pf-t--global--text--color--subtle)',
+                  }}
+                >
+                  {row.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: row.bold
+                      ? 'var(--pf-t--global--font--size--md)'
+                      : 'var(--pf-t--global--font--size--xl)',
+                    fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                  }}
+                >
+                  {row.value}
+                </div>
               </div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--xl)',
-                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
-                }}
-              >
-                {formatBytes(usedBytes)}
-              </div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {t('overview.vramUsage.available')}
-              </div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--xl)',
-                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
-                }}
-              >
-                {formatBytes(availableBytes)}
-              </div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {t('overview.vramUsage.total')}
-              </div>
-              <div style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-                {formatBytes(totalBytes)}
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       </CardBody>

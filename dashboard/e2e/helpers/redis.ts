@@ -35,6 +35,8 @@ export interface SeedDeviceInfo {
   memoryUsedBytes: number;
   memoryAvailableBytes: number;
   memoryReservedBytes?: number;
+  /** NVML-measured device memory in use (#163). Absent when the worker cannot measure. */
+  memoryMeasuredUsedBytes?: number;
 }
 
 export interface SeedWorkerDetail {

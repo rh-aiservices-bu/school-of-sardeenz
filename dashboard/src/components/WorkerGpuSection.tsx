@@ -56,7 +56,20 @@ interface DeviceMemoryBarProps {
 export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBarProps) {
   const { t } = useTranslation('cluster');
   const [expanded, setExpanded] = useState(false);
-  const { deviceIndex, deviceType, memoryTotalBytes, memoryUsedBytes } = device;
+  const {
+    deviceIndex,
+    deviceType,
+    memoryTotalBytes,
+    memoryUsedBytes,
+    memoryReservedBytes,
+    memoryMeasuredUsedBytes,
+  } = device;
+
+  // The stacked bar itself stays ledger-based (budgeting view); only the numeric readout
+  // prefers the NVML-measured value when the worker reports one (#163).
+  const hasMeasured = memoryMeasuredUsedBytes != null;
+  const primaryUsedBytes = hasMeasured ? memoryMeasuredUsedBytes : memoryUsedBytes;
+  const reserved = memoryReservedBytes ?? 0;
 
   const segments = models?.length
     ? computeModelSegments(device, models)
@@ -165,7 +178,7 @@ export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBar
           {displayMode === 'bytes' ? (
             <>
               <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-                {formatBytes(memoryUsedBytes)}
+                {formatBytes(primaryUsedBytes)}
               </span>
               <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
                 {' '}
@@ -175,9 +188,29 @@ export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBar
           ) : (
             <span style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
               {t('overview.vramAllocation.usedPercent', {
-                value: formatPercentage(memoryUsedBytes, memoryTotalBytes),
+                value: formatPercentage(primaryUsedBytes, memoryTotalBytes),
               })}
             </span>
+          )}
+          {hasMeasured && (
+            <div
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--xs)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
+            >
+              {t('overview.vramAllocation.measuredTag')}
+            </div>
+          )}
+          {reserved > 0 && (
+            <div
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--xs)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
+            >
+              {t('overview.vramAllocation.reservedInline', { value: formatBytes(reserved) })}
+            </div>
           )}
         </div>
       </div>

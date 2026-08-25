@@ -17,6 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ModelSummary`/`InstanceDetail` re-documented as the measured per-model/per-instance value
   sourced from the worker's NVML report. Ledger field descriptions clarified as budgeting
   figures, not measurements.
+- **Measured GPU memory telemetry (#163) — dashboard.** All GPU memory displays now
+  distinguish measured (NVML) from allocated/reserved (estimates): the Cluster Overview GPU
+  Memory card and donut key off the measured figure when present (Used-measured / Reserved /
+  Free segments) and label the ledger figure "allocated (estimate)" when not; device bars on
+  the GPU Memory page, placement board, worker list, and worker detail prefer the measurement
+  with the reservation shown alongside; the Models table renders "— / configured" instead of
+  a misleading "0 B" when no measurement exists (real measured 0 still renders as 0 B); the
+  model detail instance table gains a measured-memory column. BFF cluster-status fallback now
+  carries reservedBytes/measuredUsedBytes; e2e mocks emit the new fields.
 - **Measured GPU memory telemetry (#163) — worker.** The dev-worker now measures real VRAM
   in-process via `@rh-ai-bu/ts-nvml` (NVML FFI), replacing the nvidia-smi total-only parsing
   in device detection (`DeviceReport.source` is now `nvml` | `config`). Each heartbeat tick
