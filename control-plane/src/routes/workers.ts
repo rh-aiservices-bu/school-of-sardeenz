@@ -87,7 +87,12 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
     }
 
     const workerModels = allInstances
-      .filter((s) => s.workerId === workerId && s.state !== ModelLifecycleState.STOPPED)
+      .filter(
+        (s) =>
+          s.workerId === workerId &&
+          s.state !== ModelLifecycleState.STOPPED &&
+          s.state !== ModelLifecycleState.PENDING,
+      )
       .map((s) => ({
         modelName: s.modelName,
         displayName: displayNameByModel.get(s.modelName) ?? undefined,

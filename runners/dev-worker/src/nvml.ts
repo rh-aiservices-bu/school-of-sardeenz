@@ -105,10 +105,12 @@ export async function createNvmlReader(): Promise<NvmlReader | null> {
     };
     const name = nameOf(device);
     if (name !== undefined) out.name = name;
+    // Rounded: the contract declares both as integers, and the control plane's boundary
+    // validation drops non-integer values.
     const utilResult = device.getUtilizationRates();
-    if (utilResult.ok) out.utilizationPercent = utilResult.value.gpu;
+    if (utilResult.ok) out.utilizationPercent = Math.round(utilResult.value.gpu);
     const tempResult = device.getTemperature();
-    if (tempResult.ok) out.temperatureC = tempResult.value;
+    if (tempResult.ok) out.temperatureC = Math.round(tempResult.value);
     return out;
   }
 

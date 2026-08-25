@@ -337,7 +337,12 @@ export class RunnerManager {
     const perRunner = await Promise.all(
       records.map(async (record): Promise<LedgerInstanceShare[]> => {
         try {
-          const res = await this.fetchFn(`http://127.0.0.1:${record.port}/memory-report`);
+          // Timeout so a hung runner (socket accepted, response never sent) can't pend this
+          // Promise.all forever — that would freeze the heartbeat's memory-report push and
+          // eventually mark the whole worker's budget stale on the control plane.
+          const res = await this.fetchFn(`http://127.0.0.1:${record.port}/memory-report`, {
+            signal: AbortSignal.timeout(2000),
+          });
           if (!res.ok) return [];
           const body = (await res.json()) as {
             devices?: Array<{ deviceIndex: number; memoryUsedBytes: number }>;

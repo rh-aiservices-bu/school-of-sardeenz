@@ -188,25 +188,25 @@ export class MemoryBudgetService {
     if (d.utilizationPercent !== undefined) {
       if (
         typeof d.utilizationPercent === 'number' &&
-        Number.isFinite(d.utilizationPercent) &&
+        Number.isInteger(d.utilizationPercent) &&
         d.utilizationPercent >= 0 &&
         d.utilizationPercent <= 100
       ) {
         utilizationPercent = d.utilizationPercent;
       } else {
         console.warn(
-          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.utilizationPercent — must be a number in [0, 100], core report kept`,
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.utilizationPercent — must be an integer in [0, 100], core report kept`,
         );
       }
     }
 
     let temperatureC: number | undefined;
     if (d.temperatureC !== undefined) {
-      if (typeof d.temperatureC === 'number' && Number.isFinite(d.temperatureC)) {
+      if (typeof d.temperatureC === 'number' && Number.isInteger(d.temperatureC)) {
         temperatureC = d.temperatureC;
       } else {
         console.warn(
-          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.temperatureC — must be a finite number, core report kept`,
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.temperatureC — must be an integer, core report kept`,
         );
       }
     }

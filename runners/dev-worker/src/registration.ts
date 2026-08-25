@@ -180,7 +180,7 @@ export class WorkerRegistration {
     const measured = this.measuredProvider ? await this.measuredProvider().catch(() => null) : null;
     const measuredByDevice = new Map(measured?.devices.map((d) => [d.deviceIndex, d]) ?? []);
 
-    const devices = this.devices.map((device, i) => {
+    const devices = this.devices.map((device) => {
       const out: Record<string, unknown> = {
         deviceIndex: device.deviceIndex,
         deviceType: device.deviceType,
@@ -196,8 +196,9 @@ export class WorkerRegistration {
       } else {
         // No NVML reading for this device (no reader at all, or just this device's query failed)
         // — fall back to the ledger as a simulated measurement. No device stats in this case;
-        // the ledger has no notion of utilization/temperature/name.
-        out.memoryUsedBytes = this.deviceMemoryUsed[i];
+        // the ledger has no notion of utilization/temperature/name. Indexed by deviceIndex to
+        // match allocateMemory/freeMemory, not by array position.
+        out.memoryUsedBytes = this.deviceMemoryUsed[device.deviceIndex] ?? 0;
       }
       return out;
     });

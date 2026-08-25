@@ -816,7 +816,13 @@ describe('getLedgerInstanceShares', () => {
     expect(shares).toEqual([
       { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 500 },
     ]);
-    expect(fetchFn).toHaveBeenCalledWith('http://127.0.0.1:19301/memory-report');
+    // The AbortSignal timeout is load-bearing: without it a hung runner (socket accepted,
+    // response never sent) would pend the Promise.all forever, freezing the heartbeat's
+    // memory-report push until the control plane marks the whole worker's budget stale.
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://127.0.0.1:19301/memory-report',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('a sleeping runner (0 bytes reported) contributes no entries — matches "sleeping models hold nothing"', async () => {
