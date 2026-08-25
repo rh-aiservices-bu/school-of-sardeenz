@@ -81,7 +81,10 @@ export class MemoryBudgetService {
   constructor(
     private readonly redis: Redis,
     private readonly keyPrefix: string,
-    private readonly heartbeatTimeoutSecs: number,
+    // Staleness horizon for memory reports — not worker liveness. Sized to tolerate legitimate
+    // in-memory ageing between reconciliation refreshes on top of the worker's report cadence
+    // (see the construction site in index.ts); worker ONLINE/OFFLINE keeps the strict timeout.
+    private readonly staleAfterSecs: number,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -105,7 +108,7 @@ export class MemoryBudgetService {
   private isStale(lastReportAt: string): boolean {
     const reportedMs = new Date(lastReportAt).getTime();
     const nowMs = Date.now();
-    return nowMs - reportedMs > this.heartbeatTimeoutSecs * 1000;
+    return nowMs - reportedMs > this.staleAfterSecs * 1000;
   }
 
   private validateDevice(raw: unknown, workerId: string, index: number): WorkerDeviceMemory | null {
