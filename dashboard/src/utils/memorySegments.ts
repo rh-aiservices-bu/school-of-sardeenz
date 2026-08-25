@@ -5,6 +5,14 @@
  * `kind`/`modelName`/`sleeping`/`isEstimate` into tooltip/legend/aria text.
  */
 import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
+import { chart_color_black_300 } from '@patternfly/react-tokens/dist/esm/chart_color_black_300';
+import { chart_color_blue_300 } from '@patternfly/react-tokens/dist/esm/chart_color_blue_300';
+import { chart_color_green_300 } from '@patternfly/react-tokens/dist/esm/chart_color_green_300';
+import { chart_color_purple_300 } from '@patternfly/react-tokens/dist/esm/chart_color_purple_300';
+import { chart_color_teal_300 } from '@patternfly/react-tokens/dist/esm/chart_color_teal_300';
+import { chart_color_orange_300 } from '@patternfly/react-tokens/dist/esm/chart_color_orange_300';
+import { chart_color_yellow_300 } from '@patternfly/react-tokens/dist/esm/chart_color_yellow_300';
+import { chart_color_red_orange_300 } from '@patternfly/react-tokens/dist/esm/chart_color_red_orange_300';
 
 type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
@@ -38,20 +46,23 @@ export interface AttributedModel {
 }
 
 // --- reserved (non-palette) colors, must never collide with a model ---
-export const OTHER_COLOR_TOKEN = 'var(--pf-t--chart--color--black--300)';
+// Chart colors come from @patternfly/react-tokens `.var` strings, which carry a hex fallback —
+// the bare `--pf-v6-chart-color-*` custom properties are not defined by react-core's base.css
+// (a hand-written `var(--pf-t--chart--…)` here silently renders transparent/black).
+export const OTHER_COLOR_TOKEN = chart_color_black_300.var;
 export const AVAILABLE_COLOR_TOKEN = 'var(--pf-t--global--background--color--secondary--default)';
 export const USED_COLOR_TOKEN = 'var(--pf-t--global--color--status--info--default)'; // legacy mode
 export const RESERVED_COLOR_TOKEN = 'var(--pf-t--global--color--status--warning--default)'; // legacy mode
 
-// --- deterministic model palette (theme-aware PF6 chart tokens) ---
+// --- deterministic model palette (PF6 chart tokens with hex fallback) ---
 export const MODEL_PALETTE: readonly string[] = [
-  'var(--pf-t--chart--color--blue--300)',
-  'var(--pf-t--chart--color--green--300)',
-  'var(--pf-t--chart--color--purple--300)',
-  'var(--pf-t--chart--color--teal--300)',
-  'var(--pf-t--chart--color--orange--300)',
-  'var(--pf-t--chart--color--yellow--300)',
-  'var(--pf-t--chart--color--red-orange--300)',
+  chart_color_blue_300.var,
+  chart_color_green_300.var,
+  chart_color_purple_300.var,
+  chart_color_teal_300.var,
+  chart_color_orange_300.var,
+  chart_color_yellow_300.var,
+  chart_color_red_orange_300.var,
 ];
 
 /** Stable string hash (djb2/FNV-style) of a model name into the palette. */

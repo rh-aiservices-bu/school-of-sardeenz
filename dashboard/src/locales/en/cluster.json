@@ -20,10 +20,12 @@
       },
       "gpuMemory": {
         "title": "GPU Memory",
-        "usedMeasured": " used (measured)",
+        "usedMeasured": " used",
         "allocated": " allocated (estimate)",
-        "breakdownMeasured": "{{used}} used (measured) · {{reserved}} reserved · {{total}} total",
-        "breakdownAllocated": "{{used}} allocated (estimate) · {{reserved}} reserved · {{total}} total"
+        "usedFragment": "{{value}} used",
+        "allocatedFragment": "{{value}} allocated (estimate)",
+        "reservedFragment": "{{value}} reserved",
+        "totalFragment": "{{value}} total"
       },
       "alerts": {
         "title": "Alerts",
@@ -39,7 +41,7 @@
     "vramUsage": {
       "title": "VRAM Usage",
       "ariaDesc": "GPU memory usage donut chart",
-      "usedMeasured": "Used (measured)",
+      "usedMeasured": "Used",
       "allocated": "Allocated (estimate)",
       "reserved": "Reserved",
       "free": "Free",

@@ -14,6 +14,9 @@ import {
   Title,
 } from '@patternfly/react-core';
 import { ChartDonut } from '@patternfly/react-charts/victory';
+import { chart_color_blue_300 } from '@patternfly/react-tokens/dist/esm/chart_color_blue_300';
+import { chart_color_yellow_300 } from '@patternfly/react-tokens/dist/esm/chart_color_yellow_300';
+import { chart_color_black_200 } from '@patternfly/react-tokens/dist/esm/chart_color_black_200';
 import {
   CubesIcon,
   ExclamationTriangleIcon,
@@ -175,17 +178,21 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
             color: 'var(--pf-t--global--text--color--subtle)',
           }}
         >
-          {hasMeasured
-            ? t('overview.cards.gpuMemory.breakdownMeasured', {
-                used: formatBytes(measuredUsedBytes),
-                reserved: formatBytes(reserved),
-                total: formatBytes(totalBytes),
-              })
-            : t('overview.cards.gpuMemory.breakdownAllocated', {
-                used: formatBytes(allocatedBytes),
-                reserved: formatBytes(reserved),
-                total: formatBytes(totalBytes),
-              })}
+          {[
+            hasMeasured
+              ? t('overview.cards.gpuMemory.usedFragment', {
+                  value: formatBytes(measuredUsedBytes),
+                })
+              : t('overview.cards.gpuMemory.allocatedFragment', {
+                  value: formatBytes(allocatedBytes),
+                }),
+            // Reserved is a transient placement hold (STARTING only) — omit the permanent
+            // "0 B reserved" noise and show it only while it's actually non-zero.
+            ...(reserved > 0
+              ? [t('overview.cards.gpuMemory.reservedFragment', { value: formatBytes(reserved) })]
+              : []),
+            t('overview.cards.gpuMemory.totalFragment', { value: formatBytes(totalBytes) }),
+          ].join(' · ')}
         </div>
       </CardBody>
     </Card>
@@ -296,29 +303,32 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
     : t('overview.vramUsage.allocated');
   const primaryBytes = hasMeasured ? measuredUsedBytes : usedBytes;
 
-  const colorScale = [
-    'var(--pf-t-chart-color-blue-300)',
-    'var(--pf-t-chart-color-orange-300)',
-    'var(--pf-t-chart-color-blue-100)',
+  // Reserved is a transient placement hold (held only while an instance is STARTING; released
+  // on the ACTIVE transition), so in steady state it's 0 — show the segment only when it's
+  // actually non-zero rather than cluttering the chart with a permanent "0 B reserved".
+  // Chart colors: react-tokens `.var` strings (hex fallback included) — the bare chart custom
+  // properties are not defined by base.css, and an undefined var() fills SVG arcs black.
+  const segments = [
+    { label: primaryLabel, bytes: primaryBytes, color: chart_color_blue_300.var },
+    ...(reserved > 0
+      ? [
+          {
+            label: t('overview.vramUsage.reserved'),
+            bytes: reserved,
+            color: chart_color_yellow_300.var,
+          },
+        ]
+      : []),
+    { label: t('overview.vramUsage.free'), bytes: freeBytes, color: chart_color_black_200.var },
   ];
 
-  const data = [
-    { x: primaryLabel, y: primaryBytes },
-    { x: t('overview.vramUsage.reserved'), y: reserved },
-    { x: t('overview.vramUsage.free'), y: freeBytes },
-  ];
-
-  const legendData = [
-    { name: `${primaryLabel}: ${formatBytes(primaryBytes)}` },
-    { name: `${t('overview.vramUsage.reserved')}: ${formatBytes(reserved)}` },
-    { name: `${t('overview.vramUsage.free')}: ${formatBytes(freeBytes)}` },
-  ];
+  const colorScale = segments.map((s) => s.color);
+  const data = segments.map((s) => ({ x: s.label, y: s.bytes }));
+  const legendData = segments.map((s) => ({ name: `${s.label}: ${formatBytes(s.bytes)}` }));
 
   // Stat rows below the donut — mirror the segments shown in the chart, plus Total always.
-  const statRows = [
-    { label: primaryLabel, value: formatBytes(primaryBytes) },
-    { label: t('overview.vramUsage.reserved'), value: formatBytes(reserved) },
-    { label: t('overview.vramUsage.free'), value: formatBytes(freeBytes) },
+  const statRows: Array<{ label: string; value: string; bold?: boolean }> = [
+    ...segments.map((s) => ({ label: s.label, value: formatBytes(s.bytes) })),
     { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
   ];
 

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboard chart colors: undefined PF6 token names rendered the VRAM donut black and the
+  placement/GPU bars empty.** The per-model segment palette (#123) and the overview donut used
+  hand-written `var(--pf-t--chart--…)` / `var(--pf-t-chart-…)` custom properties that no
+  stylesheet defines — an invalid `var()` fills SVG arcs black and div backgrounds
+  transparent, so the placement bar had rendered empty since #123. Both now use
+  `@patternfly/react-tokens` `.var` strings (hex fallback included). Reserved memory — a
+  transient placement hold, held only while an instance is STARTING and released on ACTIVE —
+  is now shown in the GPU Memory card and VRAM donut only when non-zero instead of a
+  permanent "0 B reserved".
+
 ### Added
 
 - **Measured GPU memory telemetry via ts-nvml (#163) — contracts.** Additive contract fields
