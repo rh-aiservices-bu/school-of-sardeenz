@@ -6,7 +6,7 @@
 // figure) is unit-testable without a real NVML session or RunnerManager.
 import { resolveOwner as resolveOwnerFromProcTree } from './proc-tree.js';
 import type { NvmlDeviceMemory, NvmlProcessMemory } from './nvml.js';
-import type { MeasuredMemorySample } from './registration.js';
+import type { MeasuredDeviceSample, MeasuredMemorySample } from './registration.js';
 
 /** A runner this worker started, as reported by RunnerManager.getRunnerProcesses(). */
 export interface RunnerProcessOwner {
@@ -34,17 +34,20 @@ export function buildMeasuredSample(
   owners: RunnerProcessOwner[],
   resolveOwner: ResolveOwnerFn = defaultResolveOwner,
 ): MeasuredMemorySample {
-  const devices = deviceSamples.map((d) => ({
-    deviceIndex: d.deviceIndex,
-    memoryMeasuredUsedBytes: d.usedBytes,
-  }));
+  const devices: MeasuredDeviceSample[] = deviceSamples.map((d) => {
+    const out: MeasuredDeviceSample = { deviceIndex: d.deviceIndex, memoryUsedBytes: d.usedBytes };
+    if (d.name !== undefined) out.deviceName = d.name;
+    if (d.utilizationPercent !== undefined) out.utilizationPercent = d.utilizationPercent;
+    if (d.temperatureC !== undefined) out.temperatureC = d.temperatureC;
+    return out;
+  });
 
   const ownerPids = new Set(owners.map((o) => o.pid));
   const ownerByPid = new Map(owners.map((o) => [o.pid, o]));
 
   const instanceTotals = new Map<
     string,
-    { instanceId: string; modelName: string; deviceIndex: number; memoryMeasuredUsedBytes: number }
+    { instanceId: string; modelName: string; deviceIndex: number; memoryUsedBytes: number }
   >();
   for (const proc of processSamples) {
     const ownerPid = resolveOwner(proc.pid, ownerPids);
@@ -53,13 +56,13 @@ export function buildMeasuredSample(
     const key = `${owner.instanceId}:${proc.deviceIndex}`;
     const existing = instanceTotals.get(key);
     if (existing) {
-      existing.memoryMeasuredUsedBytes += proc.usedBytes;
+      existing.memoryUsedBytes += proc.usedBytes;
     } else {
       instanceTotals.set(key, {
         instanceId: owner.instanceId,
         modelName: owner.modelName,
         deviceIndex: proc.deviceIndex,
-        memoryMeasuredUsedBytes: proc.usedBytes,
+        memoryUsedBytes: proc.usedBytes,
       });
     }
   }

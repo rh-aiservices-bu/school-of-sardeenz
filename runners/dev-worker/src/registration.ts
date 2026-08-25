@@ -12,10 +12,18 @@ export interface CatalogCapabilityOverrides {
   features?: Record<string, unknown>;
 }
 
-/** One device's measured (NVML) usage, as sampled at report-build time. */
+/**
+ * One device's measured (NVML) usage, as sampled at report-build time. Doctrine: measured memory
+ * IS the number everywhere downstream — there's no separate "reserved" figure. `memoryUsedBytes`
+ * here always means an NVML reading; buildMemoryReport() falls back to the internal ledger itself
+ * (as a simulated measurement) for any device this sample doesn't cover.
+ */
 export interface MeasuredDeviceSample {
   deviceIndex: number;
-  memoryMeasuredUsedBytes: number;
+  memoryUsedBytes: number;
+  deviceName?: string;
+  utilizationPercent?: number;
+  temperatureC?: number;
 }
 
 /** One runner instance's measured (NVML, process-attributed) usage on one device. */
@@ -23,7 +31,7 @@ export interface MeasuredInstanceSample {
   instanceId: string;
   modelName: string;
   deviceIndex: number;
-  memoryMeasuredUsedBytes: number;
+  memoryUsedBytes: number;
 }
 
 export interface MeasuredMemorySample {
@@ -32,9 +40,16 @@ export interface MeasuredMemorySample {
 }
 
 // Supplies a fresh NVML-derived sample on demand. Returns null when measurement isn't possible
-// (no NVML, CPU box) — buildMemoryReport() then omits the measured fields entirely. Owned by
-// src/index.ts, which composes the NvmlReader with RunnerManager.getRunnerProcesses().
+// (no NVML, CPU box) — buildMemoryReport() then falls back to the ledger for devices and to
+// ledgerInstancesProvider for instances. Owned by src/index.ts, which composes the NvmlReader with
+// RunnerManager.getRunnerProcesses().
 export type MeasuredMemoryProvider = () => Promise<MeasuredMemorySample | null>;
+
+// Simulates instances[] from the worker's own runner ledger when measuredProvider is absent or
+// resolves null (no NVML — stub mode / CPU-only host). Owned by src/index.ts, which composes
+// RunnerManager.getLedgerInstanceShares() — see that method for why this correctly reports nothing
+// for a sleeping runner despite being ledger-derived rather than NVML-derived.
+export type LedgerInstancesProvider = () => Promise<MeasuredInstanceSample[]>;
 
 export class WorkerRegistration {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -50,6 +65,7 @@ export class WorkerRegistration {
     private readonly fetchFn: typeof fetch = globalThis.fetch,
     private readonly catalogCapabilities?: CatalogCapabilityOverrides,
     private readonly measuredProvider?: MeasuredMemoryProvider,
+    private readonly ledgerInstancesProvider?: LedgerInstancesProvider,
   ) {
     this.devices =
       devices ??
@@ -150,33 +166,47 @@ export class WorkerRegistration {
     return this.deviceMemoryUsed[deviceIndex] ?? 0;
   }
 
-  // Ledger figures (memoryUsedBytes) come from the deviceMemoryUsed array unconditionally — that's
-  // the untouched placement-math source of truth. Measured figures (memoryMeasuredUsedBytes,
-  // instances) are additive and only appear when measuredProvider resolves to non-null; a failing
-  // provider (thrown error, or genuinely no NVML) degrades silently to "no measurement", never to a
-  // thrown report build. reportedAt is always set, in every mode, since it's what the control plane
-  // uses to judge staleness even for a stub worker with no measurement at all.
+  // Doctrine: measured memory IS `memoryUsedBytes` everywhere downstream — there is no separate
+  // "reserved"/ledger figure exposed anywhere in the report. Per device: an NVML reading from
+  // measuredProvider when available, else the internal allocation ledger (deviceMemoryUsed) as a
+  // simulated measurement — the ledger's only remaining purpose post-doctrine. `instances` is
+  // always present (never omitted): NVML mode uses the process-attributed measurements: sample
+  // from measuredProvider, no-NVML mode simulates them via ledgerInstancesProvider (backed by
+  // RunnerManager's runner records). Both providers degrade silently on failure (thrown error, or
+  // genuinely unavailable) rather than ever throwing out of report-building. reportedAt is always
+  // set, in every mode, since it's what the control plane uses to judge staleness even for a stub
+  // worker with no NVML measurement at all.
   private async buildMemoryReport(): Promise<Record<string, unknown>> {
     const measured = this.measuredProvider ? await this.measuredProvider().catch(() => null) : null;
-    const measuredByDevice = new Map(
-      measured?.devices.map((d) => [d.deviceIndex, d.memoryMeasuredUsedBytes]) ?? [],
-    );
+    const measuredByDevice = new Map(measured?.devices.map((d) => [d.deviceIndex, d]) ?? []);
 
     const devices = this.devices.map((device, i) => {
       const out: Record<string, unknown> = {
         deviceIndex: device.deviceIndex,
         deviceType: device.deviceType,
-        memoryUsedBytes: this.deviceMemoryUsed[i],
         memoryTotalBytes: device.memoryTotalBytes,
       };
-      const measuredBytes = measuredByDevice.get(device.deviceIndex);
-      if (measuredBytes !== undefined) out.memoryMeasuredUsedBytes = measuredBytes;
+      const sample = measuredByDevice.get(device.deviceIndex);
+      if (sample) {
+        out.memoryUsedBytes = sample.memoryUsedBytes;
+        if (sample.deviceName !== undefined) out.deviceName = sample.deviceName;
+        if (sample.utilizationPercent !== undefined)
+          out.utilizationPercent = sample.utilizationPercent;
+        if (sample.temperatureC !== undefined) out.temperatureC = sample.temperatureC;
+      } else {
+        // No NVML reading for this device (no reader at all, or just this device's query failed)
+        // — fall back to the ledger as a simulated measurement. No device stats in this case;
+        // the ledger has no notion of utilization/temperature/name.
+        out.memoryUsedBytes = this.deviceMemoryUsed[i];
+      }
       return out;
     });
 
-    const report: Record<string, unknown> = { devices, reportedAt: new Date().toISOString() };
-    if (measured) report.instances = measured.instances;
-    return report;
+    const instances = measured
+      ? measured.instances
+      : ((await this.ledgerInstancesProvider?.().catch(() => [])) ?? []);
+
+    return { devices, instances, reportedAt: new Date().toISOString() };
   }
 
   private async pushMemoryReport(): Promise<void> {

@@ -762,3 +762,190 @@ describe('getRunnerProcesses', () => {
     expect(mgr.getRunnerProcesses()).toEqual([]);
   });
 });
+
+describe('getLedgerInstanceShares', () => {
+  // Runners in these tests use a fake launcher that never actually binds a socket — only the
+  // constructor-injected fetchFn is exercised, so no real network/port isolation is needed here.
+  function makeLauncher(): RunnerLauncher {
+    return {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        }),
+    };
+  }
+
+  function makeFetchFn(
+    impl: (url: string) => Promise<{ ok: boolean; json?: () => Promise<unknown> }>,
+  ): typeof fetch {
+    return vi.fn((url: unknown) => impl(url as string)) as unknown as typeof fetch;
+  }
+
+  it("returns per-device bytes from each running runner's own /memory-report", async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 500 }] }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    const shares = await mgr.getLedgerInstanceShares();
+
+    expect(shares).toEqual([
+      { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 500 },
+    ]);
+    expect(fetchFn).toHaveBeenCalledWith('http://127.0.0.1:19301/memory-report');
+  });
+
+  it('a sleeping runner (0 bytes reported) contributes no entries — matches "sleeping models hold nothing"', async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 0 }] }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it('a runner whose /memory-report call rejects contributes no entries (never throws)', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.reject(new Error('ECONNREFUSED')),
+    ) as unknown as typeof fetch;
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await expect(mgr.getLedgerInstanceShares()).resolves.toEqual([]);
+  });
+
+  it('a non-ok /memory-report response contributes no entries', async () => {
+    const fetchFn = makeFetchFn(() => Promise.resolve({ ok: false }));
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it('aggregates entries across multiple runners', async () => {
+    const fetchFn = makeFetchFn((url) =>
+      url.includes('19301')
+        ? Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 300 }] }),
+          })
+        : Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ devices: [{ deviceIndex: 1, memoryUsedBytes: 700 }] }),
+          }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 300,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 700,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+    });
+
+    const shares = await mgr.getLedgerInstanceShares();
+    expect(shares).toHaveLength(2);
+    expect(shares).toEqual(
+      expect.arrayContaining([
+        { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 300 },
+        { instanceId: 'inst-b', modelName: 'model-b', deviceIndex: 1, bytes: 700 },
+      ]),
+    );
+  });
+
+  it('returns empty when there are no running runners', async () => {
+    const mgr = new RunnerManager(makeConfig(), makeRegistration());
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+});

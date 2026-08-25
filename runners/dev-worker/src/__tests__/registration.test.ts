@@ -151,7 +151,7 @@ describe('WorkerRegistration', () => {
       expect(info.managementUrl).toBe('http://10.244.1.5:9100');
     });
 
-    it('writes initial memory report with zero usage', async () => {
+    it('writes initial memory report with zero (ledger-simulated) usage and no device stats', async () => {
       await registration.register();
 
       const memoryCall = mockRedis._pipelineCalls.find(
@@ -161,11 +161,15 @@ describe('WorkerRegistration', () => {
 
       expect(report.devices).toHaveLength(2);
       for (const dev of report.devices) {
+        // No measuredProvider at all here — memoryUsedBytes falls all the way back to the ledger.
         expect(dev.memoryUsedBytes).toBe(0);
         expect(dev.memoryTotalBytes).toBe(config.deviceMemoryBytes);
-        expect(dev.memoryMeasuredUsedBytes).toBeUndefined();
+        expect(dev.deviceName).toBeUndefined();
+        expect(dev.utilizationPercent).toBeUndefined();
+        expect(dev.temperatureC).toBeUndefined();
       }
-      expect(report.instances).toBeUndefined();
+      // instances[] is always present post-doctrine, even with no ledgerInstancesProvider wired.
+      expect(report.instances).toEqual([]);
     });
 
     it('always sets reportedAt, even with no measuredProvider (stub mode)', async () => {
@@ -363,9 +367,12 @@ describe('WorkerRegistration', () => {
           const report = JSON.parse(call.value) as WorkerMemoryReport;
           expect(report.reportedAt).toBeDefined();
           for (const dev of report.devices) {
-            expect(dev.memoryMeasuredUsedBytes).toBeUndefined();
+            // NVML provider is throwing every tick, and no ledgerInstancesProvider is wired here —
+            // devices fall back to the (untouched) ledger, currently 0.
+            expect(dev.memoryUsedBytes).toBe(0);
+            expect(dev.deviceName).toBeUndefined();
           }
-          expect(report.instances).toBeUndefined();
+          expect(report.instances).toEqual([]);
         }
       } finally {
         vi.useRealTimers();
@@ -374,15 +381,23 @@ describe('WorkerRegistration', () => {
   });
 
   describe('measured memory (NVML)', () => {
-    it('folds measuredProvider device + instance samples into the report', async () => {
+    it('folds measuredProvider device + instance samples into the report, incl. device stats', async () => {
       const sample: MeasuredMemorySample = {
-        devices: [{ deviceIndex: 0, memoryMeasuredUsedBytes: 5_000_000 }],
+        devices: [
+          {
+            deviceIndex: 0,
+            memoryUsedBytes: 5_000_000,
+            deviceName: 'NVIDIA GeForce RTX 4070 Ti',
+            utilizationPercent: 42,
+            temperatureC: 65,
+          },
+        ],
         instances: [
           {
             instanceId: 'inst-abc123',
             modelName: 'llama-3-8b',
             deviceIndex: 0,
-            memoryMeasuredUsedBytes: 4_500_000,
+            memoryUsedBytes: 4_500_000,
           },
         ],
       };
@@ -403,12 +418,19 @@ describe('WorkerRegistration', () => {
       );
       const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
 
-      expect(report.devices[0].memoryMeasuredUsedBytes).toBe(5_000_000);
-      expect(report.devices[1].memoryMeasuredUsedBytes).toBeUndefined();
+      // Device 0 is NVML-measured, including the extra stats.
+      expect(report.devices[0].memoryUsedBytes).toBe(5_000_000);
+      expect(report.devices[0].deviceName).toBe('NVIDIA GeForce RTX 4070 Ti');
+      expect(report.devices[0].utilizationPercent).toBe(42);
+      expect(report.devices[0].temperatureC).toBe(65);
+      // Device 1 has no NVML sample — falls back to the (untouched) ledger, currently 0, with no
+      // device stats (the ledger has no notion of utilization/temperature/name).
+      expect(report.devices[1].memoryUsedBytes).toBe(0);
+      expect(report.devices[1].deviceName).toBeUndefined();
       expect(report.instances).toEqual(sample.instances);
     });
 
-    it('omits measured fields when measuredProvider resolves null (CPU/stub box)', async () => {
+    it('falls back to the ledger for devices and to [] for instances when measuredProvider resolves null (CPU/stub box, no ledgerInstancesProvider wired)', async () => {
       const measuredProvider = vi.fn(() => Promise.resolve(null));
       registration = new WorkerRegistration(
         mockRedis as never,
@@ -428,12 +450,13 @@ describe('WorkerRegistration', () => {
 
       expect(measuredProvider).toHaveBeenCalled();
       for (const dev of report.devices) {
-        expect(dev.memoryMeasuredUsedBytes).toBeUndefined();
+        expect(dev.memoryUsedBytes).toBe(0);
+        expect(dev.deviceName).toBeUndefined();
       }
-      expect(report.instances).toBeUndefined();
+      expect(report.instances).toEqual([]);
     });
 
-    it('degrades to no measurement when measuredProvider throws', async () => {
+    it('degrades to ledger fallback when measuredProvider throws', async () => {
       const measuredProvider = vi.fn(() => Promise.reject(new Error('NVML query failed')));
       registration = new WorkerRegistration(
         mockRedis as never,
@@ -452,8 +475,91 @@ describe('WorkerRegistration', () => {
       const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
 
       expect(report.devices).toHaveLength(2);
-      expect(report.instances).toBeUndefined();
+      expect(report.instances).toEqual([]);
       expect(report.reportedAt).toBeDefined();
+    });
+
+    it('uses ledgerInstancesProvider to simulate instances[] when there is no NVML sample', async () => {
+      const ledgerInstancesProvider = vi.fn(() =>
+        Promise.resolve([
+          {
+            instanceId: 'inst-stub-1',
+            modelName: 'stub-model',
+            deviceIndex: 0,
+            memoryUsedBytes: 2_000_000,
+          },
+        ]),
+      );
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined, // no measuredProvider at all — stub mode
+        ledgerInstancesProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+
+      expect(ledgerInstancesProvider).toHaveBeenCalled();
+      expect(report.instances).toEqual([
+        {
+          instanceId: 'inst-stub-1',
+          modelName: 'stub-model',
+          deviceIndex: 0,
+          memoryUsedBytes: 2_000_000,
+        },
+      ]);
+    });
+
+    it('never calls ledgerInstancesProvider when the NVML measuredProvider succeeds', async () => {
+      const sample: MeasuredMemorySample = {
+        devices: [{ deviceIndex: 0, memoryUsedBytes: 5_000_000 }],
+        instances: [],
+      };
+      const measuredProvider = vi.fn(() => Promise.resolve(sample));
+      const ledgerInstancesProvider = vi.fn(() => Promise.resolve([]));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        measuredProvider,
+        ledgerInstancesProvider,
+      );
+
+      await registration.register();
+
+      expect(measuredProvider).toHaveBeenCalled();
+      expect(ledgerInstancesProvider).not.toHaveBeenCalled();
+    });
+
+    it('degrades to [] when ledgerInstancesProvider itself throws', async () => {
+      const ledgerInstancesProvider = vi.fn(() => Promise.reject(new Error('worker unreachable')));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ledgerInstancesProvider,
+      );
+
+      await expect(registration.register()).resolves.toBeUndefined();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+      expect(report.instances).toEqual([]);
     });
   });
 

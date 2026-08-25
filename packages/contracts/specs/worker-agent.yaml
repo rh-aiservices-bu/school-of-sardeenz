@@ -576,8 +576,9 @@ components:
           description: |
             Measured per-instance device memory, attributed by mapping the
             device's process list (NVML) to the runner processes the worker
-            spawned. Present only when the worker can measure (NVML available
-            and runners attributable); omitted in stub/CPU mode.
+            spawned. On hosts without NVML (stub mode / CPU-only) the worker
+            simulates the entries from its runner allocation ledger so
+            per-model views behave identically in dev.
         reportedAt:
           type: string
           format: date-time
@@ -605,25 +606,34 @@ components:
           format: int64
           minimum: 0
           description: |
-            Total bytes accounted to runners on this device by the worker's
-            allocation ledger (the sum of the running runners' configured
-            `requiredMemory` shares). A budgeting figure, not a hardware
-            measurement — see `memoryMeasuredUsedBytes` for the measured
-            value.
+            Measured device memory in use, in bytes, read from NVML
+            (`nvmlDeviceGetMemoryInfo`, total − free — includes memory
+            consumed by processes outside Sardeenz's control and the
+            driver-reserved region). On hosts without NVML (stub mode /
+            CPU-only), the worker simulates this figure from its runner
+            allocation ledger so downstream views behave identically.
         memoryTotalBytes:
           type: integer
           format: int64
           minimum: 0
           description: Total device capacity in bytes.
-        memoryMeasuredUsedBytes:
-          type: integer
-          format: int64
-          minimum: 0
+        deviceName:
+          type: string
           description: |
-            Measured device memory in use, in bytes, read from NVML
-            (`nvmlDeviceGetMemoryInfo`). Includes memory consumed by
-            processes outside Sardeenz's control. Absent when the worker
-            cannot measure (no NVML — stub mode or CPU-only host).
+            Device product name from NVML (e.g. "NVIDIA GeForce RTX 4070
+            Ti"). Absent when the worker cannot query it.
+        utilizationPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            GPU utilization percentage from NVML at report time. Absent
+            when unavailable.
+        temperatureC:
+          type: integer
+          description: |
+            GPU temperature in degrees Celsius from NVML at report time.
+            Absent when unavailable.
 
     InstanceMemoryMeasurement:
       type: object
@@ -637,7 +647,7 @@ components:
         - instanceId
         - modelName
         - deviceIndex
-        - memoryMeasuredUsedBytes
+        - memoryUsedBytes
       properties:
         instanceId:
           type: string
@@ -649,11 +659,13 @@ components:
           type: integer
           minimum: 0
           description: Zero-based global device index.
-        memoryMeasuredUsedBytes:
+        memoryUsedBytes:
           type: integer
           format: int64
           minimum: 0
-          description: Measured bytes used by this instance's process tree on this device.
+          description: |
+            Measured bytes used by this instance's process tree on this
+            device (stub-simulated on hosts without NVML).
 
     # -------------------------------------------------------------------------
     # Common

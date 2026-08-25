@@ -7,6 +7,7 @@ import {
   WorkerRegistration,
   type CatalogCapabilityOverrides,
   type MeasuredMemorySample,
+  type MeasuredInstanceSample,
 } from './registration.js';
 import { RunnerManager, probePortAvailable } from './runner-manager.js';
 import { StubLauncher } from './stub-launcher.js';
@@ -107,6 +108,21 @@ function measuredProvider(): Promise<MeasuredMemorySample | null> {
   return Promise.resolve(buildMeasuredSample(sample.devices, sample.processes, owners));
 }
 
+// Doctrine fallback for stub mode / CPU-only hosts (no NVML): simulates instances[] from the
+// worker's own runner ledger via RunnerManager.getLedgerInstanceShares(), which already correctly
+// reports nothing for a sleeping runner (see that method's doc comment).
+function ledgerInstancesProvider(): Promise<MeasuredInstanceSample[]> {
+  if (!runnerManagerRef.current) return Promise.resolve([]);
+  return runnerManagerRef.current.getLedgerInstanceShares().then((shares) =>
+    shares.map((s) => ({
+      instanceId: s.instanceId,
+      modelName: s.modelName,
+      deviceIndex: s.deviceIndex,
+      memoryUsedBytes: s.bytes,
+    })),
+  );
+}
+
 // Resolve the advertised fleet once at startup: real GPUs via NVML in apptainer mode, else the
 // configured (simulated) fleet. Done before registration so the control plane budgets real VRAM.
 const deviceReport = resolveDevices(config, nvmlReader);
@@ -119,6 +135,7 @@ const registration = new WorkerRegistration(
   undefined,
   catalogCapabilities,
   measuredProvider,
+  ledgerInstancesProvider,
 );
 const runnerManager = new RunnerManager(
   config,

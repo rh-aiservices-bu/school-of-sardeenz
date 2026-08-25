@@ -851,7 +851,9 @@ export type components = {
             workerId?: string;
             /**
              * Format: int64
-             * @description Configured device memory requirement in bytes.
+             * @description Configured device memory estimate in bytes. An indicator used
+             *     only for initial placement — it has no meaning once the model
+             *     is loaded (see `currentMemory` for actual consumption).
              */
             requiredMemory?: number;
             /**
@@ -954,7 +956,9 @@ export type components = {
             modelPath: string;
             /**
              * Format: int64
-             * @description Configured device memory requirement in bytes.
+             * @description Configured device memory estimate in bytes. An indicator used
+             *     only for initial placement — it has no meaning once the model
+             *     is loaded (see `currentMemory` for actual consumption).
              */
             requiredMemory: number;
             /** @description Required device type. */
@@ -1055,40 +1059,44 @@ export type components = {
             memoryTotalBytes: number;
             /**
              * Format: int64
-             * @description Device memory accounted to runners by the worker's allocation
-             *     ledger, in bytes (sum of configured `requiredMemory` shares).
-             *     A budgeting figure — see `memoryMeasuredUsedBytes` for the
-             *     hardware-measured value.
+             * @description Measured device memory in use, in bytes, from the worker's NVML
+             *     report (stub-simulated on hosts without NVML). Includes memory
+             *     consumed by processes outside Sardeenz's control.
              */
             memoryUsedBytes: number;
             /**
              * Format: int64
-             * @description Available device memory in bytes.
+             * @description Device memory available for placing new models, in bytes
+             *     (capacity minus measured usage, minus any in-flight placement
+             *     hold for an instance still starting — holds are an internal
+             *     scheduling detail and are not exposed as a field).
              */
             memoryAvailableBytes: number;
             /**
-             * Format: int64
-             * @description Memory reserved for models being started (not yet reflected
-             *     in the used count).
+             * @description Device product name from NVML (e.g. "NVIDIA GeForce RTX 4070
+             *     Ti"). Absent when the worker cannot query it.
              */
-            memoryReservedBytes?: number;
-            /**
-             * Format: int64
-             * @description Measured device memory in use, in bytes, from the worker's NVML
-             *     report. Includes memory consumed by processes outside Sardeenz's
-             *     control. Absent when the worker cannot measure (stub mode or
-             *     CPU-only host).
-             */
-            memoryMeasuredUsedBytes?: number;
+            deviceName?: string;
+            /** @description GPU utilization percentage at report time. Absent when unavailable. */
+            utilizationPercent?: number;
+            /** @description GPU temperature in °C at report time. Absent when unavailable. */
+            temperatureC?: number;
         };
-        /** @description Summary of a model running on a specific worker. */
+        /** @description Summary of a model instance running on a specific worker. */
         WorkerModelInfo: {
-            /** @description Model name. */
+            /** @description Configuration model name. */
             modelName: string;
+            /** @description Human-facing display name, when one is configured. */
+            displayName?: string;
+            /** @description Instance identifier (`inst-<hex>`) for click-through navigation. */
+            instanceId?: string;
             state: components["schemas"]["ModelLifecycleState"];
             /**
              * Format: int64
-             * @description Device memory consumed by this model.
+             * @description Measured device memory consumed by this instance, in bytes,
+             *     from the worker's NVML process attribution (stub-simulated on
+             *     hosts without NVML). Absent when no measurement is attributed
+             *     yet (e.g. the instance is still starting).
              */
             memoryUsedBytes?: number;
             /**
@@ -1166,26 +1174,18 @@ export type components = {
             totalBytes: number;
             /**
              * Format: int64
-             * @description Used device memory across all workers and devices.
+             * @description Measured device memory in use across all workers and devices,
+             *     in bytes (per-device NVML measurements; stub-simulated on
+             *     hosts without NVML).
              */
             usedBytes: number;
             /**
              * Format: int64
-             * @description Available device memory across all workers and devices.
+             * @description Device memory available for placement across all workers and
+             *     devices (net of in-flight placement holds, which are internal
+             *     and not exposed as a field).
              */
             availableBytes: number;
-            /**
-             * Format: int64
-             * @description Reserved device memory for models being started.
-             */
-            reservedBytes?: number;
-            /**
-             * Format: int64
-             * @description Measured device memory in use across all workers and devices
-             *     that reported an NVML measurement, in bytes. Absent when no
-             *     device reported a measurement.
-             */
-            measuredUsedBytes?: number;
         };
         /**
          * @description Per-worker, per-device memory breakdown for VRAM budget

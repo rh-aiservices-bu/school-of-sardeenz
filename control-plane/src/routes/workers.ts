@@ -33,9 +33,12 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
           memoryTotalBytes: 'totalBytes' in d ? d.totalBytes : d.memoryTotalBytes,
           memoryUsedBytes: 'usedBytes' in d ? d.usedBytes : 0,
           memoryAvailableBytes: 'availableBytes' in d ? d.availableBytes : 0,
-          memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
-          ...('measuredUsedBytes' in d && d.measuredUsedBytes !== undefined
-            ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
+          ...('deviceName' in d && d.deviceName !== undefined ? { deviceName: d.deviceName } : {}),
+          ...('utilizationPercent' in d && d.utilizationPercent !== undefined
+            ? { utilizationPercent: d.utilizationPercent }
+            : {}),
+          ...('temperatureC' in d && d.temperatureC !== undefined
+            ? { temperatureC: d.temperatureC }
             : {}),
         })),
         modelCount: instanceCountByWorker.get(w.workerId) ?? 0,
@@ -66,21 +69,34 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
 
     const allInstances = await deps.lifecycle.getAllInstances();
     const allRecords = await deps.modelRepository.findAll();
-    const requiredByModel = new Map(
-      allRecords.filter((r) => r.requiredMemory != null).map((r) => [r.name, r.requiredMemory!]),
+    const displayNameByModel = new Map(
+      allRecords.filter((r) => r.displayName != null).map((r) => [r.name, r.displayName!]),
     );
+
+    const budget = deps.memoryBudget.getWorkerBudget(workerId);
+
+    // Attributed measured bytes per instance, scoped to this worker's own report — supersedes
+    // the old #123/#151 requiredMemory seam now that genuine per-instance NVML attribution
+    // exists (#163).
+    const measuredByInstance = new Map<string, number>();
+    for (const m of budget?.instanceMeasurements ?? []) {
+      measuredByInstance.set(
+        m.instanceId,
+        (measuredByInstance.get(m.instanceId) ?? 0) + m.measuredUsedBytes,
+      );
+    }
+
     const workerModels = allInstances
       .filter((s) => s.workerId === workerId && s.state !== ModelLifecycleState.STOPPED)
       .map((s) => ({
         modelName: s.modelName,
+        displayName: displayNameByModel.get(s.modelName) ?? undefined,
+        instanceId: s.instanceId,
         state: s.state,
+        // Measured (NVML attribution), absent when nothing is attributed yet (e.g. STARTING).
+        memoryUsedBytes: measuredByInstance.get(s.instanceId) ?? undefined,
         deviceIndices: s.deviceIndices ?? undefined,
-        // Configured requirement, not a measured value — see #123 blueprint §3. This is the
-        // seam where a genuine runner-reported per-model measurement would later replace it.
-        memoryUsedBytes: requiredByModel.get(s.modelName) ?? undefined,
       }));
-
-    const budget = deps.memoryBudget.getWorkerBudget(workerId);
 
     const detail = {
       workerId: worker.workerId,
@@ -91,9 +107,12 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
         memoryTotalBytes: 'totalBytes' in d ? d.totalBytes : d.memoryTotalBytes,
         memoryUsedBytes: 'usedBytes' in d ? d.usedBytes : 0,
         memoryAvailableBytes: 'availableBytes' in d ? d.availableBytes : 0,
-        memoryReservedBytes: 'reservedBytes' in d ? d.reservedBytes : 0,
-        ...('measuredUsedBytes' in d && d.measuredUsedBytes !== undefined
-          ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
+        ...('deviceName' in d && d.deviceName !== undefined ? { deviceName: d.deviceName } : {}),
+        ...('utilizationPercent' in d && d.utilizationPercent !== undefined
+          ? { utilizationPercent: d.utilizationPercent }
+          : {}),
+        ...('temperatureC' in d && d.temperatureC !== undefined
+          ? { temperatureC: d.temperatureC }
           : {}),
       })),
       models: workerModels,

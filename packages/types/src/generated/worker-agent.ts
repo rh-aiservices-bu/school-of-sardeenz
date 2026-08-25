@@ -371,8 +371,9 @@ export type components = {
             /**
              * @description Measured per-instance device memory, attributed by mapping the
              *     device's process list (NVML) to the runner processes the worker
-             *     spawned. Present only when the worker can measure (NVML available
-             *     and runners attributable); omitted in stub/CPU mode.
+             *     spawned. On hosts without NVML (stub mode / CPU-only) the worker
+             *     simulates the entries from its runner allocation ledger so
+             *     per-model views behave identically in dev.
              */
             instances?: components["schemas"]["InstanceMemoryMeasurement"][];
             /**
@@ -389,11 +390,12 @@ export type components = {
             deviceType: components["schemas"]["DeviceType"];
             /**
              * Format: int64
-             * @description Total bytes accounted to runners on this device by the worker's
-             *     allocation ledger (the sum of the running runners' configured
-             *     `requiredMemory` shares). A budgeting figure, not a hardware
-             *     measurement — see `memoryMeasuredUsedBytes` for the measured
-             *     value.
+             * @description Measured device memory in use, in bytes, read from NVML
+             *     (`nvmlDeviceGetMemoryInfo`, total − free — includes memory
+             *     consumed by processes outside Sardeenz's control and the
+             *     driver-reserved region). On hosts without NVML (stub mode /
+             *     CPU-only), the worker simulates this figure from its runner
+             *     allocation ledger so downstream views behave identically.
              */
             memoryUsedBytes: number;
             /**
@@ -402,13 +404,20 @@ export type components = {
              */
             memoryTotalBytes: number;
             /**
-             * Format: int64
-             * @description Measured device memory in use, in bytes, read from NVML
-             *     (`nvmlDeviceGetMemoryInfo`). Includes memory consumed by
-             *     processes outside Sardeenz's control. Absent when the worker
-             *     cannot measure (no NVML — stub mode or CPU-only host).
+             * @description Device product name from NVML (e.g. "NVIDIA GeForce RTX 4070
+             *     Ti"). Absent when the worker cannot query it.
              */
-            memoryMeasuredUsedBytes?: number;
+            deviceName?: string;
+            /**
+             * @description GPU utilization percentage from NVML at report time. Absent
+             *     when unavailable.
+             */
+            utilizationPercent?: number;
+            /**
+             * @description GPU temperature in degrees Celsius from NVML at report time.
+             *     Absent when unavailable.
+             */
+            temperatureC?: number;
         };
         /**
          * @description Measured device memory attributed to one runner instance on one
@@ -426,9 +435,10 @@ export type components = {
             deviceIndex: number;
             /**
              * Format: int64
-             * @description Measured bytes used by this instance's process tree on this device.
+             * @description Measured bytes used by this instance's process tree on this
+             *     device (stub-simulated on hosts without NVML).
              */
-            memoryMeasuredUsedBytes: number;
+            memoryUsedBytes: number;
         };
         /** @description Error response returned on failure. */
         ErrorResponse: {

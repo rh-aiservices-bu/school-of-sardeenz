@@ -11,6 +11,12 @@ export interface NvmlDeviceMemory {
   deviceIndex: number;
   totalBytes: number;
   usedBytes: number;
+  /** Device product name (e.g. "NVIDIA GeForce RTX 4070 Ti"). Absent when the query fails. */
+  name?: string;
+  /** GPU utilization percentage (0-100). Absent when the query fails. */
+  utilizationPercent?: number;
+  /** GPU temperature in degrees Celsius. Absent when the query fails. */
+  temperatureC?: number;
 }
 
 export interface NvmlProcessMemory {
@@ -75,14 +81,35 @@ export async function createNvmlReader(): Promise<NvmlReader | null> {
     }
   }
 
+  // Device name is static for the process's lifetime — cache it per device index so a transient
+  // query failure on a later tick doesn't blank out a name already read successfully, and so a
+  // name already known isn't re-queried over FFI every tick for no reason.
+  const nameCache = new Map<number, string>();
+
+  function nameOf(device: Device): string | undefined {
+    const cached = nameCache.get(device.index);
+    if (cached !== undefined) return cached;
+    const result = device.getName();
+    if (!result.ok) return undefined;
+    nameCache.set(device.index, result.value);
+    return result.value;
+  }
+
   function deviceMemoryOf(device: Device): NvmlDeviceMemory | null {
-    const result = device.getMemoryInfo();
-    if (!result.ok) return null; // this device's query failed — skip it, keep the rest
-    return {
+    const memResult = device.getMemoryInfo();
+    if (!memResult.ok) return null; // memory is the one required field — skip the device without it
+    const out: NvmlDeviceMemory = {
       deviceIndex: device.index,
-      totalBytes: Number(result.value.total),
-      usedBytes: Number(result.value.used),
+      totalBytes: Number(memResult.value.total),
+      usedBytes: Number(memResult.value.used),
     };
+    const name = nameOf(device);
+    if (name !== undefined) out.name = name;
+    const utilResult = device.getUtilizationRates();
+    if (utilResult.ok) out.utilizationPercent = utilResult.value.gpu;
+    const tempResult = device.getTemperature();
+    if (tempResult.ok) out.temperatureC = tempResult.value;
+    return out;
   }
 
   function processesOf(device: Device): NvmlProcessMemory[] {

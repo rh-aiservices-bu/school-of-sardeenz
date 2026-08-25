@@ -14,6 +14,12 @@ vi.mock('@rh-ai-bu/ts-nvml', () => ({
 
 import { createNvmlReader } from '../nvml.js';
 
+interface FakeDeviceStats {
+  name?: string;
+  utilization?: { gpu: number; memory: number };
+  temperature?: number;
+}
+
 function fakeDevice(
   index: number,
   memory: { total: bigint; free: bigint; used: bigint } | null,
@@ -23,6 +29,7 @@ function fakeDevice(
     processName: string;
     usedMemoryMiB: number;
   }> | null,
+  stats: FakeDeviceStats = {},
 ) {
   return {
     index,
@@ -33,6 +40,18 @@ function fakeDevice(
     getProcesses: () =>
       processes
         ? { ok: true as const, value: processes }
+        : { ok: false as const, error: new Error('nope') },
+    getName: () =>
+      stats.name !== undefined
+        ? { ok: true as const, value: stats.name }
+        : { ok: false as const, error: new Error('nope') },
+    getUtilizationRates: () =>
+      stats.utilization !== undefined
+        ? { ok: true as const, value: stats.utilization }
+        : { ok: false as const, error: new Error('nope') },
+    getTemperature: () =>
+      stats.temperature !== undefined
+        ? { ok: true as const, value: stats.temperature }
         : { ok: false as const, error: new Error('nope') },
   };
 }
@@ -138,6 +157,80 @@ describe('createNvmlReader', () => {
     const reader = await createNvmlReader();
     expect(reader!.readDeviceMemory()).toBeNull();
     expect(reader!.readProcesses()).toBeNull();
+  });
+
+  describe('device stats (name, utilization, temperature)', () => {
+    it('folds name, utilizationPercent, and temperatureC into the device sample when available', async () => {
+      mockInit.mockImplementation(() => undefined);
+      mockGetAllDevices.mockReturnValue([
+        fakeDevice(
+          0,
+          { total: 8n * 1024n * 1024n * 1024n, free: 0n, used: 1024n * 1024n * 1024n },
+          [],
+          {
+            name: 'NVIDIA GeForce RTX 4070 Ti',
+            utilization: { gpu: 42, memory: 10 },
+            temperature: 65,
+          },
+        ),
+      ]);
+
+      const reader = await createNvmlReader();
+      const devices = reader!.readDeviceMemory();
+
+      expect(devices).toEqual([
+        {
+          deviceIndex: 0,
+          totalBytes: 8 * 1024 * 1024 * 1024,
+          usedBytes: 1024 * 1024 * 1024,
+          name: 'NVIDIA GeForce RTX 4070 Ti',
+          utilizationPercent: 42,
+          temperatureC: 65,
+        },
+      ]);
+    });
+
+    it('omits name/utilizationPercent/temperatureC individually when each query fails', async () => {
+      mockInit.mockImplementation(() => undefined);
+      mockGetAllDevices.mockReturnValue([
+        fakeDevice(0, { total: 0n, free: 0n, used: 0n }, [], {}), // no stats supplied -> all fail
+      ]);
+
+      const reader = await createNvmlReader();
+      const devices = reader!.readDeviceMemory();
+
+      expect(devices).toEqual([{ deviceIndex: 0, totalBytes: 0, usedBytes: 0 }]);
+    });
+
+    it('caches the device name so a later query failure does not blank out an already-known name', async () => {
+      mockInit.mockImplementation(() => undefined);
+      let nameCallCount = 0;
+      const device = {
+        index: 0,
+        getMemoryInfo: () => ({ ok: true as const, value: { total: 0n, free: 0n, used: 0n } }),
+        getProcesses: () => ({ ok: true as const, value: [] }),
+        getName: () => {
+          nameCallCount++;
+          // Succeeds only on the first call — simulates a transient query failure afterwards.
+          return nameCallCount === 1
+            ? { ok: true as const, value: 'NVIDIA GeForce RTX 4070 Ti' }
+            : { ok: false as const, error: new Error('transient') };
+        },
+        getUtilizationRates: () => ({ ok: false as const, error: new Error('nope') }),
+        getTemperature: () => ({ ok: false as const, error: new Error('nope') }),
+      };
+      mockGetAllDevices.mockReturnValue([device]);
+
+      const reader = await createNvmlReader();
+      const first = reader!.readDeviceMemory();
+      const second = reader!.readDeviceMemory();
+
+      expect(first?.[0].name).toBe('NVIDIA GeForce RTX 4070 Ti');
+      // Still cached, even though the underlying query would now fail.
+      expect(second?.[0].name).toBe('NVIDIA GeForce RTX 4070 Ti');
+      // The name is fetched once, not once per read.
+      expect(nameCallCount).toBe(1);
+    });
   });
 
   describe('readSample', () => {

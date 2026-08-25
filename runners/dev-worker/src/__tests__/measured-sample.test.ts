@@ -10,8 +10,8 @@ describe('buildMeasuredSample', () => {
     ];
     const result = buildMeasuredSample(devices, [], [], () => null);
     expect(result.devices).toEqual([
-      { deviceIndex: 0, memoryMeasuredUsedBytes: 5_000_000_000 },
-      { deviceIndex: 1, memoryMeasuredUsedBytes: 1_000_000_000 },
+      { deviceIndex: 0, memoryUsedBytes: 5_000_000_000 },
+      { deviceIndex: 1, memoryUsedBytes: 1_000_000_000 },
     ]);
   });
 
@@ -31,7 +31,7 @@ describe('buildMeasuredSample', () => {
         instanceId: 'inst-a',
         modelName: 'model-a',
         deviceIndex: 0,
-        memoryMeasuredUsedBytes: 3_000_000,
+        memoryUsedBytes: 3_000_000,
       },
     ]);
     expect(resolveOwner).toHaveBeenCalledTimes(2);
@@ -51,14 +51,14 @@ describe('buildMeasuredSample', () => {
     const result = buildMeasuredSample(devices, processes, owners, resolveOwner);
 
     // Device figure is the raw NVML total, unaffected by attribution.
-    expect(result.devices).toEqual([{ deviceIndex: 0, memoryMeasuredUsedBytes: 9_000_000 }]);
+    expect(result.devices).toEqual([{ deviceIndex: 0, memoryUsedBytes: 9_000_000 }]);
     // Only the attributable process shows up as an instance entry.
     expect(result.instances).toEqual([
       {
         instanceId: 'inst-a',
         modelName: 'model-a',
         deviceIndex: 0,
-        memoryMeasuredUsedBytes: 4_000_000,
+        memoryUsedBytes: 4_000_000,
       },
     ]);
   });
@@ -87,13 +87,13 @@ describe('buildMeasuredSample', () => {
           instanceId: 'inst-a',
           modelName: 'model-a',
           deviceIndex: 0,
-          memoryMeasuredUsedBytes: 1_000_000,
+          memoryUsedBytes: 1_000_000,
         },
         {
           instanceId: 'inst-b',
           modelName: 'model-b',
           deviceIndex: 0,
-          memoryMeasuredUsedBytes: 2_000_000,
+          memoryUsedBytes: 2_000_000,
         },
       ]),
     );
@@ -116,13 +116,13 @@ describe('buildMeasuredSample', () => {
           instanceId: 'inst-a',
           modelName: 'model-a',
           deviceIndex: 0,
-          memoryMeasuredUsedBytes: 1_000_000,
+          memoryUsedBytes: 1_000_000,
         },
         {
           instanceId: 'inst-a',
           modelName: 'model-a',
           deviceIndex: 1,
-          memoryMeasuredUsedBytes: 2_000_000,
+          memoryUsedBytes: 2_000_000,
         },
       ]),
     );
@@ -137,7 +137,7 @@ describe('buildMeasuredSample', () => {
 
     const result = buildMeasuredSample(devices, processes, [], resolveOwner);
 
-    expect(result.devices).toEqual([{ deviceIndex: 0, memoryMeasuredUsedBytes: 5_000_000 }]);
+    expect(result.devices).toEqual([{ deviceIndex: 0, memoryUsedBytes: 5_000_000 }]);
     expect(result.instances).toEqual([]);
     // resolveOwner is still called per-process (it's the one deciding there's no match) — what
     // matters is the empty ownerPids set produces no attribution, not that the call is skipped.

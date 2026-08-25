@@ -3,16 +3,29 @@ import { DeviceType } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 
+// Doctrine (#163 measured-only round): measured device memory IS usedBytes — there is no
+// separate ledger figure and no user-facing "reserved" number. In-flight placement holds (an
+// instance that has been placed but hasn't reported usage yet) are an INTERNAL scheduling detail:
+// they shift `availableBytes` down so placement doesn't double-book a device, but they are never
+// exposed as a field on DeviceBudget, ClusterSummary, or anywhere downstream. The `reservations`
+// map and reserveCapacity/releaseInstanceReservations/clearWorkerReservations below still exist
+// and behave exactly as before — only their visibility changed, not their mechanics.
 export interface DeviceBudget {
   deviceIndex: number;
   deviceType: string;
   totalBytes: number;
+  /** Measured device memory in use, in bytes (NVML `memoryUsedBytes`, stub-simulated without
+   *  NVML). Includes memory consumed by processes outside Sardeenz's control. */
   usedBytes: number;
-  reservedBytes: number;
-  availableBytes: number; // totalBytes - usedBytes - reservedBytes
-  /** NVML-measured device bytes in use, including non-Sardeenz processes. Telemetry only —
-   *  never fed into availableBytes/placement math. Absent when the worker couldn't measure. */
-  measuredUsedBytes?: number;
+  /** max(0, totalBytes - usedBytes - internal placement holds). Holds are not exposed as a
+   *  separate field — see the doctrine note above. */
+  availableBytes: number;
+  /** Device product name from NVML (e.g. "NVIDIA GeForce RTX 4070 Ti"). Absent when unavailable. */
+  deviceName?: string;
+  /** GPU utilization percentage at report time. Absent when unavailable. */
+  utilizationPercent?: number;
+  /** GPU temperature in degrees Celsius at report time. Absent when unavailable. */
+  temperatureC?: number;
 }
 
 /** Measured bytes attributed to one instance on one device (NVML process-list attribution). */
@@ -36,10 +49,6 @@ interface ClusterSummary {
   totalBytes: number;
   usedBytes: number;
   availableBytes: number;
-  reservedBytes: number;
-  /** Sum of measuredUsedBytes across non-stale workers' devices. Absent when no device
-   *  reported a measurement (distinct from a real 0). */
-  measuredUsedBytes?: number;
 }
 
 /** Shape of the JSON object workers push to Redis. */
@@ -160,20 +169,44 @@ export class MemoryBudgetService {
       return null;
     }
 
-    // Telemetry-tolerant: memoryMeasuredUsedBytes is optional and, unlike the ledger fields
-    // above, a malformed value is dropped (with a warning) rather than rejecting the whole
-    // device/report — a bad NVML reading must never take down placement/eviction math.
-    let memoryMeasuredUsedBytes: number | undefined;
-    if (d.memoryMeasuredUsedBytes !== undefined) {
-      if (
-        typeof d.memoryMeasuredUsedBytes === 'number' &&
-        Number.isInteger(d.memoryMeasuredUsedBytes) &&
-        d.memoryMeasuredUsedBytes >= 0
-      ) {
-        memoryMeasuredUsedBytes = d.memoryMeasuredUsedBytes;
+    // Telemetry-tolerant: deviceName/utilizationPercent/temperatureC are optional NVML extras
+    // and, unlike the ledger fields above, a malformed value is dropped (with a warning) rather
+    // than rejecting the whole device/report — a bad NVML reading must never take down
+    // placement/eviction math.
+    let deviceName: string | undefined;
+    if (d.deviceName !== undefined) {
+      if (typeof d.deviceName === 'string' && d.deviceName.length > 0) {
+        deviceName = d.deviceName;
       } else {
         console.warn(
-          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.memoryMeasuredUsedBytes — must be an integer >= 0, core report kept`,
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.deviceName — must be a non-empty string, core report kept`,
+        );
+      }
+    }
+
+    let utilizationPercent: number | undefined;
+    if (d.utilizationPercent !== undefined) {
+      if (
+        typeof d.utilizationPercent === 'number' &&
+        Number.isFinite(d.utilizationPercent) &&
+        d.utilizationPercent >= 0 &&
+        d.utilizationPercent <= 100
+      ) {
+        utilizationPercent = d.utilizationPercent;
+      } else {
+        console.warn(
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.utilizationPercent — must be a number in [0, 100], core report kept`,
+        );
+      }
+    }
+
+    let temperatureC: number | undefined;
+    if (d.temperatureC !== undefined) {
+      if (typeof d.temperatureC === 'number' && Number.isFinite(d.temperatureC)) {
+        temperatureC = d.temperatureC;
+      } else {
+        console.warn(
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.temperatureC — must be a finite number, core report kept`,
         );
       }
     }
@@ -183,14 +216,16 @@ export class MemoryBudgetService {
       deviceType: d.deviceType,
       memoryUsedBytes: d.memoryUsedBytes,
       memoryTotalBytes: d.memoryTotalBytes,
-      ...(memoryMeasuredUsedBytes !== undefined ? { memoryMeasuredUsedBytes } : {}),
+      ...(deviceName !== undefined ? { deviceName } : {}),
+      ...(utilizationPercent !== undefined ? { utilizationPercent } : {}),
+      ...(temperatureC !== undefined ? { temperatureC } : {}),
     };
   }
 
   /**
-   * Validate a single `instances[]` measurement entry. Telemetry-tolerant like
-   * `memoryMeasuredUsedBytes` above: a malformed entry is dropped (with a warning) rather than
-   * rejecting the whole report.
+   * Validate a single `instances[]` measurement entry. Telemetry-tolerant like the optional
+   * device fields above: a malformed entry is dropped (with a warning) rather than rejecting the
+   * whole report.
    */
   private validateInstanceMeasurement(
     raw: unknown,
@@ -228,13 +263,13 @@ export class MemoryBudgetService {
     }
     if (
       !(
-        typeof m.memoryMeasuredUsedBytes === 'number' &&
-        Number.isInteger(m.memoryMeasuredUsedBytes) &&
-        m.memoryMeasuredUsedBytes >= 0
+        typeof m.memoryUsedBytes === 'number' &&
+        Number.isInteger(m.memoryUsedBytes) &&
+        m.memoryUsedBytes >= 0
       )
     ) {
       console.warn(
-        `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.memoryMeasuredUsedBytes — must be an integer >= 0`,
+        `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.memoryUsedBytes — must be an integer >= 0`,
       );
       return null;
     }
@@ -243,7 +278,7 @@ export class MemoryBudgetService {
       instanceId: m.instanceId,
       modelName: m.modelName,
       deviceIndex: m.deviceIndex,
-      memoryMeasuredUsedBytes: m.memoryMeasuredUsedBytes,
+      memoryUsedBytes: m.memoryUsedBytes,
     };
   }
 
@@ -280,9 +315,10 @@ export class MemoryBudgetService {
       validatedDevices.push(device);
     }
 
-    // Telemetry-tolerant, like memoryMeasuredUsedBytes: `instances` as a whole is optional, and a
-    // malformed `instances` (wrong type, or individual bad entries) is dropped without rejecting
-    // the core report — the ledger fields above have already been validated by this point.
+    // Telemetry-tolerant, like the optional device fields: `instances` as a whole is optional,
+    // and a malformed `instances` (wrong type, or individual bad entries) is dropped without
+    // rejecting the core report — the ledger fields above have already been validated by this
+    // point.
     let instanceMeasurements: InstanceMemoryMeasurement[] | undefined;
     if (report.instances !== undefined) {
       if (!Array.isArray(report.instances)) {
@@ -303,18 +339,19 @@ export class MemoryBudgetService {
       typeof report.reportedAt === 'string' ? report.reportedAt : new Date().toISOString();
 
     const devices: DeviceBudget[] = validatedDevices.map((d) => {
-      const reservedBytes = this.getReservation(workerId, d.deviceIndex);
-      const availableBytes = d.memoryTotalBytes - d.memoryUsedBytes - reservedBytes;
+      // "reservedBytes" here is the internal placement hold (see the doctrine note at the top of
+      // the file) — it shifts availableBytes but is never exposed as a field.
+      const heldBytes = this.getReservation(workerId, d.deviceIndex);
+      const availableBytes = d.memoryTotalBytes - d.memoryUsedBytes - heldBytes;
       return {
         deviceIndex: d.deviceIndex,
         deviceType: d.deviceType,
         totalBytes: d.memoryTotalBytes,
         usedBytes: d.memoryUsedBytes,
-        reservedBytes,
         availableBytes: Math.max(0, availableBytes),
-        ...(d.memoryMeasuredUsedBytes !== undefined
-          ? { measuredUsedBytes: d.memoryMeasuredUsedBytes }
-          : {}),
+        ...(d.deviceName !== undefined ? { deviceName: d.deviceName } : {}),
+        ...(d.utilizationPercent !== undefined ? { utilizationPercent: d.utilizationPercent } : {}),
+        ...(d.temperatureC !== undefined ? { temperatureC: d.temperatureC } : {}),
       };
     });
 
@@ -329,7 +366,7 @@ export class MemoryBudgetService {
               instanceId: m.instanceId,
               modelName: m.modelName,
               deviceIndex: m.deviceIndex,
-              measuredUsedBytes: m.memoryMeasuredUsedBytes,
+              measuredUsedBytes: m.memoryUsedBytes,
             })),
           }
         : {}),
@@ -443,10 +480,9 @@ export class MemoryBudgetService {
         memoryTotalBytes: d.totalBytes,
         memoryUsedBytes: d.usedBytes,
         memoryAvailableBytes: d.availableBytes,
-        memoryReservedBytes: d.reservedBytes,
-        ...(d.measuredUsedBytes !== undefined
-          ? { memoryMeasuredUsedBytes: d.measuredUsedBytes }
-          : {}),
+        ...(d.deviceName !== undefined ? { deviceName: d.deviceName } : {}),
+        ...(d.utilizationPercent !== undefined ? { utilizationPercent: d.utilizationPercent } : {}),
+        ...(d.temperatureC !== undefined ? { temperatureC: d.temperatureC } : {}),
       })),
     }));
 
@@ -515,14 +551,15 @@ export class MemoryBudgetService {
     }
   }
 
-  /** Aggregate memory figures across every non-stale worker and device. */
+  /**
+   * Aggregate memory figures across every non-stale worker and device. `usedBytes` is measured
+   * (NVML), `availableBytes` already nets out internal placement holds — neither holds nor a
+   * separate "measured" figure are exposed here (see the doctrine note at the top of the file).
+   */
   getClusterSummary(): ClusterSummary {
     let totalBytes = 0;
     let usedBytes = 0;
     let availableBytes = 0;
-    let reservedBytes = 0;
-    let measuredUsedBytes = 0;
-    let sawMeasurement = false;
 
     for (const budget of this.getAllBudgets()) {
       if (budget.stale) continue;
@@ -530,21 +567,10 @@ export class MemoryBudgetService {
         totalBytes += device.totalBytes;
         usedBytes += device.usedBytes;
         availableBytes += device.availableBytes;
-        reservedBytes += device.reservedBytes;
-        if (device.measuredUsedBytes !== undefined) {
-          sawMeasurement = true;
-          measuredUsedBytes += device.measuredUsedBytes;
-        }
       }
     }
 
-    return {
-      totalBytes,
-      usedBytes,
-      availableBytes,
-      reservedBytes,
-      ...(sawMeasurement ? { measuredUsedBytes } : {}),
-    };
+    return { totalBytes, usedBytes, availableBytes };
   }
 
   /**
@@ -603,8 +629,8 @@ export class MemoryBudgetService {
     const device = budget.devices.find((d) => d.deviceIndex === deviceIndex);
     if (!device) return;
 
-    const reservedBytes = this.getReservation(workerId, deviceIndex);
-    device.reservedBytes = reservedBytes;
-    device.availableBytes = Math.max(0, device.totalBytes - device.usedBytes - reservedBytes);
+    // Internal placement hold only — not stored as a field on DeviceBudget (doctrine note above).
+    const heldBytes = this.getReservation(workerId, deviceIndex);
+    device.availableBytes = Math.max(0, device.totalBytes - device.usedBytes - heldBytes);
   }
 }
