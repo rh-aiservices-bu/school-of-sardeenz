@@ -30,8 +30,7 @@ export function detectNvidiaDevices(reader: NvmlReader): DetectedDevice[] | null
 // detect actual GPUs via NVML, falling back to the configured fleet only if NVML is unavailable
 // (e.g. a CPU dev box). In stub mode the fleet is always the configured (simulated) one.
 //
-// Synchronous — NVML reads are in-process (unlike the old nvidia-smi exec), but the signature stays
-// callable with `await` so callers don't need to change if that ever stops being true.
+// Synchronous — NVML reads are in-process (unlike the old nvidia-smi exec, which had to shell out).
 export function resolveDevices(config: DevWorkerConfig, reader?: NvmlReader | null): DeviceReport {
   if (config.mode === 'apptainer' && config.deviceType.toUpperCase() === 'CUDA' && reader) {
     const detected = detectNvidiaDevices(reader);

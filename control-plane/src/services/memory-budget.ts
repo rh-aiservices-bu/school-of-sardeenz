@@ -215,7 +215,9 @@ export class MemoryBudgetService {
       );
       return null;
     }
-    if (!(typeof m.deviceIndex === 'number' && Number.isInteger(m.deviceIndex) && m.deviceIndex >= 0)) {
+    if (
+      !(typeof m.deviceIndex === 'number' && Number.isInteger(m.deviceIndex) && m.deviceIndex >= 0)
+    ) {
       console.warn(
         `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.deviceIndex — must be an integer >= 0`,
       );

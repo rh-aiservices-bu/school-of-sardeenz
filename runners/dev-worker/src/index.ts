@@ -14,7 +14,7 @@ import { ApptainerLauncher } from './apptainer-launcher.js';
 import type { RunnerLauncher } from './launcher.js';
 import { resolveDevices, type DeviceReport } from './gpu-detect.js';
 import { createNvmlReader } from './nvml.js';
-import { resolveOwner } from './proc-tree.js';
+import { buildMeasuredSample } from './measured-sample.js';
 import { createServer } from './server.js';
 import { Redis } from 'ioredis';
 
@@ -95,46 +95,16 @@ const nvmlReader = await createNvmlReader();
 // until start(), well after runnerManagerRef.current is set below).
 const runnerManagerRef: { current?: RunnerManager } = {};
 
-// Composes the NVML reader's raw per-device/per-process samples with the runner manager's
-// PID->instance map to produce the measured sample WorkerRegistration.buildMemoryReport() folds
-// into the report. Returns null whenever NVML isn't available.
+// Binds the NvmlReader + RunnerManager into WorkerRegistration's MeasuredMemoryProvider. The
+// actual device/process -> instance attribution logic lives in buildMeasuredSample()
+// (measured-sample.ts), which is pure and unit-tested on its own; this is just the wiring.
 function measuredProvider(): Promise<MeasuredMemorySample | null> {
   if (!nvmlReader) return Promise.resolve(null);
-  const deviceSamples = nvmlReader.readDeviceMemory();
-  if (!deviceSamples) return Promise.resolve(null);
-
-  const devices = deviceSamples.map((d) => ({
-    deviceIndex: d.deviceIndex,
-    memoryMeasuredUsedBytes: d.usedBytes,
-  }));
+  const sample = nvmlReader.readSample();
+  if (!sample) return Promise.resolve(null);
 
   const owners = runnerManagerRef.current?.getRunnerProcesses() ?? [];
-  const ownerPids = new Set(owners.map((o) => o.pid));
-  const ownerByPid = new Map(owners.map((o) => [o.pid, o]));
-
-  const instanceTotals = new Map<
-    string,
-    { instanceId: string; modelName: string; deviceIndex: number; memoryMeasuredUsedBytes: number }
-  >();
-  for (const proc of nvmlReader.readProcesses() ?? []) {
-    const ownerPid = resolveOwner(proc.pid, ownerPids);
-    if (ownerPid === null) continue; // not one of ours — contributes to the device figure only
-    const owner = ownerByPid.get(ownerPid)!;
-    const key = `${owner.instanceId}:${proc.deviceIndex}`;
-    const existing = instanceTotals.get(key);
-    if (existing) {
-      existing.memoryMeasuredUsedBytes += proc.usedBytes;
-    } else {
-      instanceTotals.set(key, {
-        instanceId: owner.instanceId,
-        modelName: owner.modelName,
-        deviceIndex: proc.deviceIndex,
-        memoryMeasuredUsedBytes: proc.usedBytes,
-      });
-    }
-  }
-
-  return Promise.resolve({ devices, instances: Array.from(instanceTotals.values()) });
+  return Promise.resolve(buildMeasuredSample(sample.devices, sample.processes, owners));
 }
 
 // Resolve the advertised fleet once at startup: real GPUs via NVML in apptainer mode, else the

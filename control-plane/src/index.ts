@@ -50,7 +50,12 @@ async function main(): Promise<void> {
   const memoryBudget = new MemoryBudgetService(
     redis,
     config.redisKeyPrefix,
-    config.workerHeartbeatTimeoutSecs,
+    // Staleness horizon for memory reports, not liveness: in-memory budgets are only refreshed
+    // by reconciliation's refreshAll(), so a report legitimately ages up to a full reconciliation
+    // interval on top of the worker's own reporting cadence. Without the allowance, healthy
+    // workers read stale (and drop out of placement/summaries) in the tail of every window now
+    // that workers stamp reportedAt (#163). Worker liveness keeps the strict timeout below.
+    config.workerHeartbeatTimeoutSecs + config.reconciliationIntervalSecs,
   );
   const workerPool = new WorkerPoolService(
     redis,

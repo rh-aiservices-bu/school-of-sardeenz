@@ -135,7 +135,8 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
   const allocatedBytes = status.memory.usedBytes;
   const hasMeasured = measuredUsedBytes != null;
   const headlineBytes = hasMeasured ? measuredUsedBytes : allocatedBytes;
-  const percent = totalBytes > 0 ? Math.round((headlineBytes / totalBytes) * 100) : 0;
+  const percent =
+    totalBytes > 0 ? Math.min(100, Math.round((headlineBytes / totalBytes) * 100)) : 0;
   const reserved = reservedBytes ?? 0;
 
   return (
@@ -277,55 +278,49 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
   const hasMeasured = measuredUsedBytes != null;
   const reserved = reservedBytes ?? 0;
   const headlineBytes = hasMeasured ? measuredUsedBytes : usedBytes;
-  const percent = totalBytes > 0 ? Math.round((headlineBytes / totalBytes) * 100) : 0;
+  const percent =
+    totalBytes > 0 ? Math.min(100, Math.round((headlineBytes / totalBytes) * 100)) : 0;
   // Measured mode: Free = total minus measured-used minus reserved, clamped so it never goes
   // negative (a device can be simultaneously measured-full and still carry reservations).
+  // Non-measured mode: availableBytes is already computed server-side as
+  // totalBytes - usedBytes - reservedBytes (MemoryBudgetService), so it already IS the "free"
+  // figure net of reservations — without an explicit Reserved segment that memory was an
+  // invisible gap between Allocated + Available and Total (the "0% used yet less available"
+  // bug). Both branches now render the same three segments — primary-used, reserved, free —
+  // so they share one color scale.
   const freeBytes = hasMeasured
     ? Math.max(0, totalBytes - measuredUsedBytes - reserved)
     : availableBytes;
+  const primaryLabel = hasMeasured
+    ? t('overview.vramUsage.usedMeasured')
+    : t('overview.vramUsage.allocated');
+  const primaryBytes = hasMeasured ? measuredUsedBytes : usedBytes;
 
-  const data = hasMeasured
-    ? [
-        { x: t('overview.vramUsage.usedMeasured'), y: measuredUsedBytes },
-        { x: t('overview.vramUsage.reserved'), y: reserved },
-        { x: t('overview.vramUsage.free'), y: freeBytes },
-      ]
-    : [
-        { x: t('overview.vramUsage.allocated'), y: usedBytes },
-        { x: t('overview.vramUsage.available'), y: availableBytes },
-      ];
+  const colorScale = [
+    'var(--pf-t-chart-color-blue-300)',
+    'var(--pf-t-chart-color-orange-300)',
+    'var(--pf-t-chart-color-blue-100)',
+  ];
 
-  const colorScale = hasMeasured
-    ? [
-        'var(--pf-t-chart-color-blue-300)',
-        'var(--pf-t-chart-color-orange-300)',
-        'var(--pf-t-chart-color-blue-100)',
-      ]
-    : ['var(--pf-t-chart-color-blue-300)', 'var(--pf-t-chart-color-blue-100)'];
+  const data = [
+    { x: primaryLabel, y: primaryBytes },
+    { x: t('overview.vramUsage.reserved'), y: reserved },
+    { x: t('overview.vramUsage.free'), y: freeBytes },
+  ];
 
-  const legendData = hasMeasured
-    ? [
-        { name: `${t('overview.vramUsage.usedMeasured')}: ${formatBytes(measuredUsedBytes)}` },
-        { name: `${t('overview.vramUsage.reserved')}: ${formatBytes(reserved)}` },
-        { name: `${t('overview.vramUsage.free')}: ${formatBytes(freeBytes)}` },
-      ]
-    : [
-        { name: `${t('overview.vramUsage.allocated')}: ${formatBytes(usedBytes)}` },
-        { name: `${t('overview.vramUsage.available')}: ${formatBytes(availableBytes)}` },
-      ];
+  const legendData = [
+    { name: `${primaryLabel}: ${formatBytes(primaryBytes)}` },
+    { name: `${t('overview.vramUsage.reserved')}: ${formatBytes(reserved)}` },
+    { name: `${t('overview.vramUsage.free')}: ${formatBytes(freeBytes)}` },
+  ];
 
   // Stat rows below the donut — mirror the segments shown in the chart, plus Total always.
-  const statRows = hasMeasured
-    ? [
-        { label: t('overview.vramUsage.usedMeasured'), value: formatBytes(measuredUsedBytes) },
-        { label: t('overview.vramUsage.reserved'), value: formatBytes(reserved) },
-        { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
-      ]
-    : [
-        { label: t('overview.vramUsage.allocated'), value: formatBytes(usedBytes) },
-        { label: t('overview.vramUsage.available'), value: formatBytes(availableBytes) },
-        { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
-      ];
+  const statRows = [
+    { label: primaryLabel, value: formatBytes(primaryBytes) },
+    { label: t('overview.vramUsage.reserved'), value: formatBytes(reserved) },
+    { label: t('overview.vramUsage.free'), value: formatBytes(freeBytes) },
+    { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
+  ];
 
   return (
     <Card>
@@ -347,10 +342,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               height={200}
               width={200}
               title={`${percent}%`}
-              subTitle={(hasMeasured
-                ? t('overview.vramUsage.usedMeasured')
-                : t('overview.vramUsage.allocated')
-              ).trim()}
+              subTitle={primaryLabel.trim()}
               colorScale={colorScale}
               legendData={legendData}
               legendOrientation="vertical"

@@ -327,6 +327,50 @@ describe('WorkerRegistration', () => {
       const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
       expect(memCalls.length).toBe(0);
     });
+
+    it('a throwing measuredProvider never blocks the heartbeat SET or the memory push, across several ticks', async () => {
+      // Fake timers drive several deterministic ticks (rather than racing real setTimeout waits)
+      // so this test can assert ordering — the heartbeat SET and the memory push both still
+      // happen on every tick — without relying on wall-clock timing.
+      vi.useFakeTimers();
+      try {
+        const fetchFn = makeFetchFn(true);
+        const measuredProvider = vi.fn(() => Promise.reject(new Error('NVML query failed')));
+        registration = new WorkerRegistration(
+          mockRedis as never,
+          config,
+          undefined,
+          fetchFn,
+          undefined,
+          measuredProvider,
+        );
+
+        registration.startHeartbeat();
+        await vi.advanceTimersByTimeAsync(config.heartbeatIntervalMs * 3);
+        registration.stopHeartbeat();
+
+        expect(measuredProvider.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+        const hbCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':heartbeat'));
+        expect(hbCalls.length).toBeGreaterThanOrEqual(2);
+
+        const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
+        expect(memCalls.length).toBeGreaterThanOrEqual(2);
+        // Same tick count on both keys — the throwing provider never causes a tick to skip
+        // the heartbeat SET or drop the memory push entirely.
+        expect(memCalls.length).toBe(hbCalls.length);
+        for (const call of memCalls) {
+          const report = JSON.parse(call.value) as WorkerMemoryReport;
+          expect(report.reportedAt).toBeDefined();
+          for (const dev of report.devices) {
+            expect(dev.memoryMeasuredUsedBytes).toBeUndefined();
+          }
+          expect(report.instances).toBeUndefined();
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('measured memory (NVML)', () => {

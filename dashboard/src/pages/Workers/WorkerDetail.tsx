@@ -59,7 +59,9 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
   const hasMeasured = memoryMeasuredUsedBytes != null;
   const primaryUsedBytes = hasMeasured ? memoryMeasuredUsedBytes : memoryUsedBytes;
   const usedPercent =
-    memoryTotalBytes > 0 ? Math.round((primaryUsedBytes / memoryTotalBytes) * 100) : 0;
+    memoryTotalBytes > 0
+      ? Math.min(100, Math.round((primaryUsedBytes / memoryTotalBytes) * 100))
+      : 0;
 
   return (
     <Card isCompact>

@@ -685,7 +685,8 @@ describe('getRunnerProcesses', () => {
   // A dedicated port range, distinct from every other describe block in this file: the only test
   // below that binds a real socket (the default StubLauncher case) must not race the teardown of
   // real listeners started by the many other tests sharing runnerPortStart 19301 above.
-  const processesConfig = (): DevWorkerConfig => makeConfig({ workerPort: 19700, runnerPortStart: 19701 });
+  const processesConfig = (): DevWorkerConfig =>
+    makeConfig({ workerPort: 19700, runnerPortStart: 19701 });
 
   it('returns nothing for the default StubLauncher (never sets handle.pid)', async () => {
     const mgr = new RunnerManager(processesConfig(), makeRegistration());

@@ -157,9 +157,7 @@ export class WorkerRegistration {
   // thrown report build. reportedAt is always set, in every mode, since it's what the control plane
   // uses to judge staleness even for a stub worker with no measurement at all.
   private async buildMemoryReport(): Promise<Record<string, unknown>> {
-    const measured = this.measuredProvider
-      ? await this.measuredProvider().catch(() => null)
-      : null;
+    const measured = this.measuredProvider ? await this.measuredProvider().catch(() => null) : null;
     const measuredByDevice = new Map(
       measured?.devices.map((d) => [d.deviceIndex, d.memoryMeasuredUsedBytes]) ?? [],
     );

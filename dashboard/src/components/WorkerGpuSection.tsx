@@ -75,8 +75,10 @@ export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBar
     ? computeModelSegments(device, models)
     : computeDeviceSegments(device);
 
+  // Same source as the collapsed readout's percent (primaryUsedBytes) so the expanded
+  // panel's "Total (X%)" row never disagrees with the number shown above it (#163 review).
   const usedPct = Math.round(
-    Math.min(100, (memoryUsedBytes / Math.max(1, memoryTotalBytes)) * 100),
+    Math.min(100, (primaryUsedBytes / Math.max(1, memoryTotalBytes)) * 100),
   );
 
   const summary = segments
@@ -214,6 +216,22 @@ export function DeviceMemoryBar({ device, displayMode, models }: DeviceMemoryBar
           )}
         </div>
       </div>
+
+      {/* The bar's fill stays ledger-based (#151 — per-model segments are estimates); when the
+          readout above is measured, that's a different number than what's filled in below, so
+          say so explicitly rather than leaving it looking like a mismatch. */}
+      {hasMeasured && (
+        <div
+          style={{
+            marginLeft: 'calc(11ch + var(--pf-t--global--spacer--md))',
+            fontSize: 'var(--pf-t--global--font--size--xs)',
+            color: 'var(--pf-t--global--text--color--subtle)',
+            fontStyle: 'italic',
+          }}
+        >
+          {t('overview.vramAllocation.barShowsAllocated')}
+        </div>
+      )}
 
       {/* Expanded detail panel — per-segment rows */}
       {expanded && (

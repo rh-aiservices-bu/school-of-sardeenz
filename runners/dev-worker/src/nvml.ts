@@ -19,11 +19,23 @@ export interface NvmlProcessMemory {
   usedBytes: number;
 }
 
+/** One combined read: device totals and the raw process list, from a single device enumeration. */
+export interface NvmlSample {
+  devices: NvmlDeviceMemory[];
+  processes: NvmlProcessMemory[];
+}
+
 export interface NvmlReader {
   /** One entry per NVML-visible device, or null if no device could be queried at all. */
   readDeviceMemory: () => NvmlDeviceMemory[] | null;
   /** One entry per GPU process across all devices, or null if no device could be queried at all. */
   readProcesses: () => NvmlProcessMemory[] | null;
+  /**
+   * Both readDeviceMemory() and readProcesses() in one device enumeration — use this on a hot
+   * path (e.g. once per heartbeat tick) instead of calling both individually, which would
+   * enumerate Nvml.getAllDevices() twice for no benefit.
+   */
+  readSample: () => NvmlSample | null;
   shutdown: () => void;
 }
 
@@ -50,51 +62,59 @@ export async function createNvmlReader(): Promise<NvmlReader | null> {
   console.log('[worker] NVML initialized — measured GPU telemetry enabled');
 
   let shutDown = false;
+
+  // Shared by all three read methods: enumerates devices once, or returns null (and logs) if
+  // enumeration itself fails.
+  function enumerateDevices(): Device[] | null {
+    if (shutDown) return null;
+    try {
+      return Nvml.getAllDevices();
+    } catch (err) {
+      console.log(`[worker] NVML device enumeration failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  function deviceMemoryOf(device: Device): NvmlDeviceMemory | null {
+    const result = device.getMemoryInfo();
+    if (!result.ok) return null; // this device's query failed — skip it, keep the rest
+    return {
+      deviceIndex: device.index,
+      totalBytes: Number(result.value.total),
+      usedBytes: Number(result.value.used),
+    };
+  }
+
+  function processesOf(device: Device): NvmlProcessMemory[] {
+    const result = device.getProcesses();
+    if (!result.ok) return []; // this device's query failed — skip it, keep the rest
+    return result.value.map((proc) => ({
+      deviceIndex: device.index,
+      pid: proc.pid,
+      usedBytes: proc.usedMemoryMiB * MIB,
+    }));
+  }
+
   return {
     readDeviceMemory(): NvmlDeviceMemory[] | null {
-      if (shutDown) return null;
-      let devices: Device[];
-      try {
-        devices = Nvml.getAllDevices();
-      } catch (err) {
-        console.log(`[worker] NVML device enumeration failed: ${(err as Error).message}`);
-        return null;
-      }
-      const out: NvmlDeviceMemory[] = [];
-      for (const device of devices) {
-        const result = device.getMemoryInfo();
-        if (!result.ok) continue; // this device's query failed — skip it, keep the rest
-        out.push({
-          deviceIndex: device.index,
-          totalBytes: Number(result.value.total),
-          usedBytes: Number(result.value.used),
-        });
-      }
-      return out;
+      const devices = enumerateDevices();
+      if (!devices) return null;
+      return devices.map(deviceMemoryOf).filter((d): d is NvmlDeviceMemory => d !== null);
     },
 
     readProcesses(): NvmlProcessMemory[] | null {
-      if (shutDown) return null;
-      let devices: Device[];
-      try {
-        devices = Nvml.getAllDevices();
-      } catch (err) {
-        console.log(`[worker] NVML device enumeration failed: ${(err as Error).message}`);
-        return null;
-      }
-      const out: NvmlProcessMemory[] = [];
-      for (const device of devices) {
-        const result = device.getProcesses();
-        if (!result.ok) continue; // this device's query failed — skip it, keep the rest
-        for (const proc of result.value) {
-          out.push({
-            deviceIndex: device.index,
-            pid: proc.pid,
-            usedBytes: proc.usedMemoryMiB * MIB,
-          });
-        }
-      }
-      return out;
+      const devices = enumerateDevices();
+      if (!devices) return null;
+      return devices.flatMap(processesOf);
+    },
+
+    readSample(): NvmlSample | null {
+      const devices = enumerateDevices();
+      if (!devices) return null;
+      return {
+        devices: devices.map(deviceMemoryOf).filter((d): d is NvmlDeviceMemory => d !== null),
+        processes: devices.flatMap(processesOf),
+      };
     },
 
     shutdown(): void {

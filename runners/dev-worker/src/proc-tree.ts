@@ -18,7 +18,10 @@ export function readPpidFromProc(pid: number): number | null {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
     const lastParen = stat.lastIndexOf(')');
     if (lastParen === -1) return null;
-    const rest = stat.slice(lastParen + 1).trim().split(/\s+/);
+    const rest = stat
+      .slice(lastParen + 1)
+      .trim()
+      .split(/\s+/);
     // rest[0] = state, rest[1] = ppid
     const ppid = Number.parseInt(rest[1], 10);
     return Number.isNaN(ppid) ? null : ppid;

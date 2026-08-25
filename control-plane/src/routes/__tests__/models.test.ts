@@ -336,6 +336,28 @@ describe('POST /api/v1/models deploy-path eviction', () => {
   });
 });
 
+describe('POST /api/v1/models refreshes memory budgets before placement (#163 staleness fix)', () => {
+  it('calls memoryBudget.refreshAll() before placement.place() on the initial (non-eviction) path', async () => {
+    const order: string[] = [];
+    const refreshAll = vi.fn(() => {
+      order.push('refreshAll');
+      return Promise.resolve();
+    });
+    const place = vi.fn(() => {
+      order.push('place');
+      return { workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] };
+    });
+    const { app } = buildDeployApp({ refreshAll, place });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(202);
+    expect(refreshAll).toHaveBeenCalledOnce();
+    expect(place).toHaveBeenCalledOnce();
+    expect(order).toEqual(['refreshAll', 'place']);
+  });
+});
+
 describe('POST /api/v1/models modelName validation', () => {
   it('accepts a modelName with the org/model-name shape', async () => {
     const { app } = buildDeployApp();

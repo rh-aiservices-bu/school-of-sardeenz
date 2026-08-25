@@ -48,6 +48,7 @@ function makeReader(overrides: Partial<NvmlReader> = {}): NvmlReader {
   return {
     readDeviceMemory: vi.fn(() => null),
     readProcesses: vi.fn(() => null),
+    readSample: vi.fn(() => null),
     shutdown: vi.fn(),
     ...overrides,
   };
@@ -56,7 +57,9 @@ function makeReader(overrides: Partial<NvmlReader> = {}): NvmlReader {
 describe('detectNvidiaDevices', () => {
   it('maps one NVML device (bytes passthrough)', () => {
     const reader = makeReader({
-      readDeviceMemory: vi.fn(() => [{ deviceIndex: 0, totalBytes: 8188 * 1024 * 1024, usedBytes: 0 }]),
+      readDeviceMemory: vi.fn(() => [
+        { deviceIndex: 0, totalBytes: 8188 * 1024 * 1024, usedBytes: 0 },
+      ]),
     });
     const devices = detectNvidiaDevices(reader);
     expect(devices).toEqual([
@@ -92,7 +95,9 @@ describe('detectNvidiaDevices', () => {
 describe('resolveDevices', () => {
   it('apptainer + CUDA detects real GPUs (source=nvml)', () => {
     const reader = makeReader({
-      readDeviceMemory: vi.fn(() => [{ deviceIndex: 0, totalBytes: 8188 * 1024 * 1024, usedBytes: 0 }]),
+      readDeviceMemory: vi.fn(() => [
+        { deviceIndex: 0, totalBytes: 8188 * 1024 * 1024, usedBytes: 0 },
+      ]),
     });
     const report = resolveDevices(
       makeConfig({ mode: 'apptainer', deviceCount: 2, deviceMemoryBytes: 24 * GIB }),

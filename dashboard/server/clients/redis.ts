@@ -388,9 +388,33 @@ export class RedisReader {
     const workerCount = workers.length;
     const workersOnline = workers.filter((w) => w.status === WorkerStatus.ONLINE).length;
 
-    // Sum memory across all worker devices.  The control plane's
-    // worker-pool records may only carry memoryTotalBytes (no used/available
-    // breakdown), so default missing fields to 0 to avoid NaN sums.
+    return {
+      workerCount,
+      workersOnline,
+      modelCounts: counts,
+      memory: await this.resolveClusterStatusMemory(workers),
+    };
+  }
+
+  /**
+   * Resolve the memory summary for the Redis-fallback cluster status.
+   *
+   * Prefers the control-plane-computed summary from the `{prefix}:cluster:memory`
+   * snapshot (MemoryBudgetService.writeClusterMemorySnapshot / getClusterSummary) — the
+   * same figures the live route serves, including reservedBytes and measuredUsedBytes.
+   *
+   * Falls back to summing whatever the `{prefix}:worker:{id}:detail` records happen to
+   * carry only when no snapshot exists yet. Note that fallback is necessarily
+   * used/reserved/measured-blind in practice: WorkerPoolService.validateDevice only
+   * persists `deviceIndex`, `deviceType`, and `memoryTotalBytes` per device onto those
+   * records, so the sums below are usually just a total-capacity figure with
+   * used/available/reserved at 0 — this keeps the method correct if that ever changes
+   * without depending on it.
+   */
+  private async resolveClusterStatusMemory(workers: WorkerInfo[]): Promise<ClusterMemorySummary> {
+    const snapshot = await this.getClusterMemory();
+    if (snapshot?.summary) return snapshot.summary;
+
     let totalBytes = 0;
     let usedBytes = 0;
     let availableBytes = 0;
@@ -413,13 +437,7 @@ export class RedisReader {
 
     const memory: ClusterMemorySummary = { totalBytes, usedBytes, availableBytes, reservedBytes };
     if (anyMeasured) memory.measuredUsedBytes = measuredUsedBytes;
-
-    return {
-      workerCount,
-      workersOnline,
-      modelCounts: counts,
-      memory,
-    };
+    return memory;
   }
 
   /**

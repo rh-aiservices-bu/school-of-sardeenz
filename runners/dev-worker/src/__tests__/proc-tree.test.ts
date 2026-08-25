@@ -14,9 +14,7 @@ describe('readPpidFromProc', () => {
 
   it('parses ppid from a normal /proc/<pid>/stat line', () => {
     // pid=4242, comm="python3", state=S, ppid=100
-    vi.mocked(readFileSync).mockReturnValue(
-      '4242 (python3) S 100 4242 4242 0 -1 4194560 ...\n',
-    );
+    vi.mocked(readFileSync).mockReturnValue('4242 (python3) S 100 4242 4242 0 -1 4194560 ...\n');
     expect(readPpidFromProc(4242)).toBe(100);
   });
 

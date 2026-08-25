@@ -744,9 +744,23 @@ describe('MemoryBudgetService — measured memory parsing', () => {
   it('carries valid instances[] measurements through to instanceMeasurements', async () => {
     const workerId = 'w1';
     const report = workerMemoryReport(
-      [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+      [
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
+      ],
       undefined,
-      [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 5e9 }],
+      [
+        {
+          instanceId: 'inst-a',
+          modelName: 'model-a',
+          deviceIndex: 0,
+          memoryMeasuredUsedBytes: 5e9,
+        },
+      ],
     );
     const get = vi.fn().mockResolvedValue(report);
     const redis = { get } as unknown as Redis;
@@ -764,10 +778,20 @@ describe('MemoryBudgetService — measured memory parsing', () => {
     const get = vi.fn().mockResolvedValue(
       JSON.stringify({
         devices: [
-          { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
         ],
         instances: [
-          { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 5e9 },
+          {
+            instanceId: 'inst-a',
+            modelName: 'model-a',
+            deviceIndex: 0,
+            memoryMeasuredUsedBytes: 5e9,
+          },
           { instanceId: 'inst-b', modelName: 'model-b', deviceIndex: 0 }, // missing measurement
         ],
       }),
@@ -789,7 +813,12 @@ describe('MemoryBudgetService — measured memory parsing', () => {
     const get = vi.fn().mockResolvedValue(
       JSON.stringify({
         devices: [
-          { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
         ],
         instances: 'not-an-array',
       }),
@@ -807,11 +836,18 @@ describe('MemoryBudgetService — measured memory parsing', () => {
 describe('MemoryBudgetService — getClusterSummary measuredUsedBytes', () => {
   it('is undefined when no device reported a measurement', async () => {
     const workerId = 'w1';
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
-      ]),
-    );
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
+        ]),
+      );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
@@ -832,7 +868,12 @@ describe('MemoryBudgetService — getClusterSummary measuredUsedBytes', () => {
         },
       ]),
       [workerKey('w2')]: workerMemoryReport([
-        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
       ]),
       [workerKey('w3')]: workerMemoryReport([
         {
@@ -881,13 +922,33 @@ describe('MemoryBudgetService — getMeasuredByInstance', () => {
     const workerId = 'w1';
     const report = workerMemoryReport(
       [
-        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
-        { deviceIndex: 1, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
+        {
+          deviceIndex: 1,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
       ],
       undefined,
       [
-        { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 4e9 },
-        { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 1, memoryMeasuredUsedBytes: 4e9 },
+        {
+          instanceId: 'inst-a',
+          modelName: 'model-a',
+          deviceIndex: 0,
+          memoryMeasuredUsedBytes: 4e9,
+        },
+        {
+          instanceId: 'inst-a',
+          modelName: 'model-a',
+          deviceIndex: 1,
+          memoryMeasuredUsedBytes: 4e9,
+        },
       ],
     );
     const get = vi.fn().mockResolvedValue(report);
@@ -903,14 +964,42 @@ describe('MemoryBudgetService — getMeasuredByInstance', () => {
   it('aggregates the same instanceId across two workers', async () => {
     const { redis } = makeMockRedis({
       [workerKey('w1')]: workerMemoryReport(
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+        [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
+        ],
         undefined,
-        [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 3e9 }],
+        [
+          {
+            instanceId: 'inst-a',
+            modelName: 'model-a',
+            deviceIndex: 0,
+            memoryMeasuredUsedBytes: 3e9,
+          },
+        ],
       ),
       [workerKey('w2')]: workerMemoryReport(
-        [{ deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 }],
+        [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
+        ],
         undefined,
-        [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryMeasuredUsedBytes: 2e9 }],
+        [
+          {
+            instanceId: 'inst-a',
+            modelName: 'model-a',
+            deviceIndex: 0,
+            memoryMeasuredUsedBytes: 2e9,
+          },
+        ],
       ),
     });
     const service = makeService(redis);
@@ -920,13 +1009,51 @@ describe('MemoryBudgetService — getMeasuredByInstance', () => {
     expect(service.getMeasuredByInstance().get('inst-a')).toBe(5e9);
   });
 
+  it('excludes stale workers from getMeasuredByInstance (mirrors getClusterSummary staleness handling)', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport(
+      [
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
+      ],
+      '2000-01-01T00:00:00.000Z', // long stale
+      [
+        {
+          instanceId: 'inst-a',
+          modelName: 'model-a',
+          deviceIndex: 0,
+          memoryMeasuredUsedBytes: 4e9,
+        },
+      ],
+    );
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = new MemoryBudgetService(redis, KEY_PREFIX, 1); // 1s heartbeat timeout
+
+    await service.refreshWorkerBudget(workerId);
+
+    expect(service.getMeasuredByInstance().has('inst-a')).toBe(false);
+    expect(service.getMeasuredByInstance().size).toBe(0);
+  });
+
   it('returns an empty map when no worker reported instance measurements', async () => {
     const workerId = 'w1';
-    const get = vi.fn().mockResolvedValue(
-      workerMemoryReport([
-        { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
-      ]),
-    );
+    const get = vi
+      .fn()
+      .mockResolvedValue(
+        workerMemoryReport([
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
+        ]),
+      );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 

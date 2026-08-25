@@ -22,7 +22,6 @@
         "title": "GPU Memory",
         "usedMeasured": " used (measured)",
         "allocated": " allocated (estimate)",
-        "available": "{{value}} available of {{total}}",
         "breakdownMeasured": "{{used}} used (measured) · {{reserved}} reserved · {{total}} total",
         "breakdownAllocated": "{{used}} allocated (estimate) · {{reserved}} reserved · {{total}} total"
       },
@@ -44,7 +43,6 @@
       "allocated": "Allocated (estimate)",
       "reserved": "Reserved",
       "free": "Free",
-      "available": "Available",
       "total": "Total"
     },
     "modelStateBreakdown": {
@@ -81,6 +79,7 @@
       },
       "measuredTag": "(measured)",
       "reservedInline": "{{value}} reserved",
+      "barShowsAllocated": "Bar shows allocated capacity (estimate) — the reading above is measured.",
       "page": {
         "title": "GPU Memory"
       },

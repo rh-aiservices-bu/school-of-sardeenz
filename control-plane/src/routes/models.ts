@@ -177,6 +177,11 @@ async function deployFromRecord(
     await deps.lifecycle.createInstance(record.name, instanceId, null, runnerMeta.protocol);
     redisCreated = true;
 
+    // Refresh budgets before the first placement, mirroring the eviction-retry path below.
+    // In-memory budgets age up to a full reconciliation interval between refreshAll() runs, and
+    // place() skips stale budgets — without this, a deploy landing late in the reconciliation
+    // window can spuriously skip a healthy worker (or trigger an unnecessary eviction).
+    await deps.memoryBudget.refreshAll();
     const workers = deps.workerPool.getAllWorkers();
     const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
 
