@@ -15,7 +15,6 @@ import {
 } from '@patternfly/react-core';
 import { ChartDonut } from '@patternfly/react-charts/victory';
 import { chart_color_blue_300 } from '@patternfly/react-tokens/dist/esm/chart_color_blue_300';
-import { chart_color_yellow_300 } from '@patternfly/react-tokens/dist/esm/chart_color_yellow_300';
 import { chart_color_black_200 } from '@patternfly/react-tokens/dist/esm/chart_color_black_200';
 import {
   CubesIcon,
@@ -29,7 +28,7 @@ import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/type
 import { useClusterStatus } from '../../hooks/useCluster';
 import { useEventStream } from '../../hooks/useEventStream';
 import { StateLabel } from '../../components/StateLabel';
-import { PlacementBoard } from '../../components/PlacementBoard';
+import { ModelsPlacementPanel } from '../../components/ModelsPlacementPanel';
 import { InferenceUrlBanner } from '../../components/InferenceUrlBanner';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 
@@ -133,14 +132,10 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
 // ---------------------------------------------------------------------------
 function GpuMemoryCard({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
-  const { totalBytes, reservedBytes, measuredUsedBytes } = status.memory;
-  // Ledger ("allocated") value used as the headline when no NVML measurement exists (stub/CPU).
-  const allocatedBytes = status.memory.usedBytes;
-  const hasMeasured = measuredUsedBytes != null;
-  const headlineBytes = hasMeasured ? measuredUsedBytes : allocatedBytes;
-  const percent =
-    totalBytes > 0 ? Math.min(100, Math.round((headlineBytes / totalBytes) * 100)) : 0;
-  const reserved = reservedBytes ?? 0;
+  // usedBytes IS the NVML measurement now (doctrine: measured memory is the only number) — no
+  // more reserved/allocated-estimate branching.
+  const { totalBytes, usedBytes } = status.memory;
+  const percent = totalBytes > 0 ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
 
   return (
     <Card isCompact>
@@ -162,9 +157,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
           {percent}%
         </span>
         <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-          {hasMeasured
-            ? t('overview.cards.gpuMemory.usedMeasured')
-            : t('overview.cards.gpuMemory.allocated')}
+          {t('overview.cards.gpuMemory.used')}
         </span>
         <Progress
           value={percent}
@@ -179,18 +172,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
           }}
         >
           {[
-            hasMeasured
-              ? t('overview.cards.gpuMemory.usedFragment', {
-                  value: formatBytes(measuredUsedBytes),
-                })
-              : t('overview.cards.gpuMemory.allocatedFragment', {
-                  value: formatBytes(allocatedBytes),
-                }),
-            // Reserved is a transient placement hold (STARTING only) — omit the permanent
-            // "0 B reserved" noise and show it only while it's actually non-zero.
-            ...(reserved > 0
-              ? [t('overview.cards.gpuMemory.reservedFragment', { value: formatBytes(reserved) })]
-              : []),
+            t('overview.cards.gpuMemory.usedFragment', { value: formatBytes(usedBytes) }),
             t('overview.cards.gpuMemory.totalFragment', { value: formatBytes(totalBytes) }),
           ].join(' · ')}
         </div>
@@ -281,50 +263,21 @@ function SummaryCards({ status }: { status: ClusterStatus }) {
 // ---------------------------------------------------------------------------
 function MemoryDonutChart({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
-  const { totalBytes, usedBytes, availableBytes, reservedBytes, measuredUsedBytes } = status.memory;
-  const hasMeasured = measuredUsedBytes != null;
-  const reserved = reservedBytes ?? 0;
-  const headlineBytes = hasMeasured ? measuredUsedBytes : usedBytes;
-  const percent =
-    totalBytes > 0 ? Math.min(100, Math.round((headlineBytes / totalBytes) * 100)) : 0;
-  // Measured mode: Free = total minus measured-used minus reserved, clamped so it never goes
-  // negative (a device can be simultaneously measured-full and still carry reservations).
-  // Non-measured mode: availableBytes is already computed server-side as
-  // totalBytes - usedBytes - reservedBytes (MemoryBudgetService), so it already IS the "free"
-  // figure net of reservations — without an explicit Reserved segment that memory was an
-  // invisible gap between Allocated + Available and Total (the "0% used yet less available"
-  // bug). Both branches now render the same three segments — primary-used, reserved, free —
-  // so they share one color scale.
-  const freeBytes = hasMeasured
-    ? Math.max(0, totalBytes - measuredUsedBytes - reserved)
-    : availableBytes;
-  const primaryLabel = hasMeasured
-    ? t('overview.vramUsage.usedMeasured')
-    : t('overview.vramUsage.allocated');
-  const primaryBytes = hasMeasured ? measuredUsedBytes : usedBytes;
+  const { totalBytes, usedBytes } = status.memory;
+  const percent = totalBytes > 0 ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+  const freeBytes = Math.max(0, totalBytes - usedBytes);
 
-  // Reserved is a transient placement hold (held only while an instance is STARTING; released
-  // on the ACTIVE transition), so in steady state it's 0 — show the segment only when it's
-  // actually non-zero rather than cluttering the chart with a permanent "0 B reserved".
   // Chart colors: react-tokens `.var` strings (hex fallback included) — the bare chart custom
   // properties are not defined by base.css, and an undefined var() fills SVG arcs black.
   const segments = [
-    { label: primaryLabel, bytes: primaryBytes, color: chart_color_blue_300.var },
-    ...(reserved > 0
-      ? [
-          {
-            label: t('overview.vramUsage.reserved'),
-            bytes: reserved,
-            color: chart_color_yellow_300.var,
-          },
-        ]
-      : []),
+    { label: t('overview.vramUsage.used'), bytes: usedBytes, color: chart_color_blue_300.var },
     { label: t('overview.vramUsage.free'), bytes: freeBytes, color: chart_color_black_200.var },
   ];
 
   const colorScale = segments.map((s) => s.color);
   const data = segments.map((s) => ({ x: s.label, y: s.bytes }));
   const legendData = segments.map((s) => ({ name: `${s.label}: ${formatBytes(s.bytes)}` }));
+  const primaryLabel = segments[0].label;
 
   // Stat rows below the donut — mirror the segments shown in the chart, plus Total always.
   const statRows: Array<{ label: string; value: string; bold?: boolean }> = [
@@ -743,8 +696,8 @@ export function ClusterOverview() {
           <ModelStateBreakdown status={status} />
         </div>
 
-        {/* Row 2.5: Placement board — workers -> GPUs -> placed models */}
-        <PlacementBoard />
+        {/* Row 2.5: Models placement — workers -> GPUs -> placed models (v1 panel port) */}
+        <ModelsPlacementPanel />
 
         {/* Row 4: Recent events */}
         <RecentEvents />

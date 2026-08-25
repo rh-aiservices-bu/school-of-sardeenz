@@ -1,6 +1,6 @@
 import { Content, PageSection, Title } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
-import { MemoryVisualization } from '../../components/MemoryVisualization';
+import { ModelsPlacementPanel } from '../../components/ModelsPlacementPanel';
 
 export function GpuMemory() {
   const { t } = useTranslation('cluster');
@@ -16,11 +16,11 @@ export function GpuMemory() {
       >
         <Content>
           <Title headingLevel="h1" size="2xl">
-            {t('overview.vramAllocation.page.title')}
+            {t('overview.modelsPlacement.pageTitle')}
           </Title>
         </Content>
 
-        <MemoryVisualization />
+        <ModelsPlacementPanel />
       </div>
     </PageSection>
   );

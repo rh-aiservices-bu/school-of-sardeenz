@@ -12,51 +12,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   placement/GPU bars empty.** The per-model segment palette (#123) and the overview donut used
   hand-written `var(--pf-t--chart--…)` / `var(--pf-t-chart-…)` custom properties that no
   stylesheet defines — an invalid `var()` fills SVG arcs black and div backgrounds
-  transparent, so the placement bar had rendered empty since #123. Both now use
-  `@patternfly/react-tokens` `.var` strings (hex fallback included). Reserved memory — a
-  transient placement hold, held only while an instance is STARTING and released on ACTIVE —
-  is now shown in the GPU Memory card and VRAM donut only when non-zero instead of a
-  permanent "0 B reserved".
+  transparent, so the placement bar had rendered empty since #123. Charts now use
+  `@patternfly/react-tokens` values (hex fallback included).
 
-### Added
+### Changed
 
-- **Measured GPU memory telemetry via ts-nvml (#163) — contracts.** Additive contract fields
-  distinguishing hardware-measured VRAM from the existing reservation/ledger figures:
-  `WorkerDeviceMemory.memoryMeasuredUsedBytes` and a per-instance
-  `WorkerMemoryReport.instances` measurement list (worker-agent.yaml);
-  `ClusterDeviceMemory.memoryMeasuredUsedBytes` and
-  `ClusterMemorySummary.measuredUsedBytes` (control-plane.yaml). `currentMemory` on
-  `ModelSummary`/`InstanceDetail` re-documented as the measured per-model/per-instance value
-  sourced from the worker's NVML report. Ledger field descriptions clarified as budgeting
-  figures, not measurements.
-- **Measured GPU memory telemetry (#163) — dashboard.** All GPU memory displays now
-  distinguish measured (NVML) from allocated/reserved (estimates): the Cluster Overview GPU
-  Memory card and donut key off the measured figure when present (Used-measured / Reserved /
-  Free segments) and label the ledger figure "allocated (estimate)" when not; device bars on
-  the GPU Memory page, placement board, worker list, and worker detail prefer the measurement
-  with the reservation shown alongside; the Models table renders "— / configured" instead of
-  a misleading "0 B" when no measurement exists (real measured 0 still renders as 0 B); the
-  model detail instance table gains a measured-memory column. BFF cluster-status fallback now
-  carries reservedBytes/measuredUsedBytes; e2e mocks emit the new fields.
-- **Measured GPU memory telemetry (#163) — worker.** The dev-worker now measures real VRAM
-  in-process via `@rh-ai-bu/ts-nvml` (NVML FFI), replacing the nvidia-smi total-only parsing
-  in device detection (`DeviceReport.source` is now `nvml` | `config`). Each heartbeat tick
-  refreshes the Redis memory report, which now always carries `reportedAt` and — when NVML is
-  available — per-device `memoryMeasuredUsedBytes` plus per-instance measurements attributed
-  by walking each GPU process's `/proc` parent chain to the runner process the worker spawned.
-  The reservation ledger (`memoryUsedBytes`) is unchanged; stub/CPU hosts degrade gracefully
-  to unmeasured reports. SIF worker Deployment pins
-  `NVIDIA_DRIVER_CAPABILITIES=compute,utility` so `libnvidia-ml.so.1` is mounted.
-- **Measured GPU memory telemetry (#163) — control plane.** `MemoryBudgetService` ingests the
-  measured fields telemetry-tolerantly (malformed measured values/instances entries are
-  dropped with a warning; the core ledger report is never rejected for them) and carries them
-  through `DeviceBudget.measuredUsedBytes`, `WorkerBudget.instanceMeasurements`, the cluster
-  summary (`measuredUsedBytes`, absent when no device measured), and the BFF Redis snapshot.
-  New `getMeasuredByInstance()` accessor; `GET /api/v1/models` and
-  `GET /api/v1/models/{modelName}` now populate `currentMemory` (per-model sum / per-instance
-  value) — previously defined in the contract but never emitted. Cluster/workers routes expose
-  per-device `memoryMeasuredUsedBytes`. Placement, reservation, and eviction math are
-  untouched — measured values are telemetry only.
+- **Measured-only GPU memory doctrine (#163, supersedes #151).** Every memory figure in every
+  contract field, API response, report, and view is now the real measured consumption; the
+  user-facing "reserved memory" concept and the estimate-as-usage ledger displays are gone.
+  `requiredMemory` is an initial-placement indicator only, with no meaning past model load.
+  - **Contracts (breaking, pre-release):** `WorkerDeviceMemory.memoryUsedBytes` and
+    `DeviceInfo.memoryUsedBytes` now MEAN measured usage (NVML `total − free`);
+    `memoryMeasuredUsedBytes`, `memoryReservedBytes`, and summary
+    `reservedBytes`/`measuredUsedBytes` are removed; `ClusterMemorySummary` is
+    `totalBytes/usedBytes/availableBytes`. Devices gain optional `deviceName`,
+    `utilizationPercent`, `temperatureC`. `WorkerModelInfo` is now per-instance (optional
+    `instanceId`, `displayName`) with measured `memoryUsedBytes` (absent while nothing is
+    attributed, e.g. STARTING). `WorkerMemoryReport.instances` carries per-instance measured
+    bytes in all modes. `currentMemory` on `ModelSummary`/`InstanceDetail` — defined since
+    Phase 2 but never emitted — is now populated with the measured value.
+  - **Worker:** measures in-process via `@rh-ai-bu/ts-nvml` (replacing nvidia-smi total-only
+    parsing; `DeviceReport.source` is `nvml` | `config`), attributes per-instance usage by
+    walking each GPU process's `/proc` parent chain to the runner process it spawned, samples
+    device name/utilization/temperature, and refreshes the Redis report (with `reportedAt`)
+    every heartbeat tick. Hosts without NVML (stub/CPU dev) simulate measurement from the
+    internal runner ledger, polling each runner's own `/memory-report` (finally exercising
+    that contract endpoint) so sleeping instances correctly report ~0. SIF worker Deployment
+    pins `NVIDIA_DRIVER_CAPABILITIES=compute,utility`.
+  - **Control plane:** ingests reports telemetry-tolerantly (a malformed optional NVML extra
+    never rejects the core report); in-flight placement holds (STARTING instances) remain
+    purely internal, shaping `availableBytes` but exposed nowhere; the deploy path refreshes
+    budgets before initial placement and the memory-report staleness horizon allows for
+    reconciliation-interval ageing; cluster/workers routes emit per-instance measured model
+    entries (replacing the `requiredMemory`-as-usage seam from #123).
+  - **Dashboard:** the Placement panel is replaced by **Models placement** — a port of v1's
+    `GpuMemoryPanel` (nivo stacked per-GPU bars, per-model colored segments with sleeping
+    hatch, Other/Free buckets, model legend, refresh selector, per-worker collapsible groups)
+    fed from a single `/api/cluster/memory` query; the same panel serves the GPU Memory page.
+    GPU cards show device name, utilization, and temperature. All reserved/allocated-estimate
+    labels are gone; the Models table memory column shows measured consumption alone ("—"
+    until a measurement exists); model detail labels `requiredMemory` as a placement
+    indicator. Removed `PlacementBoard`/`WorkerGpuSection`/`MemoryVisualization`.
 - **MLServer engine runner and protocol-family proxy surface (ADR-021, #125).** Second engine
   runner proving the abstraction beyond vLLM. Proxy: inference routes move to protocol-family
   prefixes — `/openai/v1/*` (OpenAI surface) and `/oip/v2/*` (KServe V2 Open Inference

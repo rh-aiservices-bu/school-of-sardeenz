@@ -25,13 +25,20 @@ export function useClusterStatus() {
   return query;
 }
 
-export function useClusterMemory() {
+/**
+ * @param refetchIntervalOverride When provided, takes precedence over the default
+ * SSE-degraded-aware interval. `false` disables polling entirely (ModelsPlacementPanel's
+ * refresh Select "None" option, #163).
+ */
+export function useClusterMemory(refetchIntervalOverride?: number | false) {
   const { reportFallback } = useDegraded();
   const { status: sseStatus } = useEventStream();
+  const defaultInterval = sseStatus === 'degraded' ? 2_000 : 10_000;
   const query = useQuery({
     queryKey: ['cluster', 'memory'],
     queryFn: ({ signal }) => api.cluster.getMemory(signal),
-    refetchInterval: sseStatus === 'degraded' ? 2_000 : 10_000,
+    refetchInterval:
+      refetchIntervalOverride !== undefined ? refetchIntervalOverride : defaultInterval,
   });
 
   useEffect(() => {

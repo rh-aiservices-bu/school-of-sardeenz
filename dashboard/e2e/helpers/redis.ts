@@ -28,15 +28,17 @@ export interface SeedModelState {
   errorMessage?: string;
 }
 
+// memoryUsedBytes IS the NVML measurement now (doctrine: measured memory is the only number,
+// #163) — no more memoryReservedBytes/memoryMeasuredUsedBytes fields to seed.
 export interface SeedDeviceInfo {
   deviceIndex: number;
   deviceType: string;
   memoryTotalBytes: number;
   memoryUsedBytes: number;
   memoryAvailableBytes: number;
-  memoryReservedBytes?: number;
-  /** NVML-measured device memory in use (#163). Absent when the worker cannot measure. */
-  memoryMeasuredUsedBytes?: number;
+  deviceName?: string;
+  utilizationPercent?: number;
+  temperatureC?: number;
 }
 
 export interface SeedWorkerDetail {
@@ -56,11 +58,14 @@ export interface SeedClusterMemory {
     devices: SeedDeviceInfo[];
     models?: Array<{
       modelName: string;
+      displayName?: string;
+      instanceId?: string;
       state: string;
       memoryUsedBytes?: number;
       deviceIndices?: number[];
     }>;
   }>;
+  summary?: { totalBytes: number; usedBytes: number; availableBytes: number };
 }
 
 export interface SeedClusterEvent {

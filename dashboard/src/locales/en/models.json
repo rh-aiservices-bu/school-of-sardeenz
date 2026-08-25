@@ -102,7 +102,7 @@
       "state": "State",
       "runnerType": "Runner Type",
       "worker": "Worker",
-      "memory": "Memory (measured / configured)",
+      "memory": "Memory",
       "lastInference": "Last Inference",
       "pinned": "Pinned",
       "actions": "Actions"
@@ -151,7 +151,7 @@
       "runnerType": "Runner Type",
       "modelPath": "Model Path",
       "servedModelName": "Served Model Name",
-      "requiredMemory": "Required Memory",
+      "requiredMemory": "Required Memory (placement indicator)",
       "deviceType": "Device Type",
       "tensorParallel": "Tensor Parallelism",
       "runtimeModule": "Runtime Module",
@@ -207,7 +207,7 @@
         "instanceId": "Instance ID",
         "state": "State",
         "worker": "Worker",
-        "memory": "Memory (measured)",
+        "memory": "Memory",
         "endpoint": "Endpoint",
         "created": "Created",
         "actions": "Actions"

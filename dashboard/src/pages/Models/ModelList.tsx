@@ -30,8 +30,6 @@ import {
   DropdownItem,
   DropdownList,
   Pagination,
-  Progress,
-  ProgressSize,
   Checkbox,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, type ThProps } from '@patternfly/react-table';
@@ -98,13 +96,6 @@ const STATE_LOCALE_KEYS: Record<ModelLifecycleState, string> = {
 };
 
 const DEFAULT_PAGE_SIZE = 20;
-
-/** Return progress bar colour based on current/required ratio */
-function getMemoryVariant(ratio: number): 'success' | 'warning' | 'danger' {
-  if (ratio >= 0.95) return 'danger';
-  if (ratio >= 0.8) return 'warning';
-  return 'success';
-}
 
 export function ModelList() {
   const { t } = useTranslation('models');
@@ -631,11 +622,7 @@ export function ModelList() {
             </Thead>
             <Tbody>
               {paginatedModels.map((model) => {
-                const required = model.requiredMemory ?? 0;
                 const current = model.currentMemory;
-                const hasCurrent = current != null;
-                const ratio = required > 0 && hasCurrent ? current / required : 0;
-                const memVariant = getMemoryVariant(ratio);
 
                 return (
                   <Tr key={model.modelName}>
@@ -681,30 +668,8 @@ export function ModelList() {
                         {t('list.instances.count', { count: model.instanceCount })}
                       </Link>
                     </Td>
-                    <Td dataLabel={t('list.table.memory')} style={{ minWidth: '160px' }}>
-                      {required > 0 ? (
-                        <div>
-                          {hasCurrent && (
-                            <Progress
-                              value={Math.min(100, ratio * 100)}
-                              size={ProgressSize.sm}
-                              variant={memVariant}
-                              aria-label={t('list.table.memory')}
-                            />
-                          )}
-                          <div
-                            style={{
-                              fontSize: 'var(--pf-t--global--font--size--xs)',
-                              color: 'var(--pf-t--global--text--color--subtle)',
-                              marginTop: 'var(--pf-t--global--spacer--xs)',
-                            }}
-                          >
-                            {hasCurrent ? formatBytes(current) : '—'} / {formatBytes(required)}
-                          </div>
-                        </div>
-                      ) : (
-                        '—'
-                      )}
+                    <Td dataLabel={t('list.table.memory')}>
+                      {current != null ? formatBytes(current) : '—'}
                     </Td>
                     <Td dataLabel={t('list.table.lastInference')}>
                       {formatRelativeTime(model.lastInferenceAt)}

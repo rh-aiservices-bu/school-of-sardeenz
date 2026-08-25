@@ -399,17 +399,13 @@ export class RedisReader {
   /**
    * Resolve the memory summary for the Redis-fallback cluster status.
    *
-   * Prefers the control-plane-computed summary from the `{prefix}:cluster:memory`
-   * snapshot (MemoryBudgetService.writeClusterMemorySnapshot / getClusterSummary) — the
-   * same figures the live route serves, including reservedBytes and measuredUsedBytes.
+   * Prefers the control-plane-computed summary from the `{prefix}:cluster:memory` snapshot
+   * (MemoryBudgetService.writeClusterMemorySnapshot / getClusterSummary) — the same figures
+   * the live route serves. `usedBytes` is the NVML measurement doctrine-wide now (#163) — there
+   * is no separate reserved/ledger figure left to reconcile.
    *
-   * Falls back to summing whatever the `{prefix}:worker:{id}:detail` records happen to
-   * carry only when no snapshot exists yet. Note that fallback is necessarily
-   * used/reserved/measured-blind in practice: WorkerPoolService.validateDevice only
-   * persists `deviceIndex`, `deviceType`, and `memoryTotalBytes` per device onto those
-   * records, so the sums below are usually just a total-capacity figure with
-   * used/available/reserved at 0 — this keeps the method correct if that ever changes
-   * without depending on it.
+   * Falls back to summing whatever the `{prefix}:worker:{id}:detail` records happen to carry
+   * only when no snapshot exists yet.
    */
   private async resolveClusterStatusMemory(workers: WorkerInfo[]): Promise<ClusterMemorySummary> {
     const snapshot = await this.getClusterMemory();
@@ -418,26 +414,16 @@ export class RedisReader {
     let totalBytes = 0;
     let usedBytes = 0;
     let availableBytes = 0;
-    let reservedBytes = 0;
-    let measuredUsedBytes = 0;
-    let anyMeasured = false;
 
     for (const w of workers) {
       for (const d of w.devices) {
         totalBytes += d.memoryTotalBytes ?? 0;
         usedBytes += d.memoryUsedBytes ?? 0;
         availableBytes += d.memoryAvailableBytes ?? 0;
-        reservedBytes += d.memoryReservedBytes ?? 0;
-        if (d.memoryMeasuredUsedBytes != null) {
-          anyMeasured = true;
-          measuredUsedBytes += d.memoryMeasuredUsedBytes;
-        }
       }
     }
 
-    const memory: ClusterMemorySummary = { totalBytes, usedBytes, availableBytes, reservedBytes };
-    if (anyMeasured) memory.measuredUsedBytes = measuredUsedBytes;
-    return memory;
+    return { totalBytes, usedBytes, availableBytes };
   }
 
   /**

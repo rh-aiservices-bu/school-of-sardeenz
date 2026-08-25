@@ -40,15 +40,30 @@ export interface MockInstanceInfo {
   currentMemory?: number;
 }
 
+// memoryUsedBytes IS the NVML measurement now (doctrine: measured memory is the only number,
+// #163) — no more memoryReservedBytes/memoryMeasuredUsedBytes fields to carry.
 export interface MockDeviceInfo {
   deviceIndex: number;
   deviceType: string;
   memoryTotalBytes: number;
   memoryUsedBytes: number;
   memoryAvailableBytes: number;
-  memoryReservedBytes?: number;
-  /** NVML-measured device memory in use (#163). Absent when the worker cannot measure. */
-  memoryMeasuredUsedBytes?: number;
+  /** Device product name from NVML. Absent when the worker cannot query it. */
+  deviceName?: string;
+  /** GPU utilization percentage at report time. Absent when unavailable. */
+  utilizationPercent?: number;
+  /** GPU temperature in °C at report time. Absent when unavailable. */
+  temperatureC?: number;
+}
+
+/** Mirrors WorkerModelInfo (per-instance placement summary) for ClusterMemory.workers[].models. */
+export interface MockWorkerModelInfo {
+  modelName: string;
+  displayName?: string;
+  instanceId?: string;
+  state: string;
+  memoryUsedBytes?: number;
+  deviceIndices?: number[];
 }
 
 export interface MockWorkerInfo {
@@ -60,7 +75,7 @@ export interface MockWorkerInfo {
 }
 
 export interface MockWorkerDetail extends MockWorkerInfo {
-  models: Array<{ modelName: string; state: string; memoryUsedBytes?: number }>;
+  models: MockWorkerModelInfo[];
   runnerCapabilities?: Array<{
     runnerType: string;
     engineName: string;
@@ -85,9 +100,6 @@ export interface MockClusterStatus {
     totalBytes: number;
     usedBytes: number;
     availableBytes: number;
-    reservedBytes?: number;
-    /** Aggregate NVML-measured usage across devices that reported one (#163). */
-    measuredUsedBytes?: number;
   };
 }
 
@@ -95,7 +107,13 @@ export interface MockClusterMemory {
   workers: Array<{
     workerId: string;
     devices: MockDeviceInfo[];
+    models?: MockWorkerModelInfo[];
   }>;
+  summary?: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+  };
 }
 
 export interface MockSseEvent {
@@ -484,7 +502,23 @@ export class MockControlPlane {
 
   /** Set cluster memory snapshot. */
   setClusterMemory(memory: MockClusterMemory): void {
-    this.state.clusterMemory = memory;
+    if (memory.summary) {
+      this.state.clusterMemory = memory;
+      return;
+    }
+    // Auto-compute the summary when the caller didn't supply one — mirrors the real
+    // MemoryBudgetService.getClusterSummary() aggregation so tests don't need to hand-roll it.
+    let totalBytes = 0;
+    let usedBytes = 0;
+    let availableBytes = 0;
+    for (const w of memory.workers) {
+      for (const d of w.devices) {
+        totalBytes += d.memoryTotalBytes;
+        usedBytes += d.memoryUsedBytes;
+        availableBytes += d.memoryAvailableBytes;
+      }
+    }
+    this.state.clusterMemory = { ...memory, summary: { totalBytes, usedBytes, availableBytes } };
   }
 
   /** Mark the health endpoint as healthy or unhealthy. */
@@ -526,19 +560,11 @@ export class MockControlPlane {
     let totalBytes = 0;
     let usedBytes = 0;
     let availableBytes = 0;
-    let reservedBytes = 0;
-    let measuredUsedBytes = 0;
-    let anyMeasured = false;
     for (const w of workers) {
       for (const d of w.devices) {
         totalBytes += d.memoryTotalBytes;
         usedBytes += d.memoryUsedBytes;
         availableBytes += d.memoryAvailableBytes;
-        reservedBytes += d.memoryReservedBytes ?? 0;
-        if (d.memoryMeasuredUsedBytes != null) {
-          anyMeasured = true;
-          measuredUsedBytes += d.memoryMeasuredUsedBytes;
-        }
       }
     }
 
@@ -546,13 +572,7 @@ export class MockControlPlane {
       workerCount: workers.length,
       workersOnline,
       modelCounts: counts,
-      memory: {
-        totalBytes,
-        usedBytes,
-        availableBytes,
-        reservedBytes,
-        ...(anyMeasured ? { measuredUsedBytes } : {}),
-      },
+      memory: { totalBytes, usedBytes, availableBytes },
     };
   }
 }
