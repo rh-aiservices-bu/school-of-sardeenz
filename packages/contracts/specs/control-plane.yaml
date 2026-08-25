@@ -1705,8 +1705,10 @@ components:
           type: integer
           format: int64
           description: |
-            Actual device memory consumption in bytes, from the runner's
-            last memory report. Null if the model is not running.
+            Measured device memory consumption in bytes, summed across the
+            model's instances from the worker's last NVML memory report.
+            Absent when no instance has a measurement (model not running,
+            or the worker cannot measure).
         lastInferenceAt:
           type: string
           format: date-time
@@ -1761,8 +1763,9 @@ components:
           type: integer
           format: int64
           description: |
-            Actual device memory consumption in bytes, from the runner's
-            last memory report.
+            Measured device memory consumption in bytes for this instance,
+            from the worker's last NVML memory report. Absent when the
+            instance has no measurement.
         progress:
           type: object
           description: |
@@ -1988,7 +1991,11 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: Currently used device memory in bytes.
+          description: |
+            Device memory accounted to runners by the worker's allocation
+            ledger, in bytes (sum of configured `requiredMemory` shares).
+            A budgeting figure — see `memoryMeasuredUsedBytes` for the
+            hardware-measured value.
         memoryAvailableBytes:
           type: integer
           format: int64
@@ -2001,6 +2008,15 @@ components:
           description: |
             Memory reserved for models being started (not yet reflected
             in the used count).
+        memoryMeasuredUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Measured device memory in use, in bytes, from the worker's NVML
+            report. Includes memory consumed by processes outside Sardeenz's
+            control. Absent when the worker cannot measure (stub mode or
+            CPU-only host).
 
     WorkerModelInfo:
       type: object
@@ -2170,6 +2186,14 @@ components:
           format: int64
           minimum: 0
           description: Reserved device memory for models being started.
+        measuredUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Measured device memory in use across all workers and devices
+            that reported an NVML measurement, in bytes. Absent when no
+            device reported a measurement.
 
     ClusterMemory:
       type: object

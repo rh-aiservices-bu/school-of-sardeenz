@@ -569,6 +569,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkerDeviceMemory"
+        instances:
+          type: array
+          items:
+            $ref: "#/components/schemas/InstanceMemoryMeasurement"
+          description: |
+            Measured per-instance device memory, attributed by mapping the
+            device's process list (NVML) to the runner processes the worker
+            spawned. Present only when the worker can measure (NVML available
+            and runners attributable); omitted in stub/CPU mode.
         reportedAt:
           type: string
           format: date-time
@@ -595,12 +604,56 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: Total bytes used across all runners on this device.
+          description: |
+            Total bytes accounted to runners on this device by the worker's
+            allocation ledger (the sum of the running runners' configured
+            `requiredMemory` shares). A budgeting figure, not a hardware
+            measurement — see `memoryMeasuredUsedBytes` for the measured
+            value.
         memoryTotalBytes:
           type: integer
           format: int64
           minimum: 0
           description: Total device capacity in bytes.
+        memoryMeasuredUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Measured device memory in use, in bytes, read from NVML
+            (`nvmlDeviceGetMemoryInfo`). Includes memory consumed by
+            processes outside Sardeenz's control. Absent when the worker
+            cannot measure (no NVML — stub mode or CPU-only host).
+
+    InstanceMemoryMeasurement:
+      type: object
+      description: |
+        Measured device memory attributed to one runner instance on one
+        device, from the device's NVML process list. Under kvcached elastic
+        sharing the pooled allocation is attributed to the process that owns
+        it, so co-located instances' figures are honest per-process numbers,
+        not a split of the shared pool.
+      required:
+        - instanceId
+        - modelName
+        - deviceIndex
+        - memoryMeasuredUsedBytes
+      properties:
+        instanceId:
+          type: string
+          description: Control-plane instance identifier (`inst-<hex>`).
+        modelName:
+          type: string
+          description: Configuration model name the instance belongs to.
+        deviceIndex:
+          type: integer
+          minimum: 0
+          description: Zero-based global device index.
+        memoryMeasuredUsedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Measured bytes used by this instance's process tree on this device.
 
     # -------------------------------------------------------------------------
     # Common

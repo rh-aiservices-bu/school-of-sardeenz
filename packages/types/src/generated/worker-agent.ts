@@ -369,6 +369,13 @@ export type components = {
         WorkerMemoryReport: {
             devices: components["schemas"]["WorkerDeviceMemory"][];
             /**
+             * @description Measured per-instance device memory, attributed by mapping the
+             *     device's process list (NVML) to the runner processes the worker
+             *     spawned. Present only when the worker can measure (NVML available
+             *     and runners attributable); omitted in stub/CPU mode.
+             */
+            instances?: components["schemas"]["InstanceMemoryMeasurement"][];
+            /**
              * Format: date-time
              * @description ISO-8601 timestamp of when the worker generated this report. Used
              *     by the control plane to determine staleness. When absent, the
@@ -382,7 +389,11 @@ export type components = {
             deviceType: components["schemas"]["DeviceType"];
             /**
              * Format: int64
-             * @description Total bytes used across all runners on this device.
+             * @description Total bytes accounted to runners on this device by the worker's
+             *     allocation ledger (the sum of the running runners' configured
+             *     `requiredMemory` shares). A budgeting figure, not a hardware
+             *     measurement — see `memoryMeasuredUsedBytes` for the measured
+             *     value.
              */
             memoryUsedBytes: number;
             /**
@@ -390,6 +401,34 @@ export type components = {
              * @description Total device capacity in bytes.
              */
             memoryTotalBytes: number;
+            /**
+             * Format: int64
+             * @description Measured device memory in use, in bytes, read from NVML
+             *     (`nvmlDeviceGetMemoryInfo`). Includes memory consumed by
+             *     processes outside Sardeenz's control. Absent when the worker
+             *     cannot measure (no NVML — stub mode or CPU-only host).
+             */
+            memoryMeasuredUsedBytes?: number;
+        };
+        /**
+         * @description Measured device memory attributed to one runner instance on one
+         *     device, from the device's NVML process list. Under kvcached elastic
+         *     sharing the pooled allocation is attributed to the process that owns
+         *     it, so co-located instances' figures are honest per-process numbers,
+         *     not a split of the shared pool.
+         */
+        InstanceMemoryMeasurement: {
+            /** @description Control-plane instance identifier (`inst-<hex>`). */
+            instanceId: string;
+            /** @description Configuration model name the instance belongs to. */
+            modelName: string;
+            /** @description Zero-based global device index. */
+            deviceIndex: number;
+            /**
+             * Format: int64
+             * @description Measured bytes used by this instance's process tree on this device.
+             */
+            memoryMeasuredUsedBytes: number;
         };
         /** @description Error response returned on failure. */
         ErrorResponse: {

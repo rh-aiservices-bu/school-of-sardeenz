@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Measured GPU memory telemetry via ts-nvml (#163) — contracts.** Additive contract fields
+  distinguishing hardware-measured VRAM from the existing reservation/ledger figures:
+  `WorkerDeviceMemory.memoryMeasuredUsedBytes` and a per-instance
+  `WorkerMemoryReport.instances` measurement list (worker-agent.yaml);
+  `ClusterDeviceMemory.memoryMeasuredUsedBytes` and
+  `ClusterMemorySummary.measuredUsedBytes` (control-plane.yaml). `currentMemory` on
+  `ModelSummary`/`InstanceDetail` re-documented as the measured per-model/per-instance value
+  sourced from the worker's NVML report. Ledger field descriptions clarified as budgeting
+  figures, not measurements.
 - **MLServer engine runner and protocol-family proxy surface (ADR-021, #125).** Second engine
   runner proving the abstraction beyond vLLM. Proxy: inference routes move to protocol-family
   prefixes — `/openai/v1/*` (OpenAI surface) and `/oip/v2/*` (KServe V2 Open Inference
