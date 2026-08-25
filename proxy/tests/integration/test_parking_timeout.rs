@@ -38,7 +38,7 @@ async fn test_parking_timeout_503() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Are you there?"}]
@@ -121,7 +121,7 @@ async fn test_parking_rewakes_after_concurrent_mass_cancel() {
         let model_name = model.to_string();
         handles.push(tokio::spawn(async move {
             let _ = client
-                .post(format!("{url}/v1/chat/completions"))
+                .post(format!("{url}/openai/v1/chat/completions"))
                 .json(&serde_json::json!({
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Are you there?"}]
@@ -183,7 +183,7 @@ async fn test_parking_rewakes_after_concurrent_mass_cancel() {
     let fresh_model = model.to_string();
     tokio::spawn(async move {
         let _ = fresh_client
-            .post(format!("{fresh_url}/v1/chat/completions"))
+            .post(format!("{fresh_url}/openai/v1/chat/completions"))
             .json(&serde_json::json!({
                 "model": fresh_model,
                 "messages": [{"role": "user", "content": "Still there?"}]

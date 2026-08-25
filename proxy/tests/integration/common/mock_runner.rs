@@ -15,8 +15,10 @@ use std::sync::{
     Arc,
 };
 
+use std::sync::Mutex;
+
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -42,6 +44,10 @@ pub struct RunnerState {
     /// concurrency limit tests) construct one with zero permits via
     /// `RunnerState::new_gated` and release it with `gate.add_permits(..)`.
     pub gate: Arc<tokio::sync::Semaphore>,
+    /// Path (as seen by the runner, post prefix-strip) of the last V2 infer
+    /// request received. Lets a test assert the proxy stripped `/oip` before
+    /// forwarding (#125).
+    pub last_v2_infer_path: Arc<Mutex<Option<String>>>,
 }
 
 impl RunnerState {
@@ -52,6 +58,7 @@ impl RunnerState {
             fail_count: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Notify::new()),
             gate: Arc::new(tokio::sync::Semaphore::new(tokio::sync::Semaphore::MAX_PERMITS)),
+            last_v2_infer_path: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -97,6 +104,8 @@ impl MockRunner {
             .route("/v1/chat/completions", post(handle_inference))
             .route("/v1/completions", post(handle_inference))
             .route("/v1/models", get(handle_models))
+            .route("/v2/models/{model}/infer", post(handle_v2_infer))
+            .route("/v2/models/{model}/ready", get(handle_v2_ready))
             .with_state(state.clone());
 
         tokio::spawn(async move {
@@ -109,6 +118,12 @@ impl MockRunner {
     /// Number of requests received so far.
     pub fn request_count(&self) -> usize {
         self.state.request_count.load(Ordering::SeqCst)
+    }
+
+    /// Path (post prefix-strip) of the last V2 infer request received, if any.
+    #[allow(dead_code)]
+    pub fn last_v2_infer_path(&self) -> Option<String> {
+        self.state.last_v2_infer_path.lock().unwrap().clone()
     }
 }
 
@@ -142,6 +157,40 @@ async fn handle_inference(
     } else {
         json_response(&state.model_name).into_response()
     }
+}
+
+/// V2 (OIP) infer handler: `POST /v2/models/{model}/infer`. Mirrors
+/// `handle_inference`'s gate/fail_count/request_count behavior but returns a
+/// KServe V2-shaped body, and records the path it was called on so a test can
+/// assert the proxy stripped the `/oip` prefix before forwarding (#125).
+async fn handle_v2_infer(
+    State(state): State<RunnerState>,
+    Path(model): Path<String>,
+    req: Request<Body>,
+) -> impl IntoResponse {
+    state.request_count.fetch_add(1, Ordering::SeqCst);
+    state.received.notify_waiters();
+    *state.last_v2_infer_path.lock().unwrap() =
+        Some(req.uri().path_and_query().map(|pq| pq.as_str().to_string()).unwrap_or_default());
+
+    let _permit = state.gate.acquire().await.unwrap();
+
+    let remaining = state.fail_count.load(Ordering::SeqCst);
+    if remaining > 0 {
+        state.fail_count.fetch_sub(1, Ordering::SeqCst);
+        return (StatusCode::INTERNAL_SERVER_ERROR, Body::from("runner error")).into_response();
+    }
+
+    let body = serde_json::json!({
+        "model_name": model,
+        "outputs": [],
+    });
+    (StatusCode::OK, axum::Json(body)).into_response()
+}
+
+/// V2 (OIP) readiness handler: `GET /v2/models/{model}/ready`.
+async fn handle_v2_ready(Path(_model): Path<String>) -> impl IntoResponse {
+    (StatusCode::OK, axum::Json(serde_json::json!({"ready": true})))
 }
 
 async fn handle_models(State(state): State<RunnerState>) -> impl IntoResponse {

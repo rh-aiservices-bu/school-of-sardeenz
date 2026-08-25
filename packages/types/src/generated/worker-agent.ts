@@ -236,6 +236,15 @@ export type components = {
              */
             engineArgs?: string[];
             /**
+             * @description Optional verbatim argv the worker execs inside the SIF to launch
+             *     this runner's management shim, from the runner's catalog metadata. When present,
+             *     the Apptainer launcher uses it in place of its global
+             *     SARDEENZ_RUNNER_ENTRYPOINT; when absent, the global default is used. Never
+             *     shell-interpreted. The dev-worker stub launcher ignores it (it forks a fixed
+             *     in-process stub), exactly as it ignores runtimeModule.
+             */
+            entrypoint?: string[];
+            /**
              * @description Devices assigned to this runner by the placement pipeline. Each
              *     entry specifies a device index and type on this worker.
              */

@@ -1,4 +1,4 @@
-import { ModelLifecycleState } from '@sardeenz/types';
+import { ModelLifecycleState, Protocol } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 import { ControlPlaneError } from '../errors.js';
@@ -68,6 +68,13 @@ export interface InstanceState {
   instanceId: string;
   modelName: string;
   state: ModelLifecycleState;
+  /**
+   * Protocol family of this instance's runner (from catalog metadata at deploy). Read by
+   * refreshModelRoutingState so every routing entry carries a protocol without a catalog lookup
+   * on the sleep/wake/reconcile paths. Optional/back-compat: legacy instances predate it; readers
+   * default to openai.
+   */
+  protocol?: Protocol;
   workerId: string | null;
   runnerHost: string | null;
   /** Management port (runner-contract API) — used for health/sleep/wake/stop. */
@@ -187,6 +194,7 @@ export class ModelLifecycleService {
     modelName: string,
     instanceId: string,
     workerId?: string | null,
+    protocol?: Protocol,
   ): Promise<InstanceState> {
     const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
 
@@ -194,6 +202,7 @@ export class ModelLifecycleService {
       instanceId,
       modelName,
       state: ModelLifecycleState.PENDING,
+      protocol: protocol ?? Protocol.openai,
       workerId: workerId ?? null,
       runnerHost: null,
       runnerPort: null,

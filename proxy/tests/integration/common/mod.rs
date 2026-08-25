@@ -10,5 +10,5 @@ pub use mock_runner::{MockRunner, RunnerState};
 pub use proxy_builder::TestProxy;
 pub use routing::{
     insert_active_model, insert_active_model_multi, insert_active_model_with_metadata,
-    insert_model, insert_sleeping_model,
+    insert_active_oip_model, insert_model, insert_sleeping_model, insert_sleeping_oip_model,
 };

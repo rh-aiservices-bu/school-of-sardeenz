@@ -62,7 +62,7 @@ async fn test_disconnect_reclaims_parking_slot() {
     let mut handles = Vec::new();
     for _ in 0..3 {
         let c = client.clone();
-        let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
         let p = payload.clone();
         handles.push(tokio::spawn(async move { c.post(url).json(&p).send().await }));
     }
@@ -96,7 +96,7 @@ async fn test_disconnect_reclaims_parking_slot() {
     // available). A parking_timeout 503 (if it were to happen to land in
     // time) is also acceptable — the assertion is on error TYPE only.
     let result = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .timeout(Duration::from_millis(500))
         .send()
@@ -163,7 +163,7 @@ async fn test_global_counter_no_underflow_after_cycles() {
     // each cycle fully increments then decrements the global counter.
     for model in &models {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&serde_json::json!({
                 "model": model,
                 "messages": [{"role": "user", "content": "Hi"}]
@@ -188,7 +188,7 @@ async fn test_global_counter_no_underflow_after_cycles() {
     insert_sleeping_model(&proxy.routing_cache, extra_model).await;
 
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": extra_model,
             "messages": [{"role": "user", "content": "Hi"}]

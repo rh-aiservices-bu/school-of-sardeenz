@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DeviceType, ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import {
+  DeviceType,
+  ModelLifecycleState,
+  ModelState,
+  Protocol,
+  RunnerState,
+} from '@sardeenz/types';
 
 import { canConnect, createHarness, type TestHarness } from './helpers/harness.js';
 import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.js';
@@ -40,6 +46,7 @@ async function deployModel(
   runner.setHealthState(RunnerState.READY);
 
   await harness.deployOrchestration.deployModel({
+    protocol: Protocol.openai,
     modelName,
     instanceId,
     workerId: WORKER_ID,
@@ -173,5 +180,50 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
       { deviceIndices: [0, 1] },
     );
     expect(raw2.deviceIndices).toEqual([0, 1]);
+  });
+
+  it('persists protocol on the routing entry and preserves it across state changes (#125)', async () => {
+    const MODEL = 'protocol-roundtrip-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+    const ep: RunnerEndpoint = { host: '10.0.0.9', port: 8009, weight: 1, healthy: true };
+
+    await harness.routingMap.addEndpoint(MODEL, ep, Protocol.oip);
+    await harness.routingMap.setModelState(MODEL, ModelState.SLEEPING, Protocol.oip);
+
+    const raw = await harness.redis.hget(HASH, MODEL);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw as string) as { protocol: string; endpoints: unknown[] };
+    expect(parsed.protocol).toBe('oip');
+    expect(Array.isArray(parsed.endpoints)).toBe(true);
+  });
+
+  it('addEndpoint with omitted protocol defaults to openai (Lua ARGV[5] default)', async () => {
+    const MODEL = 'protocol-default-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+    const ep: RunnerEndpoint = { host: '10.0.0.10', port: 8010, weight: 1, healthy: true };
+
+    await harness.routingMap.addEndpoint(MODEL, ep);
+
+    const raw = await harness.redis.hget(HASH, MODEL);
+    const parsed = JSON.parse(raw as string) as { protocol: string };
+    expect(parsed.protocol).toBe('openai');
+  });
+
+  it('updateEndpointHealth and removeEndpoint preserve a pre-set protocol', async () => {
+    const MODEL = 'protocol-preserve-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+    const ep: RunnerEndpoint = { host: '10.0.0.11', port: 8011, weight: 1, healthy: true };
+
+    await harness.routingMap.addEndpoint(MODEL, ep, Protocol.oip);
+    await harness.routingMap.updateEndpointHealth(MODEL, ep.host, ep.port, false);
+
+    let raw = await harness.redis.hget(HASH, MODEL);
+    let parsed = JSON.parse(raw as string) as { protocol: string };
+    expect(parsed.protocol).toBe('oip');
+
+    await harness.routingMap.removeEndpoint(MODEL, ep.host, ep.port);
+    raw = await harness.redis.hget(HASH, MODEL);
+    parsed = JSON.parse(raw as string) as { protocol: string };
+    expect(parsed.protocol).toBe('oip');
   });
 });

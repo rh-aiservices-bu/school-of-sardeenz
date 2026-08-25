@@ -20,6 +20,17 @@ pub enum ModelState {
     Error,
 }
 
+/// Protocol family a model speaks / proxy path prefix it is invoked under.
+/// Mirrors the `Protocol` schema. Closed by design (a new protocol is a
+/// coordinated spec + mirror + proxy-release change — see issue #125 item 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Protocol {
+    #[serde(rename = "openai")]
+    Openai,
+    #[serde(rename = "oip")]
+    Oip,
+}
+
 /// Request to wake a sleeping model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +58,7 @@ pub struct WakeTriggerResponse {
 pub struct RoutingEntry {
     pub model_name: String,
     pub state: ModelState,
+    pub protocol: Protocol,
     pub endpoints: Vec<RunnerEndpoint>,
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,8 +73,6 @@ pub struct RoutingEntryMetadata {
     pub owned_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_model_len: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub engine_type: Option<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }

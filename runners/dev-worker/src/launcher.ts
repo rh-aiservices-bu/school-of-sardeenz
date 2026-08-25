@@ -36,6 +36,11 @@ export interface LaunchSpec {
    * still accepting the configuration name. When absent, modelName alone.
    */
   servedModelName?: string;
+  /**
+   * Verbatim argv to exec inside the SIF (from catalog metadata). ApptainerLauncher uses it in
+   * place of config.runnerEntrypoint; StubLauncher ignores it.
+   */
+  entrypoint?: string[];
   devices: DeviceRef[];
   /** Management port for the runner-contract API (health/sleep/wake/progress). */
   port: number;

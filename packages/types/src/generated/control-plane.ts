@@ -1215,6 +1215,15 @@ export type components = {
              *     `runtimeModule` the worker agent execs.
              */
             sifName: string;
+            /**
+             * @description Protocol family this runner speaks — the proxy path prefix under which
+             *     its models are invoked. `openai` → `/openai/v1/...` (vLLM). `oip` →
+             *     KServe V2 Open Inference Protocol `/oip/v2/...` (MLServer). REQUIRED.
+             *     Must match a value of `Protocol` in proxy-control-plane.yaml; a value the
+             *     running proxy does not advertise fails catalog import (forward-compat guard).
+             * @enum {string}
+             */
+            protocol: CatalogEntryProtocol;
             /** @description Optional free-form labels for filtering. */
             tags?: string[];
             /** @description Optional minimum device memory hint (GiB). */
@@ -1249,6 +1258,13 @@ export type components = {
             features?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Optional verbatim argv the worker execs inside the SIF to launch this
+             *     runner's management shim (e.g. ["python3","-m","sardeenz_mlserver_runner"]).
+             *     Never shell-interpreted. When absent, the worker falls back to its global
+             *     SARDEENZ_RUNNER_ENTRYPOINT (default the vLLM shim). Mirrors the runners.yaml field.
+             */
+            entrypoint?: string[];
         };
         /** @description The import state of one catalog entry. */
         CatalogItemStatus: {
@@ -1290,6 +1306,17 @@ export type components = {
              *     catalog (e.g. locally built or manually placed modules).
              */
             unmanagedModules: string[];
+            /**
+             * @description Catalog entries that failed validation and were excluded from `runners`
+             *     (e.g. missing the required `protocol`). Surfaced so an out-of-date catalog
+             *     does not silently present as "no runners". Rendered by the dashboard.
+             */
+            invalidEntries?: {
+                /** @description The entry's `id` if present, else omitted. */
+                id?: string;
+                /** @description Human-readable, actionable validation failure reason. */
+                reason: string;
+            }[];
         };
         /** @description A subdirectory within the model-weights directory. */
         WeightsEntry: {
@@ -2980,6 +3007,10 @@ export enum CatalogItemState {
     IMPORTING = "IMPORTING",
     IMPORTED = "IMPORTED",
     FAILED = "FAILED"
+}
+export enum CatalogEntryProtocol {
+    openai = "openai",
+    oip = "oip"
 }
 export enum RunnerLogLineStream {
     stdout = "stdout",

@@ -23,7 +23,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use sardeenz_proxy::generated::proxy_control_plane::{
-    ModelState, RoutingEntry, RunnerEndpoint, WakeTriggerRequest, WakeTriggerResponse,
+    ModelState, Protocol, RoutingEntry, RunnerEndpoint, WakeTriggerRequest, WakeTriggerResponse,
 };
 use sardeenz_proxy::routing::RoutingMapCache;
 
@@ -241,6 +241,7 @@ pub fn build_active_entry(model_name: &str, runner_addr: SocketAddr) -> RoutingE
     RoutingEntry {
         model_name: model_name.to_string(),
         state: ModelState::Active,
+        protocol: Protocol::Openai,
         endpoints: vec![RunnerEndpoint {
             host: runner_addr.ip().to_string(),
             port: runner_addr.port(),

@@ -24,6 +24,11 @@
     "title": "Unmanaged modules",
     "body": "SIFs on the module store that are not in the catalog (e.g. locally built or manually placed)."
   },
+  "invalid": {
+    "title": "Some catalog entries were skipped",
+    "body": "These entries failed validation and are not shown above. Fix them in the catalog source, then Refresh.",
+    "unnamed": "(unnamed entry)"
+  },
   "uninstall": {
     "confirmTitle": "Uninstall runner?",
     "confirmBody": "This deletes the imported SIF for \"{{title}}\" from the module store. Models using it must be stopped first."

@@ -6,9 +6,12 @@
 #   oc exec -it <pod> -n sardeenz -- bash /tmp/run-gates.sh            # CPU gates
 #   oc exec -it <pod> -n sardeenz -- bash /tmp/run-gates.sh --gpu      # + GPU gates (needs a GPU)
 #
-# CPU gates (0-6) run on any 4.15+ worker Pod. GPU gates (7-9) + the Gate 10 measurement need a GPU
-# and are skipped unless --gpu is passed (or a GPU is detected). Exit code is non-zero if any
-# non-skipped gate fails. Each gate traces to a spike gate (docs/project/phase4-apptainer-spike.md).
+# CPU gates (0-6) run on any 4.15+ worker Pod. GPU gates (7-11) + the Gate 10 measurement need a GPU
+# and are skipped unless --gpu is passed (or a GPU is detected). Gate 11 (MLServer launch) also
+# needs the worker agent and an MLServer SIF (MLSERVER_SIF) — it degrades to skip without either.
+# Exit code is non-zero if any non-skipped gate fails. Each gate traces to a spike gate
+# (docs/project/phase4-apptainer-spike.md), except Gate 11 which traces to issue #125's MLServer
+# launch/stop/health deliverable.
 # NOTE: intentionally `set -uo pipefail` WITHOUT `-e`. Gates must CONTINUE after a failure so the
 # pass/fail counters (below) tally every gate; `-e` would abort on the first failing command. The
 # per-gate risk that a mid-gate failure still reaches a later `pass` is handled inside each gate by
@@ -19,6 +22,7 @@ MODULES_DIR="${MODULES_DIR:-/modules}"
 SCRATCH_DIR="${SCRATCH_DIR:-/scratch}"
 WEIGHTS_DIR="${WEIGHTS_DIR:-/weights}"
 VLLM_SIF="${VLLM_SIF:-${MODULES_DIR}/vllm-0.21.sif}"
+MLSERVER_SIF="${MLSERVER_SIF:-${MODULES_DIR}/mlserver-1.6.sif}"
 AGENT_URL="${AGENT_URL:-http://127.0.0.1:9100}"
 RUN_GPU=0
 [[ "${1:-}" == "--gpu" ]] && RUN_GPU=1
@@ -31,6 +35,8 @@ FAILED_GATES=()
 # exit). Must be GLOBAL: the EXIT trap fires after gate9_kvcached_share()/main() have returned, so a
 # `local` array would be out of scope. See gate9_kvcached_share().
 GATE9_RUNNERS=()
+# Same pattern for Gate 11's MLServer runner. See gate11_mlserver_launch().
+GATE11_RUNNERS=()
 
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() {
@@ -48,6 +54,15 @@ gate() { echo; echo "== $1 =="; }
 gate9_cleanup() {
   local rid
   for rid in "${GATE9_RUNNERS[@]:-}"; do
+    [[ -n "$rid" ]] || continue
+    curl -s -o /dev/null -X DELETE "${AGENT_URL}/runners/${rid}" 2>/dev/null || true
+  done
+}
+
+# shellcheck disable=SC2317  # invoked via `trap ... EXIT`, not called directly
+gate11_cleanup() {
+  local rid
+  for rid in "${GATE11_RUNNERS[@]:-}"; do
     [[ -n "$rid" ]] || continue
     curl -s -o /dev/null -X DELETE "${AGENT_URL}/runners/${rid}" 2>/dev/null || true
   done
@@ -385,6 +400,72 @@ gate10_measure() {
   pass "Gate 10: recorded spawn timings (compare against the spike EFS floor)"
 }
 
+# Poll a runner's /health until it reports RunnerState READY, or the bounded budget below is
+# exhausted. Unlike gate9_wait_ready (which polls /memory-report), Gate 11 gates on /health: a
+# CPU-backed MLServer runtime (e.g. sklearn) has no GPU to attribute, so /memory-report legitimately
+# 409s (Unit C) even once the runner is fully READY — polling /health avoids misreporting that as a
+# startup timeout. ~60 attempts * 2s sleep ≈ 2 minutes, mirroring gate9_wait_ready's budget.
+gate11_wait_health() {
+  local host="$1" port="$2" attempt resp code body
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    resp="$(curl -s -w '\n%{http_code}' "http://${host}:${port}/health" 2>/dev/null)"
+    code="$(tail -n1 <<<"$resp")"
+    body="$(sed '$d' <<<"$resp")"
+    if [[ "$code" == "200" ]] && [[ "$(jq -r '.state // empty' <<<"$body" 2>/dev/null)" == "READY" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+gate11_mlserver_launch() {
+  gate "Gate 11 — MLServer runner launch/stop/health through Apptainer (worker agent)"
+  if [[ ! -f "${MLSERVER_SIF}" ]]; then
+    skip "Gate 11: MLServer SIF not found at ${MLSERVER_SIF}"
+    return
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    skip "Gate 11: curl not available to drive the worker agent"
+    return
+  fi
+  # Combined trap: keeps Gate 9's cleanup working (it may have already registered a trap of its
+  # own) while adding Gate 11's — see gate9_kvcached_share()'s identical rationale for registering
+  # before the first POST, so a failure between start and delete still cleans up.
+  trap 'gate9_cleanup; gate11_cleanup' EXIT
+
+  local body resp code rid host port
+  body='{"modelName":"gate11-mls","runnerType":"mlserver","runtimeModule":"mlserver-1.6","modelPath":"'"${WEIGHTS_DIR}"'/gate11-mls","requiredMemory":1,"tensorParallel":1,"deviceType":"CUDA","devices":[{"deviceIndex":0,"deviceType":"CUDA"}],"entrypoint":["python3","-m","sardeenz_mlserver_runner"]}'
+
+  resp="$(curl -s -w '\n%{http_code}' -XPOST "${AGENT_URL}/runners" -H 'content-type: application/json' -d "$body")"
+  code="$(tail -n1 <<<"$resp")"
+  rid="$(sed '$d' <<<"$resp" | jq -r '.runnerId // empty' 2>/dev/null)"
+  [[ -n "$rid" ]] && GATE11_RUNNERS+=("$rid")
+
+  if [[ "$code" != "201" ]]; then
+    fail "Gate 11: agent returned $code starting an MLServer runner"
+    return
+  fi
+  pass "Gate 11: worker agent started an MLServer runner (HTTP $code)"
+
+  host="$(sed '$d' <<<"$resp" | jq -r '.host // empty' 2>/dev/null)"
+  port="$(sed '$d' <<<"$resp" | jq -r '.port // empty' 2>/dev/null)"
+
+  if ! gate11_wait_health "$host" "$port"; then
+    fail "Gate 11: MLServer runner never reached READY (timed out waiting for /health)"
+    return
+  fi
+  pass "Gate 11: MLServer runner reached READY"
+
+  local del_code
+  del_code="$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "${AGENT_URL}/runners/${rid}" 2>/dev/null)"
+  if [[ "$del_code" == "200" || "$del_code" == "204" ]]; then
+    pass "Gate 11: MLServer runner stopped cleanly (HTTP $del_code)"
+  else
+    fail "Gate 11: stopping the MLServer runner returned HTTP $del_code"
+  fi
+}
+
 # ---------------------------------------------------------------------------------------------
 main() {
   echo "Sardeenz Phase 4 — SIF runtime gate suite"
@@ -403,10 +484,13 @@ main() {
     gate8_namespaces
     gate9_kvcached_share
     gate10_measure
+    gate11_mlserver_launch
   elif [[ ! -f "${_tiny_sif}" ]]; then
     skip "GPU gates 7-9 + Gate 10 (Gate 2 produced no SIF — cannot probe --nv; NOT necessarily 'no GPU')"
+    skip "Gate 11 (no GPU signal available — same as above)"
   else
     skip "GPU gates 7-9 + Gate 10 (no GPU / --gpu not set)"
+    skip "Gate 11 (no GPU / --gpu not set)"
   fi
 
   rm -f "${_tiny_sif}" 2>/dev/null

@@ -12,7 +12,7 @@ export type {
   operations as ProxyControlPlaneOperations,
   paths as ProxyControlPlanePaths,
 } from './generated/proxy-control-plane.js';
-export { ModelState, RoutingMapUpdateType } from './generated/proxy-control-plane.js';
+export { ModelState, RoutingMapUpdateType, Protocol } from './generated/proxy-control-plane.js';
 
 export type {
   components as ControlPlaneComponents,

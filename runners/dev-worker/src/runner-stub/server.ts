@@ -6,7 +6,15 @@ import { registerSleepRoutes } from './routes/sleep.js';
 import { registerProgressRoutes } from './routes/progress.js';
 import { registerCapabilitiesRoutes } from './routes/capabilities.js';
 import { registerInferenceRoutes } from './routes/inference.js';
+import { registerV2InferenceRoutes } from './routes/v2-inference.js';
 import type { LogSink } from '../launcher.js';
+
+// Dev-only: the authoritative protocol↔runnerType mapping lives in the catalog (control plane);
+// the local stub only distinguishes the shipped engines. mlserver speaks KServe V2 (oip); all
+// others OpenAI.
+export function isOipRunnerType(runnerType: string): boolean {
+  return runnerType === 'mlserver';
+}
 
 export interface RunnerStubConfig {
   port: number;
@@ -50,11 +58,19 @@ export function createRunnerStub(config: RunnerStubConfig): RunnerStub {
     runnerType: config.runnerType,
     deviceType: config.deviceType,
   });
-  registerInferenceRoutes(server, stateMachine, {
-    modelName: config.modelName,
-    workerId: config.workerId,
-    inferenceDelayMs: config.inferenceDelayMs,
-  });
+  if (isOipRunnerType(config.runnerType)) {
+    registerV2InferenceRoutes(server, stateMachine, {
+      modelName: config.modelName,
+      workerId: config.workerId,
+      inferenceDelayMs: config.inferenceDelayMs,
+    });
+  } else {
+    registerInferenceRoutes(server, stateMachine, {
+      modelName: config.modelName,
+      workerId: config.workerId,
+      inferenceDelayMs: config.inferenceDelayMs,
+    });
+  }
 
   return {
     server,

@@ -1,0 +1,69 @@
+"""Best-effort device memory reporting for the MLServer runner shim.
+
+CPU-only sklearn models have no CUDA device to introspect; this returns an empty ``devices`` list
+in that case. The caller (``app.py``) treats that as "no device memory to report" and answers 409
+rather than emitting a ``MemoryReport`` with an empty ``devices`` array, which the contract
+forbids (``minItems: 1``) — the same fail-closed pattern the vLLM shim uses.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+
+def memory_report(device_type: str = "CUDA") -> dict[str, Any]:
+    devices = _cuda_devices(device_type)
+    return {"devices": devices}
+
+
+def _resolve_device_indices() -> list[int] | None:
+    """Map container-local CUDA device slots to cluster-global GPU indices.
+
+    The worker agent sets ``SARDEENZ_DEVICE_INDICES`` (parallel to ``CUDA_VISIBLE_DEVICES``) to the
+    control-plane-assigned indices for this runner's devices; without it (e.g. a bare `mlserver
+    start` outside the worker) we fall back to the container-local index.
+    """
+    raw = os.environ.get("SARDEENZ_DEVICE_INDICES", "").strip()
+    if not raw:
+        return None
+    try:
+        return [int(part) for part in raw.split(",")]
+    except ValueError:
+        return None
+
+
+def _cuda_devices(device_type: str) -> list[dict[str, Any]]:
+    try:
+        import torch  # type: ignore
+    except Exception:
+        return []
+
+    if not torch.cuda.is_available():
+        return []
+
+    device_indices = _resolve_device_indices()
+
+    devices: list[dict[str, Any]] = []
+    for index in range(torch.cuda.device_count()):
+        try:
+            free_bytes, total_bytes = torch.cuda.mem_get_info(index)
+            reserved = int(torch.cuda.memory_reserved(index))
+            # Prefer this process's reserved pool; fall back to whole-device usage if reserved is 0.
+            used = reserved if reserved > 0 else int(total_bytes - free_bytes)
+            reported_index = (
+                device_indices[index]
+                if device_indices is not None and index < len(device_indices)
+                else index
+            )
+            devices.append(
+                {
+                    "deviceIndex": reported_index,
+                    "deviceType": device_type,
+                    "memoryUsedBytes": max(0, used),
+                    "memoryTotalBytes": int(total_bytes),
+                }
+            )
+        except Exception:
+            continue
+    return devices

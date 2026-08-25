@@ -36,7 +36,7 @@ async fn test_soft_rejected_wake_fails_fast_without_leak() {
 
     let start = Instant::now();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Wake up!"}]
@@ -86,7 +86,7 @@ async fn test_malformed_wake_response_still_wakes() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Wake up!"}]

@@ -1,4 +1,10 @@
-import { ModelLifecycleState, ModelState, RunnerState, SleepLevel } from '@sardeenz/types';
+import {
+  ModelLifecycleState,
+  ModelState,
+  Protocol,
+  RunnerState,
+  SleepLevel,
+} from '@sardeenz/types';
 import type { RunnerClient } from '../clients/runner.js';
 import {
   runnerHealthCheckErrorsTotal,
@@ -50,7 +56,8 @@ export async function refreshModelRoutingState(
   const aggregate = deriveAggregateState(instances);
   const routingState = toRoutingState(aggregate);
   if (routingState) {
-    await routingMap.setModelState(modelName, routingState);
+    const protocol = instances.find((i) => i.protocol)?.protocol ?? Protocol.openai;
+    await routingMap.setModelState(modelName, routingState, protocol);
   } else {
     await routingMap.removeModel(modelName);
   }
@@ -179,7 +186,11 @@ export class SleepWakeService {
           healthy: true,
           ...(instanceState.runnerId ? { runnerId: instanceState.runnerId } : {}),
         };
-        await this.routingMap.addEndpoint(modelName, endpoint);
+        await this.routingMap.addEndpoint(
+          modelName,
+          endpoint,
+          instanceState.protocol ?? Protocol.openai,
+        );
       }
 
       // STARTING → ACTIVE

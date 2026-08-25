@@ -1,4 +1,4 @@
-import { ModelState, RoutingMapUpdateType } from '@sardeenz/types';
+import { ModelState, Protocol, RoutingMapUpdateType } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 import { ControlPlaneError } from '../errors.js';
@@ -14,9 +14,10 @@ export interface RunnerEndpoint {
 export interface RoutingEntry {
   modelName: string;
   state: ModelState;
+  protocol: Protocol;
   endpoints: RunnerEndpoint[];
   updatedAt: string;
-  metadata?: { ownedBy?: string; maxModelLen?: number; engineType?: string };
+  metadata?: { ownedBy?: string; maxModelLen?: number };
 }
 
 export interface RoutingMapUpdate {
@@ -81,13 +82,13 @@ export class RoutingMapService {
     return JSON.parse(raw) as RoutingEntry;
   }
 
-  async setModelState(modelName: string, state: ModelState): Promise<void> {
+  async setModelState(modelName: string, state: ModelState, protocol?: Protocol): Promise<void> {
     const entry = await this.getEntry(modelName);
     const now = new Date().toISOString();
 
     const updated: RoutingEntry = entry
-      ? { ...entry, state, updatedAt: now }
-      : { modelName, state, endpoints: [], updatedAt: now };
+      ? { ...entry, state, ...(protocol ? { protocol } : {}), updatedAt: now }
+      : { modelName, state, protocol: protocol ?? Protocol.openai, endpoints: [], updatedAt: now };
 
     const update: RoutingMapUpdate = {
       type: entry ? RoutingMapUpdateType.MODEL_STATE_CHANGED : RoutingMapUpdateType.MODEL_ADDED,
@@ -118,7 +119,11 @@ export class RoutingMapService {
       .exec();
   }
 
-  async addEndpoint(modelName: string, endpoint: RunnerEndpoint): Promise<void> {
+  async addEndpoint(
+    modelName: string,
+    endpoint: RunnerEndpoint,
+    protocol?: Protocol,
+  ): Promise<void> {
     const now = new Date().toISOString();
 
     const luaScript = `
@@ -128,7 +133,7 @@ export class RoutingMapService {
       if raw then
         entry = cjson.decode(raw)
       else
-        entry = { modelName = ARGV[1], state = 'STARTING', endpoints = {}, updatedAt = ARGV[3] }
+        entry = { modelName = ARGV[1], state = 'STARTING', protocol = ARGV[5], endpoints = {}, updatedAt = ARGV[3] }
       end
       local ep = cjson.decode(ARGV[2])
       local filtered = {}
@@ -139,6 +144,7 @@ export class RoutingMapService {
       end
       filtered[#filtered + 1] = ep
       entry.endpoints = filtered
+      entry.protocol = ARGV[5]
       entry.updatedAt = ARGV[3]
       redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
       redis.call('PUBLISH', KEYS[2], ARGV[4])
@@ -161,6 +167,7 @@ export class RoutingMapService {
       JSON.stringify(endpoint),
       now,
       JSON.stringify(update),
+      protocol ?? 'openai',
     );
   }
 

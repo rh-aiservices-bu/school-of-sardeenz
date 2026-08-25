@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { ModelLifecycleState } from '@sardeenz/types';
+import { ModelLifecycleState, Protocol } from '@sardeenz/types';
 import { registerModelRoutes } from '../models.js';
 import type { RouteDeps } from '../deps.js';
 import type { InstanceState } from '../../services/model-lifecycle.js';
@@ -130,6 +130,7 @@ interface DeployOverrides {
   createModelRecord?: ReturnType<typeof vi.fn>;
   setModelState?: ReturnType<typeof vi.fn>;
   createInstanceRecord?: ReturnType<typeof vi.fn>;
+  resolveRunnerMetadata?: ReturnType<typeof vi.fn>;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -211,6 +212,10 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
+    },
+    catalogService: {
+      resolveRunnerMetadata:
+        over.resolveRunnerMetadata ?? vi.fn(() => Promise.resolve({ protocol: Protocol.openai })),
     },
     createRunnerClient: vi.fn(() => ({})),
   } as unknown as RouteDeps;
@@ -358,6 +363,48 @@ describe('POST /api/v1/models modelName validation', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+
+  it('rejects a slashed modelName for an oip-protocol runnerType (#125)', async () => {
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve({
+        id: 'rec-1',
+        name: params.name,
+        runnerType: params.runnerType,
+        modelPath: params.modelPath,
+        requiredMemory: (params.requiredMemory as number | undefined) ?? null,
+        deviceType: (params.deviceType as string | undefined) ?? null,
+        tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
+        engineConfig: null,
+        engineArgs: null,
+        runtimeModule: null,
+        pinned: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    const { app, deps } = buildDeployApp({
+      createModelRecord,
+      resolveRunnerMetadata: vi.fn(() => Promise.resolve({ protocol: Protocol.oip })),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, modelName: 'org/model', runnerType: 'mlserver' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+
+    // The create-route rollback path: the Postgres row created for this attempt must not survive,
+    // and the background deploy pipeline must never have been reached.
+    const modelRepository = deps.modelRepository as { delete: ReturnType<typeof vi.fn> };
+    expect(modelRepository.delete).toHaveBeenCalledWith('org/model');
+    const deployOrchestration = deps.deployOrchestration as {
+      deployModel: ReturnType<typeof vi.fn>;
+    };
+    expect(deployOrchestration.deployModel).not.toHaveBeenCalled();
   });
 });
 

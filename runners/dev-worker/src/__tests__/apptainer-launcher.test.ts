@@ -94,6 +94,33 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
 
+  it('uses a per-runner entrypoint from catalog metadata when present (#125)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(
+      makeSpec({ entrypoint: ['python3', '-m', 'sardeenz_mlserver_runner'] }),
+    );
+
+    const sifIdx = plan.args.indexOf('/modules/vllm-0.21.sif');
+    expect(plan.args.slice(sifIdx + 1, sifIdx + 4)).toEqual([
+      'python3',
+      '-m',
+      'sardeenz_mlserver_runner',
+    ]);
+    expect(plan.args.join(' ')).not.toContain('sardeenz_vllm_runner');
+  });
+
+  it('falls back to the global runnerEntrypoint when spec.entrypoint is empty', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ entrypoint: [] }));
+
+    const sifIdx = plan.args.indexOf('/modules/vllm-0.21.sif');
+    expect(plan.args.slice(sifIdx + 1, sifIdx + 4)).toEqual([
+      'python3',
+      '-m',
+      'sardeenz_vllm_runner',
+    ]);
+  });
+
   it('sets HOME as a process env var, never as an --env flag (Apptainer rejects --env HOME)', async () => {
     const { launcher } = makeLauncher();
     const plan = await launcher.buildExecPlan(makeSpec());

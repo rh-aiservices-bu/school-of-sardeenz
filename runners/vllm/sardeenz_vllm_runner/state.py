@@ -131,8 +131,8 @@ def capabilities(
 ) -> dict[str, Any]:
     """Build the RunnerCapabilities body.
 
-    Declares ``kvCacheElasticSharing`` when kvcached is enabled — the flag a future
-    control-plane oversubscription policy keys on (engine-runner.yaml).
+    Declares ``kvCacheElasticSharing`` as a top-level field (per engine-runner.yaml) when
+    kvcached is enabled — the flag a future control-plane oversubscription policy keys on.
     """
     return {
         "runnerType": runner_type,
@@ -142,8 +142,8 @@ def capabilities(
         "supportedDeviceTypes": [device_type],
         "supportedSleepLevels": [L1_HOST_RAM],
         "maxTensorParallelism": max_tensor_parallelism,
+        "kvCacheElasticSharing": bool(kvcached_enabled),
         "features": {
-            "kvCacheElasticSharing": bool(kvcached_enabled),
             "prefixCaching": True,
             "streamingInference": True,
             "chatTemplate": True,

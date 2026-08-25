@@ -5,7 +5,7 @@
 
 use reqwest::StatusCode;
 
-use sardeenz_proxy::generated::proxy_control_plane::ModelState;
+use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol};
 
 use crate::common::{insert_model, TestProxy};
 
@@ -15,11 +15,11 @@ async fn test_draining_model_returns_503() {
     let model = "draining-model/v1";
 
     let dead_addr = "127.0.0.1:1".parse().unwrap();
-    insert_model(&proxy.routing_cache, model, ModelState::Draining, dead_addr).await;
+    insert_model(&proxy.routing_cache, model, ModelState::Draining, Protocol::Openai, dead_addr).await;
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}]
@@ -47,11 +47,11 @@ async fn test_error_model_returns_503() {
     let model = "errored-model/v1";
 
     let dead_addr = "127.0.0.1:1".parse().unwrap();
-    insert_model(&proxy.routing_cache, model, ModelState::Error, dead_addr).await;
+    insert_model(&proxy.routing_cache, model, ModelState::Error, Protocol::Openai, dead_addr).await;
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}]

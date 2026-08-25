@@ -29,7 +29,7 @@ async fn test_weighted_round_robin() {
     const TOTAL: usize = 40;
     for _ in 0..TOTAL {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await
@@ -80,7 +80,7 @@ async fn test_round_robin_equal_weights() {
     const TOTAL: usize = 20;
     for _ in 0..TOTAL {
         let _ = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await;

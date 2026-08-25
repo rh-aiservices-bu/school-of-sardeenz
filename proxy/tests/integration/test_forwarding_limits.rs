@@ -48,7 +48,7 @@ async fn test_global_forwarding_limit_returns_overloaded() {
     .await;
 
     let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+    let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
 
     // First request claims the only forwarding permit and blocks in the runner.
     let held = {
@@ -100,7 +100,7 @@ async fn test_per_model_forwarding_limit_is_independent_per_model() {
     .await;
 
     let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+    let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
 
     // Saturate model_a's per-model forwarding slot.
     let held = {
@@ -161,7 +161,7 @@ async fn test_forwarding_limit_does_not_block_parked_requests() {
     .await;
 
     let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+    let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
 
     // Saturate the global forwarding limit with the active model.
     let held = {

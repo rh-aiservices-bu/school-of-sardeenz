@@ -18,6 +18,9 @@
 #       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>@sha256:<digest> — the
 #                    digest is required so a repointed tag can't silently change what gets pulled)
 #       sifName:     module filename stem, [A-Za-z0-9_.-]+ → /modules/<sifName>.sif == runtimeModule
+#       protocol:    REQUIRED — proxy protocol family: "openai" (OpenAI-compatible, /openai/v1)
+#                    or "oip" (KServe V2 Open Inference Protocol, /oip/v2). Must be one the
+#                    running proxy advertises, else import is rejected (proxy upgrade required).
 #       tags:        optional list of free-form labels for filtering
 #       minVRAMGiB:  optional minimum device memory hint (GiB)
 #       license:     optional SPDX license id
@@ -28,6 +31,9 @@
 #       maxTensorParallelism:   optional max devices this runner can span for tensor parallelism
 #       kvCacheElasticSharing:  optional bool — supports elastic, reclaimable KV-cache sharing
 #       features:               optional map of engine-specific feature flags
+#       entrypoint:  optional verbatim argv the worker execs in the SIF to launch the runner's
+#                    management shim (e.g. [python3, -m, sardeenz_mlserver_runner]); falls back
+#                    to the worker's SARDEENZ_RUNNER_ENTRYPOINT when omitted
 apiVersion: sardeenz.io/v1
 kind: RunnerCatalog
 runners:
@@ -41,6 +47,7 @@ runners:
     version: '0.21'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21@sha256:0000000000000000000000000000000000000000000000000000000000000000
     sifName: vllm-0.21
+    protocol: openai
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16
     license: Apache-2.0
@@ -65,6 +72,7 @@ runners:
     version: '0.20'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20@sha256:0000000000000000000000000000000000000000000000000000000000000000
     sifName: vllm-0.20
+    protocol: openai
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16
     license: Apache-2.0
@@ -79,3 +87,24 @@ runners:
       toolUse: true
       kvCacheOffload: false
       prefixCaching: true
+  - id: mlserver-1.6
+    title: MLServer 1.6 (KServe V2)
+    description: >-
+      Seldon MLServer 1.6 inference server speaking the KServe V2 Open Inference Protocol
+      (/oip/v2). GPU-backed runtimes (scikit-learn CPU-classical + HuggingFace/torch). Supports
+      sleep/wake via model unload/load. Not OpenAI-compatible.
+    engine: MLServer
+    runnerType: mlserver
+    version: '1.6'
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    sifName: mlserver-1.6
+    protocol: oip
+    entrypoint: [python3, -m, sardeenz_mlserver_runner]
+    tags: [oip, cuda, sklearn, huggingface]
+    minVRAMGiB: 8
+    license: Apache-2.0
+    supportedModelTypes: [PREDICTIVE, LLM, EMBEDDING]
+    supportedDeviceTypes: [CUDA]
+    supportedSleepLevels: [L1_HOST_RAM]
+    maxTensorParallelism: 1
+    kvCacheElasticSharing: false

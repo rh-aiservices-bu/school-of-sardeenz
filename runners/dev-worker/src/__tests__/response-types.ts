@@ -167,3 +167,27 @@ export interface ChatCompletionChunk {
   model: string;
   choices: ChatCompletionChunkChoice[];
 }
+
+// --- Runner stub: KServe V2 (Open Inference Protocol) ---
+
+export interface V2InferOutput {
+  name: string;
+  datatype: string;
+  shape: number[];
+  data: number[];
+}
+
+export interface V2InferResponse {
+  model_name: string;
+  model_version: string;
+  outputs: V2InferOutput[];
+}
+
+export interface V2ErrorResponse {
+  error: string;
+}
+
+export interface V2ReadyResponse {
+  name: string;
+  ready: boolean;
+}

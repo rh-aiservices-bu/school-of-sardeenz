@@ -43,7 +43,7 @@ async fn test_thundering_herd() {
 
         handles.push(tokio::spawn(async move {
             let resp = client
-                .post(format!("{url}/v1/chat/completions"))
+                .post(format!("{url}/openai/v1/chat/completions"))
                 .json(&serde_json::json!({
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Hi"}]

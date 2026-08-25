@@ -13,6 +13,7 @@ function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
     version: '0.21',
     image: 'oras://quay.io/x/vllm:0.21',
     sifName: 'vllm-0.21',
+    protocol: 'openai' as CatalogEntry['protocol'],
     maxTensorParallelism: 1,
     kvCacheElasticSharing: false,
     ...over,
@@ -20,7 +21,7 @@ function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
 }
 
 function snapshot(entries: CatalogEntry[]): CatalogSnapshot {
-  return { source: 'test', fetchedAt: '2026-01-01T00:00:00Z', entries };
+  return { source: 'test', fetchedAt: '2026-01-01T00:00:00Z', entries, invalidEntries: [] };
 }
 
 describe('buildCatalogView', () => {
@@ -62,6 +63,15 @@ describe('buildCatalogView', () => {
       new Map(),
     );
     expect(view.unmanagedModules).toEqual(['locally-built', 'triton-2.42']);
+  });
+
+  it('passes through invalidEntries from the snapshot', () => {
+    const withInvalid: CatalogSnapshot = {
+      ...snapshot([entry()]),
+      invalidEntries: [{ id: 'bad-entry', reason: "missing/invalid 'protocol'" }],
+    };
+    const view = buildCatalogView(withInvalid, new Set(), new Map());
+    expect(view.invalidEntries).toEqual([{ id: 'bad-entry', reason: "missing/invalid 'protocol'" }]);
   });
 });
 

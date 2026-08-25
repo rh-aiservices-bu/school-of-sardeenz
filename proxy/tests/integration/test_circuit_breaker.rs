@@ -38,10 +38,11 @@ async fn test_circuit_breaker_trips() {
     let model = "circuit-breaker-test/model-v1";
 
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: host.clone(),
                 port,
@@ -63,7 +64,7 @@ async fn test_circuit_breaker_trips() {
 
     for i in 0..THRESHOLD {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await
@@ -77,7 +78,7 @@ async fn test_circuit_breaker_trips() {
     }
 
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -122,7 +123,7 @@ async fn test_circuit_breaker_trips_on_5xx() {
     // Each 500 response from the runner should be recorded as a failure.
     for _ in 0..THRESHOLD {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await
@@ -134,7 +135,7 @@ async fn test_circuit_breaker_trips_on_5xx() {
 
     // Circuit should now be open — next request gets 503 without hitting runner.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -173,10 +174,11 @@ async fn test_circuit_breaker_recovers() {
     // Start with a dead endpoint to trip the circuit.
     let (dead_host, dead_port) = unreachable_endpoint();
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: dead_host.clone(),
                 port: dead_port,
@@ -199,7 +201,7 @@ async fn test_circuit_breaker_recovers() {
     // Trip the circuit.
     for _ in 0..THRESHOLD {
         let _ = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await;
@@ -207,10 +209,11 @@ async fn test_circuit_breaker_recovers() {
 
     // Swap to the working runner BEFORE waiting for recovery.
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: runner.addr.ip().to_string(),
                 port: runner.addr.port(),
@@ -229,7 +232,7 @@ async fn test_circuit_breaker_recovers() {
 
     // In HalfOpen state, the circuit allows one probe request through.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -243,7 +246,7 @@ async fn test_circuit_breaker_recovers() {
 
     // Circuit is now Closed — subsequent requests should also succeed.
     let resp2 = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -285,10 +288,11 @@ async fn test_both_replicas_recover_after_open() {
     let (dh1, dp1) = unreachable_endpoint();
     let (dh2, dp2) = unreachable_endpoint();
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![
                 RunnerEndpoint { host: dh1, port: dp1, weight: 1, healthy: true, runner_id: None },
                 RunnerEndpoint { host: dh2, port: dp2, weight: 1, healthy: true, runner_id: None },
@@ -305,7 +309,7 @@ async fn test_both_replicas_recover_after_open() {
 
     for _ in 0..(THRESHOLD * 2 + 2) {
         let _ = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await;
@@ -321,7 +325,7 @@ async fn test_both_replicas_recover_after_open() {
     tokio::time::sleep(Duration::from_millis(150)).await;
     for _ in 0..10 {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
-import { DeviceType, ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import { DeviceType, ModelLifecycleState, Protocol, RunnerState } from '@sardeenz/types';
 
 import { canConnect, createHarness, type TestHarness } from './helpers/harness.js';
 import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.js';
@@ -93,6 +93,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: MODEL,
       instanceId: INSTANCE_ID,
       workerId: WORKER_ID,
@@ -167,6 +168,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: MODEL,
       instanceId: INSTANCE_ID,
       workerId: WORKER_ID,
@@ -230,6 +232,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: rec!.name,
       instanceId: RESTART_INSTANCE_ID,
       workerId: restartResult!.workerId,
@@ -304,6 +307,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: MODEL,
       instanceId: INSTANCE_ID,
       workerId: WORKER_ID,
@@ -380,6 +384,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
       setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
       await harness.deployOrchestration.deployModel({
+        protocol: Protocol.openai,
         modelName: config.name,
         instanceId: config.instanceId,
         workerId: WORKER_ID,
@@ -455,6 +460,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     // Deliberately NOT passed to deployModel — displayName is presentation-only and never crosses
     // deploy-orchestration or the worker boundary (unlike servedModelName above).
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: MODEL,
       instanceId: INSTANCE_ID,
       workerId: WORKER_ID,
@@ -517,6 +523,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: MODEL,
       instanceId: INSTANCE_ID,
       workerId: WORKER_ID,
@@ -615,6 +622,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
 
       await expect(
         harness.deployOrchestration.deployModel({
+          protocol: Protocol.openai,
           modelName: MODEL,
           instanceId: INSTANCE_ID,
           workerId: WORKER_ID,

@@ -1,0 +1,59 @@
+# Sardeenz runner-mlserver — the Seldon MLServer (KServe V2) runner image that becomes a SIF.
+#
+# This image is NOT run as a container in production: CI builds+signs it, then a librarian job
+# converts it to a signed SIF on the shared module volume, and a worker `apptainer exec`s that SIF.
+# See docs/architecture/adrs/adr-015-sif-runtime-packaging.md and adr-017-runner-image-pipeline.md,
+# and docs/project/phase4.md (Task 3).
+#
+# Unlike runner-vllm, there is no builder stage: MLServer ships as prebuilt wheels (no CUDA -devel
+# toolchain to compile against) — mlserver + mlserver-sklearn (CPU-classical baseline) +
+# mlserver-huggingface (GPU torch runtime) install straight onto the base image.
+#
+# PIN DISCIPLINE: the base image tag and the mlserver/mlserver-sklearn/mlserver-huggingface
+# versions are pinned together. On any bump, re-validate the gRPC/metrics aux-port offsets
+# (runners/mlserver/sardeenz_mlserver_runner/cli.py) and re-run the shim's pytest suite.
+#
+# BASE IMAGE — NOT YET PINNED BY DIGEST: select a vetted CUDA+Python base matching the cluster's
+# CUDA line (mlserver-huggingface needs CUDA + torch for GPU-backed models), e.g.
+# `nvidia/cuda:12.6.x-runtime-ubi9` or the RHAIV Python-CUDA base, then pin it `@sha256:...` before
+# publishing — same discipline as runner-vllm's base, set when that image was first built
+# on-cluster (see the `@sha256:0000…` placeholder in runners.yaml for this runner's own image ref).
+
+# ---------------------------------------------------------------------------------------------
+# Stage 0: base — CUDA-runtime + Python 3.1x UBI (placeholder tag; pin @sha256 before publishing)
+# ---------------------------------------------------------------------------------------------
+FROM nvidia/cuda:12.6.3-runtime-ubi9 AS runtime
+USER 0
+RUN dnf -y module enable python312 && \
+    dnf -y install python3.12 python3.12-pip && \
+    dnf clean all && rm -rf /var/cache/dnf/* && \
+    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.12 1
+
+# HF_HUB_OFFLINE=1: runners never phone home at runtime; weights are pre-staged on the weights
+# volume. Set explicitly here so it's load-bearing regardless of the base image's default. The
+# librarian's model-staging step (not the runner) overrides it with --env HF_HUB_OFFLINE=0.
+ENV HF_HUB_OFFLINE=1
+
+# Pinned MLServer runtime set (issue "Initial runtime set" — one CPU-classical + one GPU runtime;
+# NOT xgboost/lightgbm/mlflow, additive later as a package pin + catalog entry, no code change).
+RUN pip3 install --no-cache-dir \
+      mlserver==1.6.1 \
+      mlserver-sklearn==1.6.1 \
+      mlserver-huggingface==1.6.1
+
+# Runner-contract shim: serves the engine-runner contract and drives MLServer over KServe V2.
+# BUILD CONTEXT is the repo root (needed to reach runners/mlserver), e.g.
+#   podman build -f containers/runner-mlserver/Containerfile -t sardeenz-runner-mlserver:1.6 .
+# The worker agent execs `python3 -m sardeenz_mlserver_runner --model … --port …` inside the SIF.
+COPY runners/mlserver /opt/sardeenz-mlserver-runner
+RUN pip3 install --no-cache-dir /opt/sardeenz-mlserver-runner
+
+# Non-root (issue "non-root"). The `nvidia/cuda` base ships no unprivileged app user, so create one
+# explicitly; the SIF's writable scratch/HOME redirection is handled by the worker agent at exec
+# time (mirrors runner-vllm).
+RUN useradd --uid 1001 --gid 0 --create-home --shell /sbin/nologin sardeenz
+USER 1001
+
+# Default entrypoint documents the shim; the worker agent overrides argv with --model/--port.
+CMD ["python3", "-m", "sardeenz_mlserver_runner", "--help"]

@@ -8,7 +8,13 @@ The runner catalog lets operators browse a curated list of engine runners and **
 - **Official runners** are built + signed, then pushed to an OCI registry as **ORAS** artifacts
   (`apptainer push my.sif oras://quay.io/<ns>/<repo>:<tag>`).
 - A **catalog** file (`runners.yaml`) lists the available runners (title, description, engine,
-  version, ORAS image, `sifName`, tags, …). The default catalog is the official
+  version, ORAS image, `sifName`, tags, `protocol`, `entrypoint`, …). `protocol` (required:
+  `openai` | `oip`) names the proxy protocol family the runner's models are invoked under —
+  `openai` for OpenAI-compatible engines (vLLM), `oip` for KServe V2 Open Inference Protocol
+  engines (MLServer). `entrypoint` (optional argv) is the verbatim command the worker execs inside
+  the SIF to launch the runner's management shim, falling back to the worker's
+  `SARDEENZ_RUNNER_ENTRYPOINT` when absent. See [ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md).
+  The default catalog is the official
   [`school-of-sardeenz/runners.yaml`](https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml);
   point `SARDEENZ_RUNNER_CATALOG_URL` at your own to customize. The repo-root
   [`runners.yaml`](../../runners.yaml) is the dev source and the schema reference.
@@ -80,8 +86,35 @@ Anyone with registry/store write access can then build and publish — no keys, 
 > (private half in CI/librarian, public half distributed to workers + the control plane — see
 > [`deployment/librarian/`](../../deployment/librarian/)) before exposing or sharing the deployment.
 
+### Example: an MLServer (OIP) entry
+
+```yaml
+- id: mlserver-1.6
+  title: MLServer 1.6 (KServe V2)
+  description: Seldon MLServer 1.6 — KServe V2 Open Inference Protocol, sklearn/HF-backed.
+  engine: MLServer
+  runnerType: mlserver
+  version: "1.6"
+  image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6@sha256:<digest>
+  sifName: mlserver-1.6
+  protocol: oip
+  entrypoint: [python3, -m, sardeenz_mlserver_runner]
+  supportedModelTypes: [PREDICTIVE, LLM, EMBEDDING]
+```
+
 ## Authoring your own catalog
 
 Copy `runners.yaml`, host it anywhere reachable (an internal URL, a Git raw URL, or a file mounted
-into the control plane), and set `SARDEENZ_RUNNER_CATALOG_URL`. Entries that fail validation are
-skipped (logged), so a single bad entry won't break the catalog.
+into the control plane), and set `SARDEENZ_RUNNER_CATALOG_URL`.
+
+Entries that fail validation are skipped, but a missing or invalid `protocol` is now a **loud,
+surfaced** validation error — such entries are excluded from the imported list, reported in
+`RunnerCatalogView.invalidEntries`, and shown in the dashboard's "some catalog entries were
+skipped" warning, rather than silently dropped. This keeps an out-of-date or malformed catalog from
+presenting as "no runners available" with no explanation.
+
+Importing a runner whose `protocol` the **running proxy does not advertise** fails at import time
+with an actionable "proxy upgrade required" (409) error — the proxy publishes its supported
+protocol set at the `{prefix}:proxy:protocols` Redis key on every (re)connect, and catalog import
+checks it as a forward-compat guard (fail-open when the key is absent, e.g. the proxy hasn't
+started yet). See [ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md).

@@ -44,6 +44,15 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     const entry = snapshot.entries.find((e) => e.id === request.params.id);
     if (!entry) throw ControlPlaneError.catalogEntryNotFound(request.params.id);
 
+    // Forward-compat guard: reject an import only on positive evidence the running proxy
+    // demonstrably cannot serve this protocol. Key absent (proxy not started yet / older build)
+    // is indistinguishable from "new protocol" — permit the import rather than failing catalog
+    // import whenever the proxy happens to be down (#125 Unit B item 4).
+    const supported = await deps.proxyProtocols.getSupported();
+    if (supported !== null && !supported.includes(entry.protocol)) {
+      throw ControlPlaneError.proxyProtocolUnsupported(entry.protocol, supported);
+    }
+
     const status = deps.moduleStore.startImport(entry);
     return reply.code(202).send(status);
   });

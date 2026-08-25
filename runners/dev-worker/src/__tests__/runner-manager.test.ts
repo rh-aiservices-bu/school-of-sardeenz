@@ -649,4 +649,34 @@ describe('RunnerManager', () => {
 
     expect(capturedSpec?.engineArgs).toEqual(['--x=1']);
   });
+
+  it('threads entrypoint through to the LaunchSpec passed to the launcher (#125)', async () => {
+    let capturedSpec: LaunchSpec | undefined;
+    const capturingLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> => {
+        capturedSpec = spec;
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), capturingLauncher);
+
+    await mgr.startRunner({
+      modelName: 'entrypoint-model',
+      instanceId: 'inst-entrypoint-model',
+      runnerType: 'mlserver',
+      modelPath: '/models/entrypoint-model',
+      requiredMemory: 1,
+      tensorParallel: 1,
+      entrypoint: ['python3', '-m', 'sardeenz_mlserver_runner'],
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(capturedSpec?.entrypoint).toEqual(['python3', '-m', 'sardeenz_mlserver_runner']);
+  });
 });

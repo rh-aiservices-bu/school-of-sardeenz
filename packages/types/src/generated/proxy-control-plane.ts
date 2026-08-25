@@ -102,6 +102,18 @@ export type components = {
          */
         ModelState: ModelState;
         /**
+         * @description Protocol family a model speaks, and the proxy path prefix under which
+         *     it is invoked. `openai` → OpenAI-compatible surface (`/openai/v1/...`,
+         *     vLLM). `oip` → KServe V2 Open Inference Protocol surface
+         *     (`/oip/v2/...`, MLServer). Extensible: a new value is a coordinated
+         *     change to this spec, the hand-maintained Rust mirror, and (by the
+         *     forward-compat guard) a proxy release. Values are lowercase and match
+         *     both the URL prefix and the catalog `protocol` field — deliberately
+         *     not SCREAMING_SNAKE_CASE.
+         * @enum {string}
+         */
+        Protocol: Protocol;
+        /**
          * @description Request to wake a sleeping model. Sent by the proxy to the control
          *     plane when an inference request arrives for a model in `SLEEPING`
          *     state.
@@ -172,6 +184,13 @@ export type components = {
             modelName: string;
             state: components["schemas"]["ModelState"];
             /**
+             * @description Written by the control plane. The proxy filters both model
+             *     listings on this value — `/openai/v1/models` lists only `openai`
+             *     entries, `/oip/v2/models` only `oip` — so it must be present on
+             *     every entry.
+             */
+            protocol: components["schemas"]["Protocol"];
+            /**
              * @description Runner endpoints serving this model. Empty when the model is
              *     in `SLEEPING` or `ERROR` state. Multiple entries indicate
              *     replicas for load balancing.
@@ -198,11 +217,6 @@ export type components = {
                 ownedBy?: string;
                 /** @description Maximum context length supported by this model deployment. */
                 maxModelLen?: number;
-                /**
-                 * @description The inference engine type serving this model (e.g., "vllm",
-                 *     "triton").
-                 */
-                engineType?: string;
             } & {
                 [key: string]: unknown;
             };
@@ -249,6 +263,33 @@ export type components = {
              */
             runnerId?: string;
         };
+        /**
+         * @description Response body of the proxy's `GET /oip/v2/models`. NOT part of the
+         *     standard KServe V2 dataplane spec — defined by Sardeenz. Answered by
+         *     the proxy from the routing map (never forwarded), listing only
+         *     `oip`-protocol models. SLEEPING models ARE listed (`ready: false`):
+         *     they are invocable, and a request to one parks and wakes it. "not
+         *     ready" means "asleep, wakes on inference", NOT "unavailable".
+         */
+        OipModelList: {
+            models: {
+                /** @description The Sardeenz model (configuration) name — the routing key. */
+                name: string;
+                /** @description `true` when ACTIVE, `false` when SLEEPING. */
+                ready: boolean;
+            }[];
+        };
+        /**
+         * @description JSON value stored at the Redis string key `{prefix}:proxy:protocols`.
+         *     The set of protocol families the running proxy supports. Written on
+         *     every Redis (re)connect; not TTL'd. Consumed by the control plane's
+         *     catalog-import forward-compat guard.
+         * @example [
+         *       "openai",
+         *       "oip"
+         *     ]
+         */
+        ProxyProtocolSet: components["schemas"]["Protocol"][];
         /**
          * @description Published to the `sardeenz:routing-updates` Redis pub/sub channel
          *     whenever the routing map changes. The proxy subscribes to this
@@ -400,6 +441,10 @@ export enum ModelState {
     STARTING = "STARTING",
     DRAINING = "DRAINING",
     ERROR = "ERROR"
+}
+export enum Protocol {
+    openai = "openai",
+    oip = "oip"
 }
 export enum RoutingMapUpdateType {
     MODEL_STATE_CHANGED = "MODEL_STATE_CHANGED",
