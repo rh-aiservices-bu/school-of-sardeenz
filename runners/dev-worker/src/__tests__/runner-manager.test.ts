@@ -821,7 +821,7 @@ describe('getLedgerInstanceShares', () => {
     // memory-report push until the control plane marks the whole worker's budget stale.
     expect(fetchFn).toHaveBeenCalledWith(
       'http://127.0.0.1:19301/memory-report',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }),
     );
   });
 
