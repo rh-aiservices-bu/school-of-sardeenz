@@ -14,6 +14,8 @@ import {
   Title,
 } from '@patternfly/react-core';
 import { ChartDonut } from '@patternfly/react-charts/victory';
+import { chart_color_blue_300 } from '@patternfly/react-tokens/dist/esm/chart_color_blue_300';
+import { chart_color_black_200 } from '@patternfly/react-tokens/dist/esm/chart_color_black_200';
 import {
   CubesIcon,
   ExclamationTriangleIcon,
@@ -26,7 +28,7 @@ import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/type
 import { useClusterStatus } from '../../hooks/useCluster';
 import { useEventStream } from '../../hooks/useEventStream';
 import { StateLabel } from '../../components/StateLabel';
-import { PlacementBoard } from '../../components/PlacementBoard';
+import { ModelsPlacementPanel } from '../../components/ModelsPlacementPanel';
 import { InferenceUrlBanner } from '../../components/InferenceUrlBanner';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 
@@ -130,8 +132,10 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
 // ---------------------------------------------------------------------------
 function GpuMemoryCard({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
-  const { totalBytes, usedBytes, availableBytes } = status.memory;
-  const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+  // usedBytes IS the NVML measurement now (doctrine: measured memory is the only number) — no
+  // more reserved/allocated-estimate branching.
+  const { totalBytes, usedBytes } = status.memory;
+  const percent = totalBytes > 0 ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
 
   return (
     <Card isCompact>
@@ -167,10 +171,10 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
             color: 'var(--pf-t--global--text--color--subtle)',
           }}
         >
-          {t('overview.cards.gpuMemory.available', {
-            value: formatBytes(availableBytes),
-            total: formatBytes(totalBytes),
-          })}
+          {[
+            t('overview.cards.gpuMemory.usedFragment', { value: formatBytes(usedBytes) }),
+            t('overview.cards.gpuMemory.totalFragment', { value: formatBytes(totalBytes) }),
+          ].join(' · ')}
         </div>
       </CardBody>
     </Card>
@@ -259,12 +263,26 @@ function SummaryCards({ status }: { status: ClusterStatus }) {
 // ---------------------------------------------------------------------------
 function MemoryDonutChart({ status }: { status: ClusterStatus }) {
   const { t } = useTranslation('cluster');
-  const { totalBytes, usedBytes, availableBytes } = status.memory;
-  const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+  const { totalBytes, usedBytes } = status.memory;
+  const percent = totalBytes > 0 ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+  const freeBytes = Math.max(0, totalBytes - usedBytes);
 
-  const data = [
-    { x: t('overview.vramUsage.used'), y: usedBytes },
-    { x: t('overview.vramUsage.available'), y: availableBytes },
+  // Chart colors: react-tokens `.var` strings (hex fallback included) — the bare chart custom
+  // properties are not defined by base.css, and an undefined var() fills SVG arcs black.
+  const segments = [
+    { label: t('overview.vramUsage.used'), bytes: usedBytes, color: chart_color_blue_300.var },
+    { label: t('overview.vramUsage.free'), bytes: freeBytes, color: chart_color_black_200.var },
+  ];
+
+  const colorScale = segments.map((s) => s.color);
+  const data = segments.map((s) => ({ x: s.label, y: s.bytes }));
+  const legendData = segments.map((s) => ({ name: `${s.label}: ${formatBytes(s.bytes)}` }));
+  const primaryLabel = segments[0].label;
+
+  // Stat rows below the donut — mirror the segments shown in the chart, plus Total always.
+  const statRows: Array<{ label: string; value: string; bold?: boolean }> = [
+    ...segments.map((s) => ({ label: s.label, value: formatBytes(s.bytes) })),
+    { label: t('overview.vramUsage.total'), value: formatBytes(totalBytes), bold: true },
   ];
 
   return (
@@ -287,12 +305,9 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               height={200}
               width={200}
               title={`${percent}%`}
-              subTitle={t('overview.cards.gpuMemory.used').trim()}
-              colorScale={['var(--pf-t-chart-color-blue-300)', 'var(--pf-t-chart-color-blue-100)']}
-              legendData={[
-                { name: `${t('overview.vramUsage.used')}: ${formatBytes(usedBytes)}` },
-                { name: `${t('overview.vramUsage.available')}: ${formatBytes(availableBytes)}` },
-              ]}
+              subTitle={primaryLabel.trim()}
+              colorScale={colorScale}
+              legendData={legendData}
               legendOrientation="vertical"
               legendPosition="right"
             />
@@ -304,55 +319,28 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               gap: 'var(--pf-t--global--spacer--sm)',
             }}
           >
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {t('overview.vramUsage.used')}
+            {statRows.map((row) => (
+              <div key={row.label}>
+                <div
+                  style={{
+                    fontSize: 'var(--pf-t--global--font--size--sm)',
+                    color: 'var(--pf-t--global--text--color--subtle)',
+                  }}
+                >
+                  {row.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: row.bold
+                      ? 'var(--pf-t--global--font--size--md)'
+                      : 'var(--pf-t--global--font--size--xl)',
+                    fontWeight: 'var(--pf-t--global--font--weight--bold)',
+                  }}
+                >
+                  {row.value}
+                </div>
               </div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--xl)',
-                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
-                }}
-              >
-                {formatBytes(usedBytes)}
-              </div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {t('overview.vramUsage.available')}
-              </div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--xl)',
-                  fontWeight: 'var(--pf-t--global--font--weight--bold)',
-                }}
-              >
-                {formatBytes(availableBytes)}
-              </div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--sm)',
-                  color: 'var(--pf-t--global--text--color--subtle)',
-                }}
-              >
-                {t('overview.vramUsage.total')}
-              </div>
-              <div style={{ fontWeight: 'var(--pf-t--global--font--weight--bold)' }}>
-                {formatBytes(totalBytes)}
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       </CardBody>
@@ -708,8 +696,8 @@ export function ClusterOverview() {
           <ModelStateBreakdown status={status} />
         </div>
 
-        {/* Row 2.5: Placement board — workers -> GPUs -> placed models */}
-        <PlacementBoard />
+        {/* Row 2.5: Models placement — workers -> GPUs -> placed models (v1 panel port) */}
+        <ModelsPlacementPanel />
 
         {/* Row 4: Recent events */}
         <RecentEvents />

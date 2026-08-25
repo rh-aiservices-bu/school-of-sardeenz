@@ -131,6 +131,7 @@ interface DeployOverrides {
   setModelState?: ReturnType<typeof vi.fn>;
   createInstanceRecord?: ReturnType<typeof vi.fn>;
   resolveRunnerMetadata?: ReturnType<typeof vi.fn>;
+  getMeasuredByInstance?: ReturnType<typeof vi.fn>;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -190,6 +191,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
       reserveCapacity: vi.fn(),
       releaseInstanceReservations: vi.fn(),
       refreshAll: over.refreshAll ?? vi.fn(() => Promise.resolve()),
+      getMeasuredByInstance: over.getMeasuredByInstance ?? vi.fn(() => new Map()),
     },
     placement: {
       place: over.place ?? vi.fn(() => null),
@@ -331,6 +333,28 @@ describe('POST /api/v1/models deploy-path eviction', () => {
 
     expect(res.statusCode).toBe(503);
     expect(res.json<{ code: string }>().code).toBe('PLACEMENT_FAILED');
+  });
+});
+
+describe('POST /api/v1/models refreshes memory budgets before placement (#163 staleness fix)', () => {
+  it('calls memoryBudget.refreshAll() before placement.place() on the initial (non-eviction) path', async () => {
+    const order: string[] = [];
+    const refreshAll = vi.fn(() => {
+      order.push('refreshAll');
+      return Promise.resolve();
+    });
+    const place = vi.fn(() => {
+      order.push('place');
+      return { workerId: 'w1', devices: [{ deviceIndex: 0, deviceType: 'CUDA' }] };
+    });
+    const { app } = buildDeployApp({ refreshAll, place });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(202);
+    expect(refreshAll).toHaveBeenCalledOnce();
+    expect(place).toHaveBeenCalledOnce();
+    expect(order).toEqual(['refreshAll', 'place']);
   });
 });
 
@@ -1417,6 +1441,89 @@ describe('displayName (presentation-only label)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json<{ displayName?: string }>().displayName).toBe('Qwen test 1');
+  });
+});
+
+describe('currentMemory (#163 measured telemetry)', () => {
+  const RECORD_M1 = {
+    name: 'm1',
+    runnerType: 'vllm',
+    modelPath: '/weights/m1',
+    requiredMemory: 8e9,
+    deviceType: 'CUDA',
+    tensorParallel: 1,
+    engineConfig: null,
+    engineArgs: null,
+    runtimeModule: null,
+    servedModelName: null,
+    displayName: null,
+    pinned: false,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+
+  it('GET /api/v1/models sums currentMemory across a model with two instances', async () => {
+    const instances = [
+      { ...ACTIVE_STATE, instanceId: 'inst-a' },
+      { ...ACTIVE_STATE, instanceId: 'inst-b' },
+    ];
+    const getMeasuredByInstance = vi.fn(
+      () =>
+        new Map([
+          ['inst-a', 3e9],
+          ['inst-b', 2e9],
+        ]),
+    );
+    const { app } = buildDeployApp({
+      findAll: vi.fn(() => Promise.resolve([RECORD_M1])),
+      getAllInstances: vi.fn(() => Promise.resolve(instances)),
+      getMeasuredByInstance,
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ models: Array<{ modelName: string; currentMemory?: number }> }>();
+    expect(body.models.find((m) => m.modelName === 'm1')?.currentMemory).toBe(5e9);
+  });
+
+  it('GET /api/v1/models omits currentMemory when no instance of the model has a measurement', async () => {
+    const instances = [{ ...ACTIVE_STATE, instanceId: 'inst-a' }];
+    const { app } = buildDeployApp({
+      findAll: vi.fn(() => Promise.resolve([RECORD_M1])),
+      getAllInstances: vi.fn(() => Promise.resolve(instances)),
+      getMeasuredByInstance: vi.fn(() => new Map()),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ models: Array<Record<string, unknown>> }>();
+    const model = body.models.find((m) => m['modelName'] === 'm1');
+    expect(model).toBeDefined();
+    expect('currentMemory' in (model as Record<string, unknown>)).toBe(false);
+  });
+
+  it('GET /api/v1/models/:modelName includes currentMemory on the InstanceDetail entries that have a measurement', async () => {
+    const instances = [
+      { ...ACTIVE_STATE, instanceId: 'inst-a' },
+      { ...ACTIVE_STATE, instanceId: 'inst-b' },
+    ];
+    const getMeasuredByInstance = vi.fn(() => new Map([['inst-a', 4e9]]));
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() => Promise.resolve(RECORD_M1)),
+      getInstancesForModel: vi.fn(() => Promise.resolve(instances)),
+      getMeasuredByInstance,
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ instances: Array<{ instanceId: string; currentMemory?: number }> }>();
+    const instA = body.instances.find((i) => i.instanceId === 'inst-a');
+    const instB = body.instances.find((i) => i.instanceId === 'inst-b');
+    expect(instA?.currentMemory).toBe(4e9);
+    expect(instB && 'currentMemory' in instB).toBe(false);
   });
 });
 

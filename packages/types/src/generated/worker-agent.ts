@@ -369,6 +369,14 @@ export type components = {
         WorkerMemoryReport: {
             devices: components["schemas"]["WorkerDeviceMemory"][];
             /**
+             * @description Measured per-instance device memory, attributed by mapping the
+             *     device's process list (NVML) to the runner processes the worker
+             *     spawned. On hosts without NVML (stub mode / CPU-only) the worker
+             *     simulates the entries from its runner allocation ledger so
+             *     per-model views behave identically in dev.
+             */
+            instances?: components["schemas"]["InstanceMemoryMeasurement"][];
+            /**
              * Format: date-time
              * @description ISO-8601 timestamp of when the worker generated this report. Used
              *     by the control plane to determine staleness. When absent, the
@@ -382,7 +390,12 @@ export type components = {
             deviceType: components["schemas"]["DeviceType"];
             /**
              * Format: int64
-             * @description Total bytes used across all runners on this device.
+             * @description Measured device memory in use, in bytes, read from NVML
+             *     (`nvmlDeviceGetMemoryInfo`, total − free — includes memory
+             *     consumed by processes outside Sardeenz's control and the
+             *     driver-reserved region). On hosts without NVML (stub mode /
+             *     CPU-only), the worker simulates this figure from its runner
+             *     allocation ledger so downstream views behave identically.
              */
             memoryUsedBytes: number;
             /**
@@ -390,6 +403,42 @@ export type components = {
              * @description Total device capacity in bytes.
              */
             memoryTotalBytes: number;
+            /**
+             * @description Device product name from NVML (e.g. "NVIDIA GeForce RTX 4070
+             *     Ti"). Absent when the worker cannot query it.
+             */
+            deviceName?: string;
+            /**
+             * @description GPU utilization percentage from NVML at report time. Absent
+             *     when unavailable.
+             */
+            utilizationPercent?: number;
+            /**
+             * @description GPU temperature in degrees Celsius from NVML at report time.
+             *     Absent when unavailable.
+             */
+            temperatureC?: number;
+        };
+        /**
+         * @description Measured device memory attributed to one runner instance on one
+         *     device, from the device's NVML process list. Under kvcached elastic
+         *     sharing the pooled allocation is attributed to the process that owns
+         *     it, so co-located instances' figures are honest per-process numbers,
+         *     not a split of the shared pool.
+         */
+        InstanceMemoryMeasurement: {
+            /** @description Control-plane instance identifier (`inst-<hex>`). */
+            instanceId: string;
+            /** @description Configuration model name the instance belongs to. */
+            modelName: string;
+            /** @description Zero-based global device index. */
+            deviceIndex: number;
+            /**
+             * Format: int64
+             * @description Measured bytes used by this instance's process tree on this
+             *     device (stub-simulated on hosts without NVML).
+             */
+            memoryUsedBytes: number;
         };
         /** @description Error response returned on failure. */
         ErrorResponse: {

@@ -3,12 +3,19 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import { loadRootEnv } from './load-env.js';
 import { loadConfig } from './config.js';
-import { WorkerRegistration, type CatalogCapabilityOverrides } from './registration.js';
+import {
+  WorkerRegistration,
+  type CatalogCapabilityOverrides,
+  type MeasuredMemorySample,
+  type MeasuredInstanceSample,
+} from './registration.js';
 import { RunnerManager, probePortAvailable } from './runner-manager.js';
 import { StubLauncher } from './stub-launcher.js';
 import { ApptainerLauncher } from './apptainer-launcher.js';
 import type { RunnerLauncher } from './launcher.js';
 import { resolveDevices, type DeviceReport } from './gpu-detect.js';
+import { createNvmlReader } from './nvml.js';
+import { buildMeasuredSample } from './measured-sample.js';
 import { createServer } from './server.js';
 import { Redis } from 'ioredis';
 
@@ -77,9 +84,48 @@ function createLauncher(): RunnerLauncher {
   return new StubLauncher(config);
 }
 
-// Resolve the advertised fleet once at startup: real GPUs via nvidia-smi in apptainer mode, else the
+// NVML session for this worker's lifetime, created once at startup and shut down on exit. Returns
+// null on a CPU dev box or any host without the NVIDIA driver — every consumer below tolerates that
+// and falls back to unmeasured behavior.
+const nvmlReader = await createNvmlReader();
+
+// Holds the RunnerManager once constructed below. registration must exist before runnerManager
+// (RunnerManager's constructor takes it), but measuredProvider's closure needs
+// runnerManager.getRunnerProcesses() — a mutable ref sidesteps the circular construction order
+// without a `let` variable that's only ever assigned once (measuredProvider isn't actually called
+// until start(), well after runnerManagerRef.current is set below).
+const runnerManagerRef: { current?: RunnerManager } = {};
+
+// Binds the NvmlReader + RunnerManager into WorkerRegistration's MeasuredMemoryProvider. The
+// actual device/process -> instance attribution logic lives in buildMeasuredSample()
+// (measured-sample.ts), which is pure and unit-tested on its own; this is just the wiring.
+function measuredProvider(): Promise<MeasuredMemorySample | null> {
+  if (!nvmlReader) return Promise.resolve(null);
+  const sample = nvmlReader.readSample();
+  if (!sample) return Promise.resolve(null);
+
+  const owners = runnerManagerRef.current?.getRunnerProcesses() ?? [];
+  return Promise.resolve(buildMeasuredSample(sample.devices, sample.processes, owners));
+}
+
+// Doctrine fallback for stub mode / CPU-only hosts (no NVML): simulates instances[] from the
+// worker's own runner ledger via RunnerManager.getLedgerInstanceShares(), which already correctly
+// reports nothing for a sleeping runner (see that method's doc comment).
+function ledgerInstancesProvider(): Promise<MeasuredInstanceSample[]> {
+  if (!runnerManagerRef.current) return Promise.resolve([]);
+  return runnerManagerRef.current.getLedgerInstanceShares().then((shares) =>
+    shares.map((s) => ({
+      instanceId: s.instanceId,
+      modelName: s.modelName,
+      deviceIndex: s.deviceIndex,
+      memoryUsedBytes: s.bytes,
+    })),
+  );
+}
+
+// Resolve the advertised fleet once at startup: real GPUs via NVML in apptainer mode, else the
 // configured (simulated) fleet. Done before registration so the control plane budgets real VRAM.
-const deviceReport = await resolveDevices(config);
+const deviceReport = resolveDevices(config, nvmlReader);
 
 const redis = new Redis(config.redisUrl);
 const registration = new WorkerRegistration(
@@ -88,6 +134,8 @@ const registration = new WorkerRegistration(
   deviceReport.devices,
   undefined,
   catalogCapabilities,
+  measuredProvider,
+  ledgerInstancesProvider,
 );
 const runnerManager = new RunnerManager(
   config,
@@ -96,6 +144,7 @@ const runnerManager = new RunnerManager(
   undefined,
   probePortAvailable,
 );
+runnerManagerRef.current = runnerManager;
 
 const server = createServer(runnerManager, config.workerToken);
 
@@ -124,15 +173,15 @@ async function start(): Promise<void> {
     );
   }
   // Be explicit about where the fleet came from so fabricated numbers aren't read as real hardware:
-  //   detected   — real GPUs from nvidia-smi (apptainer mode)
+  //   detected   — real GPUs from NVML (apptainer mode)
   //   simulating — fabricated from SARDEENZ_DEVICE_* (stub mode)
-  //   configured — apptainer mode but no nvidia-smi, so falling back to SARDEENZ_DEVICE_*
+  //   configured — apptainer mode but no NVML, so falling back to SARDEENZ_DEVICE_*
   const origin =
-    deviceReport.source === 'nvidia-smi'
+    deviceReport.source === 'nvml'
       ? 'detected'
       : config.mode === 'stub'
         ? 'simulating'
-        : 'configured (no nvidia-smi; set SARDEENZ_DEVICE_COUNT / SARDEENZ_DEVICE_MEMORY_GB)';
+        : 'configured (no NVML; set SARDEENZ_DEVICE_COUNT / SARDEENZ_DEVICE_MEMORY_GB)';
   console.log(
     `[worker:${config.mode}] ${config.workerId} listening on :${config.workerPort} ` +
       `(${origin} ${summarizeFleet(deviceReport)})`,
@@ -149,6 +198,7 @@ async function shutdown(): Promise<void> {
   await registration.deregister();
   await server.close();
   redis.disconnect();
+  nvmlReader?.shutdown();
   console.log(`[dev-worker] ${config.workerId} stopped.`);
 }
 

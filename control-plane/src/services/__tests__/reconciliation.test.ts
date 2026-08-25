@@ -968,7 +968,6 @@ describe('ReconciliationService', () => {
               deviceType: 'gpu',
               totalBytes: 16e9,
               usedBytes: 4e9,
-              reservedBytes: 0,
               availableBytes: 12e9,
             },
             {
@@ -976,7 +975,6 @@ describe('ReconciliationService', () => {
               deviceType: 'gpu',
               totalBytes: 16e9,
               usedBytes: 2e9,
-              reservedBytes: 0,
               availableBytes: 14e9,
             },
           ],

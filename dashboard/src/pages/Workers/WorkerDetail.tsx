@@ -50,20 +50,25 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
   const {
     deviceIndex,
     deviceType,
+    deviceName,
     memoryTotalBytes,
     memoryUsedBytes,
     memoryAvailableBytes,
-    memoryReservedBytes,
+    utilizationPercent,
+    temperatureC,
   } = device;
+  // memoryUsedBytes IS the NVML measurement now (doctrine: measured memory is the only number,
+  // #163) — no more allocated-estimate/reserved lines to show.
   const usedPercent =
-    memoryTotalBytes > 0 ? Math.round((memoryUsedBytes / memoryTotalBytes) * 100) : 0;
+    memoryTotalBytes > 0
+      ? Math.min(100, Math.round((memoryUsedBytes / memoryTotalBytes) * 100))
+      : 0;
+  const hasUtilOrTemp = utilizationPercent != null || temperatureC != null;
 
   return (
     <Card isCompact>
       <CardHeader>
-        <CardTitle>
-          GPU {deviceIndex} — {deviceType}
-        </CardTitle>
+        <CardTitle>{deviceName ?? `GPU ${deviceIndex} — ${deviceType}`}</CardTitle>
       </CardHeader>
       <CardBody>
         <div
@@ -73,6 +78,16 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
             gap: 'var(--pf-t--global--spacer--sm)',
           }}
         >
+          {hasUtilOrTemp && (
+            <div
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--xs)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
+            >
+              {t('detail.utilTemp', { util: utilizationPercent ?? '—', temp: temperatureC ?? '—' })}
+            </div>
+          )}
           <Progress value={usedPercent} aria-label={`GPU ${deviceIndex} memory usage`} />
           <div
             style={{
@@ -98,9 +113,6 @@ function DeviceCard({ device, workerModels }: DeviceCardProps) {
             }}
           >
             <div>{t('detail.memory.available', { value: formatBytes(memoryAvailableBytes) })}</div>
-            {memoryReservedBytes != null && memoryReservedBytes > 0 && (
-              <div>{t('detail.memory.reserved', { value: formatBytes(memoryReservedBytes) })}</div>
-            )}
           </div>
 
           {/* Per-device model breakdown */}

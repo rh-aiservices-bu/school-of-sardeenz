@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { detectNvidiaDevices, resolveDevices, type ExecFn } from '../gpu-detect.js';
+import { detectNvidiaDevices, resolveDevices } from '../gpu-detect.js';
+import type { NvmlReader } from '../nvml.js';
 import type { DevWorkerConfig } from '../config.js';
 
 const GIB = 1024 * 1024 * 1024;
-const MIB = 1024 * 1024;
 
 function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
   return {
@@ -44,53 +44,75 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
   };
 }
 
-const execReturning = (stdout: string): ExecFn => vi.fn(() => Promise.resolve({ stdout }));
-const execThrowing = (): ExecFn =>
-  vi.fn(() => Promise.reject(new Error('spawn nvidia-smi ENOENT')));
+function makeReader(overrides: Partial<NvmlReader> = {}): NvmlReader {
+  return {
+    readDeviceMemory: vi.fn(() => null),
+    readProcesses: vi.fn(() => null),
+    readSample: vi.fn(() => null),
+    shutdown: vi.fn(),
+    ...overrides,
+  };
+}
 
 describe('detectNvidiaDevices', () => {
-  it('parses one GPU (MiB → bytes)', async () => {
-    const devices = await detectNvidiaDevices(execReturning('8188\n'));
-    expect(devices).toEqual([{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 8188 * MIB }]);
+  it('maps one NVML device (bytes passthrough)', () => {
+    const reader = makeReader({
+      readDeviceMemory: vi.fn(() => [
+        { deviceIndex: 0, totalBytes: 8188 * 1024 * 1024, usedBytes: 0 },
+      ]),
+    });
+    const devices = detectNvidiaDevices(reader);
+    expect(devices).toEqual([
+      { deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 8188 * 1024 * 1024 },
+    ]);
   });
 
-  it('parses multiple GPUs with ascending indices', async () => {
-    const devices = await detectNvidiaDevices(execReturning('24564\n24564\n'));
+  it('maps multiple NVML devices with ascending indices', () => {
+    const reader = makeReader({
+      readDeviceMemory: vi.fn(() => [
+        { deviceIndex: 0, totalBytes: 24564 * 1024 * 1024, usedBytes: 0 },
+        { deviceIndex: 1, totalBytes: 24564 * 1024 * 1024, usedBytes: 0 },
+      ]),
+    });
+    const devices = detectNvidiaDevices(reader);
     expect(devices).toHaveLength(2);
     expect(devices?.[0].deviceIndex).toBe(0);
     expect(devices?.[1].deviceIndex).toBe(1);
-    expect(devices?.[1].memoryTotalBytes).toBe(24564 * MIB);
+    expect(devices?.[1].memoryTotalBytes).toBe(24564 * 1024 * 1024);
   });
 
-  it('returns null when nvidia-smi is unavailable', async () => {
-    expect(await detectNvidiaDevices(execThrowing())).toBeNull();
+  it('returns null when NVML reports no devices', () => {
+    const reader = makeReader({ readDeviceMemory: vi.fn(() => null) });
+    expect(detectNvidiaDevices(reader)).toBeNull();
   });
 
-  it('returns null on empty output (no GPUs)', async () => {
-    expect(await detectNvidiaDevices(execReturning('\n  \n'))).toBeNull();
-  });
-
-  it('returns null on non-numeric output rather than advertising a bogus fleet', async () => {
-    expect(await detectNvidiaDevices(execReturning('No devices were found\n'))).toBeNull();
+  it('returns null on an empty device list', () => {
+    const reader = makeReader({ readDeviceMemory: vi.fn(() => []) });
+    expect(detectNvidiaDevices(reader)).toBeNull();
   });
 });
 
 describe('resolveDevices', () => {
-  it('apptainer + CUDA detects real GPUs (source=nvidia-smi)', async () => {
-    const report = await resolveDevices(
+  it('apptainer + CUDA detects real GPUs (source=nvml)', () => {
+    const reader = makeReader({
+      readDeviceMemory: vi.fn(() => [
+        { deviceIndex: 0, totalBytes: 8188 * 1024 * 1024, usedBytes: 0 },
+      ]),
+    });
+    const report = resolveDevices(
       makeConfig({ mode: 'apptainer', deviceCount: 2, deviceMemoryBytes: 24 * GIB }),
-      execReturning('8188\n'),
+      reader,
     );
-    expect(report.source).toBe('nvidia-smi');
+    expect(report.source).toBe('nvml');
     expect(report.devices).toEqual([
-      { deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 8188 * MIB },
+      { deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 8188 * 1024 * 1024 },
     ]);
   });
 
-  it('apptainer falls back to configured fleet when nvidia-smi is absent', async () => {
-    const report = await resolveDevices(
+  it('apptainer falls back to configured fleet when NVML reader is null', () => {
+    const report = resolveDevices(
       makeConfig({ mode: 'apptainer', deviceCount: 1, deviceMemoryBytes: 8 * GIB }),
-      execThrowing(),
+      null,
     );
     expect(report.source).toBe('config');
     expect(report.devices).toEqual([
@@ -98,21 +120,33 @@ describe('resolveDevices', () => {
     ]);
   });
 
-  it('stub mode never shells out — always the configured fleet', async () => {
-    const exec = execThrowing();
-    const report = await resolveDevices(makeConfig({ mode: 'stub', deviceCount: 2 }), exec);
-    expect(report.source).toBe('config');
-    expect(report.devices).toHaveLength(2);
-    expect(exec).not.toHaveBeenCalled();
-  });
-
-  it('apptainer with a non-CUDA device type uses config (no nvidia-smi)', async () => {
-    const exec = execThrowing();
-    const report = await resolveDevices(
-      makeConfig({ mode: 'apptainer', deviceType: 'ROCM', deviceCount: 1 }),
-      exec,
+  it('apptainer falls back to configured fleet when NVML reports no devices', () => {
+    const reader = makeReader({ readDeviceMemory: vi.fn(() => null) });
+    const report = resolveDevices(
+      makeConfig({ mode: 'apptainer', deviceCount: 1, deviceMemoryBytes: 8 * GIB }),
+      reader,
     );
     expect(report.source).toBe('config');
-    expect(exec).not.toHaveBeenCalled();
+    expect(report.devices).toEqual([
+      { deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 8 * GIB },
+    ]);
+  });
+
+  it('stub mode never queries NVML — always the configured fleet', () => {
+    const reader = makeReader();
+    const report = resolveDevices(makeConfig({ mode: 'stub', deviceCount: 2 }), reader);
+    expect(report.source).toBe('config');
+    expect(report.devices).toHaveLength(2);
+    expect(reader.readDeviceMemory).not.toHaveBeenCalled();
+  });
+
+  it('apptainer with a non-CUDA device type uses config (no NVML query)', () => {
+    const reader = makeReader();
+    const report = resolveDevices(
+      makeConfig({ mode: 'apptainer', deviceType: 'ROCM', deviceCount: 1 }),
+      reader,
+    );
+    expect(report.source).toBe('config');
+    expect(reader.readDeviceMemory).not.toHaveBeenCalled();
   });
 });

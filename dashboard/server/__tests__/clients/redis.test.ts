@@ -214,6 +214,10 @@ function seedWorkerDetail(
   opts: {
     workerId: string;
     status: WorkerStatus;
+    // Mirrors the exact shape WorkerPoolService.validateDevice persists onto `:detail`
+    // records — deviceIndex/deviceType/memoryTotalBytes only. used/available/reserved/
+    // measured never reach this path in production (see resolveClusterStatusMemory in
+    // server/clients/redis.ts); seed those via the {prefix}:cluster:memory snapshot instead.
     devices: Array<{ deviceIndex: number; deviceType: string; memoryTotalBytes: number }>;
     lastHeartbeatAt?: string | null;
     joinedAt?: string;
@@ -597,8 +601,8 @@ describe('RedisReader — cluster status fallback', () => {
     });
     expect(status.workerCount).toBe(2);
     expect(status.workersOnline).toBe(1);
-    // Memory sums — detail snapshots carry memoryTotalBytes only, so
-    // used/available default to 0.
+    // Memory sums — detail snapshots carry memoryTotalBytes only, so used/available
+    // default to 0 (no cluster:memory snapshot exists in this fixture either).
     expect(status.memory).toEqual({
       totalBytes: 24_000_000_000,
       usedBytes: 0,
@@ -611,6 +615,86 @@ describe('RedisReader — cluster status fallback', () => {
 
     expect(status.modelCounts!.total).toBe(0);
     expect(status.workerCount).toBe(0);
+  });
+
+  // The `:detail` records that back listWorkers() only ever carry memoryTotalBytes per device
+  // (WorkerPoolService.validateDevice strips everything else), so used/availableBytes can only
+  // reach getClusterStatus() through the control-plane-computed `{prefix}:cluster:memory`
+  // snapshot — the real shape written by MemoryBudgetService.writeClusterMemorySnapshot/
+  // getClusterSummary. Seed that key directly rather than the `:detail` devices.
+  it('prefers the cluster:memory snapshot summary over detail sums', async () => {
+    seedWorkerDetail(store, {
+      workerId: 'w1',
+      status: WorkerStatus.ONLINE,
+      devices: [{ deviceIndex: 0, deviceType: 'GPU', memoryTotalBytes: 16_000_000_000 }],
+    });
+    seedWorkerDetail(store, {
+      workerId: 'w2',
+      status: WorkerStatus.ONLINE,
+      devices: [{ deviceIndex: 0, deviceType: 'GPU', memoryTotalBytes: 8_000_000_000 }],
+    });
+    store.set(
+      `${PREFIX}:cluster:memory`,
+      JSON.stringify({
+        workers: [
+          {
+            workerId: 'w1',
+            devices: [
+              {
+                deviceIndex: 0,
+                deviceType: 'GPU',
+                memoryTotalBytes: 16_000_000_000,
+                memoryUsedBytes: 4_000_000_000,
+                memoryAvailableBytes: 10_000_000_000,
+              },
+            ],
+          },
+          {
+            workerId: 'w2',
+            devices: [
+              {
+                deviceIndex: 0,
+                deviceType: 'GPU',
+                memoryTotalBytes: 8_000_000_000,
+                memoryUsedBytes: 1_000_000_000,
+                memoryAvailableBytes: 7_000_000_000,
+              },
+            ],
+          },
+        ],
+        summary: {
+          totalBytes: 24_000_000_000,
+          usedBytes: 5_000_000_000,
+          availableBytes: 17_000_000_000,
+        },
+      }),
+    );
+
+    const status = await reader.getClusterStatus();
+
+    expect(status.memory).toEqual({
+      totalBytes: 24_000_000_000,
+      usedBytes: 5_000_000_000,
+      availableBytes: 17_000_000_000,
+    });
+  });
+
+  it('falls back to summing :detail devices when no cluster:memory snapshot exists', async () => {
+    seedWorkerDetail(store, {
+      workerId: 'w1',
+      status: WorkerStatus.ONLINE,
+      devices: [{ deviceIndex: 0, deviceType: 'GPU', memoryTotalBytes: 16_000_000_000 }],
+    });
+
+    const status = await reader.getClusterStatus();
+
+    // No snapshot present — falls back to the detail-sum path, which (per the real
+    // writer's device shape) only ever carries totalBytes.
+    expect(status.memory).toEqual({
+      totalBytes: 16_000_000_000,
+      usedBytes: 0,
+      availableBytes: 0,
+    });
   });
 });
 
@@ -643,7 +727,6 @@ describe('RedisReader — cluster memory fallback', () => {
         totalBytes: 16_000_000_000,
         usedBytes: 4_000_000_000,
         availableBytes: 12_000_000_000,
-        reservedBytes: 0,
       },
     };
     store.set(`${PREFIX}:cluster:memory`, JSON.stringify(snapshot));

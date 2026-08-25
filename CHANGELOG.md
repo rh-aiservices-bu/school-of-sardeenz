@@ -6,8 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
+- **Dashboard chart colors: undefined PF6 token names rendered the VRAM donut black and the
+  placement/GPU bars empty.** The per-model segment palette (#123) and the overview donut used
+  hand-written `var(--pf-t--chart--…)` / `var(--pf-t-chart-…)` custom properties that no
+  stylesheet defines — an invalid `var()` fills SVG arcs black and div backgrounds
+  transparent, so the placement bar had rendered empty since #123. Charts now use
+  `@patternfly/react-tokens` values (hex fallback included).
+
+### Changed
+
+- **Measured-only GPU memory doctrine (#163, supersedes #151).** Every memory figure in every
+  contract field, API response, report, and view is now the real measured consumption; the
+  user-facing "reserved memory" concept and the estimate-as-usage ledger displays are gone.
+  `requiredMemory` is an initial-placement indicator only, with no meaning past model load.
+  - **Contracts (breaking, pre-release):** `WorkerDeviceMemory.memoryUsedBytes` and
+    `DeviceInfo.memoryUsedBytes` now MEAN measured usage (NVML `total − free`);
+    `memoryMeasuredUsedBytes`, `memoryReservedBytes`, and summary
+    `reservedBytes`/`measuredUsedBytes` are removed; `ClusterMemorySummary` is
+    `totalBytes/usedBytes/availableBytes`. Devices gain optional `deviceName`,
+    `utilizationPercent`, `temperatureC`. `WorkerModelInfo` is now per-instance (optional
+    `instanceId`, `displayName`) with measured `memoryUsedBytes` (absent while nothing is
+    attributed, e.g. STARTING). `WorkerMemoryReport.instances` carries per-instance measured
+    bytes in all modes. `currentMemory` on `ModelSummary`/`InstanceDetail` — defined since
+    Phase 2 but never emitted — is now populated with the measured value.
+  - **Worker:** measures in-process via `@rh-ai-bu/ts-nvml` (replacing nvidia-smi total-only
+    parsing; `DeviceReport.source` is `nvml` | `config`), attributes per-instance usage by
+    walking each GPU process's `/proc` parent chain to the runner process it spawned, samples
+    device name/utilization/temperature, and refreshes the Redis report (with `reportedAt`)
+    every heartbeat tick. Hosts without NVML (stub/CPU dev) simulate measurement from the
+    internal runner ledger, polling each runner's own `/memory-report` (finally exercising
+    that contract endpoint) so sleeping instances correctly report ~0. SIF worker Deployment
+    pins `NVIDIA_DRIVER_CAPABILITIES=compute,utility`.
+  - **Control plane:** ingests reports telemetry-tolerantly (a malformed optional NVML extra
+    never rejects the core report); in-flight placement holds (STARTING instances) remain
+    purely internal, shaping `availableBytes` but exposed nowhere; the deploy path refreshes
+    budgets before initial placement and the memory-report staleness horizon allows for
+    reconciliation-interval ageing; cluster/workers routes emit per-instance measured model
+    entries (replacing the `requiredMemory`-as-usage seam from #123).
+  - **Dashboard:** the Placement panel is replaced by **Models placement** — a port of v1's
+    `GpuMemoryPanel` (nivo stacked per-GPU bars, per-model colored segments with sleeping
+    hatch, Other/Free buckets, model legend, refresh selector, per-worker collapsible groups)
+    fed from a single `/api/cluster/memory` query; the same panel serves the GPU Memory page.
+    GPU cards show device name, utilization, and temperature. All reserved/allocated-estimate
+    labels are gone; the Models table memory column shows measured consumption alone ("—"
+    until a measurement exists); model detail labels `requiredMemory` as a placement
+    indicator. Removed `PlacementBoard`/`WorkerGpuSection`/`MemoryVisualization`.
 - **MLServer engine runner and protocol-family proxy surface (ADR-021, #125).** Second engine
   runner proving the abstraction beyond vLLM. Proxy: inference routes move to protocol-family
   prefixes — `/openai/v1/*` (OpenAI surface) and `/oip/v2/*` (KServe V2 Open Inference

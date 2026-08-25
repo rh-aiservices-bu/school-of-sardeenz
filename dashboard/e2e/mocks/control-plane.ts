@@ -36,15 +36,34 @@ export interface MockInstanceInfo {
   workerId?: string;
   runnerEndpoint?: { host: string; port: number };
   createdAt?: string;
+  /** NVML-measured device memory for this instance (#163). Absent when unmeasured. */
+  currentMemory?: number;
 }
 
+// memoryUsedBytes IS the NVML measurement now (doctrine: measured memory is the only number,
+// #163) — no more memoryReservedBytes/memoryMeasuredUsedBytes fields to carry.
 export interface MockDeviceInfo {
   deviceIndex: number;
   deviceType: string;
   memoryTotalBytes: number;
   memoryUsedBytes: number;
   memoryAvailableBytes: number;
-  memoryReservedBytes?: number;
+  /** Device product name from NVML. Absent when the worker cannot query it. */
+  deviceName?: string;
+  /** GPU utilization percentage at report time. Absent when unavailable. */
+  utilizationPercent?: number;
+  /** GPU temperature in °C at report time. Absent when unavailable. */
+  temperatureC?: number;
+}
+
+/** Mirrors WorkerModelInfo (per-instance placement summary) for ClusterMemory.workers[].models. */
+export interface MockWorkerModelInfo {
+  modelName: string;
+  displayName?: string;
+  instanceId?: string;
+  state: string;
+  memoryUsedBytes?: number;
+  deviceIndices?: number[];
 }
 
 export interface MockWorkerInfo {
@@ -56,7 +75,7 @@ export interface MockWorkerInfo {
 }
 
 export interface MockWorkerDetail extends MockWorkerInfo {
-  models: Array<{ modelName: string; state: string; memoryUsedBytes?: number }>;
+  models: MockWorkerModelInfo[];
   runnerCapabilities?: Array<{
     runnerType: string;
     engineName: string;
@@ -88,7 +107,13 @@ export interface MockClusterMemory {
   workers: Array<{
     workerId: string;
     devices: MockDeviceInfo[];
+    models?: MockWorkerModelInfo[];
   }>;
+  summary?: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+  };
 }
 
 export interface MockSseEvent {
@@ -198,7 +223,8 @@ export class MockControlPlane {
         state: 'PENDING',
         runnerType: body.runnerType ?? 'vllm',
         requiredMemory: body.requiredMemory ?? 0,
-        currentMemory: 0,
+        // currentMemory intentionally absent (not 0) — mirrors the real contract, where it's
+        // only populated once the worker reports a measurement (#163).
         instanceCount: 1,
         createdAt: new Date().toISOString(),
       };
@@ -476,7 +502,23 @@ export class MockControlPlane {
 
   /** Set cluster memory snapshot. */
   setClusterMemory(memory: MockClusterMemory): void {
-    this.state.clusterMemory = memory;
+    if (memory.summary) {
+      this.state.clusterMemory = memory;
+      return;
+    }
+    // Auto-compute the summary when the caller didn't supply one — mirrors the real
+    // MemoryBudgetService.getClusterSummary() aggregation so tests don't need to hand-roll it.
+    let totalBytes = 0;
+    let usedBytes = 0;
+    let availableBytes = 0;
+    for (const w of memory.workers) {
+      for (const d of w.devices) {
+        totalBytes += d.memoryTotalBytes;
+        usedBytes += d.memoryUsedBytes;
+        availableBytes += d.memoryAvailableBytes;
+      }
+    }
+    this.state.clusterMemory = { ...memory, summary: { totalBytes, usedBytes, availableBytes } };
   }
 
   /** Mark the health endpoint as healthy or unhealthy. */

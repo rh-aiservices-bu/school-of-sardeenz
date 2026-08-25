@@ -149,7 +149,7 @@ describe('GET /api/cluster/memory', () => {
   it('proxies to control plane and returns the response on success', async () => {
     const memoryData = {
       workers: [{ workerId: 'w1', devices: [] }],
-      summary: { totalBytes: 1000, usedBytes: 500, availableBytes: 500, reservedBytes: 0 },
+      summary: { totalBytes: 1000, usedBytes: 500, availableBytes: 500 },
     };
     getClusterMemoryFn.mockResolvedValue({ status: 200, data: memoryData });
 
@@ -166,7 +166,7 @@ describe('GET /api/cluster/memory', () => {
     getClusterMemoryFn.mockRejectedValue(BffError.upstreamError('Control plane down'));
     const redisMemory = {
       workers: [{ workerId: 'w1', devices: [] }],
-      summary: { totalBytes: 1000, usedBytes: 400, availableBytes: 600, reservedBytes: 0 },
+      summary: { totalBytes: 1000, usedBytes: 400, availableBytes: 600 },
     };
     getRedisClusterMemoryFn.mockResolvedValue(redisMemory);
 

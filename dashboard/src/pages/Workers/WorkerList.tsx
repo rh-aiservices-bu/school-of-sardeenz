@@ -33,6 +33,8 @@ function WorkerStatusLabel({ status }: { status: WorkerStatus }) {
 
 function WorkerRow({ worker }: { worker: WorkerInfo }) {
   const { t } = useTranslation('workers');
+  // memoryUsedBytes IS the NVML measurement now (doctrine: measured memory is the only number,
+  // #163) — no more ledger/measured distinction to fall back between.
   const totalUsed = worker.devices.reduce((sum, d) => sum + d.memoryUsedBytes, 0);
   const totalCapacity = worker.devices.reduce((sum, d) => sum + d.memoryTotalBytes, 0);
   const deviceCount = worker.devices.length;

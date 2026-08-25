@@ -680,3 +680,278 @@ describe('RunnerManager', () => {
     expect(capturedSpec?.entrypoint).toEqual(['python3', '-m', 'sardeenz_mlserver_runner']);
   });
 });
+
+describe('getRunnerProcesses', () => {
+  // A dedicated port range, distinct from every other describe block in this file: the only test
+  // below that binds a real socket (the default StubLauncher case) must not race the teardown of
+  // real listeners started by the many other tests sharing runnerPortStart 19301 above.
+  const processesConfig = (): DevWorkerConfig =>
+    makeConfig({ workerPort: 19700, runnerPortStart: 19701 });
+
+  it('returns nothing for the default StubLauncher (never sets handle.pid)', async () => {
+    const mgr = new RunnerManager(processesConfig(), makeRegistration());
+    await mgr.startRunner({
+      modelName: 'stub-model',
+      instanceId: 'inst-stub-model',
+      runnerType: 'vllm',
+      modelPath: '/models/stub',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(mgr.getRunnerProcesses()).toEqual([]);
+    await mgr.stopAll();
+  });
+
+  it('reports pid/instanceId/modelName for runners whose launcher sets handle.pid', async () => {
+    const pidLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          pid: 4242,
+          stop: () => Promise.resolve(),
+        }),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), pidLauncher);
+
+    await mgr.startRunner({
+      modelName: 'real-model',
+      instanceId: 'inst-real-model',
+      runnerType: 'vllm',
+      modelPath: '/models/real',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(mgr.getRunnerProcesses()).toEqual([
+      { pid: 4242, instanceId: 'inst-real-model', modelName: 'real-model' },
+    ]);
+    await mgr.stopAll();
+  });
+
+  it('drops a runner from the list once it is stopped', async () => {
+    const pidLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          pid: 4242,
+          stop: () => Promise.resolve(),
+        }),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), pidLauncher);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'real-model',
+      instanceId: 'inst-real-model',
+      runnerType: 'vllm',
+      modelPath: '/models/real',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.stopRunner(runnerId);
+
+    expect(mgr.getRunnerProcesses()).toEqual([]);
+  });
+});
+
+describe('getLedgerInstanceShares', () => {
+  // Runners in these tests use a fake launcher that never actually binds a socket — only the
+  // constructor-injected fetchFn is exercised, so no real network/port isolation is needed here.
+  function makeLauncher(): RunnerLauncher {
+    return {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        }),
+    };
+  }
+
+  function makeFetchFn(
+    impl: (url: string) => Promise<{ ok: boolean; json?: () => Promise<unknown> }>,
+  ): typeof fetch {
+    return vi.fn((url: unknown) => impl(url as string)) as unknown as typeof fetch;
+  }
+
+  it("returns per-device bytes from each running runner's own /memory-report", async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 500 }] }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    const shares = await mgr.getLedgerInstanceShares();
+
+    expect(shares).toEqual([
+      { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 500 },
+    ]);
+    // The AbortSignal timeout is load-bearing: without it a hung runner (socket accepted,
+    // response never sent) would pend the Promise.all forever, freezing the heartbeat's
+    // memory-report push until the control plane marks the whole worker's budget stale.
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://127.0.0.1:19301/memory-report',
+      expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }),
+    );
+  });
+
+  it('a sleeping runner (0 bytes reported) contributes no entries — matches "sleeping models hold nothing"', async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 0 }] }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it('a runner whose /memory-report call rejects contributes no entries (never throws)', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.reject(new Error('ECONNREFUSED')),
+    ) as unknown as typeof fetch;
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await expect(mgr.getLedgerInstanceShares()).resolves.toEqual([]);
+  });
+
+  it('a non-ok /memory-report response contributes no entries', async () => {
+    const fetchFn = makeFetchFn(() => Promise.resolve({ ok: false }));
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it('aggregates entries across multiple runners', async () => {
+    const fetchFn = makeFetchFn((url) =>
+      url.includes('19301')
+        ? Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 300 }] }),
+          })
+        : Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ devices: [{ deviceIndex: 1, memoryUsedBytes: 700 }] }),
+          }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 300,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 700,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+    });
+
+    const shares = await mgr.getLedgerInstanceShares();
+    expect(shares).toHaveLength(2);
+    expect(shares).toEqual(
+      expect.arrayContaining([
+        { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 300 },
+        { instanceId: 'inst-b', modelName: 'model-b', deviceIndex: 1, bytes: 700 },
+      ]),
+    );
+  });
+
+  it('returns empty when there are no running runners', async () => {
+    const mgr = new RunnerManager(makeConfig(), makeRegistration());
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+});

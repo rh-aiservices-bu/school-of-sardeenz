@@ -6,6 +6,14 @@ import { RunnerLogBuffer } from './runner-log-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { createServer as netCreateServer } from 'node:net';
 
+/** One instance's ledger-simulated bytes on one device — see getLedgerInstanceShares(). */
+export interface LedgerInstanceShare {
+  instanceId: string;
+  modelName: string;
+  deviceIndex: number;
+  bytes: number;
+}
+
 // Tries to bind 127.0.0.1:port; resolves true if the port is free, false if already in use.
 export function probePortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -79,6 +87,7 @@ export class RunnerManager {
     launcher?: RunnerLauncher,
     logBuffer?: RunnerLogBuffer,
     probePort?: (port: number) => Promise<boolean>,
+    private readonly fetchFn: typeof fetch = globalThis.fetch,
   ) {
     this.launcher = launcher ?? new StubLauncher(config);
     this.logBuffer = logBuffer ?? new RunnerLogBuffer();
@@ -295,6 +304,63 @@ export class RunnerManager {
 
   getAllRunners(): RunnerRecord[] {
     return Array.from(this.runners.values());
+  }
+
+  // Runners whose launcher recorded a process PID (the ApptainerLauncher; the StubLauncher never
+  // sets handle.pid). Used to attribute NVML-reported GPU processes back to a runner instance — the
+  // NVML PID is a descendant of handle.pid (apptainer exec -> shim -> engine), so callers walk the
+  // parent chain (see proc-tree.ts) rather than comparing PIDs directly.
+  getRunnerProcesses(): Array<{ pid: number; instanceId: string; modelName: string }> {
+    const out: Array<{ pid: number; instanceId: string; modelName: string }> = [];
+    for (const record of this.runners.values()) {
+      if (record.handle.pid !== undefined) {
+        out.push({
+          pid: record.handle.pid,
+          instanceId: record.instanceId,
+          modelName: record.modelName,
+        });
+      }
+    }
+    return out;
+  }
+
+  // Simulates per-instance measured bytes for the worker's memory report when NVML isn't available
+  // (stub mode / CPU-only host), by querying each running runner's own `/memory-report` endpoint —
+  // part of the runner contract every launcher implements (see
+  // packages/contracts/specs/engine-runner.yaml). Reusing that endpoint, rather than re-deriving
+  // sleep state here, is what makes a sleeping runner correctly contribute nothing: the runner's
+  // own /memory-report already reports 0 while SLEEPING (runner-stub/routes/memory.ts). A runner
+  // whose query fails (unreachable, still starting, in ERROR state, non-2xx) contributes no
+  // entries rather than a stale guess — this method never rejects.
+  async getLedgerInstanceShares(): Promise<LedgerInstanceShare[]> {
+    const records = Array.from(this.runners.values());
+    const perRunner = await Promise.all(
+      records.map(async (record): Promise<LedgerInstanceShare[]> => {
+        try {
+          // Timeout so a hung runner (socket accepted, response never sent) can't pend this
+          // Promise.all forever — that would freeze the heartbeat's memory-report push and
+          // eventually mark the whole worker's budget stale on the control plane.
+          const res = await this.fetchFn(`http://127.0.0.1:${record.port}/memory-report`, {
+            signal: AbortSignal.timeout(2000),
+          });
+          if (!res.ok) return [];
+          const body = (await res.json()) as {
+            devices?: Array<{ deviceIndex: number; memoryUsedBytes: number }>;
+          };
+          return (body.devices ?? [])
+            .filter((d) => d.memoryUsedBytes > 0) // sleeping (or otherwise idle) runners hold nothing
+            .map((d) => ({
+              instanceId: record.instanceId,
+              modelName: record.modelName,
+              deviceIndex: d.deviceIndex,
+              bytes: d.memoryUsedBytes,
+            }));
+        } catch {
+          return [];
+        }
+      }),
+    );
+    return perRunner.flat();
   }
 
   // Allocate a (management, engine) port pair, stepping by 2. Real engines (vLLM) serve inference

@@ -185,31 +185,25 @@ test.describe('Resilience & live updates', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    // Verify VRAM Allocation card is visible
-    await expect(page.getByText('VRAM Allocation')).toBeVisible();
+    // Verify the Models placement panel is visible (v1 GpuMemoryPanel port, #163)
+    await expect(page.getByText('Models placement')).toBeVisible();
 
-    // Both worker IDs should appear as links
+    // Both worker IDs should appear as links — 2 workers auto-expands (<= 2 workers default
+    // expanded), so both GPU grids render without needing to click anything.
     await expect(page.getByRole('link', { name: WORKER_1.workerId })).toBeVisible();
     await expect(page.getByRole('link', { name: WORKER_2.workerId })).toBeVisible();
 
-    // 4 GPU device bars should be rendered (GPU 0, GPU 1 for each worker)
-    const gpuLabels = page.getByText('GPU 0', { exact: false });
-    await expect(gpuLabels).toHaveCount(2);
-    const gpu1Labels = page.getByText('GPU 1', { exact: false });
-    await expect(gpu1Labels).toHaveCount(2);
+    // 4 GPU cards should be rendered (GPU 0, GPU 1 for each worker). No deviceName is set in
+    // this fixture, so the header falls back to "GPU {index} · {deviceType}".
+    await expect(page.getByText('GPU 0 · CUDA')).toHaveCount(2);
+    await expect(page.getByText('GPU 1 · CUDA')).toHaveCount(2);
 
-    // Verify memory values are displayed for Worker A GPU 0: 4.00 GiB / 8.00 GiB
-    await expect(page.getByText('4.00 GiB').first()).toBeVisible();
-    await expect(page.getByText('6.00 GiB').first()).toBeVisible();
-
-    // Verify Worker B GPU 1 shows full utilization: 16.00 GiB / 16.00 GiB
-    await expect(page.getByText('16.00 GiB').first()).toBeVisible();
-
-    // Click a device bar to expand details and verify breakdown
-    const expandButton = page.getByRole('button', { name: /Click to expand GPU 0/i }).first();
-    await expandButton.click();
-
-    // Expanded panel shows the breakdown
-    await expect(page.getByText('50%')).toBeVisible();
+    // Verify VRAM lines reflect the known proportions — usedBytes is the measured figure now,
+    // so these percentages come straight from memoryUsedBytes / memoryTotalBytes.
+    await expect(page.getByText('4.0 GiB / 8.0 GiB — 50%')).toBeVisible();
+    await expect(page.getByText('6.0 GiB / 8.0 GiB — 75%')).toBeVisible();
+    // 2/16 GiB = 12.5%, which Math.round() takes to 13.
+    await expect(page.getByText('2.0 GiB / 16.0 GiB — 13%')).toBeVisible();
+    await expect(page.getByText('16.0 GiB / 16.0 GiB — 100%')).toBeVisible();
   });
 });

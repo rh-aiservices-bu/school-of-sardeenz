@@ -57,9 +57,9 @@
     "memory": {
       "used": "{{value}} used",
       "total": "{{value}} total",
-      "available": "Available: {{value}}",
-      "reserved": "Reserved: {{value}}"
+      "available": "Available: {{value}}"
     },
+    "utilTemp": "{{util}}% util · {{temp}}°C",
     "deviceModels": {
       "title": "Models on this device",
       "none": "No models assigned"

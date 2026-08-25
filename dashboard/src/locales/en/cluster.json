@@ -21,7 +21,8 @@
       "gpuMemory": {
         "title": "GPU Memory",
         "used": " used",
-        "available": "{{value}} available of {{total}}"
+        "usedFragment": "{{value}} used",
+        "totalFragment": "{{value}} total"
       },
       "alerts": {
         "title": "Alerts",
@@ -38,7 +39,7 @@
       "title": "VRAM Usage",
       "ariaDesc": "GPU memory usage donut chart",
       "used": "Used",
-      "available": "Available",
+      "free": "Free",
       "total": "Total"
     },
     "modelStateBreakdown": {
@@ -56,35 +57,44 @@
         "degraded": "Degraded"
       }
     },
-    "vramAllocation": {
-      "title": "VRAM Allocation",
-      "loading": "Loading VRAM allocation data",
-      "noData": "No memory data available.",
-      "noDevices": "No devices reported.",
-      "clickToExpand": "Click to expand {{device}} memory details",
-      "displayModeLabel": "Display mode",
-      "displayGiB": "GiB",
-      "displayPercent": "%",
-      "usedPercent": "{{value}} used",
+    "modelsPlacement": {
+      "title": "Models placement",
+      "pageTitle": "GPU Memory",
+      "loading": "Loading GPU memory data",
+      "errors": {
+        "failedToLoad": "GPU memory data unavailable"
+      },
+      "empty": {
+        "title": "No GPUs reported yet",
+        "body": "GPUs will appear here once a worker registers with the control plane."
+      },
+      "refresh": {
+        "toggleLabel": "Refresh: {{label}}",
+        "ariaLabel": "Refresh interval",
+        "none": "None",
+        "5s": "5s",
+        "15s": "15s",
+        "30s": "30s",
+        "1m": "1m"
+      },
+      "worker": {
+        "gpuCount": "{{count}} GPU",
+        "gpuCount_plural": "{{count}} GPUs",
+        "modelCount": "{{count}} model",
+        "modelCount_plural": "{{count}} models",
+        "vramPercent": "VRAM {{percent}}%"
+      },
+      "gpu": {
+        "utilTemp": "{{util}}% util · {{temp}}°C",
+        "vramLine": "{{used}} / {{total}} — {{percent}}%"
+      },
       "legend": {
-        "used": "Used",
-        "reserved": "Reserved",
-        "available": "Available",
         "other": "Other",
-        "sleeping": "Sleeping"
+        "free": "Free ({{value}})",
+        "viewModel": "Go to {{model}}"
       },
-      "page": {
-        "title": "GPU Memory"
-      },
-      "tooltip": {
-        "model": "{{model}}: {{memory}} (reserved)",
-        "modelEstimate": "{{model}}: {{memory}} (estimated, reserved)",
-        "sleeping": "{{model}}: {{memory}} (sleeping, reserved)",
-        "estimateNote": "per-device split estimated"
-      },
-      "aria": {
-        "deviceBreakdown": "GPU {{index}}: {{summary}}"
-      }
+      "totalFree": "Total system free GPU memory: {{value}} across {{count}} GPU",
+      "totalFree_plural": "Total system free GPU memory: {{value}} across {{count}} GPUs"
     },
     "inferenceUrl": {
       "copy": "Copy",
@@ -98,23 +108,6 @@
         "label": "KServe V2 (OIP) base URL:",
         "description": "For Open Inference Protocol / KServe V2 clients (e.g. MLServer models).",
         "copyAria": "Copy KServe V2 base URL"
-      }
-    },
-    "placement": {
-      "title": "Placement",
-      "loading": "Loading placement data",
-      "gpu": "GPU {{index}}",
-      "tensorParallel": "Tensor-parallel · GPUs {{indices}}",
-      "tpBadge": "TP×{{count}}",
-      "unplaced": "Unplaced",
-      "unplacedHint": "Deployed before device-attribution tracking — GPU placement unknown.",
-      "placementUnknown": "Placement not tracked",
-      "noModels": "No models on this worker.",
-      "viewModel": "View {{model}} details",
-      "empty": {
-        "title": "No models placed yet",
-        "body": "Deploy a model to see it placed on a worker's GPUs here.",
-        "deployButton": "Deploy a model"
       }
     }
   }

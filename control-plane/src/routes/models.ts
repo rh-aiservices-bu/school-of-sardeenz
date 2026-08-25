@@ -177,6 +177,11 @@ async function deployFromRecord(
     await deps.lifecycle.createInstance(record.name, instanceId, null, runnerMeta.protocol);
     redisCreated = true;
 
+    // Refresh budgets before the first placement, mirroring the eviction-retry path below.
+    // In-memory budgets age up to a full reconciliation interval between refreshAll() runs, and
+    // place() skips stale budgets — without this, a deploy landing late in the reconciliation
+    // window can spuriously skip a healthy worker (or trigger an unnecessary eviction).
+    await deps.memoryBudget.refreshAll();
     const workers = deps.workerPool.getAllWorkers();
     const budgets = new Map(deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]));
 
@@ -428,6 +433,7 @@ async function deployFromRecord(
 function toInstanceDetail(
   instance: InstanceState,
   createdAt: string | undefined,
+  measuredByInstance: Map<string, number>,
 ): Record<string, unknown> {
   return {
     instanceId: instance.instanceId,
@@ -438,6 +444,9 @@ function toInstanceDetail(
       instance.runnerHost && instance.runnerPort
         ? { host: instance.runnerHost, port: instance.runnerPort }
         : undefined,
+    // Measured (NVML), not the configured requiredMemory — see ModelInfo.currentMemory. Absent
+    // when this instance has no measurement.
+    currentMemory: measuredByInstance.get(instance.instanceId) ?? undefined,
     stateChangedAt: instance.stateChangedAt ?? undefined,
     errorMessage: instance.errorMessage ?? undefined,
     createdAt: createdAt ?? instance.stateChangedAt,
@@ -626,6 +635,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
     const modelNames = new Set([...instancesByModel.keys(), ...allRecords.map((r) => r.name)]);
     const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps([...modelNames]);
+    const measuredByInstance = deps.memoryBudget.getMeasuredByInstance();
 
     const models = [];
 
@@ -635,6 +645,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const currentState = deriveAggregateState(instances);
       if (stateFilter && currentState !== stateFilter) continue;
+
+      // Measured (NVML), summed across the model's instances. Absent when none of them have a
+      // measurement (model not running, or the worker(s) can't measure) — see ModelInfo.currentMemory.
+      let currentMemory: number | undefined;
+      for (const instance of instances) {
+        const measured = measuredByInstance.get(instance.instanceId);
+        if (measured !== undefined) {
+          currentMemory = (currentMemory ?? 0) + measured;
+        }
+      }
 
       models.push({
         modelName: name,
@@ -646,6 +666,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         // breakdown lives at GET /api/v1/models/{modelName}.
         workerId: instances.length === 1 ? (instances[0].workerId ?? undefined) : undefined,
         requiredMemory: record?.requiredMemory ?? undefined,
+        currentMemory,
         lastInferenceAt: inferenceTs.get(name) ?? undefined,
         pinned: record?.pinned ?? false,
         createdAt: record?.createdAt?.toISOString() ?? instances[0]?.stateChangedAt ?? undefined,
@@ -675,6 +696,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         instanceRows.map((row) => [row.instanceId, row.createdAt.toISOString()]),
       );
       const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps([modelName]);
+      const measuredByInstance = deps.memoryBudget.getMeasuredByInstance();
 
       const detail = {
         modelName,
@@ -691,7 +713,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         servedModelName: record?.servedModelName ?? undefined,
         pinned: record?.pinned ?? false,
         instances: instances.map((instance) =>
-          toInstanceDetail(instance, createdAtByInstance.get(instance.instanceId)),
+          toInstanceDetail(
+            instance,
+            createdAtByInstance.get(instance.instanceId),
+            measuredByInstance,
+          ),
         ),
         lastInferenceAt: inferenceTs.get(modelName) ?? undefined,
         createdAt: record?.createdAt?.toISOString() ?? instances[0]?.stateChangedAt ?? '',

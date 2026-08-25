@@ -41,7 +41,6 @@ function makeBudget(
         deviceType: d.deviceType,
         totalBytes: d.totalBytes,
         usedBytes: d.usedBytes,
-        reservedBytes: 0,
         availableBytes: d.totalBytes - d.usedBytes,
       }),
     ),

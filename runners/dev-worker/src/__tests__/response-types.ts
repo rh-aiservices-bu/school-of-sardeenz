@@ -34,12 +34,26 @@ export interface WorkerInfo {
 export interface WorkerMemoryReportDevice {
   deviceIndex: number;
   deviceType: string;
+  /** Measured (NVML) when available, else the internal ledger as a simulated measurement. */
   memoryUsedBytes: number;
   memoryTotalBytes: number;
+  deviceName?: string;
+  utilizationPercent?: number;
+  temperatureC?: number;
+}
+
+export interface WorkerMemoryReportInstance {
+  instanceId: string;
+  modelName: string;
+  deviceIndex: number;
+  memoryUsedBytes: number;
 }
 
 export interface WorkerMemoryReport {
   devices: WorkerMemoryReportDevice[];
+  /** Always present post-doctrine: NVML-attributed in NVML mode, ledger-simulated otherwise. */
+  instances: WorkerMemoryReportInstance[];
+  reportedAt?: string;
 }
 
 // --- Runner stub: health / memory-report / capabilities / progress / sleep ---
