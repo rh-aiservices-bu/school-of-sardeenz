@@ -680,3 +680,84 @@ describe('RunnerManager', () => {
     expect(capturedSpec?.entrypoint).toEqual(['python3', '-m', 'sardeenz_mlserver_runner']);
   });
 });
+
+describe('getRunnerProcesses', () => {
+  // A dedicated port range, distinct from every other describe block in this file: the only test
+  // below that binds a real socket (the default StubLauncher case) must not race the teardown of
+  // real listeners started by the many other tests sharing runnerPortStart 19301 above.
+  const processesConfig = (): DevWorkerConfig => makeConfig({ workerPort: 19700, runnerPortStart: 19701 });
+
+  it('returns nothing for the default StubLauncher (never sets handle.pid)', async () => {
+    const mgr = new RunnerManager(processesConfig(), makeRegistration());
+    await mgr.startRunner({
+      modelName: 'stub-model',
+      instanceId: 'inst-stub-model',
+      runnerType: 'vllm',
+      modelPath: '/models/stub',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(mgr.getRunnerProcesses()).toEqual([]);
+    await mgr.stopAll();
+  });
+
+  it('reports pid/instanceId/modelName for runners whose launcher sets handle.pid', async () => {
+    const pidLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          pid: 4242,
+          stop: () => Promise.resolve(),
+        }),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), pidLauncher);
+
+    await mgr.startRunner({
+      modelName: 'real-model',
+      instanceId: 'inst-real-model',
+      runnerType: 'vllm',
+      modelPath: '/models/real',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(mgr.getRunnerProcesses()).toEqual([
+      { pid: 4242, instanceId: 'inst-real-model', modelName: 'real-model' },
+    ]);
+    await mgr.stopAll();
+  });
+
+  it('drops a runner from the list once it is stopped', async () => {
+    const pidLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          pid: 4242,
+          stop: () => Promise.resolve(),
+        }),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), pidLauncher);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'real-model',
+      instanceId: 'inst-real-model',
+      runnerType: 'vllm',
+      modelPath: '/models/real',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.stopRunner(runnerId);
+
+    expect(mgr.getRunnerProcesses()).toEqual([]);
+  });
+});

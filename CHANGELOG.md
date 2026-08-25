@@ -17,6 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ModelSummary`/`InstanceDetail` re-documented as the measured per-model/per-instance value
   sourced from the worker's NVML report. Ledger field descriptions clarified as budgeting
   figures, not measurements.
+- **Measured GPU memory telemetry (#163) — worker.** The dev-worker now measures real VRAM
+  in-process via `@rh-ai-bu/ts-nvml` (NVML FFI), replacing the nvidia-smi total-only parsing
+  in device detection (`DeviceReport.source` is now `nvml` | `config`). Each heartbeat tick
+  refreshes the Redis memory report, which now always carries `reportedAt` and — when NVML is
+  available — per-device `memoryMeasuredUsedBytes` plus per-instance measurements attributed
+  by walking each GPU process's `/proc` parent chain to the runner process the worker spawned.
+  The reservation ledger (`memoryUsedBytes`) is unchanged; stub/CPU hosts degrade gracefully
+  to unmeasured reports. SIF worker Deployment pins
+  `NVIDIA_DRIVER_CAPABILITIES=compute,utility` so `libnvidia-ml.so.1` is mounted.
 - **Measured GPU memory telemetry (#163) — control plane.** `MemoryBudgetService` ingests the
   measured fields telemetry-tolerantly (malformed measured values/instances entries are
   dropped with a warning; the core ledger report is never rejected for them) and carries them

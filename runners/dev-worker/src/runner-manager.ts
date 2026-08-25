@@ -297,6 +297,24 @@ export class RunnerManager {
     return Array.from(this.runners.values());
   }
 
+  // Runners whose launcher recorded a process PID (the ApptainerLauncher; the StubLauncher never
+  // sets handle.pid). Used to attribute NVML-reported GPU processes back to a runner instance — the
+  // NVML PID is a descendant of handle.pid (apptainer exec -> shim -> engine), so callers walk the
+  // parent chain (see proc-tree.ts) rather than comparing PIDs directly.
+  getRunnerProcesses(): Array<{ pid: number; instanceId: string; modelName: string }> {
+    const out: Array<{ pid: number; instanceId: string; modelName: string }> = [];
+    for (const record of this.runners.values()) {
+      if (record.handle.pid !== undefined) {
+        out.push({
+          pid: record.handle.pid,
+          instanceId: record.instanceId,
+          modelName: record.modelName,
+        });
+      }
+    }
+    return out;
+  }
+
   // Allocate a (management, engine) port pair, stepping by 2. Real engines (vLLM) serve inference
   // on `management + 1`, so allocating one port per runner would let a second runner's management
   // port collide with the first runner's engine port. Pairing avoids that regardless of launcher;

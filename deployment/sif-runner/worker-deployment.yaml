@@ -88,6 +88,10 @@ spec:
             failureThreshold: 3
           env:
             - { name: SARDEENZ_WORKER_MODE, value: apptainer }
+            # The worker agent measures VRAM in-process via NVML (ts-nvml, #163);
+            # `utility` makes the driver injector mount libnvidia-ml.so.1, `compute`
+            # keeps CUDA available for the engines the worker launches.
+            - { name: NVIDIA_DRIVER_CAPABILITIES, value: 'compute,utility' }
             # HOME must be writable and node-local (module PVC is readOnly) — spike finding.
             - { name: HOME, value: /scratch/home }
             - { name: SARDEENZ_APPTAINER_HOME, value: /scratch/home }

@@ -12,6 +12,30 @@ export interface CatalogCapabilityOverrides {
   features?: Record<string, unknown>;
 }
 
+/** One device's measured (NVML) usage, as sampled at report-build time. */
+export interface MeasuredDeviceSample {
+  deviceIndex: number;
+  memoryMeasuredUsedBytes: number;
+}
+
+/** One runner instance's measured (NVML, process-attributed) usage on one device. */
+export interface MeasuredInstanceSample {
+  instanceId: string;
+  modelName: string;
+  deviceIndex: number;
+  memoryMeasuredUsedBytes: number;
+}
+
+export interface MeasuredMemorySample {
+  devices: MeasuredDeviceSample[];
+  instances: MeasuredInstanceSample[];
+}
+
+// Supplies a fresh NVML-derived sample on demand. Returns null when measurement isn't possible
+// (no NVML, CPU box) — buildMemoryReport() then omits the measured fields entirely. Owned by
+// src/index.ts, which composes the NvmlReader with RunnerManager.getRunnerProcesses().
+export type MeasuredMemoryProvider = () => Promise<MeasuredMemorySample | null>;
+
 export class WorkerRegistration {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly deviceMemoryUsed: number[];
@@ -21,10 +45,11 @@ export class WorkerRegistration {
     private readonly redis: Redis,
     private readonly config: DevWorkerConfig,
     // The advertised fleet. Defaults to the configured (simulated) fleet when not supplied — real
-    // deployments pass GPUs resolved via resolveDevices() (nvidia-smi in apptainer mode).
+    // deployments pass GPUs resolved via resolveDevices() (NVML in apptainer mode).
     devices?: DetectedDevice[],
     private readonly fetchFn: typeof fetch = globalThis.fetch,
     private readonly catalogCapabilities?: CatalogCapabilityOverrides,
+    private readonly measuredProvider?: MeasuredMemoryProvider,
   ) {
     this.devices =
       devices ??
@@ -68,7 +93,7 @@ export class WorkerRegistration {
     pipeline.set(this.key('workers', this.config.workerId, 'heartbeat'), new Date().toISOString());
     pipeline.set(
       this.key('workers', this.config.workerId, 'memory'),
-      JSON.stringify(this.buildMemoryReport()),
+      JSON.stringify(await this.buildMemoryReport()),
     );
     await pipeline.exec();
   }
@@ -83,6 +108,10 @@ export class WorkerRegistration {
           const res = await this.fetchFn(`http://127.0.0.1:${this.config.workerPort}/healthz`);
           if (!res.ok) return;
           await this.redis.set(heartbeatKey, new Date().toISOString(), 'PX', ttlMs);
+          // Refresh the memory report every tick too, in every mode — this is what keeps
+          // `reportedAt` (and any measured NVML figures) fresh for the control plane's staleness
+          // checks, not just the ledger-driven allocate/free pushes below.
+          await this.pushMemoryReport();
         } catch {
           // Health check failed or Redis write failed — skip this tick and let the key age out.
         }
@@ -121,21 +150,41 @@ export class WorkerRegistration {
     return this.deviceMemoryUsed[deviceIndex] ?? 0;
   }
 
-  private buildMemoryReport(): { devices: Array<Record<string, unknown>> } {
-    return {
-      devices: this.devices.map((device, i) => ({
+  // Ledger figures (memoryUsedBytes) come from the deviceMemoryUsed array unconditionally — that's
+  // the untouched placement-math source of truth. Measured figures (memoryMeasuredUsedBytes,
+  // instances) are additive and only appear when measuredProvider resolves to non-null; a failing
+  // provider (thrown error, or genuinely no NVML) degrades silently to "no measurement", never to a
+  // thrown report build. reportedAt is always set, in every mode, since it's what the control plane
+  // uses to judge staleness even for a stub worker with no measurement at all.
+  private async buildMemoryReport(): Promise<Record<string, unknown>> {
+    const measured = this.measuredProvider
+      ? await this.measuredProvider().catch(() => null)
+      : null;
+    const measuredByDevice = new Map(
+      measured?.devices.map((d) => [d.deviceIndex, d.memoryMeasuredUsedBytes]) ?? [],
+    );
+
+    const devices = this.devices.map((device, i) => {
+      const out: Record<string, unknown> = {
         deviceIndex: device.deviceIndex,
         deviceType: device.deviceType,
         memoryUsedBytes: this.deviceMemoryUsed[i],
         memoryTotalBytes: device.memoryTotalBytes,
-      })),
-    };
+      };
+      const measuredBytes = measuredByDevice.get(device.deviceIndex);
+      if (measuredBytes !== undefined) out.memoryMeasuredUsedBytes = measuredBytes;
+      return out;
+    });
+
+    const report: Record<string, unknown> = { devices, reportedAt: new Date().toISOString() };
+    if (measured) report.instances = measured.instances;
+    return report;
   }
 
   private async pushMemoryReport(): Promise<void> {
     await this.redis.set(
       this.key('workers', this.config.workerId, 'memory'),
-      JSON.stringify(this.buildMemoryReport()),
+      JSON.stringify(await this.buildMemoryReport()),
     );
   }
 }

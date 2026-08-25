@@ -36,10 +36,20 @@ export interface WorkerMemoryReportDevice {
   deviceType: string;
   memoryUsedBytes: number;
   memoryTotalBytes: number;
+  memoryMeasuredUsedBytes?: number;
+}
+
+export interface WorkerMemoryReportInstance {
+  instanceId: string;
+  modelName: string;
+  deviceIndex: number;
+  memoryMeasuredUsedBytes: number;
 }
 
 export interface WorkerMemoryReport {
   devices: WorkerMemoryReportDevice[];
+  instances?: WorkerMemoryReportInstance[];
+  reportedAt?: string;
 }
 
 // --- Runner stub: health / memory-report / capabilities / progress / sleep ---
