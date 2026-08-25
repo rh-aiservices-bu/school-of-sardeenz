@@ -24,6 +24,7 @@ import { NotificationService } from './services/notification.js';
 import { CatalogService } from './services/catalog-service.js';
 import { ModuleStoreService } from './services/module-store.js';
 import { WeightsBrowserService } from './services/weights-browser.js';
+import { ProxyProtocolsService } from './services/proxy-protocols.js';
 import { StubImporter, OrasImporter, type SifImporter } from './services/sif-importer.js';
 import { WorkerClient } from './clients/worker.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
     config.workerHeartbeatTimeoutSecs,
   );
   const routingMap = new RoutingMapService(redis, config.redisKeyPrefix);
+  const proxyProtocols = new ProxyProtocolsService(redis, config.redisKeyPrefix);
   const placement = new PlacementPipeline();
   const eviction = new EvictionEngine(undefined, {
     maxPerCycle: config.evictionMaxPerCycle,
@@ -150,6 +152,7 @@ async function main(): Promise<void> {
       catalogService,
       moduleStore,
       weightsBrowser,
+      proxyProtocols,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
       createWorkerClient: (baseUrl) => new WorkerClient({ baseUrl, token: config.workerToken }),
     },

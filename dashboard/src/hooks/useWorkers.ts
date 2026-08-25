@@ -18,6 +18,7 @@ export interface SelectOption {
 // data is available (loading, error, no online workers, or none advertising caps).
 export const FALLBACK_RUNNER_OPTIONS: SelectOption[] = [
   { value: 'vllm', label: 'vLLM' },
+  { value: 'mlserver', label: 'MLServer' },
   { value: 'triton', label: 'Triton' },
 ];
 

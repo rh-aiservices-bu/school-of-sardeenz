@@ -2,9 +2,20 @@
 #
 # RoutingMapUpdate — intentionally unused component, defined for Phase 2
 # consumption. Remove once the schema is referenced by an operation.
+#
+# OipModelList — the shape of the proxy's own GET /oip/v2/models response.
+# The proxy answers this route itself from the routing map (never forwarded)
+# and is not an operation in this control-plane-facing spec, so no path can
+# $ref it (see issue #125).
+#
+# ProxyProtocolSet — reachable over Redis (`{prefix}:proxy:protocols`), not
+# HTTP. Written by the proxy at startup and read by the control plane's
+# catalog-import forward-compat guard, so no path can $ref it (see issue #125).
 specs/proxy-control-plane.yaml:
   no-unused-components:
     - '#/components/schemas/RoutingMapUpdate'
+    - '#/components/schemas/OipModelList'
+    - '#/components/schemas/ProxyProtocolSet'
 
 # WorkerInfo / WorkerMemoryReport — reachable over Redis, not HTTP. Workers
 # publish them to `{prefix}:workers:{id}:{info,memory}` and the control plane

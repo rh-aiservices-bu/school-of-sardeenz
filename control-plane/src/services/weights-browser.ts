@@ -12,7 +12,12 @@ export interface WeightsBrowserLogger {
 
 // Filenames / extensions that mark a directory as holding model weights. Presence of any one of
 // these makes a folder directly selectable as a model path in the dashboard picker.
-const MODEL_FILE_NAMES = new Set(['config.json', 'tokenizer.json', 'tokenizer.model']);
+const MODEL_FILE_NAMES = new Set([
+  'config.json',
+  'tokenizer.json',
+  'tokenizer.model',
+  'model-settings.json',
+]);
 const MODEL_FILE_EXTS = ['.safetensors', '.gguf', '.bin', '.pt', '.pth', '.onnx'];
 
 // Browses the shared model-weights directory (SARDEENZ_WEIGHTS_DIR) one level at a time so the

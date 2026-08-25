@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ModelLifecycleState, RunnerState, SleepLevel } from '@sardeenz/types';
+import { ModelLifecycleState, Protocol, RunnerState, SleepLevel } from '@sardeenz/types';
 
 import { SleepWakeService } from '../sleep-wake.js';
 import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
@@ -131,13 +131,17 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
       mocks.runnerClient as unknown as RunnerClient,
     );
 
-    expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
-      host: '10.0.0.1',
-      port: 5002,
-      weight: 1,
-      healthy: true,
-      runnerId: 'runner-abc',
-    });
+    expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
+      'test-model',
+      {
+        host: '10.0.0.1',
+        port: 5002,
+        weight: 1,
+        healthy: true,
+        runnerId: 'runner-abc',
+      },
+      Protocol.openai,
+    );
   });
 
   it('stopModel removes the endpoint under the engine port', async () => {
@@ -165,6 +169,7 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
     expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
       'test-model',
       expect.objectContaining({ host: '10.0.0.1', port: 5001 }),
+      Protocol.openai,
     );
   });
 });

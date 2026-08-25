@@ -92,12 +92,12 @@ def test_capabilities_declares_kvcache_elastic_sharing():
     assert caps["engineVersion"] == "0.21.0"
     assert caps["supportedModelTypes"] == ["LLM"]
     assert caps["supportedSleepLevels"] == [st.L1_HOST_RAM]
-    assert caps["features"]["kvCacheElasticSharing"] is True
+    assert caps["kvCacheElasticSharing"] is True
 
 
 def test_capabilities_flag_off_when_kvcached_disabled():
     caps = st.capabilities("0.21.0", kvcached_enabled=False)
-    assert caps["features"]["kvCacheElasticSharing"] is False
+    assert caps["kvCacheElasticSharing"] is False
 
 
 def test_status_lifecycle_transitions():

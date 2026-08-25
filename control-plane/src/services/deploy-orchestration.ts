@@ -1,4 +1,4 @@
-import { ModelLifecycleState, RunnerState } from '@sardeenz/types';
+import { ModelLifecycleState, Protocol, RunnerState } from '@sardeenz/types';
 import type { RunnerClient } from '../clients/runner.js';
 import type { WorkerClient, StartRunnerRequest } from '../clients/worker.js';
 import {
@@ -28,6 +28,8 @@ export interface DeployModelParams {
   engineArgs?: string[];
   runtimeModule?: string;
   servedModelName?: string;
+  protocol: Protocol;
+  entrypoint?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
@@ -74,6 +76,7 @@ export class DeployOrchestrationService {
         engineConfig: params.engineConfig,
         engineArgs: params.engineArgs,
         runtimeModule: params.runtimeModule,
+        entrypoint: params.entrypoint,
         devices: params.devices as StartRunnerRequest['devices'],
       };
       const runnerInfo = await workerClient.startRunner(startRequest);
@@ -105,7 +108,7 @@ export class DeployOrchestrationService {
         healthy: true,
         runnerId: runnerInfo.runnerId,
       };
-      await this.routingMap.addEndpoint(params.modelName, endpoint);
+      await this.routingMap.addEndpoint(params.modelName, endpoint, params.protocol);
 
       await this.lifecycle.transition(
         params.modelName,

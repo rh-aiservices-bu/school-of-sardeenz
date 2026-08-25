@@ -15,6 +15,8 @@ import {
   Gallery,
   Label,
   LabelGroup,
+  List,
+  ListItem,
   Modal,
   ModalBody,
   ModalFooter,
@@ -273,6 +275,21 @@ export function RunnerCatalog() {
           <StackItem>
             <Alert variant="danger" isInline title={t('errors.uninstallFailed')}>
               {uninstallRunner.error instanceof Error ? uninstallRunner.error.message : ''}
+            </Alert>
+          </StackItem>
+        )}
+
+        {(data?.invalidEntries?.length ?? 0) > 0 && (
+          <StackItem>
+            <Alert variant="warning" isInline title={t('invalid.title')}>
+              <Content component="p">{t('invalid.body')}</Content>
+              <List>
+                {data?.invalidEntries?.map((e, i) => (
+                  <ListItem key={e.id ?? `invalid-${i}`}>
+                    {e.id ? <b>{e.id}</b> : <i>{t('invalid.unnamed')}</i>}: {e.reason}
+                  </ListItem>
+                ))}
+              </List>
             </Alert>
           </StackItem>
         )}

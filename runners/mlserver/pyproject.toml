@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sardeenz-mlserver-runner"
+version = "0.1.0"
+description = "Sardeenz MLServer runner shim — serves the engine-runner contract and drives MLServer (KServe V2) inside a SIF."
+requires-python = ">=3.10"
+# mlserver, mlserver-sklearn, mlserver-huggingface, torch, fastapi, uvicorn and httpx are provided
+# by the runner-mlserver image. They are intentionally NOT pinned here — this package is installed
+# on top of the MLServer base image, not resolved standalone. Listed for documentation/dev installs
+# only.
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+]
+
+[project.scripts]
+sardeenz-mlserver-runner = "sardeenz_mlserver_runner.__main__:main"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["sardeenz_mlserver_runner*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

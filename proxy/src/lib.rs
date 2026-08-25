@@ -7,5 +7,6 @@ pub mod health;
 pub mod inference_tracker;
 pub mod parking;
 pub mod protocol;
+pub mod routes;
 pub mod routing;
 pub mod state;

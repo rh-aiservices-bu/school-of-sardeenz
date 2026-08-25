@@ -12,7 +12,7 @@ async fn test_unknown_model_404() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": "does-not-exist/unknown-7B",
             "messages": [{"role": "user", "content": "Hello"}]
@@ -37,7 +37,7 @@ async fn test_missing_model_field_400() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "messages": [{"role": "user", "content": "Hello"}]
         }))
@@ -60,7 +60,7 @@ async fn test_invalid_json_body_400() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .header("content-type", "application/json")
         .body("not valid json{{{")
         .send()

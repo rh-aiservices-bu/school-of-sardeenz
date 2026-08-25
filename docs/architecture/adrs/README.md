@@ -19,4 +19,5 @@
 - [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain _(amended by ADR-018)_
 - [ADR-018](adr-018-runner-catalog-oras-distribution.md) — Runner Catalog and ORAS Distribution _(amends ADR-017)_
 - [ADR-019](adr-019-logical-model-vs-instance-split.md) — Logical Model vs. Instance Split _(refines ADR-014)_
-- [ADR-020](adr-020-config-name-vs-served-model-name.md) — Configuration Name vs. Served Model Name _(refines ADR-019)_
+- [ADR-020](adr-020-config-name-vs-served-model-name.md) — Configuration Name vs. Served Model Name _(refines ADR-019; amended by ADR-021)_
+- [ADR-021](adr-021-protocol-family-path-prefixes.md) — Protocol-Family Path Prefixes for Multi-Protocol Runners _(amends ADR-020)_

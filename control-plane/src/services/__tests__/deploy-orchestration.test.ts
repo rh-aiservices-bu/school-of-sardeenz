@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ModelLifecycleState, ModelState, RunnerState, WorkerStatus } from '@sardeenz/types';
+import {
+  ModelLifecycleState,
+  ModelState,
+  Protocol,
+  RunnerState,
+  WorkerStatus,
+} from '@sardeenz/types';
 
 import { DeployOrchestrationService } from '../deploy-orchestration.js';
 import type { DeployModelParams } from '../deploy-orchestration.js';
@@ -34,6 +40,7 @@ function makeParams(overrides: Partial<DeployModelParams> = {}): DeployModelPara
     modelPath: '/models/test',
     requiredMemory: 1_000_000,
     tensorParallel: 1,
+    protocol: Protocol.openai,
     devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     ...overrides,
   };
@@ -93,6 +100,7 @@ function createMocks(): MockDeps {
           instanceId: INSTANCE_ID,
           modelName: 'test-model',
           state: trackedInstance.state,
+          protocol: Protocol.openai,
           workerId: 'worker-1',
           runnerHost: null,
           runnerPort: null,
@@ -158,6 +166,7 @@ describe('DeployOrchestrationService', () => {
       expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
         'test-model',
         ModelState.STARTING,
+        Protocol.openai,
       );
       expect(mocks.workerClient.startRunner).toHaveBeenCalledOnce();
       // No distinct engine port reported → inference falls back to the management port.
@@ -168,13 +177,17 @@ describe('DeployOrchestrationService', () => {
         enginePort: 5001,
       });
       expect(mocks.runnerClient.getHealth).toHaveBeenCalledOnce();
-      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
-        host: '10.0.0.1',
-        port: 5001,
-        weight: 1,
-        healthy: true,
-        runnerId: 'runner-abc',
-      });
+      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
+        'test-model',
+        {
+          host: '10.0.0.1',
+          port: 5001,
+          weight: 1,
+          healthy: true,
+          runnerId: 'runner-abc',
+        },
+        Protocol.openai,
+      );
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         INSTANCE_ID,
@@ -186,7 +199,50 @@ describe('DeployOrchestrationService', () => {
           runnerId: 'runner-abc',
         },
       );
-      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith('test-model', ModelState.ACTIVE);
+      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+        'test-model',
+        ModelState.ACTIVE,
+        Protocol.openai,
+      );
+    });
+
+    it('threads protocol: oip through both setModelState calls and addEndpoint', async () => {
+      // setModelState is invoked via refreshModelRoutingState, which derives protocol from the
+      // instance(s) currently in Redis (not from params directly) — mirror what createInstance
+      // would have persisted for an oip deploy, while preserving the existing mock's dynamic
+      // state tracking (so the second refresh still observes the ACTIVE transition).
+      const originalImpl = mocks.lifecycle.getInstancesForModel.getMockImplementation()!;
+      mocks.lifecycle.getInstancesForModel.mockImplementation(
+        (): InstanceState[] =>
+          (originalImpl() as InstanceState[]).map((i) => ({ ...i, protocol: Protocol.oip })),
+      );
+
+      await service.deployModel(makeParams({ protocol: Protocol.oip }));
+
+      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+        'test-model',
+        ModelState.STARTING,
+        Protocol.oip,
+      );
+      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+        'test-model',
+        ModelState.ACTIVE,
+        Protocol.oip,
+      );
+      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
+        'test-model',
+        expect.any(Object),
+        Protocol.oip,
+      );
+    });
+
+    it('forwards entrypoint to the worker client startRunner request', async () => {
+      const entrypoint = ['python3', '-m', 'sardeenz_mlserver_runner'];
+      await service.deployModel(makeParams({ entrypoint }));
+
+      expect(mocks.workerClient.startRunner).toHaveBeenCalledWith(
+        expect.objectContaining({ entrypoint }),
+      );
     });
 
     it('releases the model reservation after transitioning to ACTIVE (#87)', async () => {
@@ -211,13 +267,17 @@ describe('DeployOrchestrationService', () => {
         enginePort: 5002,
       });
       // The proxy-facing routing endpoint targets the engine port.
-      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith('test-model', {
-        host: '10.0.0.1',
-        port: 5002,
-        weight: 1,
-        healthy: true,
-        runnerId: 'runner-abc',
-      });
+      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
+        'test-model',
+        {
+          host: '10.0.0.1',
+          port: 5002,
+          weight: 1,
+          healthy: true,
+          runnerId: 'runner-abc',
+        },
+        Protocol.openai,
+      );
       expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
         'test-model',
         INSTANCE_ID,
@@ -255,6 +315,7 @@ describe('DeployOrchestrationService', () => {
         engineConfig: { maxModelLen: 4096 },
         engineArgs: undefined,
         runtimeModule: undefined,
+        entrypoint: undefined,
         devices: [
           { deviceIndex: 0, deviceType: 'CUDA' },
           { deviceIndex: 1, deviceType: 'CUDA' },

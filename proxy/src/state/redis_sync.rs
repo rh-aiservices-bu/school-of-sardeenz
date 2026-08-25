@@ -6,6 +6,11 @@ use redis::AsyncCommands;
 use crate::generated::proxy_control_plane::{RoutingEntry, RoutingMap};
 use crate::state::AppState;
 
+/// Protocol families this proxy build supports, advertised at
+/// `{prefix}:proxy:protocols` for the control plane's catalog-import
+/// forward-compat guard (#125). Keep in sync with `Protocol`'s variants.
+const SUPPORTED_PROTOCOLS: [&str; 2] = ["openai", "oip"];
+
 /// Parse a raw Redis HGETALL map into a routing map.
 ///
 /// Used by both the initial-load and refresh paths so parse-failure handling
@@ -61,6 +66,15 @@ pub async fn start_redis_sync(state: AppState) -> anyhow::Result<()> {
 
     state.set_redis_connected(true);
     tracing::info!("connected to Redis");
+
+    // Advertise supported protocol families for the control plane's catalog
+    // import-time forward-compat guard (#125). Idempotent; rewritten on every
+    // reconnect. Best-effort — a failure is logged, not fatal.
+    let protocols_key = format!("{}:proxy:protocols", state.config.redis_key_prefix);
+    let protocols_json = serde_json::to_string(&SUPPORTED_PROTOCOLS).unwrap();
+    if let Err(e) = conn.set::<_, _, ()>(&protocols_key, &protocols_json).await {
+        tracing::warn!(key = %protocols_key, error = %e, "failed to publish proxy protocols");
+    }
 
     let routing_map_key = format!("{}:routing-map", state.config.redis_key_prefix);
     let routing_updates_channel = format!("{}:routing-updates", state.config.redis_key_prefix);
@@ -134,12 +148,13 @@ mod tests {
     use metrics_exporter_prometheus::PrometheusBuilder;
 
     use super::*;
-    use crate::generated::proxy_control_plane::{ModelState, RunnerEndpoint};
+    use crate::generated::proxy_control_plane::{ModelState, Protocol, RunnerEndpoint};
 
     fn sample_entry(model_name: &str) -> RoutingEntry {
         RoutingEntry {
             model_name: model_name.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: "127.0.0.1".to_string(),
                 port: 8000,

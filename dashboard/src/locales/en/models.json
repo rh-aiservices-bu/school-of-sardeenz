@@ -235,6 +235,7 @@
     "inference": {
       "title": "Inference",
       "description": "Paste-ready request using this model's routing name (the model field clients send).",
+      "descriptionOip": "Paste-ready KServe V2 request using this model's name in the URL path. Edit the inputs tensor for your model.",
       "curlCopy": "Copy",
       "curlCopied": "Copied",
       "curlAria": "Copy curl snippet"

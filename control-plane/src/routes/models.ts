@@ -5,7 +5,11 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
 import { isContainedIn } from '../utils/path-containment.js';
-import { assertValidModelName, MODEL_NAME_PATTERN } from '../utils/model-name.js';
+import {
+  assertModelNameRoutableForProtocol,
+  assertValidModelName,
+  MODEL_NAME_PATTERN,
+} from '../utils/model-name.js';
 import type { ModelRecord } from '../services/model-repository.js';
 import { deriveAggregateState, type InstanceState } from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
@@ -165,9 +169,12 @@ async function deployFromRecord(
   const requiredMemory = record.requiredMemory;
   const tensorParallel = record.tensorParallel;
 
+  const runnerMeta = await deps.catalogService.resolveRunnerMetadata(record.runnerType);
+  assertModelNameRoutableForProtocol(record.name, runnerMeta.protocol);
+
   let redisCreated = false;
   try {
-    await deps.lifecycle.createInstance(record.name, instanceId);
+    await deps.lifecycle.createInstance(record.name, instanceId, null, runnerMeta.protocol);
     redisCreated = true;
 
     const workers = deps.workerPool.getAllWorkers();
@@ -219,6 +226,8 @@ async function deployFromRecord(
           engineArgs: record.engineArgs ?? undefined,
           runtimeModule: record.runtimeModule ?? undefined,
           servedModelName: record.servedModelName ?? undefined,
+          protocol: runnerMeta.protocol,
+          entrypoint: runnerMeta.entrypoint,
           devices: result.devices,
         })
         .catch((err: unknown) => {
@@ -355,6 +364,8 @@ async function deployFromRecord(
             engineArgs: record.engineArgs ?? undefined,
             runtimeModule: record.runtimeModule ?? undefined,
             servedModelName: record.servedModelName ?? undefined,
+            protocol: runnerMeta.protocol,
+            entrypoint: runnerMeta.entrypoint,
             devices: reclaimed.devices,
           })
           .catch((err: unknown) => {

@@ -8,6 +8,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **MLServer engine runner and protocol-family proxy surface (ADR-021, #125).** Second engine
+  runner proving the abstraction beyond vLLM. Proxy: inference routes move to protocol-family
+  prefixes — `/openai/v1/*` (OpenAI surface) and `/oip/v2/*` (KServe V2 Open Inference
+  Protocol: `POST /oip/v2/models/{model}/infer`, `GET …/ready`, `GET /oip/v2/models`) — with
+  the prefix stripped before forwarding and the bare `/v1/*` routes removed (no deprecation
+  period, pre-release); path-based model extraction; listings filtered by a new required
+  `protocol` tag (`openai` | `oip`) on routing entries (spec + hand-maintained Rust mirror;
+  dead `engineType` removed); readiness probes return 503 for sleeping models without waking
+  them; the proxy advertises its supported protocols in Redis (`{prefix}:proxy:protocols`).
+  Control plane: catalog entries require `protocol` (missing → loud `invalidEntries`
+  validation surfaced in the dashboard, not a silent skip) and may carry a per-runner
+  `entrypoint` argv (forwarded via `StartRunnerRequest`, falling back to
+  `SARDEENZ_RUNNER_ENTRYPOINT`); catalog import fails fast (409, "proxy upgrade required")
+  when the proxy doesn't advertise the entry's protocol; routing entries carry the protocol
+  end-to-end (persisted on instance state); oip model names reject `/` at deploy
+  (path-routable); `model-settings.json` recognized as a model-directory marker. New
+  `runners/mlserver/` shim (all 7 management endpoints, sleep/wake via the V2 repository
+  unload/load API, served-name-enforced `model-settings.json` generation with
+  model-directory containment, #116-correct memory attribution, engine bound to 0.0.0.0),
+  `containers/runner-mlserver/` image (mlserver + sklearn + huggingface runtimes),
+  dev-worker `mlserver` stub serving V2 routes, catalog entry in `runners.yaml`, gate 11
+  (Apptainer launch/health), and a shared engine-runner contract-conformance suite
+  (`runners/conformance/`) both shims pass — which surfaced and fixed a pre-existing vLLM
+  shim bug (`kvCacheElasticSharing` was nested under `features` instead of top-level per
+  the contract). Dashboard: protocol-labeled inference base URLs (`…/openai/v1`, `…/oip`),
+  protocol-aware per-model curl examples, mlserver in the runner fallback options. vLLM's
+  loopback engine bind is unchanged (tracked in #159).
+
 - **`servedModelName` — engine-reported model identity separate from the configuration name
   (ADR-020, #154).** Optional field on `ModelDeploymentRequest`/`ModelDetail`
   (`control-plane.yaml`) and `StartRunnerRequest` (`worker-agent.yaml`); the Rust-mirrored

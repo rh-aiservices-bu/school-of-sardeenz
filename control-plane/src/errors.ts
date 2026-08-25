@@ -14,6 +14,7 @@ export type ErrorCode =
   | 'CATALOG_NOT_FOUND'
   | 'CATALOG_FETCH_FAILED'
   | 'MODULE_IN_USE'
+  | 'PROXY_PROTOCOL_UNSUPPORTED'
   | 'UNAUTHORIZED'
   | 'INTERNAL_ERROR';
 
@@ -121,6 +122,17 @@ export class ControlPlaneError extends Error {
       'MODULE_IN_USE',
       `Module for ${id} is in use by a running runner; stop dependent models first`,
       { id },
+    );
+  }
+
+  static proxyProtocolUnsupported(protocol: string, supported: string[]): ControlPlaneError {
+    return new ControlPlaneError(
+      409,
+      'PROXY_PROTOCOL_UNSUPPORTED',
+      `Runner protocol '${protocol}' is not supported by the running proxy ` +
+        `(supports: ${supported.join(', ') || 'none'}). A proxy upgrade is required ` +
+        `before importing this runner.`,
+      { protocol, supported },
     );
   }
 

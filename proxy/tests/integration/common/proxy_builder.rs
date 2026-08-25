@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::Router;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
@@ -183,11 +183,7 @@ impl TestProxy {
         let admin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let admin_addr = admin_listener.local_addr().unwrap();
 
-        let proxy_app = Router::new()
-            .route("/v1/chat/completions", post(handlers::handle_inference))
-            .route("/v1/completions", post(handlers::handle_inference))
-            .route("/v1/models", get(handlers::handle_models))
-            .with_state(state.clone());
+        let proxy_app = sardeenz_proxy::routes::build_proxy_router(state.clone());
 
         let admin_app = Router::new()
             .route("/healthz", get(handle_healthz))

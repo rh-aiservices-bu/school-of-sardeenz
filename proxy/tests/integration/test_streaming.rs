@@ -16,7 +16,7 @@ async fn test_active_model_streaming() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Count to three"}],

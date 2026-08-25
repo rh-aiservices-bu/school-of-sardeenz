@@ -13,6 +13,7 @@ mod test_forwarding_limits;
 mod test_health;
 mod test_model_states;
 mod test_models_endpoint;
+mod test_oip_surface;
 mod test_parked_state_transitions;
 mod test_parking_leak;
 mod test_parking_limits;

@@ -31,7 +31,7 @@ async fn test_wake_trigger_failure_returns_503() {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().unwrap();
 
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}]
@@ -105,7 +105,7 @@ async fn test_wake_transport_error_no_url_leak() {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().unwrap();
 
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}]

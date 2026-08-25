@@ -7,10 +7,11 @@ mod health;
 mod inference_tracker;
 mod parking;
 mod protocol;
+mod routes;
 mod routing;
 mod state;
 
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -104,10 +105,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Proxy routes (inference traffic)
-    let proxy_app = Router::new()
-        .route("/v1/chat/completions", post(handlers::handle_inference))
-        .route("/v1/completions", post(handlers::handle_inference))
-        .route("/v1/models", get(handlers::handle_models))
+    let proxy_app = crate::routes::build_proxy_router(state.clone())
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<_>| {
@@ -137,8 +135,7 @@ async fn main() -> anyhow::Result<()> {
                     },
                 ),
         )
-        .layer(RequestBodyLimitLayer::new(config.max_body_bytes))
-        .with_state(state.clone());
+        .layer(RequestBodyLimitLayer::new(config.max_body_bytes));
 
     // Admin routes (health + metrics, separate port)
     let admin_app = Router::new()

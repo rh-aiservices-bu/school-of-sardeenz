@@ -50,7 +50,8 @@ import { DeployLogsModal } from '../../components/DeployLogsModal';
 import { formatBytes, formatRelativeTime, formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfig } from '../../hooks/useConfig';
-import { buildChatCurl } from '../../utils/inference';
+import { useCatalog } from '../../hooks/useCatalog';
+import { buildChatCurl, buildV2InferCurl, runnerProtocol } from '../../utils/inference';
 
 export function ModelDetail() {
   const { t } = useTranslation('models');
@@ -61,6 +62,7 @@ export function ModelDetail() {
 
   const { data: model, isLoading, error } = useModel(modelName ?? '');
   const { data: cfg } = useConfig();
+  const { data: catalog } = useCatalog();
   const sleepModel = useSleepModel();
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
@@ -202,6 +204,8 @@ export function ModelDetail() {
       </PageSection>
     );
   }
+
+  const protocol = runnerProtocol(model.runnerType, catalog?.runners);
 
   const isActive = model.state === ModelLifecycleState.ACTIVE;
   const isSleeping = model.state === ModelLifecycleState.SLEEPING;
@@ -513,7 +517,9 @@ export function ModelDetail() {
             component="small"
             style={{ display: 'block', marginBottom: 'var(--pf-t--global--spacer--sm)' }}
           >
-            {t('detail.inference.description')}
+            {t(
+              protocol === 'oip' ? 'detail.inference.descriptionOip' : 'detail.inference.description',
+            )}
           </Content>
           <CodeBlock
             actions={
@@ -523,9 +529,11 @@ export function ModelDetail() {
                   textId="model-curl-code-content"
                   aria-label={t('detail.inference.curlAria')}
                   onClick={() => {
-                    void navigator.clipboard.writeText(
-                      buildChatCurl(cfg.inferenceUrl, model.modelName),
-                    );
+                    const curl =
+                      protocol === 'oip'
+                        ? buildV2InferCurl(cfg.inferenceUrl, model.modelName)
+                        : buildChatCurl(cfg.inferenceUrl, model.modelName);
+                    void navigator.clipboard.writeText(curl);
                     setCurlCopied(true);
                   }}
                   exitDelay={curlCopied ? 1500 : 600}
@@ -537,7 +545,9 @@ export function ModelDetail() {
             }
           >
             <CodeBlockCode id="model-curl-code-content">
-              {buildChatCurl(cfg.inferenceUrl, model.modelName)}
+              {protocol === 'oip'
+                ? buildV2InferCurl(cfg.inferenceUrl, model.modelName)
+                : buildChatCurl(cfg.inferenceUrl, model.modelName)}
             </CodeBlockCode>
           </CodeBlock>
         </div>

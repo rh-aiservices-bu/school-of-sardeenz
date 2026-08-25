@@ -51,6 +51,8 @@ export interface StartRunnerParams {
   engineArgs?: string[];
   /** Optional engine-reported model identity (ADR-020); passed through to the launcher. */
   servedModelName?: string;
+  /** Optional verbatim argv from catalog metadata (#125); passed through to the launcher. */
+  entrypoint?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
@@ -148,6 +150,7 @@ export class RunnerManager {
           engineConfig: params.engineConfig,
           engineArgs: params.engineArgs,
           servedModelName: params.servedModelName,
+          entrypoint: params.entrypoint,
           devices: params.devices,
           port,
           enginePort,

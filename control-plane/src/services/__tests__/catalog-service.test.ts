@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
+import { Protocol } from '@sardeenz/types';
 import { CatalogService } from '../catalog-service.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -16,6 +17,7 @@ runners:
     version: "0.21"
     image: oras://quay.io/x/vllm:0.21@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     sifName: vllm-0.21
+    protocol: openai
     tags: [llm, cuda]
     minVRAMGiB: 16
 `;
@@ -31,6 +33,7 @@ describe('CatalogService.parse (via file source)', () => {
       id: 'vllm-0.21',
       runnerType: 'vllm',
       sifName: 'vllm-0.21',
+      protocol: 'openai',
       minVRAMGiB: 16,
       tags: ['llm', 'cuda'],
     });
@@ -46,6 +49,7 @@ runners:
     version: "1"
     image: oras://x/y:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     sifName: good
+    protocol: openai
   - id: bad
     title: Missing fields
 `;
@@ -73,8 +77,8 @@ runners:
   it('deduplicates entries by id', async () => {
     const yaml = `
 runners:
-  - { id: dup, title: A, description: d, runnerType: vllm, version: "1", image: "oras://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: dup }
-  - { id: dup, title: B, description: d, runnerType: vllm, version: "2", image: "oras://x:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: dup }
+  - { id: dup, title: A, description: d, runnerType: vllm, version: "1", image: "oras://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: dup, protocol: openai }
+  - { id: dup, title: B, description: d, runnerType: vllm, version: "2", image: "oras://x:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: dup, protocol: openai }
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
     const snap = await svc.load();
@@ -84,8 +88,8 @@ runners:
   it('deduplicates entries by sifName (aliasing the same module file)', async () => {
     const yaml = `
 runners:
-  - { id: a, title: A, description: d, runnerType: vllm, version: "1", image: "oras://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: shared }
-  - { id: b, title: B, description: d, runnerType: vllm, version: "2", image: "oras://x:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: shared }
+  - { id: a, title: A, description: d, runnerType: vllm, version: "1", image: "oras://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: shared, protocol: openai }
+  - { id: b, title: B, description: d, runnerType: vllm, version: "2", image: "oras://x:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sifName: shared, protocol: openai }
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
     const snap = await svc.load();
@@ -120,6 +124,7 @@ runners:
     version: "0.21"
     image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
     sifName: vllm-0.21
+    protocol: openai
     supportedModelTypes: [LLM]
     supportedDeviceTypes: [CUDA]
     supportedSleepLevels: [L1_HOST_RAM]
@@ -151,6 +156,7 @@ runners:
     version: "0.21"
     image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
     sifName: vllm-0.21
+    protocol: openai
     maxTensorParallelism: "eight"
     kvCacheElasticSharing: "yes"
     features: [not, an, object]
@@ -190,6 +196,7 @@ runners:
     version: "1"
     image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
     sifName: digest
+    protocol: openai
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
     const snap = await svc.load();
@@ -206,6 +213,7 @@ runners:
     version: "1"
     image: /modules/vllm-0.21.sif
     sifName: local
+    protocol: openai
 `;
     const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
     const snap = await svc.load();
@@ -260,5 +268,142 @@ describe('CatalogService http source', () => {
     const snap = await svc.load();
     expect(snap.entries).toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('CatalogService protocol validation (#125)', () => {
+  it('loudly rejects an entry missing protocol', async () => {
+    const yaml = `
+runners:
+  - id: noproto
+    title: No Protocol
+    description: d
+    runnerType: vllm
+    version: "1"
+    image: oras://x/y:1@sha256:${'a'.repeat(64)}
+    sifName: noproto
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(0);
+    expect(snap.invalidEntries).toEqual([
+      { id: 'noproto', reason: expect.stringMatching(/protocol/i) as string },
+    ]);
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('rejects an invalid protocol value', async () => {
+    const yaml = `
+runners:
+  - id: badproto
+    title: Bad Protocol
+    description: d
+    runnerType: vllm
+    version: "1"
+    image: oras://x/y:1@sha256:${'a'.repeat(64)}
+    sifName: badproto
+    protocol: grpc
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(0);
+    expect(snap.invalidEntries).toEqual([
+      { id: 'badproto', reason: expect.stringMatching(/protocol/i) as string },
+    ]);
+  });
+
+  it('parses entrypoint when present', async () => {
+    const yaml = `
+runners:
+  - id: mlserver-1.6
+    title: MLServer
+    description: d
+    runnerType: mlserver
+    version: "1.6"
+    image: oras://x/y:1@sha256:${'a'.repeat(64)}
+    sifName: mlserver-1.6
+    protocol: oip
+    entrypoint: [python3, -m, sardeenz_mlserver_runner]
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries[0].entrypoint).toEqual(['python3', '-m', 'sardeenz_mlserver_runner']);
+  });
+
+  it('ignores non-array entrypoint', async () => {
+    const yaml = `
+runners:
+  - id: mlserver-1.6
+    title: MLServer
+    description: d
+    runnerType: mlserver
+    version: "1.6"
+    image: oras://x/y:1@sha256:${'a'.repeat(64)}
+    sifName: mlserver-1.6
+    protocol: oip
+    entrypoint: "not-an-array"
+`;
+    const svc = new CatalogService('/c.yaml', logger, { readFile: () => Promise.resolve(yaml) });
+    const snap = await svc.load();
+    expect(snap.entries[0].entrypoint).toBeUndefined();
+  });
+});
+
+describe('CatalogService.resolveRunnerMetadata', () => {
+  const CATALOG = `
+runners:
+  - id: vllm-0.21
+    title: vLLM 0.21
+    description: d
+    runnerType: vllm
+    version: "0.21"
+    image: oras://x/y:1@sha256:${'a'.repeat(64)}
+    sifName: vllm-0.21
+    protocol: openai
+  - id: mlserver-1.6
+    title: MLServer
+    description: d
+    runnerType: mlserver
+    version: "1.6"
+    image: oras://x/y:2@sha256:${'a'.repeat(64)}
+    sifName: mlserver-1.6
+    protocol: oip
+    entrypoint: [python3, -m, sardeenz_mlserver_runner]
+`;
+
+  it('resolves protocol + entrypoint for a cataloged oip runnerType', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(CATALOG),
+    });
+    await svc.load();
+    expect(await svc.resolveRunnerMetadata('mlserver')).toEqual({
+      protocol: Protocol.oip,
+      entrypoint: ['python3', '-m', 'sardeenz_mlserver_runner'],
+    });
+  });
+
+  it('resolves protocol without entrypoint for a cataloged openai runnerType', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(CATALOG),
+    });
+    await svc.load();
+    expect(await svc.resolveRunnerMetadata('vllm')).toEqual({ protocol: Protocol.openai });
+  });
+
+  it('defaults to openai for an unknown runnerType', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(CATALOG),
+    });
+    await svc.load();
+    expect(await svc.resolveRunnerMetadata('unknown')).toEqual({ protocol: Protocol.openai });
+  });
+
+  it('defaults to openai (never throws) when the catalog source fails to load', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.reject(new Error('ENOENT')),
+    });
+    await expect(svc.resolveRunnerMetadata('mlserver')).resolves.toEqual({
+      protocol: Protocol.openai,
+    });
   });
 });

@@ -25,6 +25,11 @@ info:
 
     - `RoutingMapUpdate` — published to the `sardeenz:routing-updates`
       Redis pub/sub channel by the control plane
+    - `{prefix}:proxy:protocols` — a Redis **string** key (JSON array of
+      `Protocol`) written by the proxy at startup advertising the protocol
+      families it can serve. The control plane reads it at catalog-import
+      time to reject runners whose protocol the running proxy does not
+      support.
 
     ## Conventions
 
@@ -185,6 +190,21 @@ components:
         - DRAINING
         - ERROR
 
+    Protocol:
+      type: string
+      description: |
+        Protocol family a model speaks, and the proxy path prefix under which
+        it is invoked. `openai` → OpenAI-compatible surface (`/openai/v1/...`,
+        vLLM). `oip` → KServe V2 Open Inference Protocol surface
+        (`/oip/v2/...`, MLServer). Extensible: a new value is a coordinated
+        change to this spec, the hand-maintained Rust mirror, and (by the
+        forward-compat guard) a proxy release. Values are lowercase and match
+        both the URL prefix and the catalog `protocol` field — deliberately
+        not SCREAMING_SNAKE_CASE.
+      enum:
+        - openai
+        - oip
+
     # -------------------------------------------------------------------------
     # Wake Trigger
     # -------------------------------------------------------------------------
@@ -270,6 +290,7 @@ components:
       required:
         - modelName
         - state
+        - protocol
         - endpoints
         - updatedAt
       properties:
@@ -282,6 +303,13 @@ components:
             - "meta-llama/Llama-3.1-8B-Instruct"
         state:
           $ref: "#/components/schemas/ModelState"
+        protocol:
+          $ref: "#/components/schemas/Protocol"
+          description: |
+            Written by the control plane. The proxy filters both model
+            listings on this value — `/openai/v1/models` lists only `openai`
+            entries, `/oip/v2/models` only `oip` — so it must be present on
+            every entry.
         endpoints:
           type: array
           items:
@@ -315,11 +343,6 @@ components:
               minimum: 1
               description: |
                 Maximum context length supported by this model deployment.
-            engineType:
-              type: string
-              description: |
-                The inference engine type serving this model (e.g., "vllm",
-                "triton").
           additionalProperties: true
 
     RunnerEndpoint:
@@ -373,6 +396,45 @@ components:
           description: |
             Unique identifier for the runner instance. Used for logging,
             metrics, and correlating with control plane state.
+
+    OipModelList:
+      type: object
+      description: |
+        Response body of the proxy's `GET /oip/v2/models`. NOT part of the
+        standard KServe V2 dataplane spec — defined by Sardeenz. Answered by
+        the proxy from the routing map (never forwarded), listing only
+        `oip`-protocol models. SLEEPING models ARE listed (`ready: false`):
+        they are invocable, and a request to one parks and wakes it. "not
+        ready" means "asleep, wakes on inference", NOT "unavailable".
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - ready
+            properties:
+              name:
+                type: string
+                description: The Sardeenz model (configuration) name — the routing key.
+              ready:
+                type: boolean
+                description: "`true` when ACTIVE, `false` when SLEEPING."
+
+    ProxyProtocolSet:
+      type: array
+      description: |
+        JSON value stored at the Redis string key `{prefix}:proxy:protocols`.
+        The set of protocol families the running proxy supports. Written on
+        every Redis (re)connect; not TTL'd. Consumed by the control plane's
+        catalog-import forward-compat guard.
+      items:
+        $ref: "#/components/schemas/Protocol"
+      examples:
+        - ["openai", "oip"]
 
     # -------------------------------------------------------------------------
     # Routing Map Updates (pub/sub)

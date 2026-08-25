@@ -20,7 +20,7 @@ async fn test_active_model_request() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}]
@@ -41,7 +41,7 @@ async fn test_active_model_request() {
 
 #[tokio::test]
 async fn test_active_model_completions_endpoint() {
-    // Ensure /v1/completions (non-chat) is also proxied correctly.
+    // Ensure /openai/v1/completions (non-chat) is also proxied correctly.
     let model = "bigcode/starcoder2-15b";
 
     let runner = MockRunner::spawn(model).await;
@@ -50,7 +50,7 @@ async fn test_active_model_completions_endpoint() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model,
             "prompt": "def hello():",

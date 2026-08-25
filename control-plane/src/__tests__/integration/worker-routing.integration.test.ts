@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { DeviceType, ModelLifecycleState, RunnerState, WorkerStatus } from '@sardeenz/types';
+import { DeviceType, ModelLifecycleState, Protocol, RunnerState, WorkerStatus } from '@sardeenz/types';
 
 import { canConnect, createHarness, type TestHarness } from './helpers/harness.js';
 import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.js';
@@ -102,6 +102,7 @@ describe.skipIf(!AVAILABLE)('Worker routing integration', () => {
 
     runner.setHealthState(RunnerState.READY);
     await harness.deployOrchestration.deployModel({
+      protocol: Protocol.openai,
       modelName: MODEL,
       instanceId: INSTANCE_ID,
       workerId: WORKER_ID,

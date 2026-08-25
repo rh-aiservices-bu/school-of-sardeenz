@@ -1,12 +1,13 @@
-// test_models_endpoint: GET /v1/models returns an aggregated list of models
+// test_models_endpoint: GET /openai/v1/models returns an aggregated list of models
 // in Active or Sleeping state (not Draining/Error/Starting).
 
 use reqwest::StatusCode;
 
-use sardeenz_proxy::generated::proxy_control_plane::ModelState;
+use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol};
 
 use crate::common::{
-    insert_active_model, insert_active_model_with_metadata, insert_model, MockRunner, TestProxy,
+    insert_active_model, insert_active_model_with_metadata, insert_active_oip_model, insert_model,
+    MockRunner, TestProxy,
 };
 
 #[tokio::test]
@@ -18,7 +19,7 @@ async fn test_models_endpoint_active_and_sleeping() {
     let runner = MockRunner::spawn(active_model).await;
     let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
 
-    // Active model — should appear in /v1/models.
+    // Active model — should appear in /openai/v1/models.
     insert_active_model(&proxy.routing_cache, active_model, runner.addr).await;
 
     // Sleeping model — should also appear (still advertised).
@@ -26,16 +27,24 @@ async fn test_models_endpoint_active_and_sleeping() {
         &proxy.routing_cache,
         sleeping_model,
         ModelState::Sleeping,
+        Protocol::Openai,
         runner.addr, // addr doesn't matter for sleeping
     )
     .await;
 
     // Draining model — should NOT appear.
-    insert_model(&proxy.routing_cache, draining_model, ModelState::Draining, runner.addr).await;
+    insert_model(
+        &proxy.routing_cache,
+        draining_model,
+        ModelState::Draining,
+        Protocol::Openai,
+        runner.addr,
+    )
+    .await;
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(format!("{}/v1/models", proxy.proxy_url()))
+        .get(format!("{}/openai/v1/models", proxy.proxy_url()))
         .send()
         .await
         .expect("request failed");
@@ -49,9 +58,9 @@ async fn test_models_endpoint_active_and_sleeping() {
 
     let ids: Vec<&str> = data.iter().map(|m| m["id"].as_str().unwrap_or("")).collect();
 
-    assert!(ids.contains(&active_model), "active model should appear in /v1/models");
-    assert!(ids.contains(&sleeping_model), "sleeping model should appear in /v1/models");
-    assert!(!ids.contains(&draining_model), "draining model should NOT appear in /v1/models");
+    assert!(ids.contains(&active_model), "active model should appear in /openai/v1/models");
+    assert!(ids.contains(&sleeping_model), "sleeping model should appear in /openai/v1/models");
+    assert!(!ids.contains(&draining_model), "draining model should NOT appear in /openai/v1/models");
 
     // Standard OpenAI model object fields.
     let active =
@@ -70,7 +79,7 @@ async fn test_models_endpoint_metadata() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(format!("{}/v1/models", proxy.proxy_url()))
+        .get(format!("{}/openai/v1/models", proxy.proxy_url()))
         .send()
         .await
         .expect("request failed");
@@ -90,7 +99,7 @@ async fn test_models_endpoint_empty() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .get(format!("{}/v1/models", proxy.proxy_url()))
+        .get(format!("{}/openai/v1/models", proxy.proxy_url()))
         .send()
         .await
         .expect("request failed");
@@ -103,4 +112,33 @@ async fn test_models_endpoint_empty() {
         0,
         "empty routing map should return empty data array"
     );
+}
+
+#[tokio::test]
+async fn openai_models_excludes_oip() {
+    // /openai/v1/models filters on protocol — an oip-protocol model must not
+    // leak into the OpenAI listing (#125).
+    let openai_model = "meta-llama/Llama-3.1-8B-Instruct";
+    let oip_model = "iris-sklearn";
+
+    let runner = MockRunner::spawn(openai_model).await;
+    let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
+
+    insert_active_model(&proxy.routing_cache, openai_model, runner.addr).await;
+    insert_active_oip_model(&proxy.routing_cache, oip_model, runner.addr).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/openai/v1/models", proxy.proxy_url()))
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = resp.json().await.expect("response not JSON");
+    let ids: Vec<&str> =
+        body["data"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap_or("")).collect();
+
+    assert!(ids.contains(&openai_model), "openai-protocol model should be listed");
+    assert!(!ids.contains(&oip_model), "oip-protocol model must NOT be listed under /openai");
 }

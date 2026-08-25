@@ -333,6 +333,11 @@ Workers self-report their capabilities and device memory usage to Redis/Valkey. 
 
 ## Request Flows
 
+The proxy serves two protocol-family path prefixes on its inference port: `/openai/v1/*` (OpenAI-
+compatible, shown below) and `/oip/v2/*` (KServe V2 Open Inference Protocol, e.g. MLServer models).
+See [ADR-021](adrs/adr-021-protocol-family-path-prefixes.md) and
+[`components/proxy.md`](components/proxy.md#overview) for the full endpoint surface.
+
 ### Inference Request — Model is Active
 
 ```mermaid
@@ -342,7 +347,7 @@ sequenceDiagram
     participant Redis as Redis / Valkey
     participant Runner as Runner (vLLM)
 
-    Client->>Proxy: POST /v1/chat/completions<br/>{model: "llama-3"}
+    Client->>Proxy: POST /openai/v1/chat/completions<br/>{model: "llama-3"}
     Proxy->>Redis: Lookup routing map<br/>for "llama-3"
     Redis-->>Proxy: Worker 1, port 5001<br/>State: ACTIVE
     Proxy->>Runner: Forward request
@@ -362,7 +367,7 @@ sequenceDiagram
     participant CP as Control Plane
     participant Runner as Runner (vLLM)
 
-    Client->>Proxy: POST /v1/chat/completions<br/>{model: "llama-3"}
+    Client->>Proxy: POST /openai/v1/chat/completions<br/>{model: "llama-3"}
     Proxy->>Redis: Lookup routing map
     Redis-->>Proxy: State: SLEEPING
 
@@ -585,7 +590,8 @@ The workflow: edit the OpenAPI spec → run code generation → TypeScript types
 | [ADR-017](adrs/adr-017-runner-image-pipeline.md)             | Runner image build and supply chain _(amended by ADR-018)_                               |
 | [ADR-018](adrs/adr-018-runner-catalog-oras-distribution.md)  | Runner catalog and ORAS distribution _(amends ADR-017)_                                  |
 | [ADR-019](adrs/adr-019-logical-model-vs-instance-split.md)   | Logical model vs. instance split _(refines ADR-014)_                                     |
-| [ADR-020](adrs/adr-020-config-name-vs-served-model-name.md)  | Configuration name vs. served model name _(refines ADR-019)_                             |
+| [ADR-020](adrs/adr-020-config-name-vs-served-model-name.md)  | Configuration name vs. served model name _(refines ADR-019; amended by ADR-021)_         |
+| [ADR-021](adrs/adr-021-protocol-family-path-prefixes.md)     | Protocol-family path prefixes for multi-protocol runners _(amends ADR-020)_              |
 
 ---
 

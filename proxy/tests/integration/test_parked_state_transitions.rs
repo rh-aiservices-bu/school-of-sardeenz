@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
 
-use sardeenz_proxy::generated::proxy_control_plane::ModelState;
+use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol};
 
 use crate::common::proxy_builder::TestProxyConfig;
 use crate::common::{insert_model, TestProxy};
@@ -32,7 +32,7 @@ async fn test_parked_request_sleeping_rollback_fails_fast() {
     let model = "rollback/model-v1";
     let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
     let cache = sardeenz_proxy::routing::RoutingMapCache::new();
-    insert_model(&cache, model, ModelState::Starting, addr).await;
+    insert_model(&cache, model, ModelState::Starting, Protocol::Openai, addr).await;
 
     let proxy = TestProxy::spawn_with_shared_cache_and_config(
         TestProxyConfig {
@@ -51,14 +51,14 @@ async fn test_parked_request_sleeping_rollback_fails_fast() {
     let c = client.clone();
     let start = Instant::now();
     let handle = tokio::spawn(async move {
-        c.post(format!("{url}/v1/chat/completions"))
+        c.post(format!("{url}/openai/v1/chat/completions"))
             .json(&serde_json::json!({"model": m, "messages":[{"role":"user","content":"hi"}]}))
             .send()
             .await
     });
 
     assert!(poll_parked(&proxy, 1, Duration::from_secs(5)).await, "request never parked");
-    insert_model(&cache, model, ModelState::Sleeping, addr).await;
+    insert_model(&cache, model, ModelState::Sleeping, Protocol::Openai, addr).await;
 
     let resp = handle.await.unwrap().expect("request failed");
     let elapsed = start.elapsed();
@@ -78,7 +78,7 @@ async fn test_parked_request_draining_fails_fast() {
     let model = "rollback/model-v2";
     let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
     let cache = sardeenz_proxy::routing::RoutingMapCache::new();
-    insert_model(&cache, model, ModelState::Starting, addr).await;
+    insert_model(&cache, model, ModelState::Starting, Protocol::Openai, addr).await;
 
     let proxy = TestProxy::spawn_with_shared_cache_and_config(
         TestProxyConfig {
@@ -97,14 +97,14 @@ async fn test_parked_request_draining_fails_fast() {
     let c = client.clone();
     let start = Instant::now();
     let handle = tokio::spawn(async move {
-        c.post(format!("{url}/v1/chat/completions"))
+        c.post(format!("{url}/openai/v1/chat/completions"))
             .json(&serde_json::json!({"model": m, "messages":[{"role":"user","content":"hi"}]}))
             .send()
             .await
     });
 
     assert!(poll_parked(&proxy, 1, Duration::from_secs(5)).await, "request never parked");
-    insert_model(&cache, model, ModelState::Draining, addr).await;
+    insert_model(&cache, model, ModelState::Draining, Protocol::Openai, addr).await;
 
     let resp = handle.await.unwrap().expect("request failed");
     let elapsed = start.elapsed();

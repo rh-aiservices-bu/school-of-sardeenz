@@ -7,7 +7,10 @@ Accepted. Implementation tracked in
 [ADR-005](adr-005-openapi-contracts.md) (optional fields in `control-plane.yaml` /
 `worker-agent.yaml`; the Rust-mirrored `proxy-control-plane.yaml` is unchanged). Refines the
 vocabulary of [ADR-019](adr-019-logical-model-vs-instance-split.md): what ADR-019 calls the
-"logical model" is a **model configuration**, and its name is the configuration name.
+"logical model" is a **model configuration**, and its name is the configuration name. Amended by
+[ADR-021](adr-021-protocol-family-path-prefixes.md), which adds protocol-family path prefixes and a
+`protocol` field to `proxy-control-plane.yaml`; the "proxy untouched" consequence below is
+historical to this ADR's own change.
 
 ## Context
 
@@ -93,7 +96,9 @@ Concretely:
 ## Consequences
 
 - **The Rust proxy and `proxy-control-plane.yaml` are untouched** — the main payoff of registering
-  both names engine-side instead of rewriting request bodies at the proxy.
+  both names engine-side instead of rewriting request bodies at the proxy. *(historical: ADR-021
+  subsequently prefixes the proxy surface and adds a `protocol` routing-entry field; ADR-020's
+  decision to register both names engine-side rather than rewrite request bodies is unaffected).*
 - **When `servedModelName` is set, the response `model` field shows the served name**, even for a
   client that sent the configuration name (vLLM first-name semantics). Intended: responses identify
   the actual model, not the configuration alias. Documented user-facing behavior, not a bug.

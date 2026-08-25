@@ -262,7 +262,10 @@ export class ApptainerLauncher implements RunnerLauncher {
       args.push('--env', `${key}=${value}`);
     }
 
-    args.push(sifPath, ...this.config.runnerEntrypoint);
+    args.push(
+      sifPath,
+      ...(spec.entrypoint && spec.entrypoint.length ? spec.entrypoint : this.config.runnerEntrypoint),
+    );
     args.push('--model', spec.modelPath, '--port', String(spec.port));
     // Pin the engine's OpenAI port explicitly to the worker-allocated engine port rather than
     // relying on the shim's `--port + 1` default — the RunnerManager allocates management/engine

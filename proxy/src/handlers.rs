@@ -1,11 +1,11 @@
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use metrics::{counter, gauge, histogram};
 
 use crate::error::ProxyError;
-use crate::generated::proxy_control_plane::ModelState;
+use crate::generated::proxy_control_plane::{ModelState, RoutingEntry, RunnerEndpoint};
 use crate::routing::resolver::Resolution;
 use crate::state::AppState;
 
@@ -37,22 +37,22 @@ struct InferenceOutcome {
     forward_start: std::time::Instant,
 }
 
-pub async fn handle_inference(State(state): State<AppState>, request: Request<Body>) -> Response {
-    let _active_guard = ActiveConnectionGuard::new();
-
-    let (response, model_label, endpoint_label, elapsed) =
-        match handle_inference_inner(state, request).await {
-            Ok(outcome) => {
-                let elapsed = outcome.forward_start.elapsed().as_secs_f64();
-                (
-                    outcome.response,
-                    outcome.model.unwrap_or_default(),
-                    outcome.endpoint.unwrap_or_default(),
-                    elapsed,
-                )
-            }
-            Err(err) => (err.into_response(), String::new(), String::new(), 0.0),
-        };
+/// Shared outer metrics wrapper for both infer handlers (openai and oip):
+/// records `sardeenz_proxy_requests_total` / `sardeenz_proxy_request_duration_seconds`
+/// regardless of success/failure, then produces the HTTP response.
+fn finalize(result: Result<InferenceOutcome, ProxyError>) -> Response {
+    let (response, model_label, endpoint_label, elapsed) = match result {
+        Ok(outcome) => {
+            let elapsed = outcome.forward_start.elapsed().as_secs_f64();
+            (
+                outcome.response,
+                outcome.model.unwrap_or_default(),
+                outcome.endpoint.unwrap_or_default(),
+                elapsed,
+            )
+        }
+        Err(err) => (err.into_response(), String::new(), String::new(), 0.0),
+    };
 
     let status = response.status().as_u16().to_string();
     counter!(
@@ -65,6 +65,11 @@ pub async fn handle_inference(State(state): State<AppState>, request: Request<Bo
     histogram!("sardeenz_proxy_request_duration_seconds").record(elapsed);
 
     response
+}
+
+pub async fn handle_inference(State(state): State<AppState>, request: Request<Body>) -> Response {
+    let _active_guard = ActiveConnectionGuard::new();
+    finalize(handle_inference_inner(state, request).await)
 }
 
 async fn handle_inference_inner(
@@ -83,6 +88,45 @@ async fn handle_inference_inner(
         .ok_or_else(|| ProxyError::BadRequest("missing or invalid 'model' field".to_string()))?;
     drop(body_json);
 
+    run_inference(state, model_name, parts, body_bytes).await
+}
+
+/// V2 (OIP) inference: `POST /oip/v2/models/{model}/infer`. The model name
+/// comes from the URL path rather than the request body.
+pub async fn handle_oip_infer(
+    State(state): State<AppState>,
+    Path(model): Path<String>,
+    request: Request<Body>,
+) -> Response {
+    let _active_guard = ActiveConnectionGuard::new();
+    finalize(handle_oip_infer_inner(state, model, request).await)
+}
+
+async fn handle_oip_infer_inner(
+    state: AppState,
+    model: String,
+    request: Request<Body>,
+) -> Result<InferenceOutcome, ProxyError> {
+    let model_name = crate::protocol::extract_model_name_from_path(&model)
+        .ok_or_else(|| ProxyError::BadRequest("missing or invalid model path segment".to_string()))?;
+
+    let (parts, body) = request.into_parts();
+    let body_bytes = axum::body::to_bytes(body, state.config.max_body_bytes)
+        .await
+        .map_err(|e| ProxyError::BadRequest(format!("invalid request body: {e}")))?;
+
+    run_inference(state, model_name, parts, body_bytes).await
+}
+
+/// Resolve→park→forward core shared by the openai and oip infer handlers.
+/// No behavioral change from the pre-split `handle_inference_inner` body —
+/// only the model-name acquisition (body vs. path) moved out.
+async fn run_inference(
+    state: AppState,
+    model_name: String,
+    parts: axum::http::request::Parts,
+    body_bytes: bytes::Bytes,
+) -> Result<InferenceOutcome, ProxyError> {
     let resolution = state.resolver.resolve(&model_name).await?;
 
     match &resolution {
@@ -198,6 +242,85 @@ async fn handle_inference_inner(
 pub async fn handle_models(State(state): State<AppState>) -> impl IntoResponse {
     let models = crate::protocol::list_models(&state.routing_cache).await;
     axum::Json(models)
+}
+
+pub async fn handle_oip_models(State(state): State<AppState>) -> impl IntoResponse {
+    axum::Json(crate::protocol::list_models_v2(&state.routing_cache).await)
+}
+
+/// V2 (OIP) readiness probe: `GET /oip/v2/models/{model}/ready`. Deliberately
+/// does NOT park or trigger a wake — a readiness probe that silently
+/// cold-starts a sleeping model would make health-checking clients an
+/// accidental wake trigger. A SLEEPING/STARTING/DRAINING/ERROR model answers
+/// 503 straight from the routing map; only an ACTIVE model's probe is
+/// forwarded to the runner.
+pub async fn handle_oip_ready(
+    State(state): State<AppState>,
+    Path(model): Path<String>,
+    request: Request<Body>,
+) -> Response {
+    match handle_oip_ready_inner(state, model, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn handle_oip_ready_inner(
+    state: AppState,
+    model: String,
+    request: Request<Body>,
+) -> Result<Response, ProxyError> {
+    let model_name = crate::protocol::extract_model_name_from_path(&model)
+        .ok_or_else(|| ProxyError::BadRequest("missing or invalid model path segment".to_string()))?;
+
+    let entry = state
+        .routing_cache
+        .get(&model_name)
+        .await
+        .ok_or_else(|| ProxyError::ModelNotFound(model_name.clone()))?;
+
+    if entry.state != ModelState::Active {
+        let body = serde_json::json!({
+            "ready": false,
+            "model": model_name,
+            "message": "model is not active; it wakes on inference",
+        });
+        return Ok((StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response());
+    }
+
+    let endpoint = select_endpoint(&state, &entry)
+        .ok_or_else(|| ProxyError::AllEndpointsUnhealthy(model_name.clone()))?;
+
+    let (parts, _body) = request.into_parts();
+    let path = parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(parts.uri.path());
+
+    state
+        .forwarding_client
+        .forward(&endpoint, path, parts.method, &parts.headers, bytes::Bytes::new())
+        .await
+        .map_err(|e| {
+            // A readiness probe must not perturb circuit-breaker state — no
+            // record_failure/record_success here, unlike run_inference.
+            tracing::warn!(model = %model_name, error = %e, "oip readiness probe forwarding failed");
+            ProxyError::Upstream("upstream request failed".to_string())
+        })
+}
+
+/// Non-mutating endpoint selection for a readiness probe: filters by circuit
+/// breaker availability, then load-balances, WITHOUT claiming a half-open
+/// probe slot (unlike `run_inference`, which does — see its comments).
+fn select_endpoint(state: &AppState, entry: &RoutingEntry) -> Option<RunnerEndpoint> {
+    let candidates: Vec<_> = entry
+        .endpoints
+        .iter()
+        .filter(|ep| {
+            let key = format!("{}:{}", ep.host, ep.port);
+            state.circuit_breaker.is_available(&key)
+        })
+        .cloned()
+        .collect();
+
+    state.balancer.pick(&candidates).cloned()
 }
 
 pub async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {

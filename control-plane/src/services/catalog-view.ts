@@ -36,6 +36,7 @@ export function buildCatalogView(
     fetchedAt: snapshot.fetchedAt,
     runners,
     unmanagedModules,
+    invalidEntries: snapshot.invalidEntries,
   };
 }
 

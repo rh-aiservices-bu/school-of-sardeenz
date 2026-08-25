@@ -24,6 +24,8 @@ describe('WeightsBrowserService', () => {
     await mkdir(join(root, 'org-a', 'model-y'), { recursive: true });
     await writeFile(join(root, 'org-a', 'model-y', 'model.safetensors'), 'x');
     await mkdir(join(root, 'org-a', 'scratch'), { recursive: true });
+    await mkdir(join(root, 'org-a', 'model-z'), { recursive: true });
+    await writeFile(join(root, 'org-a', 'model-z', 'model-settings.json'), '{}');
     await mkdir(join(root, '.hidden'), { recursive: true });
     svc = new WeightsBrowserService(root, logger);
   });
@@ -44,6 +46,7 @@ describe('WeightsBrowserService', () => {
     const byName = Object.fromEntries(listing.entries.map((e) => [e.name, e]));
     expect(byName['model-x']?.isModelDir).toBe(true); // config.json
     expect(byName['model-y']?.isModelDir).toBe(true); // *.safetensors
+    expect(byName['model-z']?.isModelDir).toBe(true); // model-settings.json (MLServer)
     expect(byName['scratch']?.isModelDir).toBe(false);
   });
 

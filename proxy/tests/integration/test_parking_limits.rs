@@ -43,7 +43,7 @@ async fn test_per_model_parking_limit() {
     let mut handles = Vec::new();
     for _ in 0..2 {
         let c = client.clone();
-        let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
         let p = payload.clone();
         handles.push(tokio::spawn(async move { c.post(url).json(&p).send().await }));
     }
@@ -53,7 +53,7 @@ async fn test_per_model_parking_limit() {
 
     // The 3rd request should be rejected immediately.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -109,7 +109,7 @@ async fn test_parking_byte_budget() {
     // wake, so fire it as a background task.
     let handle = {
         let c = client.clone();
-        let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
         let p = payload.clone();
         tokio::spawn(async move { c.post(url).json(&p).send().await })
     };
@@ -119,7 +119,7 @@ async fn test_parking_byte_budget() {
     // A second request of the same size pushes the parked total past the
     // budget and should be rejected immediately.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -165,7 +165,7 @@ async fn test_global_parking_limit() {
     let mut handles = Vec::new();
     for model in [model_a, model_b] {
         let c = client.clone();
-        let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
         let p = serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hi"}]
@@ -177,7 +177,7 @@ async fn test_global_parking_limit() {
 
     // A 3rd request (any model) should be rejected by the global limit.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model_a,
             "messages": [{"role": "user", "content": "Hi"}]

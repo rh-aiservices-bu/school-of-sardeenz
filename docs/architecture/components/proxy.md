@@ -17,13 +17,33 @@ The proxy owns the **inference request path** — from client connection to runn
 
 ## Overview
 
-The proxy exposes three inference endpoints on its primary port (default `0.0.0.0:8080`):
+The proxy exposes six inference endpoints on its primary port (default `0.0.0.0:8080`), split
+across two **protocol-family path prefixes** — `/openai` for the OpenAI-compatible surface and
+`/oip` for the KServe V2 Open Inference Protocol surface (see [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)):
 
-| Endpoint               | Method | Purpose                                         |
-| ---------------------- | ------ | ----------------------------------------------- |
-| `/v1/chat/completions` | `POST` | Chat inference (forwarded to runner)            |
-| `/v1/completions`      | `POST` | Text completion inference (forwarded to runner) |
-| `/v1/models`           | `GET`  | List active and sleeping models                 |
+| Endpoint                       | Method | Purpose                                         |
+| ------------------------------- | ------ | ------------------------------------------------ |
+| `/openai/v1/chat/completions`  | `POST` | OpenAI chat inference (forwarded)               |
+| `/openai/v1/completions`       | `POST` | OpenAI text completion (forwarded)              |
+| `/openai/v1/models`            | `GET`  | List `openai`-protocol models                   |
+| `/oip/v2/models/{model}/infer` | `POST` | KServe V2 (OIP) inference (forwarded)           |
+| `/oip/v2/models/{model}/ready` | `GET`  | KServe V2 readiness (503 for sleeping, no wake)  |
+| `/oip/v2/models`               | `GET`  | List `oip`-protocol models                      |
+
+The prefix names the **protocol family, never the engine** — it is stripped before forwarding, so
+runners always receive canonical `/v1/*` or `/v2/*` paths. Both prefixes are always mounted; a
+protocol family with no deployed models simply lists nothing.
+
+### Protocol families
+
+Each routing entry carries a required `protocol` tag (`openai` or `oip`, [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md))
+written by the control plane. The proxy compiles in both protocol adapters and always mounts every
+prefix; which models appear under which prefix is driven entirely by this per-entry tag — importing
+and deploying a runner lights up its surface live, with no proxy restart or config edit. At startup
+and on every Redis reconnect, the proxy also publishes its supported protocol set to the
+`{prefix}:proxy:protocols` Redis key, which the control plane's catalog import path checks as a
+forward-compat guard (importing a runner whose `protocol` the running proxy does not advertise
+fails fast at import time rather than at request time).
 
 A separate admin server on `0.0.0.0:9099` exposes `/healthz`, `/readyz`, and `/metrics`. The admin port is never exposed outside the cluster.
 
@@ -36,7 +56,9 @@ The proxy is designed to run as multiple stateless replicas behind a load balanc
 Every inference request follows the same steps:
 
 1. Read the raw request body (buffered, max 10 MiB)
-2. Extract the `model` field from the JSON payload
+2. Extract the `model` field — from the JSON body for `/openai/*` requests, from the `{model}` URL
+   path segment for `/oip/*` requests. The rest of the path (resolve/park/wake/forward/circuit-break)
+   is protocol-agnostic.
 3. Resolve the model's current state from the in-memory routing cache
 4. If sleeping, park the connection and fire a wake trigger; if starting (wake already in progress), park without triggering
 5. Filter endpoints through the circuit breaker
@@ -53,7 +75,7 @@ sequenceDiagram
     participant Cache as Routing Cache<br/>(in-memory)
     participant Runner
 
-    Client->>Proxy: POST /v1/chat/completions<br/>{"model": "llama-3", ...}
+    Client->>Proxy: POST /openai/v1/chat/completions<br/>{"model": "llama-3", ...}
     Proxy->>Proxy: Extract model name from body
     Proxy->>Cache: resolve("llama-3")
     Cache-->>Proxy: Resolution::Active(entry)<br/>endpoints: [{host, port, weight, healthy}]
@@ -61,7 +83,7 @@ sequenceDiagram
     Proxy->>Proxy: Filter endpoints through circuit breaker
     Proxy->>Proxy: Weighted round-robin pick
 
-    Proxy->>Runner: POST /v1/chat/completions<br/>(forwarded, host header stripped)
+    Proxy->>Runner: POST /v1/chat/completions<br/>(forwarded, host header stripped)<br/>(prefix stripped)
     Runner-->>Proxy: 200 OK (streaming body)
     Proxy->>Proxy: record_success(endpoint)
     Proxy-->>Client: 200 OK (streaming body)
@@ -80,7 +102,7 @@ sequenceDiagram
     participant Redis
     participant Runner
 
-    Client->>Proxy: POST /v1/chat/completions<br/>{"model": "llama-3", ...}
+    Client->>Proxy: POST /openai/v1/chat/completions<br/>{"model": "llama-3", ...}
     Proxy->>Cache: resolve("llama-3")
     Cache-->>Proxy: Resolution::Sleeping(entry)
 
@@ -108,7 +130,7 @@ sequenceDiagram
     Cache-->>Proxy: endpoints: [{host, port, ...}]
 
     Proxy->>Proxy: Filter + round-robin pick
-    Proxy->>Runner: POST /v1/chat/completions
+    Proxy->>Runner: POST /v1/chat/completions<br/>(prefix stripped)
     Runner-->>Proxy: Response
     Proxy-->>Client: Response
 ```
@@ -125,7 +147,7 @@ sequenceDiagram
     participant R1 as Runner A<br/>(weight 3)
     participant R2 as Runner B<br/>(weight 1)
 
-    Client->>Proxy: POST /v1/chat/completions
+    Client->>Proxy: POST /openai/v1/chat/completions
     Proxy->>Cache: resolve("llama-3")
     Cache-->>Proxy: Resolution::Active<br/>endpoints: [A(w=3), B(w=1)]
 
@@ -220,6 +242,7 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
 {
   "modelName": "meta-llama/Llama-3.1-8B-Instruct",
   "state": "ACTIVE",
+  "protocol": "openai",
   "endpoints": [
     {
       "host": "10.244.1.5",
@@ -232,13 +255,15 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
   "updatedAt": "2026-06-12T10:30:00Z",
   "metadata": {
     "ownedBy": "platform-team",
-    "maxModelLen": 131072,
-    "engineType": "vllm"
+    "maxModelLen": 131072
   }
 }
 ```
 
-A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. The metadata block is optional and passed through to `/v1/models` responses without interpretation.
+A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. `protocol` is a required
+top-level field ([ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)) — it drives which
+listing (`/openai/v1/models` or `/oip/v2/models`) the entry appears under. The metadata block
+remains optional and is passed through to the `openai` listing response without interpretation.
 
 The `updatedAt` timestamp is written by the control plane for operator diagnostics and dashboard display. The proxy deserializes it for round-trip fidelity but does not consult it for routing or staleness decisions — cache freshness is determined entirely by Redis pub/sub notifications (see [Cache Invalidation](#cache-invalidation) below).
 

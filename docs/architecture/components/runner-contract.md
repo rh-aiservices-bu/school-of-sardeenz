@@ -10,7 +10,13 @@ For the runner abstraction rationale, see [ADR-010](../adrs/adr-010-engine-runne
 
 The contract covers the **management sideband** — the endpoints the control plane uses to orchestrate runners. It does not cover:
 
-- **Inference traffic.** Model serving endpoints (e.g., `/v1/chat/completions`) flow through the engine's native API and the routing proxy. They are not part of this contract.
+- **Inference traffic.** Model serving endpoints flow through the engine's **native** protocol —
+  `/v1/*` (OpenAI-compatible, e.g. vLLM) or `/v2/*` (KServe V2 Open Inference Protocol, e.g.
+  MLServer) — and the routing proxy, which reaches them via its `/openai` or `/oip` protocol-family
+  path prefix (stripped before forwarding; see [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)
+  and [`components/proxy.md`](proxy.md#overview)). Inference traffic is not part of this
+  (management) contract. The shared conformance suite (`runners/conformance/`) is the executable
+  check that every runner shim honors this management contract.
 - **Process lifecycle.** Starting the runner process, capturing its stdout/stderr, detecting process exit, and stopping the runner (SIGTERM) are worker-level concerns.
 - **Drain and stop.** Draining is a routing concern — the control plane removes the runner from the routing map, and the proxy stops sending traffic. Stopping is a process concern — the worker sends SIGTERM. Neither requires an HTTP endpoint on the runner.
 - **Device memory push.** Workers periodically push device memory snapshots to Redis/Valkey for the control plane's global view. The runner contract's `/memory-report` is a pull endpoint for on-demand queries.

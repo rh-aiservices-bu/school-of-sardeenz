@@ -195,7 +195,7 @@ For Sardeenz, a Triton-backed runner serving LLMs would typically expose an Open
 
 MLServer targets the KFServing V2 dataplane protocol for traditional ML models (scikit-learn, XGBoost, MLflow, etc.). It does not implement the OpenAI Chat Completions API and has no structured output features in the OpenAI sense.
 
-In Sardeenz's architecture, MLServer runners (e.g., for predictive models) communicate via the V2 protocol, which the proxy handles as a separate protocol path (out of scope for Phase 1). OpenAI-style structured output parameters are irrelevant for this runner type.
+In Sardeenz's architecture, MLServer runners (e.g., for predictive models) communicate via the KServe V2 (Open Inference Protocol) dataplane, which the proxy serves under its `/oip/v2/*` path prefix — a separate protocol path from the OpenAI-compatible `/openai/v1/*` surface (see [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)). OpenAI-style structured output parameters are irrelevant for this runner type.
 
 ---
 
@@ -270,11 +270,11 @@ Production reverse proxy deployments for vLLM (nginx, Envoy, vllm-proxy) all ope
 
 Even in passthrough mode, the proxy handles two endpoints that have structured output implications:
 
-**`/v1/chat/completions` and `/v1/completions`:** Forwarded verbatim. All parameters — `response_format`, `tools`, `tool_choice`, `guided_json`, `structured_outputs`, and any future parameters — pass through unchanged. The proxy only reads the `model` field for routing and the `stream` field to set the correct response handling path (SSE vs. buffered).
+**`/openai/v1/chat/completions` and `/openai/v1/completions`:** Forwarded verbatim (prefix stripped, so the runner sees `/v1/chat/completions` / `/v1/completions`). All parameters — `response_format`, `tools`, `tool_choice`, `guided_json`, `structured_outputs`, and any future parameters — pass through unchanged. The proxy only reads the `model` field for routing and the `stream` field to set the correct response handling path (SSE vs. buffered).
 
-**`/v1/models`:** The proxy aggregates the model list from the routing map. It does not proxy this endpoint to individual runners. The response returns the set of models currently in the routing map with their state.
+**`/openai/v1/models`:** The proxy aggregates the `openai`-protocol model list from the routing map. It does not proxy this endpoint to individual runners. The response returns the set of `openai`-protocol models currently in the routing map with their state.
 
-The `/v1/models` response does not include structured output capability metadata. This is intentional — that metadata would need to come from the runner and would vary by engine version, model, and server configuration. The control plane is the right place to surface per-model capabilities (see Recommendation for Phase 2 below).
+The `/openai/v1/models` response does not include structured output capability metadata. This is intentional — that metadata would need to come from the runner and would vary by engine version, model, and server configuration. The control plane is the right place to surface per-model capabilities (see Recommendation for Phase 2 below).
 
 ### What the proxy explicitly does not do
 
@@ -327,9 +327,9 @@ The runner contract already defines a `capabilities` section for features like t
 
 Runners self-report this block on startup. The control plane stores it in Redis/Valkey alongside other runner state.
 
-**2. Expose capabilities via the control plane API, not `/v1/models`.**
+**2. Expose capabilities via the control plane API, not `/openai/v1/models`.**
 
-The `/v1/models` endpoint is a thin routing construct. Capability metadata should be a separate API path, e.g., `GET /api/v1/models/{model_id}/capabilities`, served by the control plane or dashboard backend. This keeps the hot-path proxy endpoint simple and allows richer metadata than the OpenAI models spec accommodates.
+The `/openai/v1/models` endpoint is a thin routing construct. Capability metadata should be a separate API path, e.g., `GET /api/v1/models/{model_id}/capabilities`, served by the control plane or dashboard backend. This keeps the hot-path proxy endpoint simple and allows richer metadata than the OpenAI models spec accommodates.
 
 **3. Do not reject requests at the control plane based on structured output parameters.**
 
