@@ -110,7 +110,7 @@ The control plane is the brain of the system. It does not serve inference traffi
 
 Key responsibilities:
 
-- **Device memory budget tracking.** Maintains a global view of device memory allocation across all workers, built from worker self-reports in Redis/Valkey.
+- **Device memory budget tracking.** Maintains a global view of device memory allocation across all workers, built from worker self-reports in Redis/Valkey. Reports carry two distinct figures per device: the *allocation ledger* (sum of running runners' configured `requiredMemory` — the basis for placement and eviction) and, where the worker can measure (NVML via ts-nvml, #163), the *measured* usage including per-instance attribution — surfaced as telemetry (`currentMemory`, per-device measured bytes) but never fed into budget math.
 - **Model lifecycle state machine.** Manages model states (starting, active, sleeping, stopping) and transitions.
 - **Eviction.** When device memory is constrained, applies an eviction strategy (initially LRU, behind a pluggable interface) to free capacity by sleeping or stopping models.
 - **Sleep/wake coordination.** Sends sleep and wake commands to runners through the runner contract.
