@@ -1,11 +1,4 @@
-import {
-  Card,
-  CardBody,
-  ClipboardCopy,
-  ClipboardCopyVariant,
-  Flex,
-  FlexItem,
-} from '@patternfly/react-core';
+import { Card, CardBody, ClipboardCopy, ClipboardCopyVariant, Grid, GridItem } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { useConfig } from '../hooks/useConfig';
 import { openaiBaseUrl, oipBaseUrl } from '../utils/inference';
@@ -26,76 +19,62 @@ export function InferenceUrlBanner() {
   return (
     <Card isCompact>
       <CardBody>
-        <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
-          <FlexItem>
-            <Flex
-              alignItems={{ default: 'alignItemsCenter' }}
-              spaceItems={{ default: 'spaceItemsSm' }}
-              flexWrap={{ default: 'wrap' }}
+        <Grid hasGutter style={{ gap: 'var(--pf-t--global--spacer--sm)' }}>
+          <GridItem span={2} style={{ alignSelf: 'center' }}>
+            <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+              {t('overview.inferenceUrl.openai.label')}
+            </span>
+          </GridItem>
+          <GridItem span={5} style={{ alignSelf: 'center' }}>
+            <ClipboardCopy
+              isReadOnly
+              hoverTip={t('overview.inferenceUrl.copy')}
+              clickTip={t('overview.inferenceUrl.copied')}
+              variant={ClipboardCopyVariant.inline}
+              aria-label={t('overview.inferenceUrl.openai.copyAria')}
+              style={{ wordBreak: 'break-all' }}
             >
-              <FlexItem>
-                <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-                  {t('overview.inferenceUrl.openai.label')}
-                </span>
-              </FlexItem>
-              <FlexItem>
-                <ClipboardCopy
-                  isReadOnly
-                  hoverTip={t('overview.inferenceUrl.copy')}
-                  clickTip={t('overview.inferenceUrl.copied')}
-                  variant={ClipboardCopyVariant.inline}
-                  aria-label={t('overview.inferenceUrl.openai.copyAria')}
-                >
-                  {openaiUrl}
-                </ClipboardCopy>
-              </FlexItem>
-              <FlexItem>
-                <span
-                  style={{
-                    fontSize: 'var(--pf-t--global--font--size--sm)',
-                    color: 'var(--pf-t--global--text--color--subtle)',
-                  }}
-                >
-                  {t('overview.inferenceUrl.openai.description')}
-                </span>
-              </FlexItem>
-            </Flex>
-          </FlexItem>
-          <FlexItem>
-            <Flex
-              alignItems={{ default: 'alignItemsCenter' }}
-              spaceItems={{ default: 'spaceItemsSm' }}
-              flexWrap={{ default: 'wrap' }}
+              {openaiUrl}
+            </ClipboardCopy>
+          </GridItem>
+          <GridItem span={5} style={{ alignSelf: 'center' }}>
+            <span
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--sm)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
             >
-              <FlexItem>
-                <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-                  {t('overview.inferenceUrl.oip.label')}
-                </span>
-              </FlexItem>
-              <FlexItem>
-                <ClipboardCopy
-                  isReadOnly
-                  hoverTip={t('overview.inferenceUrl.copy')}
-                  clickTip={t('overview.inferenceUrl.copied')}
-                  variant={ClipboardCopyVariant.inline}
-                  aria-label={t('overview.inferenceUrl.oip.copyAria')}
-                >
-                  {oipUrl}
-                </ClipboardCopy>
-              </FlexItem>
-              <FlexItem>
-                <span
-                  style={{
-                    fontSize: 'var(--pf-t--global--font--size--sm)',
-                    color: 'var(--pf-t--global--text--color--subtle)',
-                  }}
-                >
-                  {t('overview.inferenceUrl.oip.description')}
-                </span>
-              </FlexItem>
-            </Flex>
-          </FlexItem>
-        </Flex>
+              {t('overview.inferenceUrl.openai.description')}
+            </span>
+          </GridItem>
+          <GridItem span={2} style={{ alignSelf: 'center' }}>
+            <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+              {t('overview.inferenceUrl.oip.label')}
+            </span>
+          </GridItem>
+          <GridItem span={5} style={{ alignSelf: 'center' }}>
+            <ClipboardCopy
+              isReadOnly
+              hoverTip={t('overview.inferenceUrl.copy')}
+              clickTip={t('overview.inferenceUrl.copied')}
+              variant={ClipboardCopyVariant.inline}
+              aria-label={t('overview.inferenceUrl.oip.copyAria')}
+              style={{ wordBreak: 'break-all' }}
+            >
+              {oipUrl}
+            </ClipboardCopy>
+          </GridItem>
+          <GridItem span={5} style={{ alignSelf: 'center' }}>
+            <span
+              style={{
+                fontSize: 'var(--pf-t--global--font--size--sm)',
+                color: 'var(--pf-t--global--text--color--subtle)',
+              }}
+            >
+              {t('overview.inferenceUrl.oip.description')}
+            </span>
+          </GridItem>
+        </Grid>
       </CardBody>
     </Card>
   );
