@@ -296,7 +296,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 'var(--pf-t--global--spacer--xl)' }}
         >
-          <div style={{ height: '200px', width: '200px', flexShrink: 0 }}>
+          <div style={{ height: '200px', width: '200px'}}>
             <ChartDonut
               ariaDesc={t('overview.vramUsage.ariaDesc')}
               ariaTitle={t('overview.vramUsage.title')}
@@ -307,9 +307,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               title={`${percent}%`}
               subTitle={primaryLabel.trim()}
               colorScale={colorScale}
-              legendData={legendData}
-              legendOrientation="vertical"
-              legendPosition="right"
+
             />
           </div>
           <div
