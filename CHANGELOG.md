@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`nvml-real.test.ts` failed on GPU-equipped dev boxes.** The test hardcoded the "no GPU, no
+  driver" premise that holds on CI (`ubuntu-latest`) but not on a machine with an NVIDIA driver
+  — there `Nvml.init()` legitimately succeeds, so `createNvmlReader()` returns a real reader
+  instead of `null` and the assertion broke. It now branches on environment (detected via
+  `/dev/nvidiactl` at collection time): on GPU-less hosts it still asserts the null degradation,
+  and on GPU hosts it asserts a working reader that reads real devices (then shuts it down).
+
 - **CI lint failure on `dev`: removed dead `legendData` in `ClusterOverview`.** The VRAM
   donut no longer renders a `ChartLegend` (the stat rows beside the donut carry that
   information), but the leftover `legendData` variable remained, tripping
