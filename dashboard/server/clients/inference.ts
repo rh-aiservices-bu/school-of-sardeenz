@@ -21,7 +21,7 @@ export class InferenceClient {
    * upstream generation.
    */
   async chatCompletions(body: unknown, signal: AbortSignal): Promise<Response> {
-    return fetch(`${this.baseUrl}/v1/chat/completions`, {
+    return fetch(`${this.baseUrl}/openai/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -33,7 +33,7 @@ export class InferenceClient {
   // talks to (proxy/src/main.rs), so probe the inference-port /v1/models instead.
   async isHealthy(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/models`);
+      const res = await fetch(`${this.baseUrl}/openai/v1/models`);
       return res.ok;
     } catch {
       return false;
