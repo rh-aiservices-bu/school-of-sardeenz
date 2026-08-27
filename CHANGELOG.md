@@ -15,6 +15,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   transparent, so the placement bar had rendered empty since #123. Charts now use
   `@patternfly/react-tokens` values (hex fallback included).
 
+- **Ghost instances after a worker restarts blank under the same `workerId` (#166).** A
+  worker (notably the dev worker, whose default `SARDEENZ_WORKER_ID` is stable) that restarts
+  blank keeps heartbeating ONLINE, so its old model instances stayed `ACTIVE` in the control
+  plane with dead `runnerHost`/`runnerPort` — the dashboard showed them as running, their VRAM
+  reservations lingered, and stopping one stalled in `DRAINING` for the full
+  `sleepTimeoutSecs` before ERROR. Three complementary fixes:
+  - **Runner-level reconciliation:** the worker-agent contract gains `GET /runners/{runnerId}`
+    (liveness probe: `200` running / `404` absent, implemented by the dev worker), and each
+    reconciliation tick probes the runner of every `ACTIVE`/`STARTING` instance on a worker
+    the pool still reports as present. A confirmed miss (404) reaps the instance record with
+    the full cleanup (ERROR transition, endpoint removal, Postgres row, VRAM reservation
+    release, notification). A failed probe is inconclusive and retried next tick — never
+    actionable; `OFFLINE`/unknown workers stay with the dead-worker path; `STARTING`
+    instances get a grace window (`deployTimeoutSecs`) so a fresh cold-start is never reaped.
+    New metric `sardeenz_control_plane_reconciliation_missing_runners_total`.
+  - **Startup tick:** the leader now runs one reconciliation tick immediately at boot (after
+    discovery) instead of waiting up to a full interval, so boot-time drift (including the
+    ghost-instance case above) heals right away.
+  - **Drain fast-fail:** `waitForDrain` stops burning the full sleep timeout when the runner
+    is unreachable — 3 consecutive failed health polls (a streak that resets on any
+    successful poll, so a genuinely busy runner is unaffected) raise
+    `RUNNER_UNAVAILABLE` and the stop settles promptly in `ERROR` with a clear message.
+
 ### Changed
 
 - **Measured-only GPU memory doctrine (#163, supersedes #151).** Every memory figure in every

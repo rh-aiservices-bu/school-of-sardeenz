@@ -331,9 +331,23 @@ export class SleepWakeService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  // Consecutive failed health polls before waitForDrain fast-fails. The health endpoint is
+  // answered by the runner's own shim — the runner being down is not a transient "busy" state
+  // that polling can outlast, it means there is nothing left to drain. Three polls keeps a
+  // single blip (a dropped health read while the runner is otherwise fine) from cutting a
+  // genuine drain short.
+  private static readonly MAX_CONSECUTIVE_HEALTH_FAILURES = 3;
+
   /**
    * Poll the runner's health until activeRequests reaches 0 (drain complete),
    * respecting sleepTimeoutMs via AbortSignal.timeout().
+   *
+   * Fast-fails (defence in depth for #166) when the runner becomes unreachable: N consecutive
+   * failed health polls means there is no live process left to drain, so waiting out the full
+   * sleep timeout only burns the user-visible stop time (~sleepTimeoutSecs of "Draining"). The
+   * caller's catch transitions the instance to ERROR, exactly as a drain timeout would — just
+   * within one or two poll intervals instead of minutes. A successful poll resets the streak,
+   * so intermittent blips on a healthy runner still complete their drain normally.
    */
   private async waitForDrain(
     modelName: string,
@@ -341,9 +355,29 @@ export class SleepWakeService {
     runnerClient: RunnerClient,
   ): Promise<void> {
     const signal = AbortSignal.timeout(this.sleepTimeoutMs);
+    let consecutiveFailures = 0;
 
     while (!signal.aborted) {
       const result = await this.pollRunnerHealth(modelName, instanceId, runnerClient);
+
+      if (result.state === RunnerState.ERROR) {
+        // pollRunnerHealth reports ERROR for (a) a failed health call — the runner's shim is
+        // unreachable, so there is no live process left to drain — and (b) a reachable runner
+        // self-reporting ERROR, whose record pollRunnerHealth has already transitioned to
+        // ERROR. Counting both is right: in (a) polling waits on a dead process, in (b) the
+        // record is already in ERROR, so continuing the drain buys nothing either way.
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= SleepWakeService.MAX_CONSECUTIVE_HEALTH_FAILURES) {
+          const message = `Runner for instance ${instanceId} (${modelName}) became unreachable during drain: ${result.message ?? 'health check failed'}`;
+          throw new ControlPlaneError(502, 'RUNNER_UNAVAILABLE', message, {
+            modelName,
+            instanceId,
+            runnerMessage: result.message ?? null,
+          });
+        }
+      } else {
+        consecutiveFailures = 0;
+      }
 
       if (result.activeRequests !== null && result.activeRequests === 0) {
         return;

@@ -70,6 +70,21 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
     }
   });
 
+  // Liveness probe for one runner (worker-agent contract `getRunner`, issue #166): the control
+  // plane's reconciliation calls this to detect an instance whose record still claims a runner
+  // the worker no longer hosts (e.g. a blank worker restart under the same workerId). Liveness
+  // only — presence/absence of the record, no state or health assertions, so a healthy runner is
+  // never flagged.
+  app.get<{ Params: { runnerId: string } }>('/runners/:runnerId', (req, reply) => {
+    const record = runnerManager.getRunner(req.params.runnerId);
+    if (!record) {
+      return reply
+        .status(404)
+        .send({ error: `Runner ${req.params.runnerId} not found`, code: 'NOT_FOUND' });
+    }
+    return reply.status(200).send({ runnerId: record.runnerId, instanceId: record.instanceId });
+  });
+
   app.delete<{ Params: { runnerId: string } }>('/runners/:runnerId', async (req, reply) => {
     try {
       await runnerManager.stopRunner(req.params.runnerId);

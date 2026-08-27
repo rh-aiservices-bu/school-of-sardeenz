@@ -89,6 +89,7 @@ interface MockDeps {
   };
   workerClient: {
     stopRunner: ReturnType<typeof vi.fn>;
+    getRunner: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -116,6 +117,7 @@ const DEFAULT_CONFIG: ReconciliationConfig = {
   reconciliationIntervalSecs: 30,
   deployTimeoutSecs: 600,
   sleepTimeoutSecs: 300,
+  missingRunnerProbeGraceSecs: 600,
 };
 
 const KEY_PREFIX = 'sardeenz';
@@ -175,13 +177,20 @@ function createMocks(): MockDeps {
     },
     workerClient: {
       stopRunner: vi.fn().mockResolvedValue(undefined),
+      // Default "runner present" — the missing-runner step is a no-op for existing tests that
+      // never wire createWorkerClient, and safe for the new tests that don't set it explicitly.
+      getRunner: vi.fn().mockResolvedValue(true),
     },
   };
 }
 
 function createService(
   mocks: MockDeps,
-  options: { withModelRepository?: boolean; withWorkerClient?: boolean } = {},
+  options: {
+    withModelRepository?: boolean;
+    withWorkerClient?: boolean;
+    config?: ReconciliationConfig;
+  } = {},
 ): ReconciliationService {
   return new ReconciliationService(
     mocks.lifecycle as unknown as ModelLifecycleService,
@@ -189,7 +198,7 @@ function createService(
     mocks.memoryBudget as unknown as MemoryBudgetService,
     mocks.routingMap as unknown as RoutingMapService,
     mocks.leaderElection,
-    DEFAULT_CONFIG,
+    options.config ?? DEFAULT_CONFIG,
     mocks.logger,
     mocks.redis as unknown as Redis,
     KEY_PREFIX,
@@ -484,6 +493,191 @@ describe('ReconciliationService', () => {
       await service.tick();
 
       expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tick — missing-runner reconciliation (#166)', () => {
+    // A live (ONLINE) worker record — this step only probes workers the pool still reports as
+    // present; OFFLINE/unknown workers belong to the dead-worker path.
+    const liveWorker = makeWorker({
+      workerId: 'w1',
+      status: WorkerStatus.ONLINE,
+      managementUrl: 'http://w1:9000',
+    });
+
+    it('is a no-op when createWorkerClient is not wired', async () => {
+      const unwired = createService(mocks);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'ghost-model',
+          workerId: 'w1',
+          runnerId: 'runner-ghost',
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunner.mockResolvedValue(false);
+
+      await unwired.tick();
+
+      expect(mocks.workerClient.getRunner).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+    });
+
+    it('reaps an ACTIVE instance whose runner the (live) worker no longer hosts', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'ghost-model',
+          workerId: 'w1',
+          runnerId: 'runner-ghost',
+          runnerHost: 'w1',
+          runnerPort: 8000,
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunner.mockResolvedValue(false);
+      const probeService = createService(mocks, { withWorkerClient: true });
+
+      await probeService.tick();
+
+      expect(mocks.workerClient.getRunner).toHaveBeenCalledWith('runner-ghost');
+      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+        'ghost-model',
+        'inst-ghost-model',
+        ModelLifecycleState.ERROR,
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          errorMessage: expect.stringContaining('runner-ghost'),
+        }),
+      );
+      expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('ghost-model', 'w1', 8000);
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('ghost-model', 'inst-ghost-model');
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
+        'inst-ghost-model',
+      );
+    });
+
+    it('does not touch an instance whose runner is still present on the worker', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'healthy-model',
+          workerId: 'w1',
+          runnerId: 'runner-healthy',
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunner.mockResolvedValue(true);
+      const probeService = createService(mocks, { withWorkerClient: true });
+
+      await probeService.tick();
+
+      expect(mocks.workerClient.getRunner).toHaveBeenCalledWith('runner-healthy');
+      expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+    });
+
+    it('never probes instances on OFFLINE workers — that is the dead-worker path', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'offline-model',
+          workerId: 'w1',
+          runnerId: 'runner-x',
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(
+        makeWorker({ workerId: 'w1', status: WorkerStatus.OFFLINE }),
+      );
+      const probeService = createService(mocks, { withWorkerClient: true });
+
+      await probeService.tick();
+
+      expect(mocks.workerClient.getRunner).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+    });
+
+    it('skips instances without a runnerId (startRunner not returned yet)', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'no-runner-id', workerId: 'w1', runnerId: null }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      const probeService = createService(mocks, { withWorkerClient: true });
+
+      await probeService.tick();
+
+      expect(mocks.workerClient.getRunner).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+    });
+
+    it('does not probe a fresh STARTING instance within the probe-grace window', async () => {
+      // deployTimeoutSecs (600) > grace (60), so a 30s-old STARTING is NOT reaped by
+      // recoverStuckInstances — the only path that could touch it is the probe, which must
+      // respect its own grace window (30s <= 60s → skip).
+      const probeService = createService(mocks, {
+        withWorkerClient: true,
+        config: { ...DEFAULT_CONFIG, missingRunnerProbeGraceSecs: 60 },
+      });
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'cold-start',
+          state: ModelLifecycleState.STARTING,
+          workerId: 'w1',
+          runnerId: 'runner-cold',
+          stateChangedAt: new Date(Date.now() - 30_000).toISOString(),
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunner.mockResolvedValue(false);
+
+      await probeService.tick();
+
+      expect(mocks.workerClient.getRunner).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+    });
+
+    it('probes and reaps a STARTING instance past the grace window when its runner is absent', async () => {
+      const probeService = createService(mocks, {
+        withWorkerClient: true,
+        config: { ...DEFAULT_CONFIG, missingRunnerProbeGraceSecs: 60 },
+      });
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'stale-starting',
+          state: ModelLifecycleState.STARTING,
+          workerId: 'w1',
+          runnerId: 'runner-stale',
+          stateChangedAt: new Date(Date.now() - 120_000).toISOString(),
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunner.mockResolvedValue(false);
+
+      await probeService.tick();
+
+      expect(mocks.workerClient.getRunner).toHaveBeenCalledWith('runner-stale');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('stale-starting', 'inst-stale-starting');
+    });
+
+    it('treats a failed probe as inconclusive — skips the reap and retries next tick', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'flaky-model',
+          workerId: 'w1',
+          runnerId: 'runner-flaky',
+        }),
+      ]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunner.mockRejectedValue(new Error('connect ECONNREFUSED'));
+      const probeService = createService(mocks, { withWorkerClient: true });
+
+      await probeService.tick();
+
+      expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'flaky-model', instanceId: 'inst-flaky-model' }),
+        'Runner liveness probe failed — skipping reap, will retry next tick',
+      );
     });
   });
 
