@@ -124,6 +124,12 @@ export const reconciliationStuckModelsTotal = new Counter({
   registers: [registry],
 });
 
+export const reconciliationMissingRunnersTotal = new Counter({
+  name: 'sardeenz_control_plane_reconciliation_missing_runners_total',
+  help: 'Instances whose runner the (live) worker no longer hosts, reaped by reconciliation',
+  registers: [registry],
+});
+
 export const reconciliationErrors = new Counter({
   name: 'sardeenz_control_plane_reconciliation_errors_total',
   help: 'Reconciliation step errors',

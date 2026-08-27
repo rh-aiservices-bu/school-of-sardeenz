@@ -8,12 +8,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`nvml-real.test.ts` failed on GPU-equipped dev boxes.** The test hardcoded the "no GPU, no
+  driver" premise that holds on CI (`ubuntu-latest`) but not on a machine with an NVIDIA driver
+  — there `Nvml.init()` legitimately succeeds, so `createNvmlReader()` returns a real reader
+  instead of `null` and the assertion broke. It now branches on environment (detected via
+  `/dev/nvidiactl` at collection time): on GPU-less hosts it still asserts the null degradation,
+  and on GPU hosts it asserts a working reader that reads real devices (then shuts it down).
+
+- **CI lint failure on `dev`: removed dead `legendData` in `ClusterOverview`.** The VRAM
+  donut no longer renders a `ChartLegend` (the stat rows beside the donut carry that
+  information), but the leftover `legendData` variable remained, tripping
+  `@typescript-eslint/no-unused-vars` and breaking `make lint` in CI.
+
 - **Dashboard chart colors: undefined PF6 token names rendered the VRAM donut black and the
   placement/GPU bars empty.** The per-model segment palette (#123) and the overview donut used
   hand-written `var(--pf-t--chart--…)` / `var(--pf-t-chart-…)` custom properties that no
   stylesheet defines — an invalid `var()` fills SVG arcs black and div backgrounds
   transparent, so the placement bar had rendered empty since #123. Charts now use
   `@patternfly/react-tokens` values (hex fallback included).
+
+- **Ghost instances after a worker restarts blank under the same `workerId` (#166).** A
+  worker (notably the dev worker, whose default `SARDEENZ_WORKER_ID` is stable) that restarts
+  blank keeps heartbeating ONLINE, so its old model instances stayed `ACTIVE` in the control
+  plane with dead `runnerHost`/`runnerPort` — the dashboard showed them as running, their VRAM
+  reservations lingered, and stopping one stalled in `DRAINING` for the full
+  `sleepTimeoutSecs` before ERROR. Three complementary fixes:
+  - **Runner-level reconciliation:** the worker-agent contract gains `GET /runners/{runnerId}`
+    (liveness probe: `200` running / `404` absent, implemented by the dev worker), and each
+    reconciliation tick probes the runner of every `ACTIVE`/`STARTING` instance on a worker
+    the pool still reports as present. A confirmed miss (404) reaps the instance record with
+    the full cleanup (ERROR transition, endpoint removal, Postgres row, VRAM reservation
+    release, notification). A failed probe is inconclusive and retried next tick — never
+    actionable; `OFFLINE`/unknown workers stay with the dead-worker path; `STARTING`
+    instances get a grace window (`deployTimeoutSecs`) so a fresh cold-start is never reaped.
+    New metric `sardeenz_control_plane_reconciliation_missing_runners_total`.
+  - **Startup tick:** the leader now runs one reconciliation tick immediately at boot (after
+    discovery) instead of waiting up to a full interval, so boot-time drift (including the
+    ghost-instance case above) heals right away.
+  - **Drain fast-fail:** `waitForDrain` stops burning the full sleep timeout when the runner
+    is unreachable — 3 consecutive failed health polls (a streak that resets on any
+    successful poll, so a genuinely busy runner is unaffected) raise
+    `RUNNER_UNAVAILABLE` and the stop settles promptly in `ERROR` with a clear message.
 
 ### Changed
 

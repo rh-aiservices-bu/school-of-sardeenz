@@ -100,6 +100,29 @@ export class WorkerClient {
     });
   }
 
+  /**
+   * Liveness probe for one runner (worker-agent contract `getRunner`): resolves `true` when a
+   * runner with this id is running on the worker, `false` when it is not (404 — never started,
+   * already stopped, or exited and reaped). Any other failure (network error, 5xx, …) rejects —
+   * callers must distinguish "worker answered: runner absent" (false) from "we could not ask"
+   * (rejected), since only the former is evidence the runner is gone.
+   */
+  async getRunner(runnerId: string): Promise<boolean> {
+    const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}`, {
+      headers: { ...this.authHeaders() },
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    if (response.status === 404) return false;
+    if (!response.ok) {
+      const body = await response.text();
+      throw new WorkerHttpError(
+        `Worker GET /runners/${runnerId} returned ${response.status}: ${body}`,
+        response.status,
+      );
+    }
+    return true;
+  }
+
   async stopRunner(runnerId: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}`, {
       method: 'DELETE',

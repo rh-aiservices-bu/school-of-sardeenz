@@ -173,6 +173,10 @@ async function main(): Promise<void> {
       reconciliationIntervalSecs: config.reconciliationIntervalSecs,
       deployTimeoutSecs: config.deployTimeoutSecs,
       sleepTimeoutSecs: config.sleepTimeoutSecs,
+      // STARTING grace for the missing-runner probe: a confirmed miss is only actionable once a
+      // start has had its full deploy budget to be a problem; ACTIVE misses are confirmed
+      // immediately (see ReconciliationConfig).
+      missingRunnerProbeGraceSecs: config.deployTimeoutSecs,
     },
     app.log,
     redis,
@@ -183,6 +187,8 @@ async function main(): Promise<void> {
     (baseUrl) => new WorkerClient({ baseUrl, token: config.workerToken }),
   );
 
+  // Leader election runs before the one-shot startup tick below so `isLeader` already reflects
+  // whether this instance may do leader-gated work at boot.
   await leaderElection.start();
   // Only the leader imports (the import route is leader-gated), so only the leader creates temp
   // files — and only the leader should sweep them. A non-leader sweeping the shared RWX module
@@ -192,6 +198,11 @@ async function main(): Promise<void> {
   }
   await workerPool.discoverWorkers();
   await memoryBudget.refreshAll();
+  // #166: heal boot-time drift immediately instead of after up to one reconciliation interval —
+  // a control-plane restart can otherwise leave ghost instance records (e.g. from a blank
+  // worker restart) showing as ACTIVE for up to `reconciliationIntervalSecs` longer than
+  // necessary. tick() is itself leader-gated, so a non-leader boots without doing it.
+  await reconciliation.tick();
   reconciliation.start();
 
   const shutdown = async (signal: string) => {

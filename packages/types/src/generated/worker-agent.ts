@@ -40,7 +40,20 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Check whether a runner is running
+         * @description Liveness check for a single runner: returns `200` when a runner with
+         *     the given `runnerId` is running on this worker, `404` when it is not
+         *     (never started, already stopped, or exited and reaped).
+         *
+         *     The control plane's reconciliation uses this to detect instances whose
+         *     record still claims a worker/runner that no longer exists — e.g. after
+         *     a worker restarts blank under the same `workerId` (issue #166): the
+         *     heartbeat proves the *worker* is alive but its runner roster is gone.
+         *     The probe is liveness-only — it makes no assertions about the runner's
+         *     state or health, so a healthy runner is never flagged by it.
+         */
+        get: operations["getRunner"];
         put?: never;
         post?: never;
         /**
@@ -545,6 +558,36 @@ export interface operations {
             };
             /** @description Worker has no capacity */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Unique identifier of the runner to check. */
+                runnerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A runner with this id is running on this worker */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No runner with this id is running on this worker */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -17,6 +17,7 @@ import {
   reconciliationTicksTotal,
   reconciliationStuckModelsTotal,
   reconciliationDeadWorkersTotal,
+  reconciliationMissingRunnersTotal,
   reconciliationTickDuration,
   reconciliationErrors,
   modelsTotal,
@@ -35,6 +36,16 @@ export interface ReconciliationConfig {
   readonly reconciliationIntervalSecs: number;
   readonly deployTimeoutSecs: number;
   readonly sleepTimeoutSecs: number;
+  /**
+   * How long a STARTING instance whose worker cannot be reached may go unprobed before
+   * `reconcileMissingRunners` treats the miss as confirmed. STARTING instances are probed only
+   * after this grace window — a fresh cold-start is a live operation on the worker (POST /runners
+   * still in flight) that would be wrongly killed by an immediate reap; only a long-lived miss
+   * (worker restarted blank, runner never recorded) is actionable here. A missed ACTIVE instance
+   * is always confirmed immediately — it no longer serves anything, and the fast-fail stop path
+   * (sleep-wake) already treats an unreachable runner as a one-poll-interval failure.
+   */
+  readonly missingRunnerProbeGraceSecs: number;
 }
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
@@ -160,6 +171,7 @@ export class ReconciliationService {
       });
 
       await this.safeStep('recoverStuckInstances', () => this.recoverStuckInstances());
+      await this.safeStep('reconcileMissingRunners', () => this.reconcileMissingRunners());
       await this.safeStep('reconcileInstanceTable', () => this.reconcileInstanceTable());
       await this.safeStep('reapOrphanedInstances', () => this.reapOrphanedInstances());
       await this.safeStep('refreshMetrics', () => this.refreshMetrics());
@@ -505,6 +517,156 @@ export class ReconciliationService {
             err: err instanceof Error ? err.message : String(err),
           },
           'Failed to reap orphaned instance',
+        );
+      }
+    }
+  }
+
+  /**
+   * Runner-level reconciliation (#166): catch instances whose record still claims a runner that
+   * the hosting worker no longer runs. Worker-level reconciliation (handleDeadWorkers) only sees
+   * the worker's heartbeat — a worker that restarts blank under the same `workerId` stays
+   * ONLINE, so a ghost ACTIVE instance on it would otherwise linger as "running" (and burn the
+   * full drain timeout when stopped) until the worker finally goes OFFLINE. This step probes
+   * the runner itself via the worker management API (`GET /runners/{runnerId}`) and reaps
+   * instances whose runner is absent.
+   *
+   * Probing policy (liveness-only — no state/health assertions, so a healthy worker + live
+   * runner is never flagged):
+   * - worker OFFLINE or not in the pool → never probe here; handleDeadWorkers (this tick) or
+   *   later ticks own OFFLINE workers. Keeps the two paths from double-cleaning the same
+   *   instance and from racing each other.
+   * - worker reachable, probe 404 → runner genuinely absent → full reap (same cleanup as
+   *   handleDeadWorkers).
+   * - worker reachable, probe failed (network / 5xx) → inconclusive (the worker API is up but
+   *   something is wrong asking it) → skip, retry next tick. Reaping on a failed probe would
+   *   kill genuinely live instances during a blip.
+   * - instance without a `runnerId` (fresh STARTING whose startRunner has not returned yet) →
+   *   skip: there is nothing to address the probe by, and the address would appear on its own
+   *   once the runner is up.
+   * - STARTING instances additionally get a grace window (`missingRunnerProbeGraceSecs`): a
+   *   long cold-start with the worker momentarily unreachable must not be killed on the first
+   *   tick after STARTING; ACTIVE instances are reaped on the first confirmed miss — a
+   *   confirmed-miss ACTIVE instance serves nothing, so waiting only prolongs the wrong
+   *   dashboard state.
+   */
+  private async reconcileMissingRunners(): Promise<void> {
+    if (!this.createWorkerClient) return;
+    const createWorkerClient = this.createWorkerClient;
+
+    const allInstances = await this.lifecycle.getAllInstances();
+    const candidates = allInstances.filter((i) => {
+      if (!i.runnerId || !i.workerId) return false;
+      if (i.state !== ModelLifecycleState.ACTIVE && i.state !== ModelLifecycleState.STARTING) {
+        return false;
+      }
+      const worker = this.workerPool.getWorker(i.workerId);
+      // OFFLINE / unknown workers are the dead-worker path's jurisdiction — see doc comment.
+      if (!worker || worker.status === WorkerStatus.OFFLINE) return false;
+      return true;
+    });
+    if (candidates.length === 0) return;
+
+    const graceMs = this.config.missingRunnerProbeGraceSecs * 1000;
+    const now = Date.now();
+
+    for (const instance of candidates) {
+      // Grace window for STARTING: a confirmed miss is only actionable once the start has had
+      // its full deploy budget to be a problem (fresh cold-starts skip entirely until then).
+      if (
+        instance.state === ModelLifecycleState.STARTING &&
+        now - new Date(instance.stateChangedAt).getTime() <= graceMs
+      ) {
+        continue;
+      }
+
+      try {
+        const workerId = instance.workerId;
+        const runnerId = instance.runnerId;
+        // Re-narrow: the `candidates` filter above already excluded null workerId/runnerId, but
+        // that narrowing does not survive the loop, so guard again before use.
+        if (!workerId || !runnerId) continue;
+        const worker = this.workerPool.getWorker(workerId)!;
+        let present: boolean;
+        try {
+          present = await createWorkerClient(worker.managementUrl).getRunner(runnerId);
+        } catch (probeErr) {
+          // Inconclusive — the worker's management API answered (it is ONLINE) but the probe
+          // itself failed. Treat "could not ask" as not-yet-confirmed and retry next tick.
+          this.logger.warn(
+            {
+              modelName: instance.modelName,
+              instanceId: instance.instanceId,
+              workerId: instance.workerId,
+              runnerId: instance.runnerId,
+              err: probeErr instanceof Error ? probeErr.message : String(probeErr),
+            },
+            'Runner liveness probe failed — skipping reap, will retry next tick',
+          );
+          continue;
+        }
+        if (present) continue;
+
+        this.logger.warn(
+          {
+            modelName: instance.modelName,
+            instanceId: instance.instanceId,
+            workerId: instance.workerId,
+            runnerId: instance.runnerId,
+            state: instance.state,
+          },
+          'Runner no longer hosted by its worker — reaping instance record',
+        );
+
+        await this.lifecycle.transition(
+          instance.modelName,
+          instance.instanceId,
+          ModelLifecycleState.ERROR,
+          {
+            errorMessage: `Runner ${instance.runnerId} no longer hosted by worker ${instance.workerId}`,
+          },
+        );
+        if (instance.runnerHost && instance.runnerPort) {
+          await this.routingMap.removeEndpoint(
+            instance.modelName,
+            instance.runnerHost,
+            instance.runnerEnginePort ?? instance.runnerPort,
+          );
+        }
+        await refreshModelRoutingState(this.lifecycle, this.routingMap, instance.modelName);
+        await this.lifecycle.removeInstance(instance.modelName, instance.instanceId);
+        await this.instanceRepository?.delete(instance.instanceId);
+        this.memoryBudget.releaseInstanceReservations(instance.instanceId);
+        reconciliationMissingRunnersTotal.inc();
+        this.logger.info(
+          {
+            modelName: instance.modelName,
+            instanceId: instance.instanceId,
+            workerId: instance.workerId,
+            runnerId: instance.runnerId,
+          },
+          'Removed instance whose runner is missing on a live worker',
+        );
+        this.notifications
+          ?.createNotification({
+            title: 'Model failed — runner lost',
+            description: `${instance.modelName} (${instance.instanceId}) on ${instance.workerId}`,
+            variant: 'danger',
+            source: { type: 'model', name: instance.modelName },
+          })
+          .catch(() => {});
+      } catch (err) {
+        // Per-instance isolation: one failed cleanup must not stop the rest of the tick — and
+        // the instance stays for the next tick, so a transient Redis error is self-healing.
+        this.logger.error(
+          {
+            modelName: instance.modelName,
+            instanceId: instance.instanceId,
+            workerId: instance.workerId,
+            runnerId: instance.runnerId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'Failed to handle instance with missing runner',
         );
       }
     }

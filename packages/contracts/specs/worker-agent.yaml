@@ -79,6 +79,39 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /runners/{runnerId}:
+    get:
+      operationId: getRunner
+      summary: Check whether a runner is running
+      description: |
+        Liveness check for a single runner: returns `200` when a runner with
+        the given `runnerId` is running on this worker, `404` when it is not
+        (never started, already stopped, or exited and reaped).
+
+        The control plane's reconciliation uses this to detect instances whose
+        record still claims a worker/runner that no longer exists — e.g. after
+        a worker restarts blank under the same `workerId` (issue #166): the
+        heartbeat proves the *worker* is alive but its runner roster is gone.
+        The probe is liveness-only — it makes no assertions about the runner's
+        state or health, so a healthy runner is never flagged by it.
+      tags:
+        - Runners
+      parameters:
+        - name: runnerId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique identifier of the runner to check.
+      responses:
+        "200":
+          description: A runner with this id is running on this worker
+        "404":
+          description: No runner with this id is running on this worker
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     delete:
       operationId: stopRunner
       summary: Stop a runner process

@@ -328,4 +328,113 @@ describe('SleepWakeService — RUNNER_TIMEOUT reachability (#96)', () => {
       service.wakeModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient),
     ).rejects.toMatchObject({ code: 'RUNNER_TIMEOUT' });
   });
+
+  // ---------------------------------------------------------------------------
+  // waitForDrain fast-fail on unreachable runner (#166 fix C)
+  // ---------------------------------------------------------------------------
+
+  it('waitForDrain fast-fails after 3 consecutive failed health polls instead of burning sleepTimeoutMs', async () => {
+    // Runner is gone (e.g. ghost instance after a blank worker restart): every poll fails.
+    const mocks = createMocks();
+    mocks.runnerClient.getHealth.mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const service = new SleepWakeService(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      mocks.memoryBudget as unknown as MemoryBudgetService,
+      60_000, // long timeout — the fast-fail must end the wait well before this
+      60_000,
+      1,
+    );
+
+    const start = Date.now();
+    await expect(
+      service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient),
+    ).rejects.toMatchObject({ code: 'RUNNER_UNAVAILABLE' });
+    // 3 failed polls at a 1ms interval — comfortably under even a fraction of the 60s timeout.
+    expect(Date.now() - start).toBeLessThan(1_000);
+    expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(3);
+  });
+
+  it('stopModel on an unreachable runner settles promptly with an ERROR record (no drain-timeout message)', async () => {
+    const mocks = createMocks();
+    mocks.runnerClient.getHealth.mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const service = new SleepWakeService(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      mocks.memoryBudget as unknown as MemoryBudgetService,
+      60_000,
+      60_000,
+      1,
+    );
+
+    const start = Date.now();
+    await expect(
+      service.stopModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient),
+    ).rejects.toMatchObject({ code: 'RUNNER_UNAVAILABLE' });
+    expect(Date.now() - start).toBeLessThan(1_000);
+
+    // The catch path lands the instance in ERROR with the fast-fail message — not the
+    // ~5-minute "Drain timed out" message the pre-fix behavior produced.
+    expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+      'test-model',
+      INSTANCE_ID,
+      ModelLifecycleState.ERROR,
+      expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        errorMessage: expect.stringContaining('became unreachable during drain'),
+      }),
+    );
+  });
+
+  it('waitForDrain still completes its full poll cycle when a healthy runner reports active requests', async () => {
+    // A reachable runner that keeps in-flight requests must NOT be fast-failed: its polls
+    // succeed (state READY), so the failure streak stays at zero and the drain times out
+    // the normal way — preserving the pre-fix behavior for genuinely busy runners.
+    const mocks = createMocks();
+    mocks.runnerClient.getHealth.mockResolvedValue({
+      state: RunnerState.READY,
+      activeRequests: 5,
+    });
+    const service = new SleepWakeService(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      mocks.memoryBudget as unknown as MemoryBudgetService,
+      50,
+      50,
+      10,
+    );
+
+    await expect(
+      service.sleepModel('test-model', INSTANCE_ID, mocks.runnerClient as unknown as RunnerClient),
+    ).rejects.toMatchObject({ code: 'RUNNER_TIMEOUT' });
+    // Ran the full ~50ms timeout window (many polls), not the 3-poll fast-fail — a reachable
+    // runner with in-flight traffic keeps being polled to the natural timeout.
+    expect(mocks.runnerClient.getHealth.mock.calls.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('a single health failure on an otherwise healthy runner does not trip the fast-fail', async () => {
+    // Poll 1: unreachable (e.g. a dropped read). Poll 2: runner answers with active requests.
+    // Poll 3: drained. The streak resets on the successful poll — no fast-fail, normal drain.
+    const mocks = createMocks();
+    const service = createService(mocks);
+    mocks.runnerClient.getHealth
+      .mockRejectedValueOnce(new Error('connect ECONNREFUSED'))
+      .mockResolvedValueOnce({ state: RunnerState.READY, activeRequests: 2 })
+      .mockResolvedValueOnce({ state: RunnerState.READY, activeRequests: 0 });
+
+    await service.sleepModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
+
+    expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(3);
+    expect(mocks.runnerClient.sleep).toHaveBeenCalled();
+    expect(mocks.lifecycle.transition).not.toHaveBeenCalledWith(
+      'test-model',
+      INSTANCE_ID,
+      ModelLifecycleState.ERROR,
+      expect.anything(),
+    );
+  });
 });
