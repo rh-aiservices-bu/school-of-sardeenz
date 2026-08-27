@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **CI lint failure on `dev`: removed dead `legendData` in `ClusterOverview`.** The VRAM
+  donut no longer renders a `ChartLegend` (the stat rows beside the donut carry that
+  information), but the leftover `legendData` variable remained, tripping
+  `@typescript-eslint/no-unused-vars` and breaking `make lint` in CI.
+
 - **Dashboard chart colors: undefined PF6 token names rendered the VRAM donut black and the
   placement/GPU bars empty.** The per-model segment palette (#123) and the overview donut used
   hand-written `var(--pf-t--chart--…)` / `var(--pf-t-chart-…)` custom properties that no

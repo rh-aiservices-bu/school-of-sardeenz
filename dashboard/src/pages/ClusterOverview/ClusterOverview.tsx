@@ -276,7 +276,6 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
 
   const colorScale = segments.map((s) => s.color);
   const data = segments.map((s) => ({ x: s.label, y: s.bytes }));
-  const legendData = segments.map((s) => ({ name: `${s.label}: ${formatBytes(s.bytes)}` }));
   const primaryLabel = segments[0].label;
 
   // Stat rows below the donut — mirror the segments shown in the chart, plus Total always.
