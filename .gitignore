@@ -60,6 +60,9 @@ __pycache__/
 .pytest_cache/
 *.pyc
 
+# Agents configs
+opencode.json
+
 # Claude Code worktrees (milestone execution)
 .claude/worktrees/
 
