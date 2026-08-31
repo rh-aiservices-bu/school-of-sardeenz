@@ -175,6 +175,7 @@ function GpuCard({
           layout="horizontal"
           margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
           padding={0}
+          valueFormat={formatBytes}
           colors={(datum) => bar.colors[datum.id as string] || '#ccc'}
           defs={SLEEPING_PATTERN_DEFS}
           fill={bar.fill}
@@ -281,6 +282,7 @@ function GpuCard({
               layout="horizontal"
               margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
               padding={0}
+              valueFormat={formatBytes}
               colors={(bar) => KVCACHE_COLORS[bar.id as keyof typeof KVCACHE_COLORS] || '#ccc'}
               borderRadius={3}
               enableLabel={false}
