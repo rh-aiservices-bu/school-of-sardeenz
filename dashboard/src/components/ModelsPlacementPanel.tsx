@@ -14,8 +14,8 @@
  *  - Worker status comes from useWorkers() (ClusterMemory doesn't carry it) instead of v1's
  *    healthy/leader chips, which the v1 panel didn't actually have real data for either (see
  *    the source's own comment on `leaderPodId`).
- *  - KVCache mini-bar: kept out entirely for now (no kvcached telemetry exists yet on
- *    WorkerModelInfo/DeviceInfo) — future work, see the note near the bottom of this file.
+ *  - KVCache mini-bar: activated (#165) — renders a Prealloc/Used/Free sub-bar per GPU when the
+ *    worker reports a kvcached pool for that device (DeviceInfo.kvCache), v1 parity.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -49,8 +49,10 @@ import { getNivoTooltipTheme } from '../chartTheme';
 import {
   attributeModelsToDevice,
   buildDeviceBarData,
+  buildKvcacheData,
   summarizeWorkerVram,
   SLEEPING_PATTERN_DEFS,
+  KVCACHE_COLORS,
 } from '../utils/gpuMemoryPanel';
 
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
@@ -90,6 +92,10 @@ function GpuCard({
     [device, workerDeviceCount, models],
   );
   const bar = useMemo(() => buildDeviceBarData(device, attributed), [device, attributed]);
+  const kvcache = useMemo(
+    () => buildKvcacheData(device, (models?.length ?? 0) > 0),
+    [device, models],
+  );
   const usedPercent =
     device.memoryTotalBytes > 0
       ? Math.round((device.memoryUsedBytes / device.memoryTotalBytes) * 100)
@@ -243,11 +249,73 @@ function GpuCard({
       </Flex>
 
       {/*
-        KVCache mini-bar (v1 parity note): v1 rendered a second stacked bar (Prealloc/Used/Free)
-        when a GPU's kvcache telemetry was present. No such telemetry exists on DeviceInfo or
-        WorkerModelInfo yet — this is future work, keyed on kvCacheElasticSharing (see
-        WorkerRunnerCapability) once the control plane surfaces per-device kvcache figures.
+        KVCache mini-bar (issue #165, v1 parity): renders when the worker reports a kvcached
+        pool for this device (DeviceInfo.kvCache) and the worker has models — otherwise omitted
+        entirely, exactly like the device stats above (absent means absent, not an empty bar).
       */}
+      {kvcache && (
+        <div
+          style={{
+            marginTop: '6px',
+            paddingTop: '6px',
+            borderTop: '1px solid var(--pf-t--global--border--color--default)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 'var(--pf-t--global--font--size--xs)',
+              color: 'var(--pf-t--global--text--color--subtle)',
+              marginBottom: '2px',
+            }}
+          >
+            {t('overview.modelsPlacement.gpu.kvCacheLine', {
+              used: formatBytes(kvcache.usedBytes),
+              total: formatBytes(kvcache.totalBytes),
+            })}
+          </div>
+          <div style={{ height: '12px' }}>
+            <ResponsiveBar
+              data={kvcache.data}
+              keys={kvcache.keys}
+              indexBy="id"
+              layout="horizontal"
+              margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+              padding={0}
+              colors={(bar) => KVCACHE_COLORS[bar.id as keyof typeof KVCACHE_COLORS] || '#ccc'}
+              borderRadius={3}
+              enableLabel={false}
+              enableGridY={false}
+              enableGridX={false}
+              axisTop={null}
+              axisRight={null}
+              axisBottom={null}
+              axisLeft={null}
+              theme={getNivoTooltipTheme()}
+            />
+          </div>
+          <Flex
+            gap={{ default: 'gapSm' }}
+            style={{ marginTop: '2px' }}
+          >
+            <FlexItem>
+              <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
+                <span style={{ color: KVCACHE_COLORS.Prealloc }}>●</span> Prealloc (
+                {formatBytes(kvcache.preallocBytes)})
+              </span>
+            </FlexItem>
+            <FlexItem>
+              <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
+                <span style={{ color: KVCACHE_COLORS.Used }}>●</span> Used ({formatBytes(kvcache.usedBytes)})
+              </span>
+            </FlexItem>
+            <FlexItem>
+              <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
+                <span style={{ color: KVCACHE_COLORS.Free }}>●</span> Free ({formatBytes(kvcache.freeBytes)})
+              </span>
+            </FlexItem>
+          </Flex>
+        </div>
+      )}
     </div>
   );
 }

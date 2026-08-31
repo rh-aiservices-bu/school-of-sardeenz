@@ -15,6 +15,7 @@ from typing import Optional
 import httpx
 
 from .cli import RunnerArgs, build_vllm_command
+from .kvcached_pools import kvcached_ipc_name_for_env
 
 
 class VllmEngine:
@@ -33,6 +34,12 @@ class VllmEngine:
         # it, and turn on vLLM's dev endpoints (/sleep, /wake_up) which back the runner contract.
         env.setdefault("ENABLE_KVCACHED", "true")
         env.setdefault("KVCACHED_AUTOPATCH", "1")
+        # Pin the pool's shared-memory segment name to the v1 per-GPU form so co-located runners
+        # on the same device(s) join one pool (the elastic-sharing mechanism) and /memory-report
+        # can read their combined pool state from it.
+        ipc_name = kvcached_ipc_name_for_env(os.environ.get("SARDEENZ_DEVICE_INDICES"))
+        if ipc_name and "KVCACHED_IPC_NAME" not in env:
+            env["KVCACHED_IPC_NAME"] = ipc_name
         env["VLLM_SERVER_DEV_MODE"] = "1"
         cmd = build_vllm_command(self._args)
         # New process group so we can signal the whole vLLM tree on stop.

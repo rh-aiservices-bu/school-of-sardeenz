@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **KVCached pool telemetry end to end (#165).** The dormant KVCache sub-bar in the
+  dashboard's Models placement panel is now wired to real kvcached pool statistics:
+  - **Runner (engine-runner contract, v0.1.1):** `GET /memory-report` devices gain an
+    optional per-device `kvCache` block (`totalBytes`/`usedBytes`/`preallocBytes`/
+    `freeBytes`) read from the kvcached pool's 24-byte `/dev/shm` segment (the same
+    struct `kvtop` displays). Segment names follow the v1 convention
+    (`kvcached_vllm_GPU<sorted indices>`), pinned via `KVCACHED_IPC_NAME` so
+    co-located runners join one pool; a tensor-parallel segment counts per rank (each
+    owned device carries the full value), multi-pool `_g<id>` segments on one device
+    are summed, and a missing/unreadable pool means the field is absent — never zero.
+  - **Worker agent (worker-agent contract, v0.1.1):** the per-heartbeat memory report
+    relays each device's `kvCache` block verbatim from the runners' own
+    `/memory-report` (new `RunnerManager.getKvCacheDeviceStats()`, reusing the
+    2s-timeout fetch plumbing), in both NVML and no-NVML modes.
+  - **Control plane (control-plane contract, v0.1.1):** `DeviceInfo` (and therefore
+    `ClusterMemory`) gains the optional per-device `kvCache` block, validated with the
+    telemetry-tolerant drop-with-warning policy and written into the
+    `{prefix}:cluster:memory` dashboard-fallback snapshot. Telemetry only — it never
+    feeds placement math.
+  - **Dashboard:** `ModelsPlacementPanel` renders the v1-style KVCache sub-bar
+    (Prealloc/Used/Free) per GPU when a pool is reported and the worker has models;
+    omitted otherwise.
+  - **Contracts:** additive only — `engine-runner.yaml`, `worker-agent.yaml`, and
+    `control-plane.yaml` bumped to v0.1.1; Rust proxy untouched (ADR-005 flow).
+
 ### Fixed
 
 - **`nvml-real.test.ts` failed on GPU-equipped dev boxes.** The test hardcoded the "no GPU, no

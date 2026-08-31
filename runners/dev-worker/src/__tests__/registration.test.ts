@@ -5,7 +5,7 @@ import {
   type MeasuredMemorySample,
 } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
-import type { WorkerInfo, WorkerMemoryReport } from './response-types.js';
+import type { KVCacheStats, WorkerInfo, WorkerMemoryReport } from './response-types.js';
 
 function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
   return {
@@ -560,6 +560,151 @@ describe('WorkerRegistration', () => {
       );
       const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
       expect(report.instances).toEqual([]);
+    });
+  });
+
+  describe('kvcached pool telemetry (#165)', () => {
+    const kvStats: KVCacheStats = {
+      totalBytes: 8_000,
+      usedBytes: 3_000,
+      preallocBytes: 1_000,
+      freeBytes: 4_000,
+    };
+
+    function kvProvider(map: Map<number, KVCacheStats> | null) {
+      return vi.fn(() => Promise.resolve(map));
+    }
+
+    it('relays the per-device kvCache block verbatim; devices without a pool omit it', async () => {
+      const kvCacheDeviceProvider = kvProvider(new Map([[0, kvStats]]));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        kvCacheDeviceProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+
+      expect(kvCacheDeviceProvider).toHaveBeenCalled();
+      expect(report.devices[0].kvCache).toEqual(kvStats);
+      // Device 1 has no pool — the field is absent, not zeroed.
+      expect(report.devices[1].kvCache).toBeUndefined();
+    });
+
+    it('includes kvCache alongside NVML-measured devices (independent of the ledger fallback)', async () => {
+      const sample: MeasuredMemorySample = {
+        devices: [{ deviceIndex: 0, memoryUsedBytes: 5_000_000, deviceName: 'NVIDIA RTX 4090' }],
+        instances: [],
+      };
+      const measuredProvider = vi.fn(() => Promise.resolve(sample));
+      const kvCacheDeviceProvider = kvProvider(new Map([[0, kvStats], [1, kvStats]]));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        measuredProvider,
+        undefined,
+        kvCacheDeviceProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+
+      expect(report.devices[0].memoryUsedBytes).toBe(5_000_000);
+      expect(report.devices[0].kvCache).toEqual(kvStats);
+      // Device 1 is ledger-fallback (no NVML sample) but still carries its pool stats.
+      expect(report.devices[1].memoryUsedBytes).toBe(0);
+      expect(report.devices[1].kvCache).toEqual(kvStats);
+    });
+
+    it('includes kvCache in no-NVML (ledger) mode too', async () => {
+      const ledgerInstancesProvider = vi.fn(() =>
+        Promise.resolve([
+          { instanceId: 'inst-1', modelName: 'm', deviceIndex: 0, memoryUsedBytes: 2_000 },
+        ]),
+      );
+      const kvCacheDeviceProvider = kvProvider(new Map([[0, kvStats]]));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ledgerInstancesProvider,
+        kvCacheDeviceProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+      expect(report.devices[0].kvCache).toEqual(kvStats);
+      expect(report.instances).toHaveLength(1);
+    });
+
+    it('omits kvCache entirely when the provider resolves null', async () => {
+      const kvCacheDeviceProvider = kvProvider(null);
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        kvCacheDeviceProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+      for (const dev of report.devices) expect(dev.kvCache).toBeUndefined();
+    });
+
+    it('a throwing kvCacheDeviceProvider degrades to no kvCache, report still built', async () => {
+      const kvCacheDeviceProvider = vi.fn(() => Promise.reject(new Error('runner unreachable')));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        kvCacheDeviceProvider,
+      );
+
+      await expect(registration.register()).resolves.toBeUndefined();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+      expect(report.devices).toHaveLength(2);
+      for (const dev of report.devices) expect(dev.kvCache).toBeUndefined();
+      expect(report.reportedAt).toBeDefined();
     });
   });
 

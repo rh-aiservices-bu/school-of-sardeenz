@@ -955,3 +955,150 @@ describe('getLedgerInstanceShares', () => {
     expect(await mgr.getLedgerInstanceShares()).toEqual([]);
   });
 });
+
+describe('getKvCacheDeviceStats', () => {
+  // Same harness as the getLedgerInstanceShares block: fake launcher (no sockets), URL-keyed
+  // fetchFn — only the injected fetch is exercised.
+  function makeLauncher(): RunnerLauncher {
+    return {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+        Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        }),
+    };
+  }
+
+  function makeFetchFn(
+    impl: (url: string) => Promise<{ ok: boolean; json?: () => Promise<unknown> }>,
+  ): typeof fetch {
+    return vi.fn((url: unknown) => impl(url as string)) as unknown as typeof fetch;
+  }
+
+  const KV = { totalBytes: 8_000, usedBytes: 3_000, preallocBytes: 1_000, freeBytes: 4_000 };
+
+  it('relays the runner-reported kvCache block per device, first-wins across co-located runners', async () => {
+    const fetchFn = makeFetchFn((url) =>
+      url.includes('19301')
+        ? Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                devices: [
+                  { deviceIndex: 0, memoryUsedBytes: 300, kvCache: KV },
+                  { deviceIndex: 1, memoryUsedBytes: 0 }, // no pool on device 1
+                ],
+              }),
+          })
+        : Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                // Co-located on device 0 (shared pool segment) — the second report must not
+                // clobber the first.
+                devices: [
+                  { deviceIndex: 0, memoryUsedBytes: 700, kvCache: { ...KV, usedBytes: 999 } },
+                ],
+              }),
+          }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 300,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 700,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    const stats = await mgr.getKvCacheDeviceStats();
+    expect([...stats.keys()]).toEqual([0]);
+    expect(stats.get(0)).toEqual(KV); // device 1 never appears (absent, not zero)
+    // Both runners' /memory-report were polled (the shared fetch path, with the 2s timeout).
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    const calls = (fetchFn as unknown as { mock: { calls: Array<[unknown, unknown]> } }).mock
+      .calls;
+    for (const call of calls) {
+      expect(call[1]).toEqual(
+        expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }),
+      );
+    }
+  });
+
+  it('returns an empty map when no runner reports a kvCache block', async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 300 }] }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 300,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(await mgr.getKvCacheDeviceStats()).toEqual(new Map());
+  });
+
+  it('a failing runner contributes nothing (never throws)', async () => {
+    const fetchFn = vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch;
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 300,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    await expect(mgr.getKvCacheDeviceStats()).resolves.toEqual(new Map());
+  });
+
+  it('returns an empty map when there are no running runners', async () => {
+    const mgr = new RunnerManager(makeConfig(), makeRegistration());
+    expect(await mgr.getKvCacheDeviceStats()).toEqual(new Map());
+  });
+});

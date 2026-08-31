@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Worker Agent API
-  version: 0.1.0
+  version: 0.1.1
   description: |
     Management API exposed by each worker agent (dev or production). The control
     plane calls these endpoints to start and stop runner processes on a worker.
@@ -667,6 +667,50 @@ components:
           description: |
             GPU temperature in degrees Celsius from NVML at report time.
             Absent when unavailable.
+        kvCache:
+          type: object
+          description: |
+            Measured state of the kvcached elastic KV-cache pool on this
+            device, relayed verbatim from this device's runner's
+            `GET /memory-report` `kvCache` block (engine-runner contract).
+            Telemetry only — never feeds placement math. Absent when no
+            runner on this device reports a kvcached pool (kvcached disabled,
+            CPU-only host, or the runner query failed); absent means absent,
+            not zero.
+          required:
+            - totalBytes
+            - usedBytes
+            - preallocBytes
+            - freeBytes
+          properties:
+            totalBytes:
+              type: integer
+              format: int64
+              minimum: 0
+              description: |
+                Pool's reserved virtual capacity in bytes (the pool's initial
+                limit; it does not change as the pool elastically resizes).
+            usedBytes:
+              type: integer
+              format: int64
+              minimum: 0
+              description: |
+                Bytes of physical device memory currently pinned by the
+                pool's in-use KV blocks.
+            preallocBytes:
+              type: integer
+              format: int64
+              minimum: 0
+              description: |
+                Bytes of physical device memory pinned by the pool's
+                preallocated (reserved) pages.
+            freeBytes:
+              type: integer
+              format: int64
+              minimum: 0
+              description: |
+                Virtual capacity not yet backed by physical memory
+                (`totalBytes - usedBytes - preallocBytes`).
 
     InstanceMemoryMeasurement:
       type: object

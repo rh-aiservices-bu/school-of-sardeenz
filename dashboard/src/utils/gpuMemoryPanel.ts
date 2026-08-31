@@ -15,6 +15,52 @@ export const OTHER_COLOR_HEX = '#8B8D8F';
 export const FREE_COLOR_HEX = '#D2D2D2';
 export const SLEEPING_PATTERN_ID = 'sleeping-pattern';
 
+/** KVCache mini-bar segment colors (v1 GpuMemoryPanel parity: Prealloc amber, Used blue, Free gray). */
+export const KVCACHE_COLORS: Record<'Prealloc' | 'Used' | 'Free', string> = {
+  Prealloc: '#F0AB00',
+  Used: '#0066CC',
+  Free: '#6A6E73',
+};
+
+export interface KvcacheBarData {
+  /** Single-row nivo dataset for the KVCache sub-bar (v1 buildKvcacheData port, #165). */
+  data: [{ id: 'KVCache'; Prealloc: number; Used: number; Free: number }];
+  keys: ['Prealloc', 'Used', 'Free'];
+  totalBytes: number;
+  usedBytes: number;
+  preallocBytes: number;
+  freeBytes: number;
+}
+
+/**
+ * Build the nivo dataset for one device's KVCache sub-bar (issue #165, v1 `buildKvcacheData`
+ * port). Renders only when the device carries a kvcached pool report with capacity > 0 AND the
+ * worker actually has models on it (a pool with nothing serving is not interesting — same
+ * guard as v1). Returns null when the sub-bar should be omitted.
+ */
+export function buildKvcacheData(
+  device: DeviceInfo,
+  hasModels: boolean,
+): KvcacheBarData | null {
+  const kvcache = device.kvCache;
+  if (!kvcache || kvcache.totalBytes <= 0 || !hasModels) return null;
+  return {
+    data: [
+      {
+        id: 'KVCache',
+        Prealloc: kvcache.preallocBytes,
+        Used: kvcache.usedBytes,
+        Free: kvcache.freeBytes,
+      },
+    ],
+    keys: ['Prealloc', 'Used', 'Free'],
+    totalBytes: kvcache.totalBytes,
+    usedBytes: kvcache.usedBytes,
+    preallocBytes: kvcache.preallocBytes,
+    freeBytes: kvcache.freeBytes,
+  };
+}
+
 /** nivo `defs`/`fill` pattern for sleeping model segments (diagonal hatching, v1 parity). */
 export const SLEEPING_PATTERN_DEFS = [
   {

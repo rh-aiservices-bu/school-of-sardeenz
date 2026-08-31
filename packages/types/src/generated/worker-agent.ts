@@ -431,6 +431,41 @@ export type components = {
              *     Absent when unavailable.
              */
             temperatureC?: number;
+            /**
+             * @description Measured state of the kvcached elastic KV-cache pool on this
+             *     device, relayed verbatim from this device's runner's
+             *     `GET /memory-report` `kvCache` block (engine-runner contract).
+             *     Telemetry only — never feeds placement math. Absent when no
+             *     runner on this device reports a kvcached pool (kvcached disabled,
+             *     CPU-only host, or the runner query failed); absent means absent,
+             *     not zero.
+             */
+            kvCache?: {
+                /**
+                 * Format: int64
+                 * @description Pool's reserved virtual capacity in bytes (the pool's initial
+                 *     limit; it does not change as the pool elastically resizes).
+                 */
+                totalBytes: number;
+                /**
+                 * Format: int64
+                 * @description Bytes of physical device memory currently pinned by the
+                 *     pool's in-use KV blocks.
+                 */
+                usedBytes: number;
+                /**
+                 * Format: int64
+                 * @description Bytes of physical device memory pinned by the pool's
+                 *     preallocated (reserved) pages.
+                 */
+                preallocBytes: number;
+                /**
+                 * Format: int64
+                 * @description Virtual capacity not yet backed by physical memory
+                 *     (`totalBytes - usedBytes - preallocBytes`).
+                 */
+                freeBytes: number;
+            };
         };
         /**
          * @description Measured device memory attributed to one runner instance on one

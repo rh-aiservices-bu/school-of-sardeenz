@@ -23,7 +23,7 @@ engine-agnostic (ADR-010, [phase4.md](../../docs/project/phase4.md) Task 5).
   | ------------------------------------ | ----------------------------------------------------------------------------------- |
   | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies |
   | `GET /capabilities`                  | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on       |
-  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`)                                |
+  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`); per-device `kvCache` pool block when a kvcached pool is visible |
   | `POST /sleep`                        | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM)                     |
   | `POST /wake`                         | vLLM `/wake_up`                                                                     |
   | `GET /sleep-status`, `GET /progress` | State introspection                                                                 |
@@ -40,6 +40,7 @@ sardeenz_vllm_runner/
 ├── cli.py        # arg parsing + `vllm serve` command construction (pure)
 ├── engine.py     # vLLM subprocess lifecycle + dev-endpoint (/sleep, /wake_up) client
 ├── memory.py     # best-effort device memory report
+├── kvcached_pools.py  # kvcached pool stats from the pool's shm segment (#165)
 └── state.py      # RunnerState machine + contract-shape response builders (pure)
 ```
 

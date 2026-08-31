@@ -31,6 +31,13 @@ export interface WorkerInfo {
   managementUrl: string;
 }
 
+export interface KVCacheStats {
+  totalBytes: number;
+  usedBytes: number;
+  preallocBytes: number;
+  freeBytes: number;
+}
+
 export interface WorkerMemoryReportDevice {
   deviceIndex: number;
   deviceType: string;
@@ -40,6 +47,7 @@ export interface WorkerMemoryReportDevice {
   deviceName?: string;
   utilizationPercent?: number;
   temperatureC?: number;
+  kvCache?: KVCacheStats;
 }
 
 export interface WorkerMemoryReportInstance {
@@ -68,6 +76,7 @@ export interface MemoryReportDevice {
   deviceType: string;
   memoryUsedBytes: number;
   memoryTotalBytes: number;
+  kvCache?: KVCacheStats;
 }
 
 export interface MemoryReportResponse {

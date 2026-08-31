@@ -40,9 +40,10 @@ class _FakeEngine:  # mirrors the VllmEngine surface create_app()/_health_poller
 
 
 def _fake_memory_report(device_type: str = "CUDA") -> dict[str, Any]:
-    # Only the fields the contract actually requires (engine-runner.yaml DeviceMemoryUsage) —
-    # matches what the real vLLM memory.py emits (no memoryFreeBytes; that field does not exist
-    # in the contract).
+    # The contract-required fields (engine-runner.yaml DeviceMemoryUsage) plus the
+    # optional kvcached pool block (#165) so the conformance suite also exercises
+    # the kvCache shape. No memoryFreeBytes — that field does not exist in the
+    # contract.
     return {
         "devices": [
             {
@@ -50,6 +51,12 @@ def _fake_memory_report(device_type: str = "CUDA") -> dict[str, Any]:
                 "deviceType": device_type,
                 "memoryUsedBytes": 2_000,
                 "memoryTotalBytes": 10_000,
+                "kvCache": {
+                    "totalBytes": 4_000,
+                    "usedBytes": 1_500,
+                    "preallocBytes": 500,
+                    "freeBytes": 2_000,
+                },
             }
         ]
     }

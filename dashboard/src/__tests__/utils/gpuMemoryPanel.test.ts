@@ -8,8 +8,10 @@ import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/type
 import {
   attributeModelsToDevice,
   buildDeviceBarData,
+  buildKvcacheData,
   summarizeWorkerVram,
   SLEEPING_PATTERN_ID,
+  KVCACHE_COLORS,
 } from '../../utils/gpuMemoryPanel';
 
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
@@ -175,6 +177,41 @@ describe('buildDeviceBarData', () => {
     const bar = buildDeviceBarData(device, attributed);
     expect(bar.colors['model-a']).toBeDefined();
     expect(bar.colors['Free']).toBeDefined();
+  });
+});
+
+describe('buildKvcacheData (issue #165)', () => {
+  const kvCache = {
+    totalBytes: 12 * 1024 ** 3,
+    usedBytes: 5 * 1024 ** 3,
+    preallocBytes: 1 * 1024 ** 3,
+    freeBytes: 6 * 1024 ** 3,
+  };
+
+  it('builds the single-row Prealloc/Used/Free dataset from the device kvCache block', () => {
+    const bar = buildKvcacheData(makeDevice({ kvCache }), true);
+    expect(bar).not.toBeNull();
+    expect(bar!.data).toEqual([
+      { id: 'KVCache', Prealloc: kvCache.preallocBytes, Used: kvCache.usedBytes, Free: kvCache.freeBytes },
+    ]);
+    expect(bar!.keys).toEqual(['Prealloc', 'Used', 'Free']);
+    expect(bar!.totalBytes).toBe(kvCache.totalBytes);
+  });
+
+  it('returns null when the device has no kvCache block (absent means absent)', () => {
+    expect(buildKvcacheData(makeDevice(), true)).toBeNull();
+  });
+
+  it('returns null when the pool has no capacity (totalBytes 0)', () => {
+    expect(buildKvcacheData(makeDevice({ kvCache: { ...kvCache, totalBytes: 0 } }), true)).toBeNull();
+  });
+
+  it('returns null when the worker has no models (v1 guard: a pool with nothing serving is not rendered)', () => {
+    expect(buildKvcacheData(makeDevice({ kvCache }), false)).toBeNull();
+  });
+
+  it('exposes the v1 segment colors for the sub-bar legend', () => {
+    expect(KVCACHE_COLORS).toEqual({ Prealloc: '#F0AB00', Used: '#0066CC', Free: '#6A6E73' });
   });
 });
 
