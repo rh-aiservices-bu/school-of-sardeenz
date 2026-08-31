@@ -15,11 +15,19 @@ export const OTHER_COLOR_HEX = '#8B8D8F';
 export const FREE_COLOR_HEX = '#D2D2D2';
 export const SLEEPING_PATTERN_ID = 'sleeping-pattern';
 
-/** KVCache mini-bar segment colors (v1 GpuMemoryPanel parity: Prealloc amber, Used blue, Free gray). */
+/**
+ * KVCache mini-bar segment colors.
+ *
+ * Deliberately grayscale and disjoint from MODEL_PALETTE_HEX: the model palette already spans all
+ * seven chromatic PF6 chart hues, so the only chart family guaranteed never to collide with a
+ * model segment is the neutral gray (`--pf-t--chart--color--black--*`) scale. Grayscale also reads
+ * as a *different metric* than the colorful per-model VRAM segments. Lightness encodes filledness:
+ * Free lightest → Prealloc mid → Used darkest.
+ */
 export const KVCACHE_COLORS: Record<'Prealloc' | 'Used' | 'Free', string> = {
-  Prealloc: '#F0AB00',
-  Used: '#0066CC',
-  Free: '#6A6E73',
+  Prealloc: '#A3A3A3',
+  Used: '#707070',
+  Free: '#E0E0E0',
 };
 
 export interface KvcacheBarData {

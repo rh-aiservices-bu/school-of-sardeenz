@@ -13,6 +13,7 @@ import {
   SLEEPING_PATTERN_ID,
   KVCACHE_COLORS,
 } from '../../utils/gpuMemoryPanel';
+import { MODEL_PALETTE_HEX } from '../../utils/memorySegments';
 
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
 type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
@@ -210,8 +211,22 @@ describe('buildKvcacheData (issue #165)', () => {
     expect(buildKvcacheData(makeDevice({ kvCache }), false)).toBeNull();
   });
 
-  it('exposes the v1 segment colors for the sub-bar legend', () => {
-    expect(KVCACHE_COLORS).toEqual({ Prealloc: '#F0AB00', Used: '#0066CC', Free: '#6A6E73' });
+  it('uses a grayscale palette disjoint from the model palette (no color collision)', () => {
+    // The model palette spans all seven chromatic PF6 chart hues, so a KVCache segment color must
+    // never equal a model-segment color — otherwise a model and its KVCache sub-bar look identical.
+    const kvcacheColors = Object.values(KVCACHE_COLORS).map((c) => c.toLowerCase());
+    for (const hex of kvcacheColors) {
+      expect(MODEL_PALETTE_HEX.map((c) => c.toLowerCase())).not.toContain(hex);
+    }
+    // Grayscale: each channel equal.
+    for (const hex of kvcacheColors) {
+      const n = Number.parseInt(hex.slice(1), 16);
+      const r = (n >> 16) & 0xff;
+      const g = (n >> 8) & 0xff;
+      const b = n & 0xff;
+      expect(g).toBe(r);
+      expect(b).toBe(r);
+    }
   });
 });
 
