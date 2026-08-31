@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Engine Runner Contract
-  version: 0.1.0
+  version: 0.1.1
   description: |
     Contract that every inference engine runner must implement for the Sardeenz
     control plane to manage its lifecycle. A runner is a process within a worker
@@ -460,6 +460,58 @@ components:
           description: |
             Total device memory capacity in bytes for this device. The control
             plane uses this alongside `memoryUsedBytes` to compute utilization.
+        kvCache:
+          $ref: "#/components/schemas/KVCachePoolStats"
+
+    KVCachePoolStats:
+      type: object
+      description: |
+        Measured state of the kvcached elastic KV-cache pool for this device,
+        read from the pool's IPC/shared-memory segment (the same struct
+        `kvtop` displays). The four figures form a partition:
+        `totalBytes = usedBytes + preallocBytes + freeBytes`.
+
+        Under kvcached co-tenancy several runners' pools can coexist on one
+        device; the runner reports the sum of the pools it participates in on
+        this device. Absent when the runner does not use a kvcached-backed KV
+        pool on this device (e.g. kvcached disabled, no GPU, or the pool's
+        segment is not yet readable).
+      required:
+        - totalBytes
+        - usedBytes
+        - preallocBytes
+        - freeBytes
+      properties:
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Pool's reserved virtual capacity in bytes (the pool's initial
+            limit; it does not change as the pool elastically resizes).
+        usedBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Bytes of physical device memory currently pinned by the pool's
+            in-use KV blocks.
+        preallocBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Bytes of physical device memory pinned by the pool's preallocated
+            (reserved) pages — backed but not yet serving KV blocks, still
+            occupying device memory.
+        freeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Virtual capacity not yet backed by physical memory
+            (`totalBytes - usedBytes - preallocBytes`) — the headroom the pool
+            can elastically grow into.
 
     MemoryReport:
       type: object

@@ -1081,6 +1081,39 @@ export type components = {
             utilizationPercent?: number;
             /** @description GPU temperature in °C at report time. Absent when unavailable. */
             temperatureC?: number;
+            /**
+             * @description Measured state of the kvcached elastic KV-cache pool on this
+             *     device (prealloc/used/free breakdown), relayed from the worker's
+             *     memory report. Telemetry only — never feeds placement math.
+             *     Absent when no kvcached pool is reported for this device; absent
+             *     means absent, not zero.
+             */
+            kvCache?: {
+                /**
+                 * Format: int64
+                 * @description Pool's reserved virtual capacity in bytes (the pool's initial
+                 *     limit; it does not change as the pool elastically resizes).
+                 */
+                totalBytes: number;
+                /**
+                 * Format: int64
+                 * @description Bytes of physical device memory currently pinned by the
+                 *     pool's in-use KV blocks.
+                 */
+                usedBytes: number;
+                /**
+                 * Format: int64
+                 * @description Bytes of physical device memory pinned by the pool's
+                 *     preallocated (reserved) pages.
+                 */
+                preallocBytes: number;
+                /**
+                 * Format: int64
+                 * @description Virtual capacity not yet backed by physical memory
+                 *     (`totalBytes - usedBytes - preallocBytes`).
+                 */
+                freeBytes: number;
+            };
         };
         /** @description Summary of a model instance running on a specific worker. */
         WorkerModelInfo: {

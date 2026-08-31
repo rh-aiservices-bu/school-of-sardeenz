@@ -57,7 +57,8 @@ Via the librarian job / `apptainer` (needs node-local scratch + ≥8Gi RAM; neve
 worker):
 
 ```bash
-export APPTAINER_TMPDIR=/scratch APPTAINER_CACHEDIR=/scratch/cache
-apptainer pull /modules/vllm-0.21.sif docker://<registry>/sardeenz-runner-vllm:0.21
-apptainer sign /modules/vllm-0.21.sif
+export APPTAINER_TMPDIR=/var/tmp/scratch APPTAINER_CACHEDIR=/var/tmp/scratch/cache
+apptainer build vllm-0.21.sif docker-daemon://localhost/sardeenz-runner-vllm:0.21
+# apptainer sign /modules/vllm-0.21.sif
+apptainer push  vllm-0.21.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
 ```

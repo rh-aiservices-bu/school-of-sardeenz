@@ -86,7 +86,8 @@
       },
       "gpu": {
         "utilTemp": "{{util}}% util · {{temp}}°C",
-        "vramLine": "{{used}} / {{total}} — {{percent}}%"
+        "vramLine": "{{used}} / {{total}} — {{percent}}%",
+        "kvCacheLine": "KVCache: {{used}} / {{total}}"
       },
       "legend": {
         "other": "Other",

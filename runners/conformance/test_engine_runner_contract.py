@@ -56,6 +56,14 @@ def test_memory_report_shape(shim_client):
     for device in body["devices"]:
         for key in ("deviceIndex", "deviceType", "memoryUsedBytes", "memoryTotalBytes"):
             assert key in device
+        # Optional kvcached pool block (#165): absent unless the runner has a
+        # kvcached pool on the device; when present, it must be a full partition.
+        if "kvCache" in device:
+            kv = device["kvCache"]
+            for key in ("totalBytes", "usedBytes", "preallocBytes", "freeBytes"):
+                assert key in kv, f"{_name}: kvCache missing {key!r}"
+                assert isinstance(kv[key], int) and kv[key] >= 0
+            assert kv["totalBytes"] == kv["usedBytes"] + kv["preallocBytes"] + kv["freeBytes"]
 
 
 def test_progress_shape(shim_client):

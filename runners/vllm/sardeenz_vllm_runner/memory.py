@@ -13,10 +13,29 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from . import kvcached_pools
+
 
 def memory_report(device_type: str = "CUDA") -> dict[str, Any]:
     devices = _cuda_devices(device_type)
+    # kvcached pool stats are per-device telemetry only; a read failure (or no
+    # kvcached at all) just means the kvCache field is absent — never a zero.
+    pools = _kvcached_pools()
+    for device in devices:
+        stats = pools.get(device["deviceIndex"])
+        if stats is not None:
+            device["kvCache"] = stats
     return {"devices": devices}
+
+
+def _kvcached_pools() -> dict[int, dict[str, Any]]:
+    device_indices = _resolve_device_indices()
+    if device_indices is None:
+        return {}
+    try:
+        return kvcached_pools.read_kvcached_pools(device_indices)
+    except Exception:
+        return {}
 
 
 def _resolve_device_indices() -> list[int] | None:

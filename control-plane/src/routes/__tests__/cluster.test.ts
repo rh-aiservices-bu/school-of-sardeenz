@@ -280,5 +280,50 @@ describe('measured memory (#163 doctrine: measured is THE number, no reserved/me
     expect('temperatureC' in (device ?? {})).toBe(false);
     expect('memoryReservedBytes' in (device ?? {})).toBe(false);
     expect('memoryMeasuredUsedBytes' in (device ?? {})).toBe(false);
+    expect('kvCache' in (device ?? {})).toBe(false);
+  });
+
+  it('GET /api/v1/cluster/memory relays the per-device kvCache block verbatim (issue #165)', async () => {
+    const kvCache = {
+      totalBytes: 12 * 1024 ** 3,
+      usedBytes: 5 * 1024 ** 3,
+      preallocBytes: 1 * 1024 ** 3,
+      freeBytes: 6 * 1024 ** 3,
+    };
+    const getWorkerBudget = vi.fn(() => ({
+      workerId: 'w1',
+      devices: [
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          totalBytes: 16 * 1024 ** 3,
+          usedBytes: 5 * 1024 ** 3,
+          availableBytes: 11 * 1024 ** 3,
+          kvCache,
+        },
+      ],
+      lastReportAt: new Date().toISOString(),
+      stale: false,
+    }));
+    const { app } = buildApp({
+      getWorkerBudget,
+      clusterSummary: {
+        totalBytes: 16 * 1024 ** 3,
+        usedBytes: 5 * 1024 ** 3,
+        availableBytes: 11 * 1024 ** 3,
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/cluster/memory' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      workers: Array<{ devices: Array<Record<string, unknown>> }>;
+      summary: Record<string, unknown>;
+    }>();
+    const device = body.workers[0]?.devices[0];
+    expect(device?.kvCache).toEqual(kvCache);
+    // kvCache is telemetry only — the VRAM figures are untouched by it.
+    expect(device?.memoryUsedBytes).toBe(5 * 1024 ** 3);
+    expect(device?.memoryAvailableBytes).toBe(11 * 1024 ** 3);
   });
 });

@@ -9,7 +9,7 @@ import {
   type MeasuredMemorySample,
   type MeasuredInstanceSample,
 } from './registration.js';
-import { RunnerManager, probePortAvailable } from './runner-manager.js';
+import { RunnerManager, probePortAvailable, type KVCacheDeviceStats } from './runner-manager.js';
 import { StubLauncher } from './stub-launcher.js';
 import { ApptainerLauncher } from './apptainer-launcher.js';
 import type { RunnerLauncher } from './launcher.js';
@@ -123,6 +123,13 @@ function ledgerInstancesProvider(): Promise<MeasuredInstanceSample[]> {
   );
 }
 
+// kvcached pool telemetry (#165): relayed verbatim from the runners' own /memory-report
+// kvCache blocks in every mode (NVML and no-NVML alike — NVML has no pool-level figures).
+function kvCacheDeviceProvider(): Promise<Map<number, KVCacheDeviceStats> | null> {
+  if (!runnerManagerRef.current) return Promise.resolve(null);
+  return runnerManagerRef.current.getKvCacheDeviceStats();
+}
+
 // Resolve the advertised fleet once at startup: real GPUs via NVML in apptainer mode, else the
 // configured (simulated) fleet. Done before registration so the control plane budgets real VRAM.
 const deviceReport = resolveDevices(config, nvmlReader);
@@ -136,6 +143,7 @@ const registration = new WorkerRegistration(
   catalogCapabilities,
   measuredProvider,
   ledgerInstancesProvider,
+  kvCacheDeviceProvider,
 );
 const runnerManager = new RunnerManager(
   config,

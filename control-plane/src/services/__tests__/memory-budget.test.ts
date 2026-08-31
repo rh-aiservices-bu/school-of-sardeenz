@@ -53,6 +53,7 @@ function workerMemoryReport(
     deviceName?: string;
     utilizationPercent?: number;
     temperatureC?: number;
+    kvCache?: { totalBytes: number; usedBytes: number; preallocBytes: number; freeBytes: number };
   }>,
   reportedAt?: string,
   instances?: Array<{
@@ -781,6 +782,139 @@ describe('MemoryBudgetService — optional NVML device fields', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Issue #165: per-device kvcached pool block (kvCache) — telemetry-tolerant like the NVML
+// extras above: relayed verbatim when valid, dropped (with a warning) when malformed, never
+// rejecting the device/report, and absent (never zeroed) when not reported.
+// ---------------------------------------------------------------------------
+
+describe('MemoryBudgetService — kvcached pool block (issue #165)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  const validKV = { totalBytes: 16_000_000_000, usedBytes: 6_000_000_000, preallocBytes: 2_000_000_000, freeBytes: 8_000_000_000 };
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('carries a valid kvCache block through to the device budget', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport([
+      {
+        deviceIndex: 0,
+        deviceType: 'CUDA',
+        memoryUsedBytes: 8_000_000_000,
+        memoryTotalBytes: 16_000_000_000,
+        kvCache: validKV,
+      },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget?.devices[0]?.kvCache).toEqual(validKV);
+    // Telemetry only — the kvCache block must not shift placement math.
+    expect(budget?.devices[0]?.usedBytes).toBe(8_000_000_000);
+    expect(budget?.devices[0]?.availableBytes).toBe(8_000_000_000);
+  });
+
+  it('leaves kvCache absent when the device omits it', async () => {
+    const workerId = 'w1';
+    const report = workerMemoryReport([
+      { deviceIndex: 0, deviceType: 'CUDA', memoryUsedBytes: 0, memoryTotalBytes: 16_000_000_000 },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect('kvCache' in (budget?.devices[0] ?? {})).toBe(false);
+  });
+
+  it('drops a malformed kvCache block (negative value) but keeps the core device report', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+            kvCache: { totalBytes: -1, usedBytes: 0, preallocBytes: 0, freeBytes: 0 },
+          },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.devices[0]?.usedBytes).toBe(0);
+    expect('kvCache' in (budget?.devices[0] ?? {})).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('kvCache'));
+  });
+
+  it('drops a kvCache block missing a field but keeps the core device report', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+            kvCache: { totalBytes: 100, usedBytes: 10, preallocBytes: 5 },
+          },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect('kvCache' in (budget?.devices[0] ?? {})).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('freeBytes'));
+  });
+
+  it('drops a non-object kvCache value but keeps the core device report', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+            kvCache: 'nope',
+          },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect('kvCache' in (budget?.devices[0] ?? {})).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('kvCache'));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Issue #163: instances[] measured attribution — telemetry-tolerant, never rejects the core
 // report. Source field is `memoryUsedBytes` (renamed from memoryMeasuredUsedBytes in round 2).
 // ---------------------------------------------------------------------------
@@ -1086,6 +1220,12 @@ describe('MemoryBudgetService — writeClusterMemorySnapshot content (measured-o
           deviceName: 'NVIDIA GeForce RTX 4070 Ti',
           utilizationPercent: 55,
           temperatureC: 64,
+          kvCache: {
+            totalBytes: 12_000_000_000,
+            usedBytes: 5_000_000_000,
+            preallocBytes: 1_000_000_000,
+            freeBytes: 6_000_000_000,
+          },
         },
       ]),
     });
@@ -1106,6 +1246,12 @@ describe('MemoryBudgetService — writeClusterMemorySnapshot content (measured-o
     expect(device?.deviceName).toBe('NVIDIA GeForce RTX 4070 Ti');
     expect(device?.utilizationPercent).toBe(55);
     expect(device?.temperatureC).toBe(64);
+    expect(device?.kvCache).toEqual({
+      totalBytes: 12_000_000_000,
+      usedBytes: 5_000_000_000,
+      preallocBytes: 1_000_000_000,
+      freeBytes: 6_000_000_000,
+    });
     expect('memoryReservedBytes' in (device ?? {})).toBe(false);
     expect('memoryMeasuredUsedBytes' in (device ?? {})).toBe(false);
     expect(snapshot.summary).toEqual({
@@ -1138,5 +1284,6 @@ describe('MemoryBudgetService — writeClusterMemorySnapshot content (measured-o
     expect('deviceName' in device).toBe(false);
     expect('utilizationPercent' in device).toBe(false);
     expect('temperatureC' in device).toBe(false);
+    expect('kvCache' in device).toBe(false);
   });
 });

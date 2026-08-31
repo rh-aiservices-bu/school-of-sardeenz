@@ -26,6 +26,14 @@ export interface DeviceBudget {
   utilizationPercent?: number;
   /** GPU temperature in degrees Celsius at report time. Absent when unavailable. */
   temperatureC?: number;
+  /** Measured kvcached pool state for this device (prealloc/used/free partition). Absent when no
+   *  kvcached pool is reported for the device. Telemetry only — never feeds placement math. */
+  kvCache?: {
+    totalBytes: number;
+    usedBytes: number;
+    preallocBytes: number;
+    freeBytes: number;
+  };
 }
 
 /** Measured bytes attributed to one instance on one device (NVML process-list attribution). */
@@ -60,6 +68,48 @@ const WORKER_MEMORY_SUBKEY = 'memory';
 
 function workerMemoryKey(prefix: string, workerId: string): string {
   return redisKey(prefix, 'workers', workerId, WORKER_MEMORY_SUBKEY);
+}
+
+/** One non-negative-integer field of a kvCache block. */
+function nonNegativeInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Validate a worker-reported kvCache block (issue #165). Returns the block, or undefined when
+ * it is malformed (dropped, with a warning via the caller's prefix) — telemetry-tolerant policy:
+ * a bad kvcached reading never rejects the surrounding device/report.
+ */
+function validateKVCacheBlock(
+  raw: unknown,
+  warnPrefix: string,
+): { totalBytes: number; usedBytes: number; preallocBytes: number; freeBytes: number } | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn(`${warnPrefix} — must be an object, core report kept`);
+    return undefined;
+  }
+  const kv = raw as Record<string, unknown>;
+  const totalBytes = kv.totalBytes;
+  const usedBytes = kv.usedBytes;
+  const preallocBytes = kv.preallocBytes;
+  const freeBytes = kv.freeBytes;
+  if (!nonNegativeInt(totalBytes)) {
+    console.warn(`${warnPrefix}.totalBytes — must be an integer >= 0, core report kept`);
+    return undefined;
+  }
+  if (!nonNegativeInt(usedBytes)) {
+    console.warn(`${warnPrefix}.usedBytes — must be an integer >= 0, core report kept`);
+    return undefined;
+  }
+  if (!nonNegativeInt(preallocBytes)) {
+    console.warn(`${warnPrefix}.preallocBytes — must be an integer >= 0, core report kept`);
+    return undefined;
+  }
+  if (!nonNegativeInt(freeBytes)) {
+    console.warn(`${warnPrefix}.freeBytes — must be an integer >= 0, core report kept`);
+    return undefined;
+  }
+  return { totalBytes, usedBytes, preallocBytes, freeBytes };
 }
 
 function isEnumValue<T extends string>(v: unknown, enumObj: Record<string, T>): v is T {
@@ -211,6 +261,14 @@ export class MemoryBudgetService {
       }
     }
 
+    // Telemetry-tolerant, like the NVML extras above: a malformed kvCache block (issue #165) is
+    // dropped (with a warning) rather than rejecting the device — kvcached pool telemetry must
+    // never take down placement/eviction math.
+    const kvCache =
+      d.kvCache === undefined
+        ? undefined
+        : validateKVCacheBlock(d.kvCache, `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.kvCache`);
+
     return {
       deviceIndex: d.deviceIndex,
       deviceType: d.deviceType,
@@ -219,6 +277,7 @@ export class MemoryBudgetService {
       ...(deviceName !== undefined ? { deviceName } : {}),
       ...(utilizationPercent !== undefined ? { utilizationPercent } : {}),
       ...(temperatureC !== undefined ? { temperatureC } : {}),
+      ...(kvCache !== undefined ? { kvCache } : {}),
     };
   }
 
@@ -352,6 +411,7 @@ export class MemoryBudgetService {
         ...(d.deviceName !== undefined ? { deviceName: d.deviceName } : {}),
         ...(d.utilizationPercent !== undefined ? { utilizationPercent: d.utilizationPercent } : {}),
         ...(d.temperatureC !== undefined ? { temperatureC: d.temperatureC } : {}),
+        ...(d.kvCache !== undefined ? { kvCache: d.kvCache } : {}),
       };
     });
 
@@ -483,6 +543,7 @@ export class MemoryBudgetService {
         ...(d.deviceName !== undefined ? { deviceName: d.deviceName } : {}),
         ...(d.utilizationPercent !== undefined ? { utilizationPercent: d.utilizationPercent } : {}),
         ...(d.temperatureC !== undefined ? { temperatureC: d.temperatureC } : {}),
+        ...(d.kvCache !== undefined ? { kvCache: d.kvCache } : {}),
       })),
     }));
 

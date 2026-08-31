@@ -108,6 +108,7 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
           ...('temperatureC' in d && d.temperatureC !== undefined
             ? { temperatureC: d.temperatureC }
             : {}),
+          ...('kvCache' in d && d.kvCache !== undefined ? { kvCache: d.kvCache } : {}),
         })),
         models: workerModels,
       };

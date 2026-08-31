@@ -14,6 +14,23 @@ export interface LedgerInstanceShare {
   bytes: number;
 }
 
+/** One kvcached pool block as relayed from a runner's /memory-report (engine-runner contract
+ * `KVCachePoolStats`); absent when the runner reports no pool for the device. */
+export interface KVCacheDeviceStats {
+  totalBytes: number;
+  usedBytes: number;
+  preallocBytes: number;
+  freeBytes: number;
+}
+
+/** One device entry of a runner's /memory-report body (engine-runner contract
+ * `DeviceMemoryUsage`); only the fields the worker consumes are modeled. */
+interface RunnerMemoryReportDevice {
+  deviceIndex: number;
+  memoryUsedBytes: number;
+  kvCache?: KVCacheDeviceStats;
+}
+
 // Tries to bind 127.0.0.1:port; resolves true if the port is free, false if already in use.
 export function probePortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -333,34 +350,59 @@ export class RunnerManager {
   // whose query fails (unreachable, still starting, in ERROR state, non-2xx) contributes no
   // entries rather than a stale guess — this method never rejects.
   async getLedgerInstanceShares(): Promise<LedgerInstanceShare[]> {
+    const reports = await this.fetchMemoryReports();
+    return reports.flatMap(({ record, body }) =>
+      (body.devices ?? [])
+        .filter((d) => d.memoryUsedBytes > 0) // sleeping (or otherwise idle) runners hold nothing
+        .map((d) => ({
+          instanceId: record.instanceId,
+          modelName: record.modelName,
+          deviceIndex: d.deviceIndex,
+          bytes: d.memoryUsedBytes,
+        })),
+    );
+  }
+
+  // Per-device kvcached pool stats relayed from the runners' own /memory-report kvCache blocks
+  // (issue #165) — the NVML-active path needs them too since NVML has no pool-level figures.
+  // Co-located runners that share a pool segment (same GPU) report the same numbers; a device
+  // with no reported pool is simply absent from the result (absent means absent, not zero).
+  async getKvCacheDeviceStats(): Promise<Map<number, KVCacheDeviceStats>> {
+    const stats = new Map<number, KVCacheDeviceStats>();
+    for (const { body } of await this.fetchMemoryReports()) {
+      for (const device of body.devices ?? []) {
+        if (device.kvCache && !stats.has(device.deviceIndex)) {
+          stats.set(device.deviceIndex, device.kvCache);
+        }
+      }
+    }
+    return stats;
+  }
+
+  // One /memory-report fetch per running runner. Timeout so a hung runner (socket accepted,
+  // response never sent) can't pend this Promise.all forever — that would freeze the
+  // heartbeat's memory-report push and eventually mark the whole worker's budget stale on the
+  // control plane. A runner whose query fails (unreachable, still starting, in ERROR state,
+  // non-2xx) contributes nothing rather than a stale guess; never rejects.
+  private async fetchMemoryReports(): Promise<
+    Array<{ record: RunnerRecord; body: { devices?: RunnerMemoryReportDevice[] } }>
+  > {
     const records = Array.from(this.runners.values());
     const perRunner = await Promise.all(
-      records.map(async (record): Promise<LedgerInstanceShare[]> => {
+      records.map(async (record) => {
         try {
-          // Timeout so a hung runner (socket accepted, response never sent) can't pend this
-          // Promise.all forever — that would freeze the heartbeat's memory-report push and
-          // eventually mark the whole worker's budget stale on the control plane.
           const res = await this.fetchFn(`http://127.0.0.1:${record.port}/memory-report`, {
             signal: AbortSignal.timeout(2000),
           });
-          if (!res.ok) return [];
-          const body = (await res.json()) as {
-            devices?: Array<{ deviceIndex: number; memoryUsedBytes: number }>;
-          };
-          return (body.devices ?? [])
-            .filter((d) => d.memoryUsedBytes > 0) // sleeping (or otherwise idle) runners hold nothing
-            .map((d) => ({
-              instanceId: record.instanceId,
-              modelName: record.modelName,
-              deviceIndex: d.deviceIndex,
-              bytes: d.memoryUsedBytes,
-            }));
+          if (!res.ok) return null;
+          const body = (await res.json()) as { devices?: RunnerMemoryReportDevice[] };
+          return { record, body };
         } catch {
-          return [];
+          return null;
         }
       }),
     );
-    return perRunner.flat();
+    return perRunner.filter((r): r is { record: RunnerRecord; body: { devices?: RunnerMemoryReportDevice[] } } => r !== null);
   }
 
   // Allocate a (management, engine) port pair, stepping by 2. Real engines (vLLM) serve inference

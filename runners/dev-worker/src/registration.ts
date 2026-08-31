@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis';
 import type { DevWorkerConfig } from './config.js';
 import type { DetectedDevice } from './gpu-detect.js';
+import type { KVCacheDeviceStats } from './runner-manager.js';
 
 export interface CatalogCapabilityOverrides {
   supportedModelTypes?: string[];
@@ -51,6 +52,13 @@ export type MeasuredMemoryProvider = () => Promise<MeasuredMemorySample | null>;
 // for a sleeping runner despite being ledger-derived rather than NVML-derived.
 export type LedgerInstancesProvider = () => Promise<MeasuredInstanceSample[]>;
 
+// Per-device kvcached pool stats (issue #165), relayed verbatim from the runners' own
+// /memory-report kvCache blocks. Owned by src/index.ts, which composes
+// RunnerManager.getKvCacheDeviceStats(). Returns null when nothing is available (no running
+// runners, every query failed); a device missing from the Map simply gets no kvCache field.
+// Telemetry only — never feeds the ledger or placement math.
+export type KVCacheDeviceProvider = () => Promise<Map<number, KVCacheDeviceStats> | null>;
+
 export class WorkerRegistration {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly deviceMemoryUsed: number[];
@@ -66,6 +74,7 @@ export class WorkerRegistration {
     private readonly catalogCapabilities?: CatalogCapabilityOverrides,
     private readonly measuredProvider?: MeasuredMemoryProvider,
     private readonly ledgerInstancesProvider?: LedgerInstancesProvider,
+    private readonly kvCacheDeviceProvider?: KVCacheDeviceProvider,
   ) {
     this.devices =
       devices ??
@@ -177,7 +186,10 @@ export class WorkerRegistration {
   // set, in every mode, since it's what the control plane uses to judge staleness even for a stub
   // worker with no NVML measurement at all.
   private async buildMemoryReport(): Promise<Record<string, unknown>> {
-    const measured = this.measuredProvider ? await this.measuredProvider().catch(() => null) : null;
+    const [measured, kvCache] = await Promise.all([
+      this.measuredProvider ? this.measuredProvider().catch(() => null) : Promise.resolve(null),
+      this.kvCacheDeviceProvider ? this.kvCacheDeviceProvider().catch(() => null) : Promise.resolve(null),
+    ]);
     const measuredByDevice = new Map(measured?.devices.map((d) => [d.deviceIndex, d]) ?? []);
 
     const devices = this.devices.map((device) => {
@@ -200,6 +212,11 @@ export class WorkerRegistration {
         // match allocateMemory/freeMemory, not by array position.
         out.memoryUsedBytes = this.deviceMemoryUsed[device.deviceIndex] ?? 0;
       }
+      // kvcached pool telemetry is independent of the NVML-vs-ledger choice above: it comes from
+      // the runners themselves in every mode, and absence (no pool reported for this device)
+      // means the field is omitted, never zeroed.
+      const kvStats = kvCache?.get(device.deviceIndex);
+      if (kvStats !== undefined) out.kvCache = kvStats;
       return out;
     });
 

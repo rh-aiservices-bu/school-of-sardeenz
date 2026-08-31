@@ -7,11 +7,14 @@ integration gates (Phase 4 Task 9).
 
 from __future__ import annotations
 
+import struct
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
+from sardeenz_vllm_runner import kvcached_pools as kp
 from sardeenz_vllm_runner import memory as mem
 from sardeenz_vllm_runner import state as st
 from sardeenz_vllm_runner.cli import build_vllm_command, parse_args
@@ -159,3 +162,133 @@ def test_memory_report_falls_back_to_local_index_without_env(monkeypatch: pytest
     monkeypatch.delenv("SARDEENZ_DEVICE_INDICES", raising=False)
     report = mem.memory_report()
     assert [d["deviceIndex"] for d in report["devices"]] == [0, 1]
+
+
+# ---------------------------------------------------------------------------
+# kvcached pool stats (issue #165)
+# ---------------------------------------------------------------------------
+
+
+def _write_segment(dir_path: Path, name: str, total: int, used: int, prealloc: int) -> None:
+    (dir_path / name).write_bytes(struct.pack("<qqq", total, used, prealloc))
+
+
+def test_kvcached_ipc_name_sorts_and_dedups_devices():
+    assert kp.build_kvcached_ipc_name([3]) == "kvcached_vllm_GPU3"
+    assert kp.build_kvcached_ipc_name([1, 0]) == "kvcached_vllm_GPU0_GPU1"
+    assert kp.build_kvcached_ipc_name([2, 2, 1]) == "kvcached_vllm_GPU1_GPU2"
+
+
+def test_kvcached_ipc_name_for_env():
+    assert kp.kvcached_ipc_name_for_env("3") == "kvcached_vllm_GPU3"
+    assert kp.kvcached_ipc_name_for_env("1,0") == "kvcached_vllm_GPU0_GPU1"
+    assert kp.kvcached_ipc_name_for_env("") is None
+    assert kp.kvcached_ipc_name_for_env(None) is None
+    assert kp.kvcached_ipc_name_for_env("bogus") is None
+    assert kp.kvcached_ipc_name_for_env(",,") is None
+
+
+def test_read_kvcached_pools_reads_own_segment(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    _write_segment(tmp_path, "kvcached_vllm_GPU3", 1_000_000, 400_000, 100_000)
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    pools = kp.read_kvcached_pools([3])
+    assert pools == {
+        3: {
+            "totalBytes": 1_000_000,
+            "usedBytes": 400_000,
+            "preallocBytes": 100_000,
+            "freeBytes": 500_000,
+        }
+    }
+
+
+def test_read_kvcached_pools_ignores_foreign_segments(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    _write_segment(tmp_path, "kvcached_vllm_GPU3", 1_000_000, 400_000, 100_000)
+    # A pool on a device this runner does not own: ignored.
+    _write_segment(tmp_path, "kvcached_vllm_GPU7", 999, 1, 1)
+    # A non-pool file of the right size but wrong name shape: ignored.
+    _write_segment(tmp_path, "unrelated", 5, 0, 0)
+    # A pool segment with zero total (not yet initialized): ignored.
+    _write_segment(tmp_path, "kvcached_vllm_GPU3_g1", 0, 0, 0)
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    # Only the device-3 pool is reported — and the zero-total _g1 twin is excluded
+    # from it, so the numbers are the single initialized pool's.
+    assert kp.read_kvcached_pools([3]) == {
+        3: {"totalBytes": 1_000_000, "usedBytes": 400_000, "preallocBytes": 100_000, "freeBytes": 500_000}
+    }
+    # A runner on device 7 sees only the device-7 pool.
+    assert kp.read_kvcached_pools([7]) == {
+        7: {"totalBytes": 999, "usedBytes": 1, "preallocBytes": 1, "freeBytes": 997}
+    }
+    assert kp.read_kvcached_pools([]) == {}
+
+
+def test_read_kvcached_pools_skips_wrong_size_and_zero_total(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    (tmp_path / "kvcached_vllm_GPU0").write_bytes(b"short")
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    assert kp.read_kvcached_pools([0]) == {}
+
+
+def test_read_kvcached_pools_missing_shm_dir_is_empty(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(kp, "SHM_DIR", "/nonexistent/shm/dir")
+    assert kp.read_kvcached_pools([0]) == {}
+
+
+def test_read_kvcached_pools_missing_segment_is_absent_not_zero(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    assert kp.read_kvcached_pools([0]) == {}
+
+
+def test_read_kvcached_pools_sums_multiple_groups_on_one_device(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    # Two pools on the same GPU (e.g. hybrid attention groups _g1/_g2): per-device
+    # figure is their sum.
+    _write_segment(tmp_path, "kvcached_vllm_GPU0", 1_000, 300, 100)
+    _write_segment(tmp_path, "kvcached_vllm_GPU0_g1", 2_000, 500, 200)
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    assert kp.read_kvcached_pools([0]) == {
+        0: {"totalBytes": 3_000, "usedBytes": 800, "preallocBytes": 300, "freeBytes": 1_900}
+    }
+
+
+def test_read_kvcached_pools_tp_segment_counts_per_rank_not_split(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    # A tensor-parallel segment is written by every rank; each rank's allocator
+    # tracks its own device's pages, so each owned device carries the full value.
+    _write_segment(tmp_path, "kvcached_vllm_GPU0_GPU1", 1_000, 400, 100)
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    pools = kp.read_kvcached_pools([0, 1])
+    assert pools[0] == {"totalBytes": 1_000, "usedBytes": 400, "preallocBytes": 100, "freeBytes": 500}
+    assert pools[1] == pools[0]
+
+
+def test_memory_report_attaches_kvcache_block(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    _install_fake_torch(monkeypatch, device_count=2)
+    monkeypatch.setenv("SARDEENZ_DEVICE_INDICES", "3,7")
+    _write_segment(tmp_path, "kvcached_vllm_GPU3", 8, 3, 2)
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    report = mem.memory_report()
+    by_index = {d["deviceIndex"]: d for d in report["devices"]}
+    assert by_index[3]["kvCache"] == {
+        "totalBytes": 8,
+        "usedBytes": 3,
+        "preallocBytes": 2,
+        "freeBytes": 3,
+    }
+    # Device without a pool keeps no kvCache key — absent, not zero.
+    assert "kvCache" not in by_index[7]
+
+
+def test_memory_report_no_kvcache_without_device_indices(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    _install_fake_torch(monkeypatch, device_count=1)
+    monkeypatch.delenv("SARDEENZ_DEVICE_INDICES", raising=False)
+    _write_segment(tmp_path, "kvcached_vllm_GPU0", 8, 3, 2)
+    monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
+    report = mem.memory_report()
+    assert "kvCache" not in report["devices"][0]

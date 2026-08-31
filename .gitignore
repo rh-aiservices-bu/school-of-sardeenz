@@ -66,6 +66,9 @@ opencode.json
 # Claude Code worktrees (milestone execution)
 .claude/worktrees/
 
+# Qwen settings
+.qwen/settings.json
+
 # Playwright e2e run artifacts
 dashboard/playwright-report/
 dashboard/test-results/
