@@ -99,6 +99,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Ignore `.qwen/worktrees/` in git.** Milestone-execution worktrees now live
+  under `.qwen/worktrees/` (the Qwen Code counterpart of the already-ignored
+  `.claude/worktrees/`); the path is gitignored so worktree checkouts never
+  pollute the tree.
+
 - **Ignore `.qwen/tmp/` in git.** The Qwen Code session temp dir (scratch files
   like skill-args) is now gitignored alongside the existing `.qwen/settings.json`
   exclusion, so untracked session state no longer shows up in `git status`.

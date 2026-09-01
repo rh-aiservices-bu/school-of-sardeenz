@@ -65,6 +65,7 @@ opencode.json
 
 # worktrees (milestone execution)
 .claude/worktrees/
+.qwen/worktrees/
 .qwen/tmp/
 
 # Qwen settings
