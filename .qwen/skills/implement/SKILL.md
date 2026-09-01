@@ -25,7 +25,7 @@ You are implementing a phase or feature for the **Sardeenz v2** project. Every c
 
 ## Ground rules (non-negotiable, project-wide)
 
-These come from the root `CLAUDE.md` and the ADRs. They hold for every step below, including inside subagents and forks — repeat them into every agent/fork prompt you spawn.
+These come from the root `AGENTS.md` and the ADRs. They hold for every step below, including inside subagents and forks — repeat them into every agent/fork prompt you spawn.
 
 - **`dev` is the integration branch; `main` is for releases only.** Create feature/fix/chore branches from `dev` and PR back to `dev`. Never branch feature work from `main`.
 - **CHANGELOG:** always update `CHANGELOG.md` under `[Unreleased]` *before* each commit.
@@ -62,7 +62,7 @@ Before writing any code:
    - If the argument is a **feature description**, identify which components are affected.
 
 2. **Read the relevant context.** Launch parallel `Explore` agents (thoroughness "medium"–"very thorough") as needed to read, in parallel:
-   - `CLAUDE.md` at the repo root (project-wide rules)
+   - `AGENTS.md` at the repo root (project-wide rules)
    - the phase document, if applicable
    - `docs/architecture/overview.md` when changes cross component boundaries
    - the existing code in the areas that will be modified
@@ -217,7 +217,7 @@ Fix any issues found. Commit fixes with message: `fix: resolve verification issu
 1. **CHANGELOG.md** — verify all changes are captured under `[Unreleased]` (this should already be done from the incremental commits; confirm completeness).
 2. **Phase document** — if implementing a phase, update the task statuses in `docs/project/phase<N>.md` to reflect completion.
 3. **Architecture docs** — update or create docs under `docs/architecture/` if the implementation introduced a new design decision or changed existing behavior.
-4. **CLAUDE.md** — update project status if a phase milestone was reached.
+4. **AGENTS.md** — update project status if a phase milestone was reached.
 
 Commit documentation updates with message: `docs: update documentation for <feature/phase>`.
 

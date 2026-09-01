@@ -49,7 +49,7 @@ completion, confirm you actually have the report's content. If a late scope
 addition you sent may have crossed with a completion, confirm the agent received
 it rather than assuming.
 
-**Authority docs for every subagent:** `CLAUDE.md`, `proxy/CLAUDE.md`, and the ADRs
+**Authority docs for every subagent:** `AGENTS.md`, `proxy/AGENTS.md`, and the ADRs
 in `docs/architecture/adrs/` are the source of truth. The non-negotiables:
 
 - **ADR-005 — contracts:** the OpenAPI specs in `packages/contracts/specs/` are the
@@ -64,7 +64,7 @@ in `docs/architecture/adrs/` are the source of truth. The non-negotiables:
 - **ADR-015/016/017/018 — SIF runtime:** runners ship as signed Apptainer SIFs;
   workers mount the module store read-only; only the librarian and control plane
   write it.
-- **Workflow rules (root `CLAUDE.md`):** `dev` is the integration branch; **update
+- **Workflow rules (root `AGENTS.md`):** `dev` is the integration branch; **update
   `CHANGELOG.md` under `[Unreleased]` before committing**; npm, never pnpm; stage
   specific files, never `git add -A`; fix all lint errors — no clean-slate
   exceptions.

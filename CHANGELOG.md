@@ -93,6 +93,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Renamed `CLAUDE.md` to `AGENTS.md` (root and `proxy/`).** The AI-agent
+  instruction files now use the tool-agnostic `AGENTS.md` name (read natively by
+  Qwen Code and other tools); `CLAUDE.md` is kept as a symlink to `AGENTS.md` so
+  Claude Code keeps finding the same content. The two Qwen skills in
+  `.qwen/skills/` now cite `AGENTS.md` as the authority doc.
+
 - **Measured-only GPU memory doctrine (#163, supersedes #151).** Every memory figure in every
   contract field, API response, report, and view is now the real measured consumption; the
   user-facing "reserved memory" concept and the estimate-as-usage ledger displays are gone.
