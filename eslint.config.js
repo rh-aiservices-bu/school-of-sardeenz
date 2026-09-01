@@ -25,6 +25,7 @@ export default tseslint.config(
       '**/node_modules/',
       '**/target/',
       '**/coverage/',
+      '**/.claude/',
       'packages/types/src/generated/',
       'vitest.config.ts',
       'vitest.workspace.ts',
