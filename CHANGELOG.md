@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Qwen Code skills (`.qwen/skills/`).** Adapted the Claude Code `implement` and
+  `implement-milestone` skills to Qwen Code conventions for use in this project:
+  - `implement` — the full-quality phase/feature process (branch from `dev`,
+    plan, implement, independent review/fix loop, verify, docs, summary). The
+    Claude-only review step is replaced by a fresh `fork` that fans out parallel
+    review subagents over `git diff dev...HEAD` and returns only a compact
+    findings report, keeping the orchestrator context clean. Contract-codegen
+    and scaffold flows are inlined.
+  - `implement-milestone` — the milestone orchestration loop (resolve, plan with
+    approval gate, per-issue blueprint → implement → review → integrate →
+    verify → three-gate acceptance → record, wrap-up with PR draft). Model
+    tiering (Opus/Sonnet) is replaced by same-model subagents with strict
+    context isolation; worktrees move to `.qwen/worktrees/`.
+
 - **KVCached pool telemetry end to end (#165).** The dormant KVCache sub-bar in the
   dashboard's Models placement panel is now wired to real kvcached pool statistics:
   - **Runner (engine-runner contract, v0.1.1):** `GET /memory-report` devices gain an
