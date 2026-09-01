@@ -49,6 +49,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Root `eslint .` choked on `.claude/worktrees/` (#143).** A leftover milestone-execution
+  git worktree under `.claude/worktrees/` (the standing worktree location) caused `make lint`
+  to parse the worktree's full repo copy and fail with a flood of type-aware parse/lint
+  errors, even though the real tree linted clean. Added `**/.claude/` to the ignores in the
+  root eslint config, making lint results independent of orchestration worktrees.
+
 - **`nvml-real.test.ts` failed on GPU-equipped dev boxes.** The test hardcoded the "no GPU, no
   driver" premise that holds on CI (`ubuntu-latest`) but not on a machine with an NVIDIA driver
   — there `Nvml.init()` legitimately succeeds, so `createNvmlReader()` returns a real reader
@@ -92,6 +98,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `RUNNER_UNAVAILABLE` and the stop settles promptly in `ERROR` with a clear message.
 
 ### Changed
+
+- **Ignore `.qwen/tmp/` in git.** The Qwen Code session temp dir (scratch files
+  like skill-args) is now gitignored alongside the existing `.qwen/settings.json`
+  exclusion, so untracked session state no longer shows up in `git status`.
 
 - **Renamed `CLAUDE.md` to `AGENTS.md` (root and `proxy/`).** The AI-agent
   instruction files now use the tool-agnostic `AGENTS.md` name (read natively by

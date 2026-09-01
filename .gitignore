@@ -63,8 +63,9 @@ __pycache__/
 # Agents configs
 opencode.json
 
-# Claude Code worktrees (milestone execution)
+# worktrees (milestone execution)
 .claude/worktrees/
+.qwen/tmp/
 
 # Qwen settings
 .qwen/settings.json
