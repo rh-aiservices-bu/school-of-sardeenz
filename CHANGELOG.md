@@ -99,6 +99,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Ignore `.qwen/tmp/` in git.** The Qwen Code session temp dir (scratch files
+  like skill-args) is now gitignored alongside the existing `.qwen/settings.json`
+  exclusion, so untracked session state no longer shows up in `git status`.
+
 - **Renamed `CLAUDE.md` to `AGENTS.md` (root and `proxy/`).** The AI-agent
   instruction files now use the tool-agnostic `AGENTS.md` name (read natively by
   Qwen Code and other tools); `CLAUDE.md` is kept as a symlink to `AGENTS.md` so
