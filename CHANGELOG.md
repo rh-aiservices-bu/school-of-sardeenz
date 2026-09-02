@@ -49,6 +49,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard offered Delete on transient-state models/instances, then 409'd (#172).** After
+  #140 the control plane rejects `DELETE /api/v1/models/{modelName}` and
+  `DELETE .../instances/{instanceId}` with `409 INVALID_STATE` while an instance is `PENDING`,
+  `STARTING`, `DRAINING` or `STOPPING`, but the dashboard still rendered every Delete
+  affordance unconditionally — an admin could click Delete on a starting/draining model and
+  only got a generic error. The Delete affordances are now gated on state, mirroring the
+  existing Stop gating:
+  - **Model detail header + ERROR-alert Delete** gate on "any instance is transient" (the API
+    rejects a mixed `ACTIVE`+`STARTING` model even though its aggregate state is `ACTIVE`),
+    using the per-instance `instances` list on `ModelDetail`.
+  - **Model list row kebab Delete** gates on the aggregate `state`. `ModelInfo` (the list
+    payload) exposes only the aggregate state, not per-instance states, so the list cannot
+    detect a mixed `ACTIVE`+`STARTING` model — the detail page covers that case.
+  - **Per-instance row Delete** gates on the instance's own state.
+  - **Bulk delete** now pre-filters transient models out of the request set, tells the user how
+    many were skipped (and in the confirm modal), and collects per-model failures instead of
+    the last 409 overwriting a single error slot. The API's `INVALID_STATE` message (which
+    names the state) is surfaced verbatim rather than a generic "Delete failed".
+
 - **Worker endpoints under-reported runner capabilities (#147).** `GET /api/v1/workers`
   and `GET /api/v1/workers/{workerId}` each mapped only 5 of the 9
   `WorkerRunnerCapability` schema fields inline — dropping `maxTensorParallelism`
