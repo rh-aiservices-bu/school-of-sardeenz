@@ -49,6 +49,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard unit tests could not render any React component — dual-React split (#148).** The
+  monorepo root hoists a React 19 copy (a direct dep of `@redocly/cli`) plus
+  `@testing-library/react`, whose CJS entry's native `require('react')` binds that root React 19 —
+  while `dashboard/vitest.config.ts` alias-pins the app code to the dashboard-local React 18.3.1.
+  Every `render`/`renderHook` threw "Invalid hook call" / cross-version element errors, so all
+  dashboard unit tests were pinned to the logic-simulation convention and hook wiring had no
+  executable render coverage. `vitest.config.ts` now pins the whole React render tree to
+  dashboard-local 18.3.1 files — `react`, `react-dom` (+`client`/`test-utils`), `react/jsx-runtime`,
+  `react/jsx-dev-runtime` — plus `@testing-library/react` to its root-hoisted **ESM** build (whose
+  `import`s flow through the alias pipeline, unlike the CJS entry's native `require`). Proven by
+  converting the `NotificationProvider` auth-gate suite from logic-simulation to 4 real renders
+  (gate branch logic exercised against the real `AuthProvider`/`useAuth` context). Coverage note:
+  plain-React context/hook trees now render, but root-hoisted CJS packages that natively
+  `require('react')` — `@patternfly/react-core`, `react-router-dom`, `react-i18next`,
+  `@tanstack/react-query` — still re-split against root React 19; closing that boundary is tracked
+  as a follow-up (see PR notes).
+
 - **Dashboard offered Delete on transient-state models/instances, then 409'd (#172).** After
   #140 the control plane rejects `DELETE /api/v1/models/{modelName}` and
   `DELETE .../instances/{instanceId}` with `409 INVALID_STATE` while an instance is `PENDING`,
