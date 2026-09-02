@@ -48,6 +48,7 @@ import type { ModelInfo } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
 import { formatBytes, formatRelativeTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
+import { canDeleteModelRow } from './deleteGating';
 
 type SortField = 'modelName' | 'state' | 'currentMemory' | 'lastInferenceAt';
 type SortDirection = 'asc' | 'desc';
@@ -323,20 +324,36 @@ export function ModelList() {
     });
   };
 
-  // Bulk delete: delete all selected models
+  // Bulk delete: delete only selected models that aren't in a transient state (a transient
+  // model would 409). Skipped models are reported, and each failure is collected per-model
+  // instead of the last error overwriting a single slot.
   const handleBulkDelete = () => {
-    const selectedList = [...selectedModelNames];
+    const selectedModels = (models ?? []).filter((m) => selectedModelNames.has(m.modelName));
+    const deletable = selectedModels.filter((m) => canDeleteModelRow(m.state));
+    const skippedCount = selectedModels.length - deletable.length;
     setMutationError(null);
-    const promises = selectedList.map((name) =>
-      deleteModel.mutateAsync(name).catch((err: unknown) => {
-        setMutationError(err instanceof Error ? err.message : 'Delete failed');
+    const failures: string[] = [];
+    const promises = deletable.map((m) =>
+      deleteModel.mutateAsync(m.modelName).catch((err: unknown) => {
+        failures.push(`${m.modelName}: ${err instanceof Error ? err.message : 'Delete failed'}`);
       }),
     );
     void Promise.all(promises).then(() => {
+      const messages: string[] = [];
+      if (skippedCount > 0) {
+        messages.push(t('list.bulkActions.deleteSkipped', { count: skippedCount }));
+      }
+      messages.push(...failures);
+      setMutationError(messages.length > 0 ? messages.join('\n') : null);
       setBulkDeleteOpen(false);
       setSelectedModelNames(new Set());
     });
   };
+
+  // Derived counts for the bulk-delete confirmation modal.
+  const bulkSelectedModels = (models ?? []).filter((m) => selectedModelNames.has(m.modelName));
+  const bulkDeletableCount = bulkSelectedModels.filter((m) => canDeleteModelRow(m.state)).length;
+  const bulkSkippedCount = bulkSelectedModels.length - bulkDeletableCount;
 
   if (isLoading) {
     return (
@@ -406,7 +423,7 @@ export function ModelList() {
           }
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {mutationError}
+          <span style={{ whiteSpace: 'pre-line' }}>{mutationError}</span>
         </Alert>
       )}
 
@@ -760,16 +777,18 @@ export function ModelList() {
                                 {t('list.stop.menuItem')}
                               </DropdownItem>
                             )}
-                            <DropdownItem
-                              key="delete"
-                              isDanger
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                setDeleteConfirmModel(model);
-                              }}
-                            >
-                              {t('list.delete.menuItem')}
-                            </DropdownItem>
+                            {canDeleteModelRow(model.state) && (
+                              <DropdownItem
+                                key="delete"
+                                isDanger
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  setDeleteConfirmModel(model);
+                                }}
+                              >
+                                {t('list.delete.menuItem')}
+                              </DropdownItem>
+                            )}
                           </DropdownList>
                         </Dropdown>
                       </Td>
@@ -875,9 +894,23 @@ export function ModelList() {
         aria-label={t('list.bulkActions.delete')}
       >
         <ModalHeader title={t('list.bulkActions.deleteConfirmTitle')} titleIconVariant="danger" />
-        <ModalBody>{t('list.bulkActions.deleteConfirmBody', { count: selectedCount })}</ModalBody>
+        <ModalBody>
+          {bulkDeletableCount > 0
+            ? t('list.bulkActions.deleteConfirmBody', { count: bulkDeletableCount })
+            : t('list.bulkActions.deleteNothingDeletable')}
+          {bulkSkippedCount > 0 && (
+            <div style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+              {t('list.bulkActions.deleteSkippedHint', { count: bulkSkippedCount })}
+            </div>
+          )}
+        </ModalBody>
         <ModalFooter>
-          <Button variant="danger" onClick={handleBulkDelete} isLoading={deleteModel.isPending}>
+          <Button
+            variant="danger"
+            onClick={handleBulkDelete}
+            isLoading={deleteModel.isPending}
+            isDisabled={bulkDeletableCount === 0}
+          >
             {t('list.bulkActions.delete')}
           </Button>
           <Button variant="link" onClick={() => setBulkDeleteOpen(false)}>

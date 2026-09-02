@@ -3,6 +3,27 @@ import { ModelLifecycleState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
+import type { ControlPlaneComponents } from '@sardeenz/types';
+import type { WorkerCapability } from '../services/worker-pool.js';
+
+type WorkerRunnerCapability = ControlPlaneComponents['schemas']['WorkerRunnerCapability'];
+
+/** Map a normalized worker-reported capability to the WorkerRunnerCapability wire shape. */
+function toRunnerCapability(c: WorkerCapability): WorkerRunnerCapability {
+  return {
+    runnerType: c.runnerType,
+    engineName: c.engineName,
+    supportedModelTypes: c.supportedModelTypes,
+    supportedDeviceTypes: c.supportedDeviceTypes,
+    supportedSleepLevels: c.supportedSleepLevels,
+    maxTensorParallelism: c.maxTensorParallelism,
+    kvCacheElasticSharing: c.kvCacheElasticSharing,
+    ...('engineVersion' in c && c.engineVersion !== undefined
+      ? { engineVersion: c.engineVersion }
+      : {}),
+    ...('features' in c && c.features !== undefined ? { features: c.features } : {}),
+  };
+}
 
 export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get('/api/v1/workers', async (_request, reply) => {
@@ -44,13 +65,7 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
         modelCount: instanceCountByWorker.get(w.workerId) ?? 0,
         runnerCapabilities:
           w.capabilities && w.capabilities.length > 0
-            ? w.capabilities.map((c) => ({
-                runnerType: c.runnerType,
-                engineName: c.engineName,
-                supportedModelTypes: c.supportedModelTypes,
-                supportedDeviceTypes: c.supportedDeviceTypes,
-                supportedSleepLevels: c.supportedSleepLevels,
-              }))
+            ? w.capabilities.map(toRunnerCapability)
             : undefined,
         lastHeartbeatAt: w.lastHeartbeatAt ?? undefined,
       };
@@ -121,13 +136,7 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
           : {}),
       })),
       models: workerModels,
-      runnerCapabilities: worker.capabilities.map((c) => ({
-        runnerType: c.runnerType,
-        engineName: c.engineName,
-        supportedModelTypes: c.supportedModelTypes,
-        supportedDeviceTypes: c.supportedDeviceTypes,
-        supportedSleepLevels: c.supportedSleepLevels,
-      })),
+      runnerCapabilities: worker.capabilities.map(toRunnerCapability),
       lastHeartbeatAt: worker.lastHeartbeatAt ?? undefined,
       joinedAt: worker.joinedAt,
     };

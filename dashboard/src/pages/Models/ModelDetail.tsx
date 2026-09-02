@@ -52,6 +52,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useConfig } from '../../hooks/useConfig';
 import { useCatalog } from '../../hooks/useCatalog';
 import { buildChatCurl, buildV2InferCurl, runnerProtocol } from '../../utils/inference';
+import { canDeleteModelDetail, canDeleteInstanceRow } from './deleteGating';
 
 export function ModelDetail() {
   const { t } = useTranslation('models');
@@ -216,6 +217,9 @@ export function ModelDetail() {
   // Placement/runtime fields (worker, endpoint, memory, progress, per-instance error) live on
   // each instance now (#120) — the model-level `state` above is the aggregate across them.
   const instances = model.instances ?? [];
+  // Model-level Delete 409s if *any* instance is transient (the API rejects a mixed
+  // ACTIVE+STARTING model even though its aggregate state is ACTIVE) — see #172.
+  const canDeleteModel = canDeleteModelDetail(instances);
   const errorInstance = instances.find((i) => i.state === ModelLifecycleState.ERROR);
   const startingInstance = instances.find((i) => i.state === ModelLifecycleState.STARTING);
 
@@ -306,11 +310,13 @@ export function ModelDetail() {
                   </Button>
                 </FlexItem>
               )}
-              <FlexItem>
-                <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-                  {t('detail.delete.button')}
-                </Button>
-              </FlexItem>
+              {canDeleteModel && (
+                <FlexItem>
+                  <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
+                    {t('detail.delete.button')}
+                  </Button>
+                </FlexItem>
+              )}
             </Flex>
           </FlexItem>
         )}
@@ -350,11 +356,13 @@ export function ModelDetail() {
                     {t('detail.wake.button')}
                   </Button>
                 </FlexItem>
-                <FlexItem>
-                  <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-                    {t('detail.delete.button')}
-                  </Button>
-                </FlexItem>
+                {canDeleteModel && (
+                  <FlexItem>
+                    <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
+                      {t('detail.delete.button')}
+                    </Button>
+                  </FlexItem>
+                )}
               </Flex>
             ) : undefined
           }
@@ -589,6 +597,7 @@ export function ModelDetail() {
                     : (instance.runnerEndpoint?.host ?? '—');
                 const canSleep = instance.state === ModelLifecycleState.ACTIVE;
                 const canWake = instance.state === ModelLifecycleState.SLEEPING;
+                const canDeleteInstance = canDeleteInstanceRow(instance.state);
 
                 return (
                   <Tr key={instance.instanceId}>
@@ -649,14 +658,16 @@ export function ModelDetail() {
                               </Button>
                             </FlexItem>
                           )}
-                          <FlexItem>
-                            <Button
-                              variant="danger"
-                              onClick={() => setDeleteInstanceId(instance.instanceId)}
-                            >
-                              {t('detail.instance.delete.button')}
-                            </Button>
-                          </FlexItem>
+                          {canDeleteInstance && (
+                            <FlexItem>
+                              <Button
+                                variant="danger"
+                                onClick={() => setDeleteInstanceId(instance.instanceId)}
+                              >
+                                {t('detail.instance.delete.button')}
+                              </Button>
+                            </FlexItem>
+                          )}
                         </Flex>
                       </Td>
                     )}

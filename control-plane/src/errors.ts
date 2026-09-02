@@ -76,6 +76,47 @@ export class ControlPlaneError extends Error {
     );
   }
 
+  /**
+   * A model-level action is refused because one specific instance is in a transient state, named
+   * explicitly (state + id) rather than folded into an aggregate. For a mixed-state model (e.g.
+   * ACTIVE + STARTING) the aggregate can be a settled value, which would misleadingly claim the
+   * model is deletable; this reports the offending instance the operator can act on (#174).
+   */
+  static invalidInstanceState(
+    modelName: string,
+    instanceId: string,
+    instanceState: string,
+    action: string,
+  ): ControlPlaneError {
+    return new ControlPlaneError(
+      409,
+      'INVALID_STATE',
+      `Cannot ${action} model ${modelName}: instance ${instanceId} is in ${instanceState} state`,
+      { modelName, instanceId, currentState: instanceState, action },
+    );
+  }
+
+  /**
+   * A model-level action is refused because another mutating operation (a delete, a stop, or an
+   * instance-scoped op) is already backgrounding for the same model. Distinct from
+   * `invalidState`/`invalidInstanceState` (which report a lifecycle state) so a client can tell
+   * "wait for the launch to settle" from "an op is already running, do nothing" — same
+   * `INVALID_STATE` code, distinct message, and a machine-readable `details.reason` (#173/#174).
+   */
+  static operationInProgress(
+    modelName: string,
+    action: string,
+    reason: string,
+    detail: string,
+  ): ControlPlaneError {
+    return new ControlPlaneError(
+      409,
+      'INVALID_STATE',
+      `Cannot ${action} model ${modelName}: ${detail}`,
+      { modelName, action, reason },
+    );
+  }
+
   static workerNotFound(workerId: string): ControlPlaneError {
     return new ControlPlaneError(404, 'WORKER_NOT_FOUND', `Worker not found: ${workerId}`, {
       workerId,

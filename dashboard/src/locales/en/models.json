@@ -83,7 +83,10 @@
       "sleepConfirmTitle": "Sleep selected models?",
       "sleepConfirmBody": "This will put {{count}} model(s) to sleep, freeing their device memory. They can be woken back up on demand.",
       "deleteConfirmTitle": "Delete selected models?",
-      "deleteConfirmBody": "This will permanently delete {{count}} model(s) from the cluster. This action cannot be undone."
+      "deleteConfirmBody": "This will permanently delete {{count}} model(s) from the cluster. This action cannot be undone.",
+      "deleteSkippedHint": "{{count}} selected model(s) are starting, draining or stopping and will be skipped — they cannot be deleted until they settle.",
+      "deleteSkipped": "Skipped {{count}} model(s) in a transient state (starting, draining or stopping).",
+      "deleteNothingDeletable": "All selected models are in a transient state and cannot be deleted right now."
     },
     "empty": {
       "title": "No models deployed",

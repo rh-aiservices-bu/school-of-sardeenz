@@ -1752,7 +1752,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model is already stopping or stopped */
+            /** @description An instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress`) so a client can distinguish them. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1763,6 +1763,15 @@ export interface operations {
             };
             /** @description Internal control plane error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The control plane cannot accept the request (not leader) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2059,7 +2068,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model already has runtime state (running or transitioning) */
+            /** @description Model already has runtime state (running or transitioning), or a delete is already in progress for the model. Both use code `INVALID_STATE`; the in-progress-delete body carries `details.reason: delete-in-progress`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2123,6 +2132,15 @@ export interface operations {
             };
             /** @description No model record exists */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A delete is already in progress for the model — a new instance cannot be minted for a model whose teardown is backgrounding. Code `INVALID_STATE`, `details.reason: delete-in-progress`. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2194,8 +2212,26 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The control plane cannot accept the request (not leader) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -16,6 +16,28 @@ const workerWithCaps = {
       supportedModelTypes: ['TEXT'],
       supportedDeviceTypes: ['CUDA'],
       supportedSleepLevels: ['L1'],
+      maxTensorParallelism: 1,
+      kvCacheElasticSharing: false,
+    },
+  ],
+  lastHeartbeatAt: null,
+};
+
+const workerWithFullCaps = {
+  workerId: 'w3',
+  status: WorkerStatus.ONLINE,
+  devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 1 }],
+  capabilities: [
+    {
+      runnerType: 'vllm',
+      engineName: 'vLLM',
+      supportedModelTypes: ['TEXT'],
+      supportedDeviceTypes: ['CUDA'],
+      supportedSleepLevels: ['L1'],
+      engineVersion: '0.19.1',
+      maxTensorParallelism: 4,
+      kvCacheElasticSharing: true,
+      features: { prefillChunked: true },
     },
   ],
   lastHeartbeatAt: null,
@@ -29,9 +51,11 @@ const workerWithoutCaps = {
   lastHeartbeatAt: null,
 };
 
-function buildApp(): { app: FastifyInstance } {
+function buildApp(workers: unknown[] = [workerWithCaps, workerWithoutCaps]): {
+  app: FastifyInstance;
+} {
   const deps = {
-    workerPool: { getAllWorkers: vi.fn(() => [workerWithCaps, workerWithoutCaps]) },
+    workerPool: { getAllWorkers: vi.fn(() => workers) },
     lifecycle: { getAllInstances: vi.fn(() => Promise.resolve([])) },
     memoryBudget: { getWorkerBudget: vi.fn(() => undefined) },
   } as unknown as RouteDeps;
@@ -60,6 +84,8 @@ describe('GET /api/v1/workers runnerCapabilities', () => {
         supportedModelTypes: ['TEXT'],
         supportedDeviceTypes: ['CUDA'],
         supportedSleepLevels: ['L1'],
+        maxTensorParallelism: 1,
+        kvCacheElasticSharing: false,
       },
     ]);
   });
@@ -74,6 +100,37 @@ describe('GET /api/v1/workers runnerCapabilities', () => {
     expect(w2).toBeDefined();
     expect('runnerCapabilities' in (w2 as Record<string, unknown>)).toBe(false);
   });
+
+  it('omits engineVersion and features from capabilities when the worker did not report them', async () => {
+    const { app } = buildApp();
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers' });
+    const body = res.json<{
+      workers: Array<{ workerId: string; runnerCapabilities?: Array<Record<string, unknown>> }>;
+    }>();
+    const w1 = body.workers.find((w) => w.workerId === 'w1');
+    const cap = w1?.runnerCapabilities?.[0];
+
+    expect(cap).toBeDefined();
+    expect('engineVersion' in (cap as Record<string, unknown>)).toBe(false);
+    expect('features' in (cap as Record<string, unknown>)).toBe(false);
+  });
+
+  it('relays engineVersion, features, and non-default maxTensorParallelism/kvCacheElasticSharing when reported', async () => {
+    const { app } = buildApp([workerWithFullCaps]);
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers' });
+    const body = res.json<{
+      workers: Array<{ workerId: string; runnerCapabilities?: Array<Record<string, unknown>> }>;
+    }>();
+    const w3 = body.workers.find((w) => w.workerId === 'w3');
+    const cap = w3?.runnerCapabilities?.[0];
+
+    expect(cap?.['engineVersion']).toBe('0.19.1');
+    expect(cap?.['features']).toEqual({ prefillChunked: true });
+    expect(cap?.['maxTensorParallelism']).toBe(4);
+    expect(cap?.['kvCacheElasticSharing']).toBe(true);
+  });
 });
 
 // Doctrine (#163 round 2): the old requiredMemory-based per-model seam (#123/#151) is gone.
@@ -85,10 +142,11 @@ describe('GET /api/v1/workers/:workerId — per-instance models (#163 doctrine)'
     instances?: unknown[];
     records?: Array<{ name: string; displayName?: string | null }>;
     getWorkerBudget?: ReturnType<typeof vi.fn>;
+    worker?: unknown;
   }): { app: FastifyInstance } {
     const deps = {
       workerPool: {
-        getWorker: vi.fn(() => workerWithCaps),
+        getWorker: vi.fn(() => opts.worker ?? workerWithCaps),
       },
       lifecycle: { getAllInstances: vi.fn(() => Promise.resolve(opts.instances ?? [])) },
       memoryBudget: { getWorkerBudget: opts.getWorkerBudget ?? vi.fn(() => undefined) },
@@ -187,6 +245,94 @@ describe('GET /api/v1/workers/:workerId — per-instance models (#163 doctrine)'
     const res = await app.inject({ method: 'GET', url: '/api/v1/workers/w1' });
     const body = res.json<{ models: Array<{ displayName?: string }> }>();
     expect(body.models[0]?.displayName).toBe('Llama 3 8B');
+  });
+
+  it('emits all required and defaulted capability fields in runnerCapabilities', async () => {
+    const { app } = buildDetailApp({});
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers/w1' });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json<{ runnerCapabilities: Array<Record<string, unknown>> }>();
+    expect(body.runnerCapabilities).toEqual([
+      {
+        runnerType: 'vllm',
+        engineName: 'vLLM',
+        supportedModelTypes: ['TEXT'],
+        supportedDeviceTypes: ['CUDA'],
+        supportedSleepLevels: ['L1'],
+        maxTensorParallelism: 1,
+        kvCacheElasticSharing: false,
+      },
+    ]);
+  });
+
+  it('relays engineVersion and features in runnerCapabilities when reported', async () => {
+    const { app } = buildDetailApp({ worker: workerWithFullCaps });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers/w1' });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json<{ runnerCapabilities: Array<Record<string, unknown>> }>();
+    const cap = body.runnerCapabilities[0];
+    expect(cap?.['engineVersion']).toBe('0.19.1');
+    expect(cap?.['features']).toEqual({ prefillChunked: true });
+  });
+
+  it('excludes PENDING (and STOPPED) instances from models even when the PENDING instance carries a measurement', async () => {
+    const { app } = buildDetailApp({
+      instances: [
+        {
+          instanceId: 'inst-a',
+          workerId: 'w1',
+          modelName: 'llama-3-8b',
+          state: ModelLifecycleState.ACTIVE,
+          deviceIndices: [0],
+        },
+        {
+          instanceId: 'inst-p',
+          workerId: 'w1',
+          modelName: 'pending-model',
+          state: ModelLifecycleState.PENDING,
+          deviceIndices: [0],
+        },
+        {
+          instanceId: 'inst-s',
+          workerId: 'w1',
+          modelName: 'stopped-model',
+          state: ModelLifecycleState.STOPPED,
+          deviceIndices: [0],
+        },
+      ],
+      getWorkerBudget: vi.fn(() => ({
+        workerId: 'w1',
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            totalBytes: 16 * 1024 ** 3,
+            usedBytes: 4 * 1024 ** 3,
+            availableBytes: 12 * 1024 ** 3,
+          },
+        ],
+        lastReportAt: new Date().toISOString(),
+        stale: false,
+        instanceMeasurements: [
+          {
+            instanceId: 'inst-p',
+            modelName: 'pending-model',
+            deviceIndex: 0,
+            measuredUsedBytes: 4 * 1024 ** 3,
+          },
+        ],
+      })),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers/w1' });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json<{ models: Array<{ instanceId?: string }> }>();
+    expect(body.models.map((m) => m.instanceId)).toEqual(['inst-a']);
   });
 });
 

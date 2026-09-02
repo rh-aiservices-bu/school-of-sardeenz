@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Control Plane API
-  version: 0.1.1
+  version: 0.1.3
   description: |
     Admin and orchestration API for the Sardeenz control plane. This is the
     single API surface consumed by both the admin dashboard backend and
@@ -249,13 +249,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is already stopping or stopped
+          description: >-
+            An instance is in a transient state (PENDING, STARTING, DRAINING, or
+            STOPPING), or another mutating operation is already in progress for
+            the model (a delete, a stop, or an instance-scoped op). All use code
+            `INVALID_STATE`; the transient-state body names the offending instance
+            and its state, and the in-progress-operation body carries a
+            `details.reason` (`delete-in-progress` / `stop-in-progress` /
+            `instance-operation-in-progress`) so a client can distinguish them.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The control plane cannot accept the request (not leader)
           content:
             application/json:
               schema:
@@ -539,7 +552,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model already has runtime state (running or transitioning)
+          description: >-
+            Model already has runtime state (running or transitioning), or a
+            delete is already in progress for the model. Both use code
+            `INVALID_STATE`; the in-progress-delete body carries
+            `details.reason: delete-in-progress`.
           content:
             application/json:
               schema:
@@ -602,6 +619,15 @@ paths:
                 $ref: "#/components/schemas/ModelActionResponse"
         "404":
           description: No model record exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >-
+            A delete is already in progress for the model — a new instance
+            cannot be minted for a model whose teardown is backgrounding. Code
+            `INVALID_STATE`, `details.reason: delete-in-progress`.
           content:
             application/json:
               schema:
@@ -676,8 +702,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The control plane cannot accept the request (not leader)
           content:
             application/json:
               schema:
