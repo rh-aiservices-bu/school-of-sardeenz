@@ -68,6 +68,22 @@ function buildApp(opts: {
 // `instanceId` for click-through, and `memoryUsedBytes` sourced from measured (NVML) attribution
 // via the worker's budget.instanceMeasurements — never from the configured requiredMemory.
 describe('GET /api/v1/cluster/memory — per-instance models (#163 doctrine)', () => {
+  const instancePending = {
+    instanceId: 'inst-p',
+    workerId: 'w1',
+    modelName: 'pending-model',
+    state: ModelLifecycleState.PENDING,
+    deviceIndices: [0],
+  };
+
+  const instanceStopped = {
+    instanceId: 'inst-s',
+    workerId: 'w1',
+    modelName: 'stopped-model',
+    state: ModelLifecycleState.STOPPED,
+    deviceIndices: [0],
+  };
+
   function budgetWithMeasurement(instanceId: string, bytes: number): ReturnType<typeof vi.fn> {
     return vi.fn(() => ({
       workerId: 'w1',
@@ -193,6 +209,19 @@ describe('GET /api/v1/cluster/memory — per-instance models (#163 doctrine)', (
     const res = await app.inject({ method: 'GET', url: '/api/v1/cluster/memory' });
     const body = res.json<{ workers: Array<{ models: Array<{ displayName?: string }> }> }>();
     expect(body.workers[0]?.models[0]?.displayName).toBe('Llama 3 8B');
+  });
+
+  it('excludes PENDING and STOPPED instances from models even when the PENDING instance carries a measurement', async () => {
+    const { app } = buildApp({
+      instances: [instanceActive, instancePending, instanceStopped],
+      getWorkerBudget: budgetWithMeasurement('inst-p', 4 * 1024 ** 3),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/cluster/memory' });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json<{ workers: Array<{ models: Array<{ instanceId?: string }> }> }>();
+    expect(body.workers[0]?.models.map((m) => m.instanceId)).toEqual(['inst-a']);
   });
 });
 

@@ -49,6 +49,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Worker endpoints under-reported runner capabilities (#147).** `GET /api/v1/workers`
+  and `GET /api/v1/workers/{workerId}` each mapped only 5 of the 9
+  `WorkerRunnerCapability` schema fields inline — dropping `maxTensorParallelism`
+  and `kvCacheElasticSharing` (non-optional in the generated types, defaulted by
+  worker-pool normalization) plus the optional `engineVersion`/`features` — so
+  consumers typed against the contract saw `undefined` for required fields. Both
+  call sites now share one `toRunnerCapability` mapper that emits every schema
+  field (optionals omitted when not worker-reported). The instance-state filter
+  divergence the issue describes (part 2) was already aligned in-tree; regression
+  tests now pin that PENDING/STOPPED instances are excluded from the per-instance
+  model lists even when they carry a VRAM measurement. No contract change — the
+  spec already declared all fields.
+
 - **`DELETE /api/v1/models/{modelName}` could orphan a runner holding unbudgeted VRAM (#140).**
   Deleting a model in a transient state (`PENDING`/`STARTING`/`DRAINING`) raced the
   fire-and-forget launch dispatched by deploy/start/wake: the delete teardown released
