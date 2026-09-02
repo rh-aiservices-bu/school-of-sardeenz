@@ -64,7 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   plain-React context/hook trees now render, but root-hoisted CJS packages that natively
   `require('react')` — `@patternfly/react-core`, `react-router-dom`, `react-i18next`,
   `@tanstack/react-query` — still re-split against root React 19; closing that boundary is tracked
-  as a follow-up (see PR notes).
+  as a follow-up (#176).
 
 - **Dashboard offered Delete on transient-state models/instances, then 409'd (#172).** After
   #140 the control plane rejects `DELETE /api/v1/models/{modelName}` and
