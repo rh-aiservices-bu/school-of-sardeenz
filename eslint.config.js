@@ -26,6 +26,7 @@ export default tseslint.config(
       '**/target/',
       '**/coverage/',
       '**/.claude/',
+      '**/.qwen/worktrees/',
       'packages/types/src/generated/',
       'vitest.config.ts',
       'vitest.workspace.ts',
