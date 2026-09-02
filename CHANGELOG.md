@@ -82,7 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   spec already declared all fields.
 
 - **`DELETE /api/v1/models/{modelName}` could orphan a runner holding unbudgeted VRAM (#140).**
-  Deleting a model in a transient state (`PENDING`/`STARTING`/`DRAINING`) raced the
+  Deleting a model in a transient state (`PENDING`/`STARTING`/`DRAINING`/`STOPPING`) raced the
   fire-and-forget launch dispatched by deploy/start/wake: the delete teardown released
   the VRAM reservation and removed the lifecycle key while `startRunner` was still
   completing on the worker. Both DELETE handlers (model-level and instance-scoped) now
@@ -94,6 +94,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   transient states and the in-progress-delete case, `503 NOT_LEADER` documented on both,
   generated TS types regenerated (ADR-005 flow). The pre-existing record-only delete
   path racing a concurrent deploy dispatch is tracked separately (#171).
+
+- **Launch paths and stop/instance claims not fenced against an in-flight model DELETE (#140
+  follow-up, #173).** #140's `deletingInFlight` claim was consulted only by DELETE itself, so the
+  three launch entry points that mint a new instance for an existing record never checked it: a
+  launch dispatched while a delete backgrounded still produced the orphaned runner #140 set out to
+  close, reached from the launch side. The shared `deployFromRecord` pipeline now refuses (409
+  `INVALID_STATE`, `details.reason: delete-in-progress`) while the model is `deletingInFlight` —
+  guarding `POST /api/v1/models/{modelName}/instances`, `POST /api/v1/models/{modelName}/start`,
+  and the deploy route — and re-checks right before both fire-and-forget dispatches: the direct
+  placement branch rolls back the instance it minted and returns 409, the capacity-reclamation
+  branch releases the reservation and settles the instance to `ERROR` instead of launching. Symmetrically, model-level `DELETE` now also 409s while a stop
+  (`stoppingInFlight`) or an instance-scoped op (`instanceOpInFlight`) is claimed for one of the
+  model's instances but not yet past its first state transition, where it would otherwise slip past
+  the transient-state guard. The three claim sets are hoisted into one object shared with
+  `deployFromRecord`. Control-plane contract v0.1.3 (additive): new 409 on `createModelInstance`,
+  409 descriptions on `startModel`/`deleteModel` reworded, generated TS types regenerated (ADR-005
+  flow). This covers the add-instance-during-teardown sliver #171 notes in passing (an add-instance
+  landing during a normal, claim-holding delete is now refused), but not #171's core record-only
+  path: a DELETE of a model with zero visible instances takes a synchronous fast exit and never
+  claims `deletingInFlight`, so the launch side has nothing to observe — that race stays tracked
+  under #171.
+
+- **#140 polish: misleading 409 bodies for mixed-state and in-progress-delete cases (#174).**
+  Model-level `DELETE` reported `deriveAggregateState(instances)` in its 409 body, so for a mixed
+  `ACTIVE` + `STARTING` model the response claimed the model was `ACTIVE` (a settled, deletable
+  state) and gave the operator nothing to act on; it now names the offending instance and its state
+  (`instance <id> is in STARTING state`). The in-progress-delete rejection reused the same aggregate
+  message as the transient-state one; it now carries a distinct message and a `details.reason`
+  (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress`) so a client can tell
+  "wait for the launch to settle" from "an op is already running, do nothing" — all still code
+  `INVALID_STATE`. The stale `docs/project/milestone-M10-pr-draft.md` (marked "delete after use")
+  was removed from the branch.
 
 - **Root `eslint .` choked on `.claude/worktrees/` (#143).** A leftover milestone-execution
   git worktree under `.claude/worktrees/` (the standing worktree location) caused `make lint`

@@ -150,6 +150,19 @@ async function teardownInstance(
 }
 
 /**
+ * Process-local in-flight claim sets, created once per `registerModelRoutes` and shared between
+ * the route handlers and `deployFromRecord`. Hoisted into one object (rather than left as closures)
+ * so the launch pipeline can consult `deletingInFlight` — the model-DELETE claim — and refuse to
+ * mint (or, mid-reclamation, dispatch) an instance for a model whose teardown is already
+ * backgrounding, closing the launch-vs-delete race from the launch side (#173).
+ */
+interface RouteClaims {
+  readonly stoppingInFlight: Set<string>;
+  readonly instanceOpInFlight: Set<string>;
+  readonly deletingInFlight: Set<string>;
+}
+
+/**
  * Runs the placement → reserve → transition → dispatch pipeline for a stored model record,
  * creating exactly one new instance identified by `instanceId`. Shared by `POST /api/v1/models`
  * (record just created, first instance), `POST /api/v1/models/:modelName/instances` (record
@@ -161,9 +174,26 @@ async function teardownInstance(
 async function deployFromRecord(
   app: FastifyInstance,
   deps: RouteDeps,
+  claims: RouteClaims,
   record: ModelRecord,
   instanceId: string,
 ): Promise<{ instanceId: string; state: ModelLifecycleState; message: string }> {
+  // #173: a model DELETE claims `deletingInFlight` synchronously, then backgrounds the teardown
+  // over a snapshot of the model's instances. A launch dispatched into that window (add-instance,
+  // start, or a same-named deploy) mints an instance the snapshot never saw, so its runner
+  // survives the delete's model-row removal — the orphaned-runner race #140 set out to close,
+  // reached from the launch side. Refuse before any Redis/budget state is created. This is the
+  // top-of-pipeline guard shared by all three callers; the reclamation branch below re-checks
+  // right before its (post-await) dispatch.
+  if (claims.deletingInFlight.has(record.name)) {
+    throw ControlPlaneError.operationInProgress(
+      record.name,
+      'start a new instance for',
+      'delete-in-progress',
+      'a delete is already in progress',
+    );
+  }
+
   // Re-checked here (not just at deploy time) so a stored modelPath that predates a narrowed
   // weightsDir, or that reached the table by any path other than the validated deploy route,
   // is still rejected before a runner is launched from it. Deploy's own pre-create check
@@ -230,6 +260,22 @@ async function deployFromRecord(
         workerId: result.workerId,
         deviceIndices: result.devices.map((d) => d.deviceIndex),
       });
+
+      // #173: the top-of-pipeline guard ran several awaits ago (catalog lookup, budget refresh,
+      // transition, row insert) — a model DELETE landing in that window snapshots without this
+      // instance and claims `deletingInFlight`. Re-check right before the fire-and-forget dispatch,
+      // mirroring the reclamation branch below. Throwing routes through the outer catch, which
+      // removes the Redis key and releases the reservation; the Postgres row is dropped here so
+      // nothing outlives the 409 (the delete's CASCADE would catch it anyway).
+      if (claims.deletingInFlight.has(record.name)) {
+        await deps.instanceRepository.delete(instanceId).catch(() => {});
+        throw ControlPlaneError.operationInProgress(
+          record.name,
+          'start a new instance for',
+          'delete-in-progress',
+          'a delete is already in progress',
+        );
+      }
 
       deps.deployOrchestration
         .deployModel({
@@ -369,6 +415,27 @@ async function deployFromRecord(
           deviceIndices: reclaimed.devices.map((d) => d.deviceIndex),
         });
 
+        // #173: eviction + re-placement above spans several awaits, so a model DELETE may have
+        // claimed `deletingInFlight` since the top-of-pipeline guard passed. Re-check right before
+        // the fire-and-forget dispatch — the last point we can still avoid launching a runner the
+        // in-flight delete's snapshot never saw. If claimed, release the reservation we just made
+        // and settle the instance to ERROR (mirroring this block's own catch below, rather than
+        // removing the Redis key: the delete's teardown + reconciliation reap the remnant, and a
+        // remaining ERROR row is the same terminal, deletable state that catch produces). Skip the
+        // dispatch.
+        if (claims.deletingInFlight.has(record.name)) {
+          deps.memoryBudget.releaseInstanceReservations(instanceId);
+          await deps.lifecycle.transition(record.name, instanceId, ModelLifecycleState.ERROR, {
+            errorMessage: 'Deployment aborted: model delete in progress',
+          });
+          await refreshModelRoutingState(deps.lifecycle, deps.routingMap, record.name);
+          app.log.warn(
+            { modelName: record.name, instanceId },
+            'Capacity reclamation aborted: model delete claimed mid-flight',
+          );
+          return;
+        }
+
         deps.deployOrchestration
           .deployModel({
             modelName: record.name,
@@ -494,6 +561,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   // are orthogonal operations that need only each exclude themselves.
   const deletingInFlight = new Set<string>();
 
+  // Bundle the three sets so the shared `deployFromRecord` pipeline can see `deletingInFlight`
+  // (#173). The bare names above are still used directly by the route handlers in this closure.
+  const claims: RouteClaims = { stoppingInFlight, instanceOpInFlight, deletingInFlight };
+
   app.post<{ Body: DeployBody }>('/api/v1/models', async (request, reply) => {
     if (!deps.leaderElection.isLeader) {
       throw ControlPlaneError.notLeader();
@@ -603,7 +674,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
     const instanceId = mintInstanceId();
     try {
-      const { state, message } = await deployFromRecord(app, deps, record, instanceId);
+      const { state, message } = await deployFromRecord(app, deps, claims, record, instanceId);
       return reply.code(202).send({ modelName: record.name, instanceId, state, message });
     } catch (err) {
       // Placement failed synchronously — roll back the DB row so the name is free to retry.
@@ -628,7 +699,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       const instanceId = mintInstanceId();
-      const { state, message } = await deployFromRecord(app, deps, record, instanceId);
+      const { state, message } = await deployFromRecord(app, deps, claims, record, instanceId);
 
       return reply.code(202).send({ modelName, instanceId, state, message });
     },
@@ -780,13 +851,55 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const aggregateState = deriveAggregateState(instances);
 
-      if (instances.some((i) => TRANSIENT_FOR_DELETE.has(i.state))) {
-        throw ControlPlaneError.invalidState(modelName, aggregateState, 'delete');
+      // #174: report the specific transient instance (state + id), not the aggregate. For a
+      // mixed-state model (e.g. ACTIVE + STARTING) the aggregate can be a settled value, which
+      // would misleadingly claim the model is deletable and give the operator nothing to act on.
+      const transientInstance = instances.find((i) => TRANSIENT_FOR_DELETE.has(i.state));
+      if (transientInstance) {
+        throw ControlPlaneError.invalidInstanceState(
+          modelName,
+          transientInstance.instanceId,
+          transientInstance.state,
+          'delete',
+        );
       }
 
+      // #174: distinct message + `details.reason` from the transient-state case above, so a client
+      // can tell "a delete is already running, do nothing" from "wait for a launch to settle".
       if (deletingInFlight.has(modelName)) {
-        throw ControlPlaneError.invalidState(modelName, aggregateState, 'delete');
+        throw ControlPlaneError.operationInProgress(
+          modelName,
+          'delete',
+          'delete-in-progress',
+          'a delete is already in progress',
+        );
       }
+
+      // #173: a Stop or an instance-scoped op (delete/sleep/wake) can be claimed but not yet past
+      // its first state transition, so its instances still read as settled and slip past the
+      // transient guard above. Both that op and this delete would then run teardown on the same
+      // instance while the model row and routing map are removed underneath the in-flight op.
+      // Refuse until it settles.
+      if (stoppingInFlight.has(modelName)) {
+        throw ControlPlaneError.operationInProgress(
+          modelName,
+          'delete',
+          'stop-in-progress',
+          'a stop is already in progress',
+        );
+      }
+      const busyInstance = instances.find((i) =>
+        instanceOpInFlight.has(`${modelName}:${i.instanceId}`),
+      );
+      if (busyInstance) {
+        throw ControlPlaneError.operationInProgress(
+          modelName,
+          'delete',
+          'instance-operation-in-progress',
+          `an operation is already in progress on instance ${busyInstance.instanceId}`,
+        );
+      }
+
       deletingInFlight.add(modelName);
 
       deps.notifications
@@ -1179,7 +1292,13 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       const instanceId = mintInstanceId();
-      const { state: newState, message } = await deployFromRecord(app, deps, record, instanceId);
+      const { state: newState, message } = await deployFromRecord(
+        app,
+        deps,
+        claims,
+        record,
+        instanceId,
+      );
 
       return reply.code(202).send({
         modelName,
