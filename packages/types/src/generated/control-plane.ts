@@ -1752,7 +1752,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model is already stopping or stopped */
+            /** @description Model is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1763,6 +1763,15 @@ export interface operations {
             };
             /** @description Internal control plane error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The control plane cannot accept the request (not leader) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2194,8 +2203,26 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal control plane error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The control plane cannot accept the request (not leader) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

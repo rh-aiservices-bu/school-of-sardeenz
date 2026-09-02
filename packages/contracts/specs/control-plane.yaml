@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Control Plane API
-  version: 0.1.1
+  version: 0.1.2
   description: |
     Admin and orchestration API for the Sardeenz control plane. This is the
     single API surface consumed by both the admin dashboard backend and
@@ -249,13 +249,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is already stopping or stopped
+          description: Model is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The control plane cannot accept the request (not leader)
           content:
             application/json:
               schema:
@@ -676,8 +682,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The control plane cannot accept the request (not leader)
           content:
             application/json:
               schema:

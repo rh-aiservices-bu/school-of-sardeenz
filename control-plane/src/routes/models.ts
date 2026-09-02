@@ -50,6 +50,20 @@ const STOPPABLE_STATES: ReadonlySet<ModelLifecycleState> = new Set([
   ModelLifecycleState.ERROR,
 ]);
 
+// Delete is rejected from these transient states (M10 decision, #140): every one has
+// fire-and-forget background work in flight (deploy/start/wake orchestration, sleep drain,
+// or a running stop) that no synchronous teardown can cancel — deleting would release the
+// VRAM reservation and the lifecycle key while startRunner still completes on the worker,
+// orphaning a runner holding VRAM the budget counts as free. The complement — ACTIVE,
+// SLEEPING, STOPPED, ERROR — is deletable with 202: stopModel settles ERROR/SLEEPING/ACTIVE
+// via VALID_TRANSITIONS, and a STOPPED record carries no live process.
+const TRANSIENT_FOR_DELETE: ReadonlySet<ModelLifecycleState> = new Set([
+  ModelLifecycleState.PENDING,
+  ModelLifecycleState.STARTING,
+  ModelLifecycleState.DRAINING,
+  ModelLifecycleState.STOPPING,
+]);
+
 /** Mint a fresh instance identity. Control-plane-assigned, no coordination needed (ADR-019 §0). */
 function mintInstanceId(): string {
   return `inst-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -473,6 +487,13 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   // claiming across all three is the more conservative (and simpler) guard.
   const instanceOpInFlight = new Set<string>();
 
+  // Model-delete analogue of stoppingInFlight (#140): closes the double-DELETE window — two
+  // concurrent Deletes can both read the same settled state before either mutates anything,
+  // since teardown is fully backgrounded. Keyed on modelName and held until the background
+  // teardown completes. Deliberately a separate set from stoppingInFlight: Stop and Delete
+  // are orthogonal operations that need only each exclude themselves.
+  const deletingInFlight = new Set<string>();
+
   app.post<{ Body: DeployBody }>('/api/v1/models', async (request, reply) => {
     if (!deps.leaderElection.isLeader) {
       throw ControlPlaneError.notLeader();
@@ -757,11 +778,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         });
       }
 
-      if (instances.some((i) => i.state === ModelLifecycleState.STOPPING)) {
-        throw ControlPlaneError.invalidState(modelName, ModelLifecycleState.STOPPING, 'delete');
+      const aggregateState = deriveAggregateState(instances);
+
+      if (instances.some((i) => TRANSIENT_FOR_DELETE.has(i.state))) {
+        throw ControlPlaneError.invalidState(modelName, aggregateState, 'delete');
       }
 
-      const aggregateState = deriveAggregateState(instances);
+      if (deletingInFlight.has(modelName)) {
+        throw ControlPlaneError.invalidState(modelName, aggregateState, 'delete');
+      }
+      deletingInFlight.add(modelName);
 
       deps.notifications
         .createNotification({
@@ -775,28 +801,36 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         });
 
       void (async () => {
-        // Isolated per instance (Promise.allSettled over teardownInstance, which never throws) —
-        // one instance's teardown failure must not strand the others, and the model row / routing
-        // map cleanup below must still run so the record doesn't survive a partial delete.
-        const results = await Promise.allSettled(
-          instances.map((instance) => teardownInstance(app, deps, modelName, instance, 'Delete')),
-        );
-        const failures = results.filter((r) => r.status === 'rejected' || r.value === false).length;
-        if (failures > 0) {
-          app.log.error(
-            { modelName, failures, total: instances.length },
-            'Some instances failed teardown during model delete',
-          );
-        }
-
         try {
-          // CASCADE on the FK cleans up any instance rows this loop didn't reach (e.g. one
-          // created concurrently after the snapshot above, or one whose teardown failed above).
-          await deps.modelRepository.delete(modelName);
-          await deps.routingMap.removeModel(modelName);
-          app.log.info({ modelName }, 'Model removed');
-        } catch (err: unknown) {
-          app.log.error({ err, modelName }, 'Background model deletion failed');
+          // Isolated per instance (Promise.allSettled over teardownInstance, which never
+          // throws) — one instance's teardown failure must not strand the others, and the
+          // model row / routing map cleanup below must still run so the record doesn't
+          // survive a partial delete.
+          const results = await Promise.allSettled(
+            instances.map((instance) => teardownInstance(app, deps, modelName, instance, 'Delete')),
+          );
+          const failures = results.filter(
+            (r) => r.status === 'rejected' || r.value === false,
+          ).length;
+          if (failures > 0) {
+            app.log.error(
+              { modelName, failures, total: instances.length },
+              'Some instances failed teardown during model delete',
+            );
+          }
+
+          try {
+            // CASCADE on the FK cleans up any instance rows this loop didn't reach (e.g. one
+            // created concurrently after the snapshot above, or one whose teardown failed
+            // above).
+            await deps.modelRepository.delete(modelName);
+            await deps.routingMap.removeModel(modelName);
+            app.log.info({ modelName }, 'Model removed');
+          } catch (err: unknown) {
+            app.log.error({ err, modelName }, 'Background model deletion failed');
+          }
+        } finally {
+          deletingInFlight.delete(modelName);
         }
       })();
 
@@ -1170,6 +1204,14 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {
         throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
+      }
+
+      if (TRANSIENT_FOR_DELETE.has(instance.state)) {
+        throw ControlPlaneError.invalidState(
+          `${modelName}/${instanceId}`,
+          instance.state,
+          'delete',
+        );
       }
 
       const claimKey = `${modelName}:${instanceId}`;

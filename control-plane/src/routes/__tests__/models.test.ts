@@ -662,17 +662,82 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     expect(res.statusCode).toBe(202);
   });
 
-  it('returns 409 when an instance is in STOPPING state', async () => {
-    const stopping = { ...ACTIVE_STATE, state: ModelLifecycleState.STOPPING };
+  it.each([
+    ModelLifecycleState.PENDING,
+    ModelLifecycleState.STARTING,
+    ModelLifecycleState.DRAINING,
+    ModelLifecycleState.STOPPING,
+  ])('returns 409 when an instance is in %s (transient state, #140)', async (state) => {
+    const transient = { ...ACTIVE_STATE, state };
     const { app } = buildApp({
-      getInstance: vi.fn(() => Promise.resolve(stopping)),
-      getInstancesForModel: vi.fn(() => Promise.resolve([stopping])),
+      getInstance: vi.fn(() => Promise.resolve(transient)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([transient])),
     });
 
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
 
     expect(res.statusCode).toBe(409);
     expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('returns 202 when an instance is in ERROR (delete is the escape hatch for wedged models, #140)', async () => {
+    const errorState = { ...ACTIVE_STATE, state: ModelLifecycleState.ERROR };
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(errorState)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([errorState])),
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('returns 409 when ANY instance is transient, even if the aggregate is settled (mixed ACTIVE + STARTING, #140)', async () => {
+    const starting = {
+      ...ACTIVE_STATE,
+      instanceId: 'inst-000000000002',
+      state: ModelLifecycleState.STARTING,
+    };
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ACTIVE_STATE, starting])),
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('rejects a concurrent second model DELETE while the first is still backgrounding (#140)', async () => {
+    const { app } = buildApp();
+
+    const [first, second] = await Promise.all([
+      app.inject({ method: 'DELETE', url: '/api/v1/models/m1' }),
+      app.inject({ method: 'DELETE', url: '/api/v1/models/m1' }),
+    ]);
+
+    const statusCodes = [first.statusCode, second.statusCode].sort((a, b) => a - b);
+    expect(statusCodes).toEqual([202, 409]);
+
+    const rejected = first.statusCode === 409 ? first : second;
+    expect(rejected.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('releases the model-delete claim after background teardown so a retry is not claim-blocked (#140)', async () => {
+    const { app } = buildApp();
+
+    const first = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(first.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // The default mocks do not mutate lifecycle state, so the instance is still ACTIVE
+    // after the first delete and the retry takes the normal (claim-free) delete path —
+    // the assertion is that the deletingInFlight claim was released by the background
+    // teardown's finally, not that the model was tombstoned.
+    const retry = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(retry.statusCode).toBe(202);
   });
 });
 
@@ -1591,6 +1656,36 @@ describe('instance-scoped op dedup (quality L4 / security L2)', () => {
       url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
     });
     expect(retry.statusCode).toBe(202);
+  });
+
+  it.each([
+    ModelLifecycleState.PENDING,
+    ModelLifecycleState.STARTING,
+    ModelLifecycleState.DRAINING,
+    ModelLifecycleState.STOPPING,
+  ])('DELETE of an instance in %s returns 409 (transient state, #140)', async (state) => {
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve({ ...ACTIVE_STATE, state })),
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('DELETE of an ACTIVE instance returns 202 (settled state, #140)', async () => {
+    const { app } = buildApp();
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+
+    expect(res.statusCode).toBe(202);
   });
 
   it('rejects a concurrent second sleep on the same instance', async () => {

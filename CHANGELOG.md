@@ -49,6 +49,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`DELETE /api/v1/models/{modelName}` could orphan a runner holding unbudgeted VRAM (#140).**
+  Deleting a model in a transient state (`PENDING`/`STARTING`/`DRAINING`) raced the
+  fire-and-forget launch dispatched by deploy/start/wake: the delete teardown released
+  the VRAM reservation and removed the lifecycle key while `startRunner` was still
+  completing on the worker. Both DELETE handlers (model-level and instance-scoped) now
+  reject transient states with 409 `INVALID_STATE`, mirroring the #121 Stop semantics;
+  settled states — including `ERROR`, the escape hatch for wedged models — remain
+  deletable. The model-level handler additionally claims `deletingInFlight` before
+  backgrounding, closing the concurrent double-delete window. Control-plane contract
+  v0.1.2 (additive): 409 descriptions on both delete operations reworded to name the
+  transient states and the in-progress-delete case, `503 NOT_LEADER` documented on both,
+  generated TS types regenerated (ADR-005 flow). The pre-existing record-only delete
+  path racing a concurrent deploy dispatch is tracked separately (#171).
+
 - **Root `eslint .` choked on `.claude/worktrees/` (#143).** A leftover milestone-execution
   git worktree under `.claude/worktrees/` (the standing worktree location) caused `make lint`
   to parse the worktree's full repo copy and fail with a flood of type-aware parse/lint
