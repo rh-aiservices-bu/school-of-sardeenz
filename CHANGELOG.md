@@ -270,6 +270,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **CLAUDE.md project status refreshed for M12.** The Project Status paragraph now lists M12 (Runner & Engine Hardening, PR #183) as merged and names M13 (Feature & Resilience Backlog) as the next milestone; the M12 PR draft (`docs/project/milestone-M12-pr-draft.md`) is removed now that the PR is merged.
+
 - **Per-runner 4-port block; explicit MLServer gRPC/metrics ports (#160).** The dev-worker's
   port allocator now reserves a contiguous block of four ports per runner —
   `(mgmt, engine, gRPC, metrics) = (base, base+1, base+2, base+3)` — uniformly for every
