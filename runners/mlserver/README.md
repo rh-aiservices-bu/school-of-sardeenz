@@ -54,15 +54,17 @@ advertises `supportedSleepLevels: ["L1_HOST_RAM"]` for v1 (it is the best availa
 
 ## MLServer bind address, ports, and the extra-`engineArgs` caveat
 
-- `MLSERVER_HOST=0.0.0.0` (not vLLM's `127.0.0.1` loopback default — see #159) and
+- `MLSERVER_HOST=0.0.0.0` (matching the vLLM shim's `--engine-host` default since #159) and
   `MLSERVER_HTTP_PORT=<engine-port>` configure MLServer's bind via env, the documented
   `MLSERVER_`-prefixed override mechanism.
 - MLServer also binds a gRPC server and a Prometheus metrics server even in this REST-only
-  deployment. The shim derives `MLSERVER_GRPC_PORT`/`MLSERVER_METRICS_PORT` from the engine port
-  (`+10000`/`+20000` by default, overridable via `SARDEENZ_MLSERVER_GRPC_PORT`/
-  `SARDEENZ_MLSERVER_METRICS_PORT`). **These offset defaults are cluster-validated, not yet
-  proven**: the real fix (the worker reserving a 4-port block per oip runner) is a follow-up on the
-  worker's port allocator, out of this shim's scope.
+  deployment. The shim derives `MLSERVER_GRPC_PORT`/`MLSERVER_METRICS_PORT` from
+  `SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT`. As of #160, the worker's port
+  allocator reserves a contiguous 4-port block (management, engine, gRPC, metrics) per runner and
+  passes the gRPC/metrics ports explicitly via those two env vars on every worker-launched runner,
+  so the `+10000`/`+20000` offset derivation is now only a fallback for standalone/direct SIF
+  invocation (outside a worker launch) — its 65535 ceiling can no longer be reached from a worker
+  launch.
 - **v1 limitation:** any `engineArgs` forwarded after `--served-model-name` are parsed off and
   **ignored** (with a startup warning) — MLServer's configuration is file/env-based, so there is no
   argv pass-through equivalent to vLLM's.
@@ -98,5 +100,8 @@ MLServer/torch/httpx/FastAPI:
 ```bash
 cd runners/mlserver && python3 -m pytest
 ```
+
+This suite plus the vLLM shim's and the shared `runners/conformance` suite run together in CI
+(the `python` job) and via `make test-python` (after `make test-python-deps`).
 
 The engine + HTTP layers are exercised by the Phase 4-style cluster integration gates (Unit D).

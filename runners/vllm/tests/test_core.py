@@ -51,13 +51,26 @@ def test_parse_args_rejects_equal_ports():
         parse_args(["--model", "/w/m", "--port", "9101", "--engine-port", "9101"])
 
 
-def test_build_vllm_command_enables_sleep_mode_and_binds_internal_port():
+def test_build_vllm_command_enables_sleep_mode_and_binds_default_engine_host():
     args = parse_args(["--model", "/w/m", "--port", "9101", "--engine-port", "9200"])
     cmd = build_vllm_command(args)
     assert cmd[:3] == ["vllm", "serve", "/w/m"]
     assert "--enable-sleep-mode" in cmd
     assert cmd[cmd.index("--port") + 1] == "9200"
-    assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
+    assert cmd[cmd.index("--host") + 1] == "0.0.0.0"
+
+
+def test_parse_args_defaults_engine_host_to_all_interfaces():
+    args = parse_args(["--model", "/w/m", "--port", "9101"])
+    assert args.engine_host == "0.0.0.0"
+
+
+def test_build_vllm_command_uses_custom_engine_host():
+    args = parse_args(
+        ["--model", "/w/m", "--port", "9101", "--engine-host", "10.0.0.5"]
+    )
+    cmd = build_vllm_command(args)
+    assert cmd[cmd.index("--host") + 1] == "10.0.0.5"
 
 
 def test_build_vllm_command_forwards_served_model_name_after_double_dash():

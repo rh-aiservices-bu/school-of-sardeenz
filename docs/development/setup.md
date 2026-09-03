@@ -172,6 +172,7 @@ name doesn't end in `_test`**.
 | `make format-check`  | Check formatting (CI-safe)                |
 | `make typecheck`     | TypeScript `tsc --build` + `cargo check`  |
 | `make test`          | Run all test suites (Vitest + cargo test) |
+| `make test-python`   | Run the Python runner-shim + conformance suites (after `make test-python-deps`) |
 | `make test-coverage` | Run tests with V8 coverage                |
 | `make codegen`       | Regenerate types from OpenAPI specs       |
 | `make services`      | Start dev services (Redis + Postgres)     |

@@ -88,6 +88,22 @@ jobs:
       - name: Run dashboard e2e
         run: npm run test:e2e -w @sardeenz/dashboard
 
+  python:
+    name: runner shims + conformance (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+      # The shims + shared conformance suite exercise real FastAPI apps against FAKE engines, so the
+      # only deps are fastapi/httpx/pytest (via each shim's [test] extra) — never vllm/torch/mlserver.
+      - name: Install shim test deps
+        run: make test-python-deps
+      - name: Run Python test suites
+        run: make test-python
+
 # Deliberately NOT gated here (tracked separately, not part of #82):
 #   - `make format-check`: `npx prettier --check .` fails on 34 files today; it
 #     is not in `make all`, so excluding it does not weaken this pipeline.

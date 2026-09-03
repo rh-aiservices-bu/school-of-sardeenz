@@ -118,8 +118,9 @@ Map<string, string>` (the unambiguous conflict/lookup key). `StartRunnerRequest.
     still used to watch a first-instance cold start from the deploy modal); a new
     `GET /runners/by-instance/{instanceId}/logs` is unambiguous and is what the control plane uses
     once it has minted an instance id (i.e., for every deploy/replica/move going forward). Port
-    allocation (`allocatePorts`, lowest-free-`(management, engine)`-pair scan) is unchanged — it
-    already assigns each of N same-model runners its own pair.
+    allocation (`allocatePorts`, lowest-free contiguous 4-port block scan — management, engine,
+    gRPC, metrics, since #160) is unchanged in spirit — it already assigns each of N same-model
+    runners its own block.
 11. **Move-model is a scripted composition on top of these primitives, not a new endpoint.** Deploy
     a new instance elsewhere (`POST .../instances`) → shift traffic via a new internal-only
     `RoutingMapService.updateEndpointWeight(modelName, host, port, weight)` primitive (Lua, mirrors

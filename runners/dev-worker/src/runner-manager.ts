@@ -49,8 +49,12 @@ export interface RunnerRecord {
   modelName: string;
   /** Management port (runner-contract API). */
   port: number;
-  /** Inference port (`/v1/*`) the proxy targets — equals `port` for the single-server stub. */
+  /** Inference port (`/v1/*` | `/v2/*`) the proxy targets — equals `port` for the single-server stub. */
   enginePort: number;
+  /** MLServer gRPC port (base+2). Reserved for every runner; used only by OIP runners. */
+  grpcPort: number;
+  /** MLServer Prometheus-metrics port (base+3). Reserved for every runner; used only by OIP runners. */
+  metricsPort: number;
   host: string;
   requiredMemory: number;
   devices: { deviceIndex: number; deviceType: string }[];
@@ -80,6 +84,9 @@ export interface StartRunnerParams {
   entrypoint?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
 }
+
+// Ports reserved per runner: mgmt, engine, gRPC, metrics — see allocatePorts.
+const PORTS_PER_RUNNER = 4;
 
 export class RunnerManager {
   private readonly runners = new Map<string, RunnerRecord>();
@@ -123,7 +130,7 @@ export class RunnerManager {
     }
 
     const runnerId = `runner-${randomUUID().slice(0, 8)}`;
-    const { port, enginePort } = await this.allocatePorts();
+    const { port, enginePort, grpcPort, metricsPort } = await this.allocatePorts();
 
     // Reserve the instance slot up-front so concurrent starts of the same instance race to
     // ConflictError rather than both proceeding. Also register under modelName — a Set now
@@ -180,6 +187,8 @@ export class RunnerManager {
           devices: params.devices,
           port,
           enginePort,
+          grpcPort,
+          metricsPort,
         },
         (stream, content) => this.logBuffer.append(runnerId, stream, content),
         // Once the engine has finished starting, end the launch-log stream: connected viewers stop
@@ -196,6 +205,8 @@ export class RunnerManager {
         modelName: params.modelName,
         port: handle.port,
         enginePort: handle.enginePort,
+        grpcPort,
+        metricsPort,
         host: handle.host,
         requiredMemory: params.requiredMemory,
         devices: params.devices,
@@ -405,28 +416,43 @@ export class RunnerManager {
     return perRunner.filter((r): r is { record: RunnerRecord; body: { devices?: RunnerMemoryReportDevice[] } } => r !== null);
   }
 
-  // Allocate a (management, engine) port pair, stepping by 2. Real engines (vLLM) serve inference
-  // on `management + 1`, so allocating one port per runner would let a second runner's management
-  // port collide with the first runner's engine port. Pairing avoids that regardless of launcher;
-  // single-server launchers (the stub) simply leave the engine port of the pair unused.
+  // Allocate a contiguous block of PORTS_PER_RUNNER ports for one runner:
+  //   (mgmt=base, engine=base+1, grpc=base+2, metrics=base+3)
+  // A uniform block per runner (protocol-agnostic): OpenAI/stub runners bind only mgmt (+engine for
+  // vLLM) and leave grpc/metrics unused; OIP (MLServer) runners bind all four (engine/gRPC/metrics
+  // via SARDEENZ_MLSERVER_*_PORT env — see apptainer-launcher.ts). Reserving explicit ports removes
+  // the MLServer shim's +10000/+20000 offset derivation and its 65535 ceiling (#160). The engine
+  // port stays mgmt+1, preserving the invariant real engines (vLLM) rely on.
   //
-  // Scans for the lowest free pair in [runnerPortStart, runnerPortStart + maxRunners * 2) rather
-  // than a monotonic counter, so ports released by stopRunner()/crash cleanup get reused instead of
-  // exhausting the range over a worker's lifetime.
-  private async allocatePorts(): Promise<{ port: number; enginePort: number }> {
-    const rangeEnd = this.config.runnerPortStart + this.config.maxRunners * 2;
-    for (let base = this.config.runnerPortStart; base < rangeEnd; base += 2) {
+  // Scans for the lowest free block in [runnerPortStart, runnerPortStart + maxRunners *
+  // PORTS_PER_RUNNER), stepping by PORTS_PER_RUNNER, so blocks released by stopRunner()/crash
+  // cleanup get reused instead of exhausting the range. usedPorts tracks only `base`: the whole
+  // block is a pure function of base, so freeing base frees the block.
+  private async allocatePorts(): Promise<{
+    port: number;
+    enginePort: number;
+    grpcPort: number;
+    metricsPort: number;
+  }> {
+    const rangeEnd = this.config.runnerPortStart + this.config.maxRunners * PORTS_PER_RUNNER;
+    for (let base = this.config.runnerPortStart; base < rangeEnd; base += PORTS_PER_RUNNER) {
       if (this.usedPorts.has(base)) continue;
-      if (base === this.config.workerPort || base + 1 === this.config.workerPort) continue;
+      // Skip any block that would overlap the worker's own management port.
+      if (this.config.workerPort >= base && this.config.workerPort <= base + PORTS_PER_RUNNER - 1)
+        continue;
       this.usedPorts.add(base);
       if (this.probePort) {
-        const free = (await this.probePort(base)) && (await this.probePort(base + 1));
+        const free =
+          (await this.probePort(base)) &&
+          (await this.probePort(base + 1)) &&
+          (await this.probePort(base + 2)) &&
+          (await this.probePort(base + 3));
         if (!free) {
           this.usedPorts.delete(base);
           continue;
         }
       }
-      return { port: base, enginePort: base + 1 };
+      return { port: base, enginePort: base + 1, grpcPort: base + 2, metricsPort: base + 3 };
     }
     throw new Error(
       `Port range exhausted: all ${this.config.maxRunners} runner slots in ` +

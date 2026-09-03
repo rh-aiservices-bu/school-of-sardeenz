@@ -14,9 +14,10 @@ engine-agnostic (ADR-010, [phase4.md](../../docs/project/phase4.md) Task 5).
 
 ## What it does
 
-- Launches `vllm serve <model> --host 127.0.0.1 --port <engine-port> --enable-sleep-mode` as a
-  child process (the OpenAI-compatible inference server). Inference traffic flows straight to that
-  port via the proxy — it is **not** part of this contract.
+- Launches `vllm serve <model> --host 0.0.0.0 --port <engine-port> --enable-sleep-mode` (bind host
+  configurable via `--engine-host`; #159) as a child process (the OpenAI-compatible inference
+  server). Inference traffic flows straight to that port via the proxy — it is **not** part of
+  this contract.
 - Serves the runner-contract management API on `--port`:
 
   | Endpoint                             | Behaviour                                                                           |
@@ -60,5 +61,8 @@ sardeenz_vllm_runner/
 ```bash
 cd runners/vllm && python3 -m pytest
 ```
+
+This suite plus the MLServer shim's and the shared `runners/conformance` suite run together in CI
+(the `python` job) and via `make test-python` (after `make test-python-deps`).
 
 The engine + HTTP layers are exercised by the Phase 4 cluster integration gates (Task 9).

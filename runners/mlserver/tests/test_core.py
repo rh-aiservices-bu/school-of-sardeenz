@@ -91,6 +91,24 @@ def test_parse_args_end_to_end_from_launcher_argv():
     assert args.model == "/repo"
 
 
+def test_parse_args_uses_env_override_ports(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("SARDEENZ_MLSERVER_GRPC_PORT", "18000")
+    monkeypatch.setenv("SARDEENZ_MLSERVER_METRICS_PORT", "28000")
+    argv = ["--model", "/repo", "--port", "9101", "--", "--served-model-name", "org/m"]
+    args = parse_args(argv)
+    assert args.grpc_port == 18000
+    assert args.metrics_port == 28000
+
+
+def test_parse_args_falls_back_to_offsets_without_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("SARDEENZ_MLSERVER_GRPC_PORT", raising=False)
+    monkeypatch.delenv("SARDEENZ_MLSERVER_METRICS_PORT", raising=False)
+    argv = ["--model", "/repo", "--port", "9101", "--", "--served-model-name", "org/m"]
+    args = parse_args(argv)
+    assert args.grpc_port == 19102
+    assert args.metrics_port == 29102
+
+
 def test_aux_ports_defaults_and_env_override():
     assert aux_ports(9102, None, None) == (19102, 29102)
     assert aux_ports(9102, "18000", "28000") == (18000, 28000)

@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Python runner-shim + conformance suites gated in CI (#161).** A dedicated `python` GitHub
+  Actions job (`actions/setup-python` pinned by SHA, Python 3.12 via a new root
+  `.python-version`) installs the two shims' `[test]` extras — `pytest`, `fastapi`, `httpx`
+  only, never vLLM/torch/MLServer — and runs `runners/vllm/tests`, `runners/mlserver/tests`
+  and the shared engine-runner conformance suite `runners/conformance/` (72 tests) as a
+  required sibling of the `quality` and `e2e` jobs. Locally: `make test-python-deps` then
+  `make test-python` (`make test` is unchanged). A root `pytest.ini` sets
+  `--import-mode=importlib` so the three suites collect in one invocation despite both shims
+  shipping `tests/test_core.py` (previously an "import file mismatch"); per-shim runs still use
+  their own `pyproject.toml` config. Conformance/shim READMEs and `docs/development/setup.md`
+  updated. Follow-up #182 tracks CI-only pip constraints.
+
 - **Qwen Code skills (`.qwen/skills/`).** Adapted the Claude Code `implement` and
   `implement-milestone` skills to Qwen Code conventions for use in this project:
   - `implement` — the full-quality phase/feature process (branch from `dev`,
@@ -48,6 +60,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `control-plane.yaml` bumped to v0.1.1; Rust proxy untouched (ADR-005 flow).
 
 ### Fixed
+
+- **vLLM engine bind host configurable, default `0.0.0.0` (#159).** The vLLM runner shim
+  started the engine with a hardcoded `--host 127.0.0.1`, so the engine port was unreachable
+  from a proxy running on another node/pod even though the worker's `advertiseHost` is
+  configurable. `build_vllm_command` now uses a new `--engine-host` shim flag (default
+  `0.0.0.0`), matching the MLServer shim's day-one behavior (#125); the dev-worker launcher
+  passes nothing and relies on the default. The shim's own health/sleep/wake calls to its
+  engine stay on loopback. Regression tests cover the default and a custom host; READMEs
+  updated. Follow-up #181 tracks the proxy-scoped NetworkPolicy ingress rule still needed
+  for the engine port off-node.
 
 - **Dashboard e2e: runner-catalog mock, deploy-flow tests re-enabled, stale-build guard (#155).**
   The e2e mock control plane now serves `GET /api/v1/catalog` with a minimal `RunnerCatalogView`
@@ -247,6 +269,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `RUNNER_UNAVAILABLE` and the stop settles promptly in `ERROR` with a clear message.
 
 ### Changed
+
+- **Per-runner 4-port block; explicit MLServer gRPC/metrics ports (#160).** The dev-worker's
+  port allocator now reserves a contiguous block of four ports per runner —
+  `(mgmt, engine, gRPC, metrics) = (base, base+1, base+2, base+3)` — uniformly for every
+  runner (protocol-agnostic; OpenAI runners leave gRPC/metrics unused), scanning
+  `[SARDEENZ_RUNNER_PORT_START, +SARDEENZ_MAX_RUNNERS*4)` with stride 4. The Apptainer
+  launcher passes `SARDEENZ_MLSERVER_GRPC_PORT` / `SARDEENZ_MLSERVER_METRICS_PORT` to every
+  runner so the MLServer shim no longer derives them as `engine+10000/+20000`; the offsets
+  remain only as a logged fallback for standalone shim runs (the 65535 ceiling can no longer
+  be hit from a worker launch). The engine-port = mgmt+1 invariant is retained; no contract,
+  Redis, or control-plane surface changes. `make dev-worker-2` caps each worker at
+  `SARDEENZ_MAX_RUNNERS=24` so the wider block range stays inside each worker's 100-port
+  window. Docs (`runner-contract.md`, MLServer README, ADR-019 wording, `.env.example`)
+  updated.
 
 - **CLAUDE.md project status refreshed.** The Project Status paragraph now lists M9–M11, #154 (ADR-020), and the VRAM telemetry doctrine as merged, and names M12 (Runner & Engine Hardening) then M13 as the next milestones; it previously still said M9 was next and #154 in progress.
 

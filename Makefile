@@ -5,7 +5,7 @@ COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podm
 .DEFAULT_GOAL := help
 
 .PHONY: help all lint lint-specs format format-check typecheck test test-integration \
-        test-coverage codegen clean services services-stop \
+        test-coverage test-python test-python-deps codegen clean services services-stop \
         dev dev-full dev-full-logged dev-cp dev-bff dev-dashboard dev-proxy \
         dev-worker dev-worker-2 dev-worker-stop
 
@@ -59,10 +59,12 @@ dev-proxy: ## Routing proxy only (cargo watch; requires Rust)
 dev-worker: ## A single dev worker (dev-worker-0, port 9100 unless overridden in .env)
 	node --import tsx runners/dev-worker/src/index.ts
 
+# SARDEENZ_MAX_RUNNERS=24 below: with the #160 4-port-per-runner block, 24 runners * 4 ports = 96,
+# fitting each worker's 100-port block (9100s/9200s) without overlapping the next worker's range.
 dev-worker-2: ## Two dev workers (ports 9100/9200) for multi-worker placement testing
 	npx concurrently --names "w0,w1" --prefix-colors "blue,red" \
-		"SARDEENZ_WORKER_ID=dev-worker-0 SARDEENZ_WORKER_PORT=9100 SARDEENZ_RUNNER_PORT_START=9101 node --import tsx runners/dev-worker/src/index.ts" \
-		"SARDEENZ_WORKER_ID=dev-worker-1 SARDEENZ_WORKER_PORT=9200 SARDEENZ_RUNNER_PORT_START=9201 node --import tsx runners/dev-worker/src/index.ts"
+		"SARDEENZ_WORKER_ID=dev-worker-0 SARDEENZ_WORKER_PORT=9100 SARDEENZ_RUNNER_PORT_START=9101 SARDEENZ_MAX_RUNNERS=24 node --import tsx runners/dev-worker/src/index.ts" \
+		"SARDEENZ_WORKER_ID=dev-worker-1 SARDEENZ_WORKER_PORT=9200 SARDEENZ_RUNNER_PORT_START=9201 SARDEENZ_MAX_RUNNERS=24 node --import tsx runners/dev-worker/src/index.ts"
 
 dev-worker-stop: ## Stop all running dev workers
 	@pkill -f "runners/dev-worker/src/index.ts" 2>/dev/null || echo "No dev workers running"
@@ -110,6 +112,19 @@ test-integration: ## Integration tests (requires compose services)
 
 test-coverage: ## Run tests with V8 coverage
 	npm run test:coverage
+
+# The Python runner shims (runners/vllm, runners/mlserver) and the shared engine-runner
+# conformance suite (runners/conformance) run only fake engines — deps are fastapi/httpx/pytest,
+# never vllm/torch/mlserver. `test-python` runs pytest only; run `test-python-deps` first (ideally
+# in a venv) to install the shims editable with their [test] extras. Kept out of `make test` so a
+# Rust/TS dev box needs no Python — CI runs both in a dedicated `python` job. The root pytest.ini
+# supplies --import-mode=importlib so the single invocation below does not collide on the shims'
+# duplicate tests/test_core.py basename (#161).
+test-python-deps: ## Install the Python shims (editable, [test] extras) — run inside a venv
+	pip install -e "runners/vllm[test]" -e "runners/mlserver[test]"
+
+test-python: ## Run the Python shim + conformance suites (needs test-python-deps first)
+	python3 -m pytest runners/vllm/tests runners/mlserver/tests runners/conformance
 
 ##@ Build / misc
 

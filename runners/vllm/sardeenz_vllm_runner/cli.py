@@ -12,6 +12,7 @@ class RunnerArgs:
     port: int
     engine_port: int
     host: str
+    engine_host: str  # vLLM OpenAI-server bind host (default 0.0.0.0 — NOT loopback; #159)
     device_type: str
     tensor_parallel: int
     # Extra args passed through to `vllm serve` (everything after `--`). The worker forwards
@@ -44,6 +45,9 @@ def parse_args(argv: list[str]) -> RunnerArgs:
         help="Port for vLLM's OpenAI server (defaults to --port + 1).",
     )
     parser.add_argument("--host", default="0.0.0.0", help="Bind host for the contract server.")
+    parser.add_argument(
+        "--engine-host", default="0.0.0.0", help="Bind host for vLLM's OpenAI server."
+    )
     parser.add_argument("--device-type", default="CUDA", help="Device type for capabilities.")
     parser.add_argument(
         "--tensor-parallel", type=int, default=1, help="Tensor-parallel degree passed to vLLM."
@@ -59,6 +63,7 @@ def parse_args(argv: list[str]) -> RunnerArgs:
         port=ns.port,
         engine_port=engine_port,
         host=ns.host,
+        engine_host=ns.engine_host,
         device_type=ns.device_type,
         tensor_parallel=ns.tensor_parallel,
         engine_args=forwarded,
@@ -76,7 +81,7 @@ def build_vllm_command(args: RunnerArgs) -> list[str]:
         "serve",
         args.model,
         "--host",
-        "127.0.0.1",
+        args.engine_host,
         "--port",
         str(args.engine_port),
         "--enable-sleep-mode",
