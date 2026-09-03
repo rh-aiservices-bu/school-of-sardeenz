@@ -22,6 +22,8 @@ function makeSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
     devices: [{ deviceIndex: 2, deviceType: 'CUDA' }],
     port: 9101,
     enginePort: 9102,
+    grpcPort: 9103,
+    metricsPort: 9104,
     ...overrides,
   };
 }
@@ -78,6 +80,8 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args).toContain('ENABLE_KVCACHED=true');
     expect(args).toContain('KVCACHED_AUTOPATCH=1');
     expect(args).toContain('CUDA_VISIBLE_DEVICES=2');
+    expect(args).toContain('SARDEENZ_MLSERVER_GRPC_PORT=9103');
+    expect(args).toContain('SARDEENZ_MLSERVER_METRICS_PORT=9104');
 
     // SIF path precedes the entrypoint, which precedes the model/port flags.
     const sifIdx = args.indexOf('/modules/vllm-0.21.sif');
@@ -91,6 +95,29 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     // Forwarded through the shim's `--` passthrough to keep working with already-built SIFs.
     const ddIdx = args.indexOf('--');
     expect(ddIdx).toBeGreaterThan(-1);
+    expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
+  });
+
+  it('emits SARDEENZ_MLSERVER_GRPC_PORT/METRICS_PORT --env for the allocated block', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec());
+
+    const args = plan.args;
+    const grpcIdx = args.indexOf('SARDEENZ_MLSERVER_GRPC_PORT=9103');
+    const metricsIdx = args.indexOf('SARDEENZ_MLSERVER_METRICS_PORT=9104');
+    expect(grpcIdx).toBeGreaterThan(-1);
+    expect(metricsIdx).toBeGreaterThan(-1);
+    expect(args[grpcIdx - 1]).toBe('--env');
+    expect(args[metricsIdx - 1]).toBe('--env');
+  });
+
+  it('vLLM argv is unaffected by the aux-port env', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec());
+
+    const args = plan.args;
+    expect(args[args.indexOf('--engine-port') + 1]).toBe('9102');
+    const ddIdx = args.indexOf('--');
     expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
 

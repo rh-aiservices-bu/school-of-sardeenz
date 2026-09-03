@@ -50,6 +50,17 @@ export interface LaunchSpec {
    * here; single-server launchers (the StubLauncher) may ignore it and serve inference on `port`.
    */
   enginePort: number;
+  /**
+   * gRPC port (mgmt+2) from the worker's 4-port block. OIP runners (MLServer) bind their gRPC
+   * server here; OpenAI runners (vLLM, stub) ignore it. Passed to MLServer via
+   * SARDEENZ_MLSERVER_GRPC_PORT (see ApptainerLauncher.buildExecPlan). (#160)
+   */
+  grpcPort: number;
+  /**
+   * Prometheus-metrics port (mgmt+3) from the worker's 4-port block. OIP runners bind their
+   * metrics server here via SARDEENZ_MLSERVER_METRICS_PORT; OpenAI runners ignore it. (#160)
+   */
+  metricsPort: number;
 }
 
 // Opaque handle returned by a launcher and stored by the RunnerManager. `stop()` closes over

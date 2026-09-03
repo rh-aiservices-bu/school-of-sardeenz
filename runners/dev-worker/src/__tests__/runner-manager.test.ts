@@ -110,7 +110,7 @@ describe('RunnerManager', () => {
     expect(result.enginePort).toBe(19301);
   });
 
-  it('allocates ports in (management, engine) pairs so engine ports never collide', async () => {
+  it('allocates ports in contiguous 4-port blocks so engine ports never collide', async () => {
     const r1 = await manager.startRunner({
       modelName: 'model-a',
       instanceId: 'inst-model-a',
@@ -130,10 +130,42 @@ describe('RunnerManager', () => {
       devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
     });
 
-    // Ports step by 2: r1 reserves (19301, 19302), r2 reserves (19303, 19304). Were the manager to
-    // step by 1, r2's management port (19302) would collide with r1's engine port (management + 1).
+    // Ports step by 4: r1 reserves the block (19301..19304), r2 reserves (19305..19308). Were the
+    // manager to step by 1, r2's management port would collide with r1's engine/grpc/metrics ports.
     expect(r1.port).toBe(19301);
-    expect(r2.port).toBe(19303);
+    expect(r2.port).toBe(19305);
+  });
+
+  it('reserves a contiguous 4-port block (mgmt, engine, grpc, metrics)', async () => {
+    let capturedSpec: LaunchSpec | undefined;
+    const launcher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> => {
+        capturedSpec = spec;
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+
+    const result = await mgr.startRunner({
+      modelName: 'block-model',
+      instanceId: 'inst-block-model',
+      runnerType: 'mlserver',
+      modelPath: '/models/block-model',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(result.port).toBe(19301);
+    expect(result.enginePort).toBe(19302);
+    expect(capturedSpec?.grpcPort).toBe(19303);
+    expect(capturedSpec?.metricsPort).toBe(19304);
   });
 
   it('rejects duplicate instanceId with ConflictError (#120: conflict key is instanceId, not model name)', async () => {
@@ -503,6 +535,32 @@ describe('RunnerManager', () => {
     expect(b.port).toBe(19301);
   });
 
+  it('block is reused after stop', async () => {
+    const a = await manager.startRunner({
+      modelName: 'block-reuse-a',
+      instanceId: 'inst-block-reuse-a',
+      runnerType: 'vllm',
+      modelPath: '/models/block-reuse-a',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(a.port).toBe(19301);
+
+    await manager.stopRunner(a.runnerId);
+
+    const b = await manager.startRunner({
+      modelName: 'block-reuse-b',
+      instanceId: 'inst-block-reuse-b',
+      runnerType: 'vllm',
+      modelPath: '/models/block-reuse-b',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(b.port).toBe(19301);
+  });
+
   it('reuses released port after unexpected exit', async () => {
     const { launcher, fireExit } = makeSupervisedLauncher();
     const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
@@ -574,7 +632,7 @@ describe('RunnerManager', () => {
       devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     });
 
-    expect(a.port).toBe(19303);
+    expect(a.port).toBe(19305);
   });
 
   it('port released on failed launch', async () => {

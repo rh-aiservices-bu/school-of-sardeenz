@@ -251,6 +251,11 @@ export class ApptainerLauncher implements RunnerLauncher {
       FLASHINFER_WORKSPACE_DIR: `${cacheDir}/flashinfer`,
       ENABLE_KVCACHED: 'true',
       KVCACHED_AUTOPATCH: '1',
+      // MLServer's gRPC/metrics servers bind even in REST-only use; pass explicit ports from the
+      // worker's 4-port block so the shim never derives them via +10000/+20000 (and never trips the
+      // 65535 ceiling). vLLM ignores these. (#160)
+      SARDEENZ_MLSERVER_GRPC_PORT: String(spec.grpcPort),
+      SARDEENZ_MLSERVER_METRICS_PORT: String(spec.metricsPort),
     };
     if (useNv) {
       envFlags.CUDA_VISIBLE_DEVICES = spec.devices.map((d) => d.deviceIndex).join(',');

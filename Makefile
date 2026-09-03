@@ -59,10 +59,12 @@ dev-proxy: ## Routing proxy only (cargo watch; requires Rust)
 dev-worker: ## A single dev worker (dev-worker-0, port 9100 unless overridden in .env)
 	node --import tsx runners/dev-worker/src/index.ts
 
+# SARDEENZ_MAX_RUNNERS=24 below: with the #160 4-port-per-runner block, 24 runners * 4 ports = 96,
+# fitting each worker's 100-port block (9100s/9200s) without overlapping the next worker's range.
 dev-worker-2: ## Two dev workers (ports 9100/9200) for multi-worker placement testing
 	npx concurrently --names "w0,w1" --prefix-colors "blue,red" \
-		"SARDEENZ_WORKER_ID=dev-worker-0 SARDEENZ_WORKER_PORT=9100 SARDEENZ_RUNNER_PORT_START=9101 node --import tsx runners/dev-worker/src/index.ts" \
-		"SARDEENZ_WORKER_ID=dev-worker-1 SARDEENZ_WORKER_PORT=9200 SARDEENZ_RUNNER_PORT_START=9201 node --import tsx runners/dev-worker/src/index.ts"
+		"SARDEENZ_WORKER_ID=dev-worker-0 SARDEENZ_WORKER_PORT=9100 SARDEENZ_RUNNER_PORT_START=9101 SARDEENZ_MAX_RUNNERS=24 node --import tsx runners/dev-worker/src/index.ts" \
+		"SARDEENZ_WORKER_ID=dev-worker-1 SARDEENZ_WORKER_PORT=9200 SARDEENZ_RUNNER_PORT_START=9201 SARDEENZ_MAX_RUNNERS=24 node --import tsx runners/dev-worker/src/index.ts"
 
 dev-worker-stop: ## Stop all running dev workers
 	@pkill -f "runners/dev-worker/src/index.ts" 2>/dev/null || echo "No dev workers running"

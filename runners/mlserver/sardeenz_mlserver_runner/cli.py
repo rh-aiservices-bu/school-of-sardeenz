@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from dataclasses import dataclass, field
+
+_log = logging.getLogger("sardeenz_mlserver_runner.cli")
 
 # Default offsets from --engine-port for MLServer's gRPC and metrics servers (both bind even in
 # REST-only deployments — see MLSERVER_GRPC_PORT/MLSERVER_METRICS_PORT below). Overridable via env
@@ -71,11 +74,24 @@ def parse_args(argv: list[str]) -> RunnerArgs:
         raise ValueError("--engine-port must differ from --port")
 
     served_name, config_name, leftovers = _extract_served_names(forwarded)
-    grpc_port, metrics_port = aux_ports(
-        engine_port,
-        os.environ.get("SARDEENZ_MLSERVER_GRPC_PORT"),
-        os.environ.get("SARDEENZ_MLSERVER_METRICS_PORT"),
-    )
+    grpc_env = os.environ.get("SARDEENZ_MLSERVER_GRPC_PORT")
+    metrics_env = os.environ.get("SARDEENZ_MLSERVER_METRICS_PORT")
+    grpc_port, metrics_port = aux_ports(engine_port, grpc_env, metrics_env)
+    if grpc_env or metrics_env:
+        _log.info(
+            "MLServer aux ports from worker env override: grpc=%d metrics=%d", grpc_port, metrics_port
+        )
+    else:
+        _log.warning(
+            "MLServer aux ports derived from +%d/+%d offsets of engine_port=%d (grpc=%d metrics=%d) "
+            "— standalone/fallback path; the worker normally supplies SARDEENZ_MLSERVER_GRPC_PORT/"
+            "SARDEENZ_MLSERVER_METRICS_PORT (#160)",
+            _DEFAULT_GRPC_OFFSET,
+            _DEFAULT_METRICS_OFFSET,
+            engine_port,
+            grpc_port,
+            metrics_port,
+        )
 
     return RunnerArgs(
         model=ns.model,
@@ -123,6 +139,11 @@ def aux_ports(engine_port: int, grpc_env: str | None, metrics_env: str | None) -
     Pure: ``grpc_env``/``metrics_env`` are the already-read env var values (or ``None``), not env
     var names — kept out of ``os.environ`` here so this stays a pure, unit-testable function. Env
     overrides win; otherwise the ports default to ``engine_port + 10000`` / ``+ 20000``.
+
+    As of #160 the worker's port allocator reserves an explicit gRPC/metrics port per runner and
+    passes them via ``SARDEENZ_MLSERVER_GRPC_PORT``/``SARDEENZ_MLSERVER_METRICS_PORT`` (env
+    override, above) on every worker-launched runner; the offset arithmetic here is a fallback for
+    standalone/direct SIF invocation, where the ceiling guard below still applies.
     """
     grpc_port = int(grpc_env) if grpc_env else engine_port + _DEFAULT_GRPC_OFFSET
     metrics_port = int(metrics_env) if metrics_env else engine_port + _DEFAULT_METRICS_OFFSET

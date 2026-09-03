@@ -258,6 +258,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Per-runner 4-port block; explicit MLServer gRPC/metrics ports (#160).** The dev-worker's
+  port allocator now reserves a contiguous block of four ports per runner —
+  `(mgmt, engine, gRPC, metrics) = (base, base+1, base+2, base+3)` — uniformly for every
+  runner (protocol-agnostic; OpenAI runners leave gRPC/metrics unused), scanning
+  `[SARDEENZ_RUNNER_PORT_START, +SARDEENZ_MAX_RUNNERS*4)` with stride 4. The Apptainer
+  launcher passes `SARDEENZ_MLSERVER_GRPC_PORT` / `SARDEENZ_MLSERVER_METRICS_PORT` to every
+  runner so the MLServer shim no longer derives them as `engine+10000/+20000`; the offsets
+  remain only as a logged fallback for standalone shim runs (the 65535 ceiling can no longer
+  be hit from a worker launch). The engine-port = mgmt+1 invariant is retained; no contract,
+  Redis, or control-plane surface changes. `make dev-worker-2` caps each worker at
+  `SARDEENZ_MAX_RUNNERS=24` so the wider block range stays inside each worker's 100-port
+  window. Docs (`runner-contract.md`, MLServer README, ADR-019 wording, `.env.example`)
+  updated.
+
 - **CLAUDE.md project status refreshed.** The Project Status paragraph now lists M9–M11, #154 (ADR-020), and the VRAM telemetry doctrine as merged, and names M12 (Runner & Engine Hardening) then M13 as the next milestones; it previously still said M9 was next and #154 in progress.
 
 - **Ignore `.qwen/worktrees/` in git.** Milestone-execution worktrees now live
