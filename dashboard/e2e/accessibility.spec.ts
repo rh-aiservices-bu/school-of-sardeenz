@@ -159,7 +159,7 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
     await page.goto(bffUrl(bffPort, '/models'));
 
     // Wait for the table to render
-    await expect(page.locator('table[aria-label="Model list"]')).toBeVisible();
+    await expect(page.getByRole('grid', { name: 'Models' })).toBeVisible();
 
     await runA11yCheck(page);
   });
@@ -189,7 +189,7 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
 
     await page.goto(bffUrl(bffPort, '/workers'));
 
-    await expect(page.locator('table[aria-label="Worker list"]')).toBeVisible();
+    await expect(page.getByRole('grid', { name: 'Workers' })).toBeVisible();
 
     await runA11yCheck(page);
   });
@@ -223,7 +223,9 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
 
     // Wait for the model heading to appear
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    await expect(page.getByText(ACTIVE_MODEL.modelName)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: ACTIVE_MODEL.modelName }),
+    ).toBeVisible();
 
     await runA11yCheck(page);
   });
@@ -272,7 +274,7 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
     mockControlPlane.setModels([ACTIVE_MODEL]);
 
     await page.goto(bffUrl(bffPort, '/models'));
-    await expect(page.locator('table[aria-label="Model list"]')).toBeVisible();
+    await expect(page.getByRole('grid', { name: 'Models' })).toBeVisible();
 
     // Open the kebab menu and click Delete to open the modal
     await page.locator(`button[aria-label="Actions for ${ACTIVE_MODEL.modelName}"]`).click();

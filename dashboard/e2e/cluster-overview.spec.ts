@@ -40,7 +40,9 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByText('Workers')).toBeVisible();
+    // Unscoped getByText('Workers') also matches the global nav sidebar link of the same name
+    // (a strict-mode violation) — scope to the summary card itself.
+    await expect(page.getByTestId('summary-card-workers').getByText('Workers')).toBeVisible();
   });
 
   test('shows Models summary card', async ({ page, bffPort, mockControlPlane }) => {
@@ -48,7 +50,10 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByText('Models')).toBeVisible();
+    // Unscoped getByText('Models') is a case-insensitive substring match and can also hit the
+    // global nav sidebar link, or the inference URL banner's "MLServer models" text once
+    // /api/config resolves — scope to the summary card itself.
+    await expect(page.getByTestId('summary-card-models').getByText('Models')).toBeVisible();
   });
 
   test('shows GPU Memory summary card', async ({ page, bffPort, mockControlPlane }) => {
@@ -56,7 +61,9 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByText('GPU Memory')).toBeVisible();
+    // Unscoped getByText('GPU Memory') also matches the global nav sidebar link of the same
+    // name — scope to the summary card itself.
+    await expect(page.getByTestId('summary-card-gpu-memory').getByText('GPU Memory')).toBeVisible();
   });
 
   test('shows Alerts summary card', async ({ page, bffPort, mockControlPlane }) => {
@@ -64,7 +71,9 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByText('Alerts')).toBeVisible();
+    // Scoped to the summary card for consistency with the other summary-card assertions, which
+    // must scope to avoid colliding with the global nav sidebar / inference URL banner text.
+    await expect(page.getByTestId('summary-card-alerts').getByText('Alerts')).toBeVisible();
   });
 
   test('summary cards show correct counts from mock data', async ({
@@ -76,13 +85,17 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    // Worker count should show 1 / 1
-    const workersCard = page.locator('.pf-v6-c-card').filter({ hasText: 'Workers' }).first();
-    await expect(workersCard.getByText('1')).toBeVisible();
+    // Worker count should show 1 / 1. Scope by data-testid rather than a text filter: the
+    // inference URL banner (rendered once /api/config resolves) contains "MLServer models" in
+    // its OIP description, and PlaywrightLocator.filter({ hasText }) matches case-insensitively,
+    // so `.filter({ hasText: 'Models' })` can race-pick that banner card instead of the actual
+    // Models summary card once it mounts.
+    const workersCard = page.getByTestId('summary-card-workers');
+    await expect(workersCard.getByText('1', { exact: true })).toBeVisible();
 
     // Models total: 3
-    const modelsCard = page.locator('.pf-v6-c-card').filter({ hasText: 'Models' }).first();
-    await expect(modelsCard.getByText('3')).toBeVisible();
+    const modelsCard = page.getByTestId('summary-card-models');
+    await expect(modelsCard.getByText('3', { exact: true })).toBeVisible();
   });
 
   test('shows VRAM Usage section', async ({ page, bffPort, mockControlPlane }) => {
@@ -90,7 +103,7 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByText('VRAM Usage')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'VRAM Usage' })).toBeVisible();
   });
 
   test('shows Model State Breakdown section', async ({ page, bffPort, mockControlPlane }) => {
@@ -123,7 +136,7 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    const workersCard = page.locator('.pf-v6-c-card').filter({ hasText: 'Workers' }).first();
+    const workersCard = page.getByTestId('summary-card-workers');
     await expect(workersCard.getByText('All online')).toBeVisible();
   });
 
@@ -141,7 +154,7 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    const alertsCard = page.locator('.pf-v6-c-card').filter({ hasText: 'Alerts' }).first();
+    const alertsCard = page.getByTestId('summary-card-alerts');
     await expect(alertsCard.getByText('All clear')).toBeVisible();
   });
 });

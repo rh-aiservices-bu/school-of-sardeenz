@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/global-setup.ts',
   timeout: 30_000,
   expect: { timeout: 8_000 },
   fullyParallel: false, // Tests spin up BFF per-test — sequential avoids port exhaustion

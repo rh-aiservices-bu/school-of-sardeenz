@@ -400,6 +400,16 @@ export function ModelList() {
       variant={variant}
       isCompact={variant === 'top'}
       aria-label={t('list.pagination.ariaLabel')}
+      // PF6's <nav> inside Pagination gets its accessible name from titles.paginationAriaLabel,
+      // not the top-level aria-label prop — two Pagination instances (top/bottom) on one page
+      // otherwise render two <nav> landmarks with the same default name ("Pagination"),
+      // tripping axe's landmark-unique check.
+      titles={{
+        paginationAriaLabel:
+          variant === 'top'
+            ? t('list.pagination.ariaLabelTop')
+            : t('list.pagination.ariaLabelBottom'),
+      }}
     />
   );
 
@@ -634,7 +644,11 @@ export function ModelList() {
                 <Th sort={getSortParams('currentMemory')}>{t('list.table.memory')}</Th>
                 <Th sort={getSortParams('lastInferenceAt')}>{t('list.table.lastInference')}</Th>
                 <Th>{t('list.table.pinned')}</Th>
-                {isAdmin && <Th aria-label={t('list.table.actions')} />}
+                {isAdmin && (
+                  <Th aria-label={t('list.table.actions')}>
+                    <span className="pf-v6-screen-reader">{t('list.table.actions')}</span>
+                  </Th>
+                )}
               </Tr>
             </Thead>
             <Tbody>

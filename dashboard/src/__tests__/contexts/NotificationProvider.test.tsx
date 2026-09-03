@@ -1,24 +1,80 @@
 /**
- * Tests for the NotificationProvider mount-fetch lifecycle (issue #106).
+ * Tests for NotificationProvider mount-fetch lifecycle and the ProtectedRoute
+ * auth gate (issue #106, #148).
  *
- * We test the fetch/error-handling logic that the provider's mount effect
- * runs by simulating it directly, rather than using renderHook — following
- * the project convention documented in NotificationContext.test.ts,
- * useEventStream.test.ts, and role-visibility.test.tsx ("to avoid React
- * version conflicts in the worktree").
- *
- * That conflict is real here, not just historical caution: this worktree's
- * root node_modules resolves @testing-library/react against React 19.2.7,
- * while dashboard/vitest.config.ts aliases the dashboard's own code to its
- * local React 18.3.1. Any renderHook/render call throws "Invalid hook call"
- * or "A React Element from an older version of React was rendered" —
- * verified empirically while implementing this file.
- *
- * Rendering-level coverage for actual mount/unmount behaviour is deferred to
- * the Playwright e2e suite, matching the pattern role-visibility.test.tsx
- * uses for the same reason (not extended here — out of scope for #106).
+ * The auth-gate cases below are real renders of the gate (App.tsx ProtectedRoute
+ * logic) with a mocked useAuth — issue #148 pinned @testing-library/react to
+ * the dashboard-local React 18.3.1 in vitest.config.ts, so render/renderHook
+ * now work in this workspace. The mount-fetch block is retained as a direct
+ * test of the effect body (it mirrors NotificationContext.tsx exactly); the
+ * logic-simulation convention notes in the other dashboard test files are
+ * still accurate for them — only this file has been converted.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { AuthProvider, useAuth } from '../../contexts/AuthContext';
+import type { AuthState } from '../../contexts/AuthContext';
+import { api } from '../../api/client';
+import { NotificationProvider } from '../../contexts/NotificationContext';
+
+vi.mock('../../api/client', () => ({
+  api: {
+    notifications: {
+      list: vi.fn(),
+      markRead: vi.fn(),
+      markAllRead: vi.fn(),
+      remove: vi.fn(),
+      clearAll: vi.fn(),
+    },
+  },
+}));
+
+vi.mock('../../contexts/AuthContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../contexts/AuthContext')>();
+  return { ...actual, useAuth: vi.fn() };
+});
+
+const mockedList = vi.mocked(api.notifications.list);
+
+/**
+ * Mirrors App.tsx ProtectedRoute's gating condition exactly (real gate logic,
+ * test-local): the same branch order and the same useAuth() inputs
+ * (authMode → isLoading → isAuthenticated). The real component additionally
+ * calls useLocation() and renders <Navigate to="/login"> for the unauthenticated
+ * branch; those are router-navigation concerns, not gate logic, so the test
+ * gate renders a plain marker element instead. No Router wrapper is used:
+ * react-router-dom is a CJS package hoisted to the monorepo root whose
+ * require('react') resolves to root React 19, which would re-split the render
+ * tree (issue #148).
+ */
+function Gate({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading, authMode } = useAuth();
+  if (authMode === 'none') return <>{children}</>;
+  if (isLoading) return <div data-testid="gate-loading" />;
+  if (!isAuthenticated) return <div data-testid="gate-login" />;
+  return <>{children}</>;
+}
+
+function renderGate(auth: Partial<AuthState>, children: ReactNode) {
+  const state: AuthState = {
+    isAuthenticated: false,
+    isAdmin: false,
+    user: null,
+    authMode: 'simple',
+    isLoading: false,
+    login: async () => {},
+    logout: () => {},
+    loginError: null,
+    ...auth,
+  };
+  vi.mocked(useAuth).mockReturnValue(state);
+  return render(
+    <AuthProvider>
+      <Gate>{children}</Gate>
+    </AuthProvider>,
+  );
+}
 
 const MAX_NOTIFICATIONS = 200;
 
@@ -116,42 +172,50 @@ describe('NotificationProvider mount fetch', () => {
   });
 });
 
-describe('NotificationProvider auth-gate guard', () => {
-  /** Mirrors ProtectedRoute's gating condition in App.tsx. */
-  function gateMountsProvider(
-    authMode: 'none' | 'simple' | 'oauth',
-    isAuthenticated: boolean,
-  ): boolean {
-    return authMode === 'none' || isAuthenticated;
-  }
-
-  it('does not mount the provider while unauthenticated under simple auth', () => {
-    expect(gateMountsProvider('simple', false)).toBe(false);
+describe('NotificationProvider auth gate (real render)', () => {
+  beforeEach(() => {
+    vi.mocked(useAuth).mockReset();
+    mockedList.mockReset();
+    mockedList.mockResolvedValue({ notifications: [] });
   });
 
-  it('mounts the provider once authenticated under simple auth', () => {
-    expect(gateMountsProvider('simple', true)).toBe(true);
+  it('does NOT mount NotificationProvider (no history fetch) while unauthenticated under simple auth', async () => {
+    renderGate(
+      { authMode: 'simple', isAuthenticated: false },
+      <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>,
+    );
+    expect(await screen.findByTestId('gate-login')).toBeInTheDocument();
+    expect(screen.queryByText('PROVIDER_MOUNTED')).not.toBeInTheDocument();
+    expect(mockedList).not.toHaveBeenCalled();
   });
 
-  it('does not mount the provider while unauthenticated under oauth', () => {
-    expect(gateMountsProvider('oauth', false)).toBe(false);
+  it('does NOT mount NotificationProvider while unauthenticated under oauth', async () => {
+    renderGate(
+      { authMode: 'oauth', isAuthenticated: false },
+      <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>,
+    );
+    expect(await screen.findByTestId('gate-login')).toBeInTheDocument();
+    expect(mockedList).not.toHaveBeenCalled();
   });
 
-  it('mounts the provider unconditionally when auth is disabled', () => {
-    expect(gateMountsProvider('none', false)).toBe(true);
+  it('mounts NotificationProvider and fires the history fetch once authenticated', async () => {
+    renderGate(
+      {
+        authMode: 'simple',
+        isAuthenticated: true,
+        isAdmin: true,
+        user: { username: 'alice', roles: ['admin'], authMode: 'simple' },
+      },
+      <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>,
+    );
+    expect(await screen.findByText('PROVIDER_MOUNTED')).toBeInTheDocument();
+    await vi.waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+    expect(mockedList).toHaveBeenCalledWith(200);
   });
 
-  it('the history fetch never runs while the gate keeps the provider unmounted', () => {
-    // NotificationProvider's only fetch is triggered by its mount effect
-    // (useEffect(…, [])). React guarantees an unmounted component's effects
-    // never run, so gateMountsProvider === false is sufficient to prove no
-    // /api/notifications request is issued — there is no code path in
-    // NotificationContext.tsx that fetches independently of mount.
-    const listMock = vi.fn();
-    const authed = gateMountsProvider('simple', false);
-    if (authed) {
-      void fetchHistory(listMock);
-    }
-    expect(listMock).not.toHaveBeenCalled();
+  it('mounts NotificationProvider unconditionally when auth is disabled', async () => {
+    renderGate({ authMode: 'none' }, <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>);
+    expect(await screen.findByText('PROVIDER_MOUNTED')).toBeInTheDocument();
+    await vi.waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
   });
 });

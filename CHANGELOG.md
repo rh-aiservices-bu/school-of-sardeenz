@@ -49,6 +49,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard e2e: runner-catalog mock, deploy-flow tests re-enabled, stale-build guard (#155).**
+  The e2e mock control plane now serves `GET /api/v1/catalog` with a minimal `RunnerCatalogView`
+  (one imported `vllm` runner, module `vllm-0.21`) so the deploy form's required Runtime Module
+  dropdown is populated in the harness. The two deploy-submission tests that were `test.fixme`
+  (the deploy flow and the ADR-020 display-name flow) now run: they select the module, close the
+  launch-logs modal, and assert the post-deploy navigation and the display name shown as the
+  primary identifier. A dependency-free Playwright `globalSetup` fails a bare `playwright test`
+  when `dist/client` is missing or older than the client source (the false-green cause the issue
+  reported), with `SKIP_DIST_FRESHNESS_CHECK=1` as the escape hatch; `npm run test:e2e` builds
+  first, so CI is unaffected. The other failures the issue listed were fixed under #128.
+
+- **Dashboard e2e suite green and enforced in CI (#128).** The Playwright suite had 21
+  pre-existing failures once #102 made it runnable. Updated the specs to current PF6 markup
+  (role-based `grid`/heading/`aria-current` locators replacing stale `table[aria-label]`/`itemid`
+  selectors, and strict-mode-safe matches for text that renders twice), fixed the e2e harness so
+  the BFF Redis-fallback path actually fires (the mock control plane now answers a non-JSON 503
+  when simulating an outage; the Redis seed helper writes the post-#120 per-instance key shape the
+  BFF reads), and fixed the app a11y bugs the newly reachable axe checks surfaced: Cluster Overview
+  gains its `h1`, Metrics empty-state headings drop from `h3` to `h2` (`heading-order`), the two
+  Models-list paginations get distinct landmark names, the action-column table headers carry
+  screen-reader text, and Model Detail's secondary timestamps use the contrast-safe subtle text
+  token. Added browser coverage for the #120 instances UI (instances-count column, Add-instance
+  action on the list, per-instance table and Add-instance button on the detail page). A new `e2e`
+  job in `.github/workflows/ci.yml` (Valkey service container, Chromium) runs the suite on every
+  PR, closing the #82 deferral; marking it a required check is a branch-protection setting. The
+  deploy-submit flow stays `test.fixme` until #155 adds the runner-catalog mock.
+  A verification pass under parallel spec-file load then removed the last timing-sensitive
+  matches: chart-card titles are scoped to the PF6 card title (Victory renders the same text into
+  the SVG `<title>`/`<desc>`), the Metrics page heading is matched exactly at level 1, the four
+  Cluster Overview summary cards carry `data-testid`s so their counts are no longer found through
+  substring text filters that also hit the nav links and the inference URL banner, and the
+  Prometheus-unreachable assertion waits long enough for React Query's retry backoff.
+
+- **`npm test -w @sardeenz/dev-worker` crashed on vitest cwd/projects resolution (#144).**
+  `runners/dev-worker/` had no local vitest config, so the workspace-scoped invocation fell
+  back to the root `vitest.config.ts`, whose `test.projects` entries are resolved relative to
+  the cwd (`runners/dev-worker`) and dangle (`Startup Error: Projects definition references a
+  non-existing file or a directory: …/runners/dev-worker/packages/types`). A minimal
+  `runners/dev-worker/vitest.config.ts` (no `projects` key) was added — the same arrangement
+  `control-plane/` and `dashboard/` already use — so the workspace-scoped run and the root
+  multi-project run share one correctly-resolving config. Root `vitest run` now loads it as the
+  project config for the `runners/dev-worker` projects entry, unchanged in totals.
+
+- **Flaky BFF streamed-chunk test under parallel-suite load (#156).** The
+  `delivers the streamed body to the client in more than one chunk` case in
+  `dashboard/server/__tests__/routes/inference.test.ts` asserted that client-side read
+  timestamps span >= 100 ms across two upstream enqueues; under full parallel-suite load the
+  observed spread can drop below the threshold (seen: 79 ms) while the test passes reliably in
+  isolation — a load-sensitive wall-clock assertion, not a buffering regression. The two-chunk
+  delivery itself is the invariant: the test now asserts the read **count** (>= 2 separate reads)
+  only. The 150 ms upstream enqueue delay in the mock is kept — it keeps the two frames from
+  coalescing into one pipe batch, which is what makes the count a meaningful signal against a
+  buffering regression.
+
+- **Dashboard unit tests could not render any React component — dual-React split (#148).** The
+  monorepo root hoists a React 19 copy (a direct dep of `@redocly/cli`) plus
+  `@testing-library/react`, whose CJS entry's native `require('react')` binds that root React 19 —
+  while `dashboard/vitest.config.ts` alias-pins the app code to the dashboard-local React 18.3.1.
+  Every `render`/`renderHook` threw "Invalid hook call" / cross-version element errors, so all
+  dashboard unit tests were pinned to the logic-simulation convention and hook wiring had no
+  executable render coverage. `vitest.config.ts` now pins the whole React render tree to
+  dashboard-local 18.3.1 files — `react`, `react-dom` (+`client`/`test-utils`), `react/jsx-runtime`,
+  `react/jsx-dev-runtime` — plus `@testing-library/react` to its root-hoisted **ESM** build (whose
+  `import`s flow through the alias pipeline, unlike the CJS entry's native `require`). Proven by
+  converting the `NotificationProvider` auth-gate suite from logic-simulation to 4 real renders
+  (gate branch logic exercised against the real `AuthProvider`/`useAuth` context). Coverage note:
+  plain-React context/hook trees now render, but root-hoisted CJS packages that natively
+  `require('react')` — `@patternfly/react-core`, `react-router-dom`, `react-i18next`,
+  `@tanstack/react-query` — still re-split against root React 19; closing that boundary is tracked
+  as a follow-up (#176).
+
 - **Dashboard offered Delete on transient-state models/instances, then 409'd (#172).** After
   #140 the control plane rejects `DELETE /api/v1/models/{modelName}` and
   `DELETE .../instances/{instanceId}` with `409 INVALID_STATE` while an instance is `PENDING`,

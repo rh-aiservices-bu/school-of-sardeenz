@@ -72,4 +72,6 @@ The automated scan runs the WCAG 2.1 AA ruleset via axe-core. It catches many bu
 npm run test:e2e --workspace=@sardeenz/dashboard -- --grep "Accessibility"
 ```
 
+Run the suite via `npm run test:e2e` (not bare `npx playwright test`) so the client build is fresh — a `globalSetup` guard fails the run against a stale or missing `dist/client`.
+
 Violations are reported with a full HTML detail report. Fix all axe-reported WCAG 2.1 AA violations before merging. Note that passing the automated scan is a necessary but not sufficient condition for full WCAG 2.1 AA conformance.

@@ -390,7 +390,7 @@ export function ModelDetail() {
               style={{
                 display: 'block',
                 marginTop: 'var(--pf-t--global--spacer--sm)',
-                color: 'var(--pf-t--global--color--nonstatus--gray--default)',
+                color: 'var(--pf-t--global--text--color--subtle)',
               }}
             >
               {startingInstance.progress.message}
@@ -494,7 +494,7 @@ export function ModelDetail() {
             {model.lastInferenceAt ? (
               <>
                 {formatRelativeTime(model.lastInferenceAt)}{' '}
-                <span style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}>
+                <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
                   ({formatDateTime(model.lastInferenceAt)})
                 </span>
               </>
@@ -586,7 +586,13 @@ export function ModelDetail() {
                 <Th>{t('detail.instances.columns.memory')}</Th>
                 <Th>{t('detail.instances.columns.endpoint')}</Th>
                 <Th>{t('detail.instances.columns.created')}</Th>
-                {isAdmin && <Th aria-label={t('detail.instances.columns.actions')} />}
+                {isAdmin && (
+                  <Th aria-label={t('detail.instances.columns.actions')}>
+                    <span className="pf-v6-screen-reader">
+                      {t('detail.instances.columns.actions')}
+                    </span>
+                  </Th>
+                )}
               </Tr>
             </Thead>
             <Tbody>

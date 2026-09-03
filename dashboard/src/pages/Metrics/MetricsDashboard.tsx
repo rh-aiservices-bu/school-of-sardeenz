@@ -152,7 +152,7 @@ function MetricsEmptyState({ title }: MetricsEmptyStateProps) {
       variant="sm"
       icon={ChartLineIcon}
       titleText={title ?? t('empty.title')}
-      headingLevel="h3"
+      headingLevel="h2"
     >
       <EmptyStateBody>{t('empty.body')}</EmptyStateBody>
     </EmptyState>

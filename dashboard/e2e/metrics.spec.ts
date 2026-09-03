@@ -6,10 +6,12 @@ test.describe('Metrics Dashboard', () => {
     test('metrics page renders heading', async ({ page, bffPort }) => {
       await page.goto(bffUrl(bffPort, '/metrics'));
 
+      // getByRole name matching is a case-insensitive substring by default, so an unscoped
+      // { name: 'Metrics' } also matches the "No metrics data available" empty-state headings
+      // once charts with no data render — a strict-mode violation that only appears after those
+      // headings mount. Require an exact, level-1 heading match to pin it to the page title.
       await expect(
-        page
-          .getByRole('heading', { name: 'Metrics' })
-          .or(page.locator('h1').filter({ hasText: 'Metrics' })),
+        page.getByRole('heading', { name: 'Metrics', level: 1, exact: true }),
       ).toBeVisible();
     });
 
@@ -57,7 +59,7 @@ test.describe('Metrics Dashboard', () => {
       await page.goto(bffUrl(bffPort, '/metrics'));
 
       const autoRefreshSwitch = page.locator('#auto-refresh-switch');
-      await autoRefreshSwitch.click();
+      await page.locator('#auto-refresh-switch-label').click();
       await expect(autoRefreshSwitch).not.toBeChecked();
     });
   });
@@ -90,9 +92,16 @@ test.describe('Metrics Dashboard', () => {
 
       await page.goto(bffUrl(bffPort, '/metrics'));
 
-      // Chart card titles should be present
-      await expect(page.getByText('Request Latency (p50 / p95 / p99)')).toBeVisible();
-      await expect(page.getByText('Request Throughput')).toBeVisible();
+      // Chart card titles should be present. Scope to the PatternFly card title element:
+      // once the Victory chart mounts, it renders an SVG <title>/<desc> with the same text
+      // (ariaTitle/ariaDesc), so an unscoped getByText() becomes a strict-mode violation
+      // (3 matches) as soon as the chart finishes rendering.
+      await expect(
+        page.locator('.pf-v6-c-card__title').filter({ hasText: 'Request Latency (p50 / p95 / p99)' }),
+      ).toBeVisible();
+      await expect(
+        page.locator('.pf-v6-c-card__title').filter({ hasText: 'Request Throughput' }),
+      ).toBeVisible();
     });
 
     test('memory section renders when instant data available', async ({
@@ -109,7 +118,9 @@ test.describe('Metrics Dashboard', () => {
 
       await page.goto(bffUrl(bffPort, '/metrics'));
 
-      await expect(page.getByText('Device Memory (Current)')).toBeVisible();
+      await expect(
+        page.locator('.pf-v6-c-card__title').filter({ hasText: 'Device Memory (Current)' }),
+      ).toBeVisible();
     });
   });
 
@@ -123,8 +134,13 @@ test.describe('Metrics Dashboard', () => {
 
       await page.goto(bffUrl(bffPort, '/metrics'));
 
-      // Charts should show empty state / error state
-      await expect(page.getByText('No metrics data available').first()).toBeVisible();
+      // Charts should show empty state / error state. All ten chart queries retry through
+      // React Query's default backoff (3 retries, up to ~7s of delay) before settling into the
+      // error state, which can exceed Playwright's 8s default assertion timeout under load —
+      // give this one enough headroom to observe the deterministic end state rather than racing it.
+      await expect(page.getByText('No metrics data available').first()).toBeVisible({
+        timeout: 15_000,
+      });
     });
   });
 });
