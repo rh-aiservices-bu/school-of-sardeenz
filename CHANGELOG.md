@@ -49,6 +49,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`npm test -w @sardeenz/dev-worker` crashed on vitest cwd/projects resolution (#144).**
+  `runners/dev-worker/` had no local vitest config, so the workspace-scoped invocation fell
+  back to the root `vitest.config.ts`, whose `test.projects` entries are resolved relative to
+  the cwd (`runners/dev-worker`) and dangle (`Startup Error: Projects definition references a
+  non-existing file or a directory: …/runners/dev-worker/packages/types`). A minimal
+  `runners/dev-worker/vitest.config.ts` (no `projects` key) was added — the same arrangement
+  `control-plane/` and `dashboard/` already use — so the workspace-scoped run and the root
+  multi-project run share one correctly-resolving config. Root `vitest run` now loads it as the
+  project config for the `runners/dev-worker` projects entry, unchanged in totals.
+
 - **Flaky BFF streamed-chunk test under parallel-suite load (#156).** The
   `delivers the streamed body to the client in more than one chunk` case in
   `dashboard/server/__tests__/routes/inference.test.ts` asserted that client-side read
