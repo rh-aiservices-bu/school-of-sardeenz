@@ -248,6 +248,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **CLAUDE.md project status refreshed.** The Project Status paragraph now lists M9–M11, #154 (ADR-020), and the VRAM telemetry doctrine as merged, and names M12 (Runner & Engine Hardening) then M13 as the next milestones; it previously still said M9 was next and #154 in progress.
+
 - **Ignore `.qwen/worktrees/` in git.** Milestone-execution worktrees now live
   under `.qwen/worktrees/` (the Qwen Code counterpart of the already-ignored
   `.claude/worktrees/`); the path is gitignored so worktree checkouts never
