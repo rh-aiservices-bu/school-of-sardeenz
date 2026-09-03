@@ -49,6 +49,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard e2e: runner-catalog mock, deploy-flow tests re-enabled, stale-build guard (#155).**
+  The e2e mock control plane now serves `GET /api/v1/catalog` with a minimal `RunnerCatalogView`
+  (one imported `vllm` runner, module `vllm-0.21`) so the deploy form's required Runtime Module
+  dropdown is populated in the harness. The two deploy-submission tests that were `test.fixme`
+  (the deploy flow and the ADR-020 display-name flow) now run: they select the module, close the
+  launch-logs modal, and assert the post-deploy navigation and the display name shown as the
+  primary identifier. A dependency-free Playwright `globalSetup` fails a bare `playwright test`
+  when `dist/client` is missing or older than the client source (the false-green cause the issue
+  reported), with `SKIP_DIST_FRESHNESS_CHECK=1` as the escape hatch; `npm run test:e2e` builds
+  first, so CI is unaffected. The other failures the issue listed were fixed under #128.
+
 - **Dashboard e2e suite green and enforced in CI (#128).** The Playwright suite had 21
   pre-existing failures once #102 made it runnable. Updated the specs to current PF6 markup
   (role-based `grid`/heading/`aria-current` locators replacing stale `table[aria-label]`/`itemid`

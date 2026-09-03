@@ -196,4 +196,6 @@ export type {
   MockWorkerInfo,
   MockWorkerDetail,
   MockSseEvent,
+  MockRunnerCatalog,
+  MockCatalogItem,
 } from './mocks/control-plane.js';

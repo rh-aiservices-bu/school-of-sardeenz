@@ -195,10 +195,7 @@ test.describe('Model Management', () => {
       await expect(page).toHaveURL(/\/models$/);
     });
 
-    // fixme(#155): the mock control plane has no catalog route, so the required
-    // Runtime Module dropdown is empty and every deploy submission is blocked in
-    // this harness. #155 adds the catalog mock and un-fixmes this test.
-    test.fixme('deploy flow: fill form and submit deploys model', async ({
+    test('deploy flow: fill form and submit deploys model', async ({
       page,
       bffPort,
       mockControlPlane,
@@ -211,10 +208,15 @@ test.describe('Model Management', () => {
       await page.getByLabel('Model Path').fill('/models/test-model/7b');
       await page.getByLabel('Required Memory (GiB)').fill('8');
 
+      await page.locator('#runtime-module').selectOption('vllm-0.21');
+
       await page.getByRole('button', { name: 'Deploy' }).click();
 
+      // Deploy opens the launch-logs modal; navigation happens on close.
+      await page.getByRole('button', { name: 'Close' }).last().click();
+
       // After successful deployment, the BFF posts to the mock CP which returns 201,
-      // then the UI navigates to the model detail page
+      // then closing the launch-logs modal navigates to the model detail page.
       await expect(page).toHaveURL(/\/models\/test-model/, { timeout: 10_000 });
     });
   });
@@ -395,10 +397,7 @@ test.describe('Model Management', () => {
   });
 
   test.describe('Display Name', () => {
-    // fixme(#155): the mock control plane has no catalog route, so the required
-    // Runtime Module dropdown is empty and every deploy submission is blocked in
-    // this harness. Assertions are correct; un-fixme once the mock serves a catalog.
-    test.fixme('deploying with a display name shows it primary in the list and detail header, with modelName as the secondary identifier', async ({
+    test('deploying with a display name shows it primary in the list and detail header, with modelName as the secondary identifier', async ({
       page,
       bffPort,
       mockControlPlane,
@@ -412,7 +411,11 @@ test.describe('Model Management', () => {
       await page.getByLabel('Model Path').fill('/models/test-model/displayname');
       await page.getByLabel('Required Memory (GiB)').fill('8');
 
+      await page.locator('#runtime-module').selectOption('vllm-0.21');
+
       await page.getByRole('button', { name: 'Deploy' }).click();
+
+      await page.getByRole('button', { name: 'Close' }).last().click();
 
       await expect(page).toHaveURL(/\/models\/test-model/, { timeout: 10_000 });
 

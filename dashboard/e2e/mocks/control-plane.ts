@@ -116,6 +116,30 @@ export interface MockClusterMemory {
   };
 }
 
+/** Minimal RunnerCatalogView (control-plane.yaml) for the deploy form's Runtime Module dropdown. */
+export interface MockCatalogItem {
+  entry: {
+    id: string;
+    title: string;
+    description: string;
+    engine?: string;
+    runnerType: string;
+    version: string;
+    image: string;
+    sifName: string;
+    protocol: 'openai' | 'oip';
+  };
+  status: { id: string; state: 'NOT_IMPORTED' | 'IMPORTING' | 'IMPORTED' | 'FAILED' };
+  updateAvailable: boolean;
+}
+
+export interface MockRunnerCatalog {
+  source?: string;
+  fetchedAt?: string;
+  runners: MockCatalogItem[];
+  unmanagedModules: string[];
+}
+
 export interface MockSseEvent {
   type: string;
   timestamp: string;
@@ -138,6 +162,7 @@ interface MockState {
   workerDetails: Record<string, MockWorkerDetail>;
   clusterStatus: MockClusterStatus;
   clusterMemory: MockClusterMemory;
+  catalog: MockRunnerCatalog;
   healthy: boolean;
   apiError: boolean;
 }
@@ -171,8 +196,34 @@ export class MockControlPlane {
         memory: { totalBytes: 0, usedBytes: 0, availableBytes: 0 },
       },
       clusterMemory: { workers: [] },
+      catalog: MockControlPlane.defaultCatalog(),
       healthy: true,
       apiError: false,
+    };
+  }
+
+  private static defaultCatalog(): MockRunnerCatalog {
+    return {
+      source: 'mock://runners.yaml',
+      fetchedAt: new Date().toISOString(),
+      runners: [
+        {
+          entry: {
+            id: 'vllm-0.21',
+            title: 'vLLM 0.21',
+            description: 'vLLM reference runner (mock).',
+            engine: 'vLLM',
+            runnerType: 'vllm',
+            version: '0.21',
+            image: 'oras://quay.io/sardeenz/runner-vllm:0.21',
+            sifName: 'vllm-0.21',
+            protocol: 'openai',
+          },
+          status: { id: 'vllm-0.21', state: 'IMPORTED' },
+          updateAvailable: false,
+        },
+      ],
+      unmanagedModules: [],
     };
   }
 
@@ -369,6 +420,11 @@ export class MockControlPlane {
       return reply.send(this.state.clusterMemory);
     });
 
+    // Runner catalog (#155) — merged catalog + import state the deploy form reads.
+    app.get('/api/v1/catalog', async (_req, reply) => {
+      return reply.send(this.state.catalog);
+    });
+
     // SSE — push events from sseEmitter
     app.get('/api/v1/events', async (req, reply) => {
       reply.hijack();
@@ -522,6 +578,11 @@ export class MockControlPlane {
       }
     }
     this.state.clusterMemory = { ...memory, summary: { totalBytes, usedBytes, availableBytes } };
+  }
+
+  /** Replace the mock runner catalog (deploy form's Runtime Module source). */
+  setCatalog(catalog: MockRunnerCatalog): void {
+    this.state.catalog = catalog;
   }
 
   /** Mark the health endpoint as healthy or unhealthy. */

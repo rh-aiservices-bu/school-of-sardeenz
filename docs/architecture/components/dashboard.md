@@ -301,6 +301,7 @@ The Playwright tests use a purpose-built mock harness rather than real upstream 
 - **`MockControlPlane`** (`dashboard/e2e/mocks/control-plane.ts`) — Fastify server on a random port serving all BFF-facing control plane endpoints with configurable canned responses. Supports stateful scenarios (deploy, delete, sleep, wake) and an SSE `pushEvent()` API for testing real-time transitions.
 - **`MockPrometheus`** (`dashboard/e2e/mocks/prometheus.ts`) — Fastify server serving `/api/v1/query_range` and `/api/v1/query` with pluggable response factories.
 - **Playwright fixtures** (`dashboard/e2e/fixtures.ts`) — per-test fixture that starts both mock servers on random ports, spawns the BFF process pointed at the mocks, and tears everything down after the test.
+- **Dist freshness guard** (`dashboard/e2e/global-setup.ts`) — a Playwright `globalSetup` that fails the run when `dist/client/index.html` is missing or older than the client source (`src/`, `index.html`, `vite.config.ts`). `npm run test:e2e` builds first so it always passes; running `npx playwright test` directly against a stale build now errors instead of giving a false-green signal. Bypass with `SKIP_DIST_FRESHNESS_CHECK=1`.
 
 ## Prometheus Integration
 
