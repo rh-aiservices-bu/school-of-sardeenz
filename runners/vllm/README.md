@@ -62,4 +62,7 @@ sardeenz_vllm_runner/
 cd runners/vllm && python3 -m pytest
 ```
 
+This suite plus the MLServer shim's and the shared `runners/conformance` suite run together in CI
+(the `python` job) and via `make test-python` (after `make test-python-deps`).
+
 The engine + HTTP layers are exercised by the Phase 4 cluster integration gates (Task 9).

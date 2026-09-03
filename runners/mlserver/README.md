@@ -101,4 +101,7 @@ MLServer/torch/httpx/FastAPI:
 cd runners/mlserver && python3 -m pytest
 ```
 
+This suite plus the vLLM shim's and the shared `runners/conformance` suite run together in CI
+(the `python` job) and via `make test-python` (after `make test-python-deps`).
+
 The engine + HTTP layers are exercised by the Phase 4-style cluster integration gates (Unit D).

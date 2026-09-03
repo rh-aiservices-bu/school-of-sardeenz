@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Python runner-shim + conformance suites gated in CI (#161).** A dedicated `python` GitHub
+  Actions job (`actions/setup-python` pinned by SHA, Python 3.12 via a new root
+  `.python-version`) installs the two shims' `[test]` extras — `pytest`, `fastapi`, `httpx`
+  only, never vLLM/torch/MLServer — and runs `runners/vllm/tests`, `runners/mlserver/tests`
+  and the shared engine-runner conformance suite `runners/conformance/` (72 tests) as a
+  required sibling of the `quality` and `e2e` jobs. Locally: `make test-python-deps` then
+  `make test-python` (`make test` is unchanged). A root `pytest.ini` sets
+  `--import-mode=importlib` so the three suites collect in one invocation despite both shims
+  shipping `tests/test_core.py` (previously an "import file mismatch"); per-shim runs still use
+  their own `pyproject.toml` config. Conformance/shim READMEs and `docs/development/setup.md`
+  updated. Follow-up #182 tracks CI-only pip constraints.
+
 - **Qwen Code skills (`.qwen/skills/`).** Adapted the Claude Code `implement` and
   `implement-milestone` skills to Qwen Code conventions for use in this project:
   - `implement` — the full-quality phase/feature process (branch from `dev`,

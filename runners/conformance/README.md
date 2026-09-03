@@ -33,12 +33,14 @@ transition both shims' `state.py` response builders must produce identically.
 
 ## Run
 
-Needs `fastapi` + `httpx` (from the two shims' own dependencies — installed editable alongside):
+Needs `fastapi` + `httpx` + `pytest` (installing the two shims with their `[test]` extra pulls
+all three — no vLLM/MLServer/torch/GPU):
 
 ```bash
-pip install -e runners/vllm -e runners/mlserver
+pip install -e "runners/vllm[test]" -e "runners/mlserver[test]"
 python -m pytest runners/conformance
 ```
 
-Not part of `make test` / CI (CI runs `tsc`/`eslint`/`redocly`/`clippy`/`vitest`/`cargo test` — no
-pytest), matching the shims' own unit suites. Run it in a dev venv or inside a runner SIF.
+Runs in CI as the dedicated `python` job (`.github/workflows/ci.yml`) and locally via
+`make test-python` (after `make test-python-deps`), which runs this suite together with both shims'
+unit suites in one `pytest` invocation. Can also be run directly in a dev venv or inside a runner SIF.
