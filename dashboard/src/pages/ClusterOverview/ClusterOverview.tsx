@@ -45,7 +45,7 @@ function WorkersCard({ status }: { status: ClusterStatus }) {
   const color: 'green' | 'red' | 'grey' = total === 0 ? 'grey' : online === total ? 'green' : 'red';
 
   return (
-    <Card isCompact>
+    <Card isCompact data-testid="summary-card-workers">
       <CardTitle>
         <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
           <FlexItem>
@@ -86,7 +86,7 @@ function ModelsCard({ status }: { status: ClusterStatus }) {
   const { active = 0, sleeping = 0, total } = status.modelCounts;
 
   return (
-    <Card isCompact>
+    <Card isCompact data-testid="summary-card-models">
       <CardTitle>
         <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
           <FlexItem>
@@ -138,7 +138,7 @@ function GpuMemoryCard({ status }: { status: ClusterStatus }) {
   const percent = totalBytes > 0 ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
 
   return (
-    <Card isCompact>
+    <Card isCompact data-testid="summary-card-gpu-memory">
       <CardTitle>
         <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
           <FlexItem>
@@ -192,7 +192,7 @@ function AlertsCard({ status }: { status: ClusterStatus }) {
   const color: 'red' | 'green' = total > 0 ? 'red' : 'green';
 
   return (
-    <Card isCompact>
+    <Card isCompact data-testid="summary-card-alerts">
       <CardTitle>
         <Flex spaceItems={{ default: 'spaceItemsSm' }} alignItems={{ default: 'alignItemsCenter' }}>
           <FlexItem>
