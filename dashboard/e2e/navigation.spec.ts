@@ -12,10 +12,10 @@ test.describe('Navigation', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    // The page renders h2 elements (PageTitle within CardTitle), not h1
+    // The page has an h1 page title plus h2 section titles (PageTitle within CardTitle)
     await expect(page.locator('h2').first()).toBeVisible();
     // Verify we're on the cluster overview by checking the sidebar nav item is active
-    await expect(page.locator('[itemid="/"].pf-m-current')).toBeVisible();
+    await expect(page.locator('nav a[aria-current="page"]')).toHaveText('Cluster Overview');
   });
 
   test('sidebar shows all primary navigation items', async ({
@@ -72,8 +72,7 @@ test.describe('Navigation', () => {
     mockControlPlane.setModels([]);
 
     await page.goto(bffUrl(bffPort, '/models'));
-    const modelsNavItem = page.locator('[itemid="/models"]');
-    await expect(modelsNavItem).toHaveClass(/pf-m-current/);
+    await expect(page.locator('nav a[aria-current="page"]')).toHaveText('Models');
   });
 
   test('sidebar highlights active nav item for workers page', async ({
@@ -84,8 +83,7 @@ test.describe('Navigation', () => {
     mockControlPlane.setWorkers([]);
 
     await page.goto(bffUrl(bffPort, '/workers'));
-    const workersNavItem = page.locator('[itemid="/workers"]');
-    await expect(workersNavItem).toHaveClass(/pf-m-current/);
+    await expect(page.locator('nav a[aria-current="page"]')).toHaveText('Workers');
   });
 
   test('shows 404 page for unknown routes', async ({ page, bffPort }) => {

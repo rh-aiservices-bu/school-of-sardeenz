@@ -191,7 +191,10 @@ export class MockControlPlane {
     // API error simulation — returns 503 on all /api/v1/* routes
     app.addHook('onRequest', async (req, reply) => {
       if (this.state.apiError && req.url.startsWith('/api/v1/')) {
-        return reply.code(503).send({ error: 'service unavailable' });
+        // Non-JSON body: the BFF ControlPlaneClient.request() calls res.json(), which throws on
+        // this, raising a BffError so the routes take their Redis-fallback path (source:
+        // 'redis-fallback'). A JSON 503 would be passed straight through and never trigger fallback.
+        return reply.code(503).type('text/plain').send('service unavailable');
       }
     });
 

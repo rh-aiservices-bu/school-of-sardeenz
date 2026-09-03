@@ -57,7 +57,7 @@ test.describe('Metrics Dashboard', () => {
       await page.goto(bffUrl(bffPort, '/metrics'));
 
       const autoRefreshSwitch = page.locator('#auto-refresh-switch');
-      await autoRefreshSwitch.click();
+      await page.locator('#auto-refresh-switch-label').click();
       await expect(autoRefreshSwitch).not.toBeChecked();
     });
   });

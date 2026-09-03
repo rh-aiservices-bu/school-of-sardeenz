@@ -52,7 +52,7 @@ test.describe('Workers', () => {
 
       await page.goto(bffUrl(bffPort, '/workers'));
 
-      await expect(page.locator('table[aria-label="Worker list"]')).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'Workers' })).toBeVisible();
     });
 
     test('shows worker IDs in the table', async ({ page, bffPort, mockControlPlane }) => {

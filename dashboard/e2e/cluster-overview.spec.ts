@@ -78,11 +78,11 @@ test.describe('Cluster Overview', () => {
 
     // Worker count should show 1 / 1
     const workersCard = page.locator('.pf-v6-c-card').filter({ hasText: 'Workers' }).first();
-    await expect(workersCard.getByText('1')).toBeVisible();
+    await expect(workersCard.getByText('1', { exact: true })).toBeVisible();
 
     // Models total: 3
     const modelsCard = page.locator('.pf-v6-c-card').filter({ hasText: 'Models' }).first();
-    await expect(modelsCard.getByText('3')).toBeVisible();
+    await expect(modelsCard.getByText('3', { exact: true })).toBeVisible();
   });
 
   test('shows VRAM Usage section', async ({ page, bffPort, mockControlPlane }) => {
@@ -90,7 +90,7 @@ test.describe('Cluster Overview', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    await expect(page.getByText('VRAM Usage')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'VRAM Usage' })).toBeVisible();
   });
 
   test('shows Model State Breakdown section', async ({ page, bffPort, mockControlPlane }) => {

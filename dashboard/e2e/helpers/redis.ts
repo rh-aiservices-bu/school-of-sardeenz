@@ -22,10 +22,11 @@ export interface SeedModelState {
   modelName: string;
   state: string;
   workerId?: string;
-  runnerType?: string;
   stateChangedAt?: string;
   lastInferenceAt?: string;
   errorMessage?: string;
+  /** Instance id for the per-instance key (#120). Defaults to a stable single-instance id. */
+  instanceId?: string;
 }
 
 // memoryUsedBytes IS the NVML measurement now (doctrine: measured memory is the only number,
@@ -105,20 +106,31 @@ export class RedisTestHelper {
   }
 
   /**
-   * Seed a model state blob at `{prefix}:models:{modelName}`.
-   * Matches the shape written by the CP's ModelLifecycleService.
+   * Seed a single-instance model state blob at `{prefix}:models:{modelName}:{instanceId}`.
+   * Matches the per-instance shape written by the CP's ModelLifecycleService (#120's
+   * ModelLifecycleService.InstanceState) — RedisReader.getModel()/listModels() reconstruct a
+   * model's aggregate state by scanning `{prefix}:models:{modelName}:*` instance blobs, so a
+   * flat `{prefix}:models:{modelName}` key (the pre-#120 shape) is invisible to the fallback path.
    */
   async seedModel(model: SeedModelState): Promise<void> {
+    const instanceId = model.instanceId ?? 'inst-seed0001';
     const blob = {
+      instanceId,
       modelName: model.modelName,
       state: model.state,
       workerId: model.workerId ?? null,
-      runnerType: model.runnerType ?? 'vllm',
+      runnerHost: null,
+      runnerPort: null,
+      runnerId: null,
+      deviceIndices: null,
       stateChangedAt: model.stateChangedAt ?? new Date().toISOString(),
       lastInferenceAt: model.lastInferenceAt ?? null,
       errorMessage: model.errorMessage ?? null,
     };
-    await this.client.set(`${this.prefix}:models:${model.modelName}`, JSON.stringify(blob));
+    await this.client.set(
+      `${this.prefix}:models:${model.modelName}:${instanceId}`,
+      JSON.stringify(blob),
+    );
   }
 
   /**

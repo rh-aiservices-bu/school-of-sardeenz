@@ -49,6 +49,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard e2e suite green and enforced in CI (#128).** The Playwright suite had 21
+  pre-existing failures once #102 made it runnable. Updated the specs to current PF6 markup
+  (role-based `grid`/heading/`aria-current` locators replacing stale `table[aria-label]`/`itemid`
+  selectors, and strict-mode-safe matches for text that renders twice), fixed the e2e harness so
+  the BFF Redis-fallback path actually fires (the mock control plane now answers a non-JSON 503
+  when simulating an outage; the Redis seed helper writes the post-#120 per-instance key shape the
+  BFF reads), and fixed the app a11y bugs the newly reachable axe checks surfaced: Cluster Overview
+  gains its `h1`, Metrics empty-state headings drop from `h3` to `h2` (`heading-order`), the two
+  Models-list paginations get distinct landmark names, the action-column table headers carry
+  screen-reader text, and Model Detail's secondary timestamps use the contrast-safe subtle text
+  token. Added browser coverage for the #120 instances UI (instances-count column, Add-instance
+  action on the list, per-instance table and Add-instance button on the detail page). A new `e2e`
+  job in `.github/workflows/ci.yml` (Valkey service container, Chromium) runs the suite on every
+  PR, closing the #82 deferral; marking it a required check is a branch-protection setting. The
+  deploy-submit flow stays `test.fixme` until #155 adds the runner-catalog mock.
+
 - **`npm test -w @sardeenz/dev-worker` crashed on vitest cwd/projects resolution (#144).**
   `runners/dev-worker/` had no local vitest config, so the workspace-scoped invocation fell
   back to the root `vitest.config.ts`, whose `test.projects` entries are resolved relative to

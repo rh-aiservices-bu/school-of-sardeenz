@@ -74,7 +74,9 @@
     "filterByRunner": "Filter by runner type",
     "filterRunnerCount": "Runner ({{count}})",
     "pagination": {
-      "ariaLabel": "Models pagination"
+      "ariaLabel": "Models pagination",
+      "ariaLabelTop": "Models pagination (top)",
+      "ariaLabelBottom": "Models pagination (bottom)"
     },
     "bulkActions": {
       "selected": "{{count}} selected",

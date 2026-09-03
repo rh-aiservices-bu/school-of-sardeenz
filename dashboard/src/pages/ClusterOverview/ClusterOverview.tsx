@@ -674,6 +674,10 @@ export function ClusterOverview() {
           gap: 'var(--pf-t--global--spacer--lg)',
         }}
       >
+        <Title headingLevel="h1" size="2xl">
+          {t('overview.title')}
+        </Title>
+
         {/* Inference URL — visible and copyable without navigation */}
         <InferenceUrlBanner />
 

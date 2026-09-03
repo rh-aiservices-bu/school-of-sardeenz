@@ -60,10 +60,37 @@ jobs:
         if: always()
         run: cargo --version && cd proxy && cargo clippy --version
 
+  e2e:
+    name: dashboard e2e (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      redis:
+        image: valkey/valkey:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SARDEENZ_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run dashboard e2e
+        run: npm run test:e2e -w @sardeenz/dashboard
+
 # Deliberately NOT gated here (tracked separately, not part of #82):
 #   - `make format-check`: `npx prettier --check .` fails on 34 files today; it
 #     is not in `make all`, so excluding it does not weaken this pipeline.
-#   - Playwright e2e: blocked on #102 — do not add until it closes.
 #   - `make test-integration`: needs Redis + Postgres service containers —
 #     belongs in a separate job later.
 #   - index-completeness check (#81).
