@@ -49,6 +49,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **vLLM engine bind host configurable, default `0.0.0.0` (#159).** The vLLM runner shim
+  started the engine with a hardcoded `--host 127.0.0.1`, so the engine port was unreachable
+  from a proxy running on another node/pod even though the worker's `advertiseHost` is
+  configurable. `build_vllm_command` now uses a new `--engine-host` shim flag (default
+  `0.0.0.0`), matching the MLServer shim's day-one behavior (#125); the dev-worker launcher
+  passes nothing and relies on the default. The shim's own health/sleep/wake calls to its
+  engine stay on loopback. Regression tests cover the default and a custom host; READMEs
+  updated. Follow-up #181 tracks the proxy-scoped NetworkPolicy ingress rule still needed
+  for the engine port off-node.
+
 - **Dashboard e2e: runner-catalog mock, deploy-flow tests re-enabled, stale-build guard (#155).**
   The e2e mock control plane now serves `GET /api/v1/catalog` with a minimal `RunnerCatalogView`
   (one imported `vllm` runner, module `vllm-0.21`) so the deploy form's required Runtime Module

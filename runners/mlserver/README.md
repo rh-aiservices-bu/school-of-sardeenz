@@ -54,7 +54,7 @@ advertises `supportedSleepLevels: ["L1_HOST_RAM"]` for v1 (it is the best availa
 
 ## MLServer bind address, ports, and the extra-`engineArgs` caveat
 
-- `MLSERVER_HOST=0.0.0.0` (not vLLM's `127.0.0.1` loopback default — see #159) and
+- `MLSERVER_HOST=0.0.0.0` (matching the vLLM shim's `--engine-host` default since #159) and
   `MLSERVER_HTTP_PORT=<engine-port>` configure MLServer's bind via env, the documented
   `MLSERVER_`-prefixed override mechanism.
 - MLServer also binds a gRPC server and a Prometheus metrics server even in this REST-only
