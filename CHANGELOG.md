@@ -49,6 +49,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Flaky BFF streamed-chunk test under parallel-suite load (#156).** The
+  `delivers the streamed body to the client in more than one chunk` case in
+  `dashboard/server/__tests__/routes/inference.test.ts` asserted that client-side read
+  timestamps span >= 100 ms across two upstream enqueues; under full parallel-suite load the
+  observed spread can drop below the threshold (seen: 79 ms) while the test passes reliably in
+  isolation — a load-sensitive wall-clock assertion, not a buffering regression. The two-chunk
+  delivery itself is the invariant: the test now asserts the read **count** (>= 2 separate reads)
+  only. The 150 ms upstream enqueue delay in the mock is kept — it keeps the two frames from
+  coalescing into one pipe batch, which is what makes the count a meaningful signal against a
+  buffering regression.
+
 - **Dashboard unit tests could not render any React component — dual-React split (#148).** The
   monorepo root hoists a React 19 copy (a direct dep of `@redocly/cli`) plus
   `@testing-library/react`, whose CJS entry's native `require('react')` binds that root React 19 —
