@@ -64,6 +64,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   job in `.github/workflows/ci.yml` (Valkey service container, Chromium) runs the suite on every
   PR, closing the #82 deferral; marking it a required check is a branch-protection setting. The
   deploy-submit flow stays `test.fixme` until #155 adds the runner-catalog mock.
+  A verification pass under parallel spec-file load then removed the last timing-sensitive
+  matches: chart-card titles are scoped to the PF6 card title (Victory renders the same text into
+  the SVG `<title>`/`<desc>`), the Metrics page heading is matched exactly at level 1, the four
+  Cluster Overview summary cards carry `data-testid`s so their counts are no longer found through
+  substring text filters that also hit the nav links and the inference URL banner, and the
+  Prometheus-unreachable assertion waits long enough for React Query's retry backoff.
 
 - **`npm test -w @sardeenz/dev-worker` crashed on vitest cwd/projects resolution (#144).**
   `runners/dev-worker/` had no local vitest config, so the workspace-scoped invocation fell
