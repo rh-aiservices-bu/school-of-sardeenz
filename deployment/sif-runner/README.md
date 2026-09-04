@@ -12,6 +12,7 @@ spike's §5/§8 manifests as a reusable Kustomize base.
 | `rbac.yaml`                        | `sardeenz-worker` ServiceAccount + Role/RoleBinding granting `use` on the SCC.                                                                                                                                                           |
 | `pvcs.yaml`                        | RWX `sardeenz-modules` (module store) + `sardeenz-weights` claims. Set `storageClassName` per cluster.                                                                                                                                   |
 | `worker-deployment.yaml`           | The worker Pod: `/dev/fuse` annotation, seccomp `Unconfined`, no `hostUsers:false`, GPU limit, mem req/limit, `fsGroup:0`, `HOME=/scratch/home`, module (readOnly)/weights/scratch/`/dev/shm` mounts. Runs the agent `--mode=apptainer`. |
+| `networkpolicy.yaml`               | Same-namespace ingress allow-list: control plane to worker API and runner management ports, proxy to runner HTTP engine ports.                                                                                                           |
 | `module-pvc-write-protection.yaml` | ValidatingAdmissionPolicy denying non-librarian pods that mount the module PVC read-write (chosen mechanism; fallbacks documented inline).                                                                                               |
 | `containerruntimeconfig.yaml`      | _Opt-in_ — force `crun` if a node pool defaults to `runc`. Not in the default kustomization (triggers a MachineConfig roll).                                                                                                             |
 
@@ -25,6 +26,22 @@ oc label namespace sardeenz sardeenz.io/module-guard=enforce
 
 The `sardeenz-worker` image is `worker-base` (Apptainer + Node) with the built TypeScript worker
 agent layered on top at `/opt/sardeenz/worker-agent` (running `node dist/index.js --mode=apptainer`).
+
+## Runner port policy
+
+The Deployment pins `SARDEENZ_WORKER_PORT=9100`, `SARDEENZ_RUNNER_PORT_START=9101`, and
+`SARDEENZ_MAX_RUNNERS=32`. They form the `[9101, 9229)` runner envelope in four-port blocks:
+management (`base`), HTTP engine (`base + 1`), gRPC (`base + 2`), and metrics (`base + 3`).
+`networkpolicy.yaml` admits the control plane to 9100 and the management ports, and the proxy to
+the HTTP engine ports only. `SARDEENZ_WORKER_TOKEN` authenticates only the worker agent on 9100;
+runner management endpoints on each base port and the engine listeners are unauthenticated. It
+intentionally declares no dynamic runner `containerPort`s.
+
+An overlay changing either runner-port environment variable **must patch both the Deployment and
+NetworkPolicy together**. The policy uses explicit ports so that gRPC and metrics listeners remain
+unreachable; do not widen it to the full envelope or use a port range. vLLM does not bind gRPC or
+metrics listeners in these blocks. MLServer does bind both listeners without authentication, but
+the policy denies ingress to them.
 
 ## SIF signing public key
 

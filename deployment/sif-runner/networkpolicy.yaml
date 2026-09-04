@@ -1,7 +1,9 @@
-# Restricts ingress to the worker agent Service to the control plane only (see
-# docs/usage/deployment-security.md — the worker agent has no authentication of its own beyond
-# the optional SARDEENZ_WORKER_TOKEN shared secret, so network isolation is the primary boundary).
-# Any other pod in the namespace is denied.
+# Restricts ingress to the worker Pod (see docs/usage/deployment-security.md). The worker agent
+# and engine listeners have optional or no authentication, so these same-namespace, component
+# selectors are the primary boundary. Keep the port lists aligned with the worker env below:
+# [SARDEENZ_RUNNER_PORT_START, + SARDEENZ_MAX_RUNNERS * 4), stride 4.
+# Do not replace these lists with a range: the gRPC (+2) and metrics (+3) ports are deliberately
+# not reachable. Overlays that change either runner port setting must update this policy too.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -23,3 +25,136 @@ spec:
       ports:
         - protocol: TCP
           port: 9100
+        - protocol: TCP
+          port: 9101
+        - protocol: TCP
+          port: 9105
+        - protocol: TCP
+          port: 9109
+        - protocol: TCP
+          port: 9113
+        - protocol: TCP
+          port: 9117
+        - protocol: TCP
+          port: 9121
+        - protocol: TCP
+          port: 9125
+        - protocol: TCP
+          port: 9129
+        - protocol: TCP
+          port: 9133
+        - protocol: TCP
+          port: 9137
+        - protocol: TCP
+          port: 9141
+        - protocol: TCP
+          port: 9145
+        - protocol: TCP
+          port: 9149
+        - protocol: TCP
+          port: 9153
+        - protocol: TCP
+          port: 9157
+        - protocol: TCP
+          port: 9161
+        - protocol: TCP
+          port: 9165
+        - protocol: TCP
+          port: 9169
+        - protocol: TCP
+          port: 9173
+        - protocol: TCP
+          port: 9177
+        - protocol: TCP
+          port: 9181
+        - protocol: TCP
+          port: 9185
+        - protocol: TCP
+          port: 9189
+        - protocol: TCP
+          port: 9193
+        - protocol: TCP
+          port: 9197
+        - protocol: TCP
+          port: 9201
+        - protocol: TCP
+          port: 9205
+        - protocol: TCP
+          port: 9209
+        - protocol: TCP
+          port: 9213
+        - protocol: TCP
+          port: 9217
+        - protocol: TCP
+          port: 9221
+        - protocol: TCP
+          port: 9225
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-proxy
+      ports:
+        - protocol: TCP
+          port: 9102
+        - protocol: TCP
+          port: 9106
+        - protocol: TCP
+          port: 9110
+        - protocol: TCP
+          port: 9114
+        - protocol: TCP
+          port: 9118
+        - protocol: TCP
+          port: 9122
+        - protocol: TCP
+          port: 9126
+        - protocol: TCP
+          port: 9130
+        - protocol: TCP
+          port: 9134
+        - protocol: TCP
+          port: 9138
+        - protocol: TCP
+          port: 9142
+        - protocol: TCP
+          port: 9146
+        - protocol: TCP
+          port: 9150
+        - protocol: TCP
+          port: 9154
+        - protocol: TCP
+          port: 9158
+        - protocol: TCP
+          port: 9162
+        - protocol: TCP
+          port: 9166
+        - protocol: TCP
+          port: 9170
+        - protocol: TCP
+          port: 9174
+        - protocol: TCP
+          port: 9178
+        - protocol: TCP
+          port: 9182
+        - protocol: TCP
+          port: 9186
+        - protocol: TCP
+          port: 9190
+        - protocol: TCP
+          port: 9194
+        - protocol: TCP
+          port: 9198
+        - protocol: TCP
+          port: 9202
+        - protocol: TCP
+          port: 9206
+        - protocol: TCP
+          port: 9210
+        - protocol: TCP
+          port: 9214
+        - protocol: TCP
+          port: 9218
+        - protocol: TCP
+          port: 9222
+        - protocol: TCP
+          port: 9226
