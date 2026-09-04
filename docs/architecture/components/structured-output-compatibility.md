@@ -270,7 +270,7 @@ Production reverse proxy deployments for vLLM (nginx, Envoy, vllm-proxy) all ope
 
 Even in passthrough mode, the proxy handles two endpoints that have structured output implications:
 
-**`/openai/v1/chat/completions` and `/openai/v1/completions`:** Forwarded verbatim (prefix stripped, so the runner sees `/v1/chat/completions` / `/v1/completions`). All parameters — `response_format`, `tools`, `tool_choice`, `guided_json`, `structured_outputs`, and any future parameters — pass through unchanged. The proxy only reads the `model` field for routing and the `stream` field to set the correct response handling path (SSE vs. buffered).
+**`/openai/v1/chat/completions` and `/openai/v1/completions`:** Forwarded verbatim (prefix stripped, so the runner sees `/v1/chat/completions` / `/v1/completions`). All parameters — `response_format`, `tools`, `tool_choice`, `guided_json`, `structured_outputs`, and any future parameters — pass through unchanged. The proxy only reads the `model` field for routing; the upstream response is always streamed back as-is, whether or not `stream` is set.
 
 **`/openai/v1/models`:** The proxy aggregates the `openai`-protocol model list from the routing map. It does not proxy this endpoint to individual runners. The response returns the set of `openai`-protocol models currently in the routing map with their state.
 
