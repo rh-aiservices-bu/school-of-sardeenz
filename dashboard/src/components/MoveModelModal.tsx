@@ -44,14 +44,17 @@ export function MoveModelModal({
   const [devices, setDevices] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [moveIds, setMoveIds] = useState<{ source: string; replacement: string } | null>(null);
+  const [replacementWasObserved, setReplacementWasObserved] = useState(false);
   const isOpen = source !== null;
   const tensorParallel = detail?.tensorParallel ?? source?.deviceIndices.length ?? 1;
   const target = workers?.find((worker) => worker.workerId === workerId);
+  const perDeviceRequired = (detail?.requiredMemory ?? 0) / tensorParallel;
   const compatible = useMemo(() => {
     if (!target || !detail) return [];
-    const supportsRunner = target.runnerCapabilities?.some(
+    const capability = target.runnerCapabilities?.find(
       (capability) =>
         capability.runnerType === detail.runnerType &&
+        capability.maxTensorParallelism >= tensorParallel &&
         (!detail.deviceType ||
           capability.supportedDeviceTypes.includes(detail.deviceType as never)),
     );
@@ -59,12 +62,52 @@ export function MoveModelModal({
       capabilitiesFallback ||
       (capabilities.some((capability) => capability.runnerType === detail.runnerType) &&
         runnerTypes.some((option) => option.value === detail.runnerType));
-    return supportsRunner && runnerKnown
+    return capability && runnerKnown
       ? target.devices.filter(
-          (device) => !detail.deviceType || device.deviceType === detail.deviceType,
+          (device) =>
+            (!detail.deviceType || device.deviceType === detail.deviceType) &&
+            capability.supportedDeviceTypes.includes(device.deviceType as never) &&
+            device.memoryAvailableBytes >= perDeviceRequired,
         )
       : [];
-  }, [capabilities, capabilitiesFallback, detail, runnerTypes, target]);
+  }, [
+    capabilities,
+    capabilitiesFallback,
+    detail,
+    perDeviceRequired,
+    runnerTypes,
+    target,
+    tensorParallel,
+  ]);
+  const eligibleWorkers = useMemo(
+    () =>
+      workers?.filter((worker) => {
+        if (worker.status !== WorkerStatus.ONLINE || !detail || !source) return false;
+        const capability = worker.runnerCapabilities?.find(
+          (candidate) =>
+            candidate.runnerType === detail.runnerType &&
+            candidate.maxTensorParallelism >= tensorParallel,
+        );
+        if (!capability) return false;
+        const eligibleCount = worker.devices.filter(
+          (device) =>
+            (!detail.deviceType || device.deviceType === detail.deviceType) &&
+            capability.supportedDeviceTypes.includes(device.deviceType as never) &&
+            device.memoryAvailableBytes >= perDeviceRequired,
+        ).length;
+        const isSamePlacement =
+          worker.workerId === source.workerId &&
+          source.deviceIndices.length === tensorParallel &&
+          source.deviceIndices.every((index) => devices.includes(index));
+        return eligibleCount >= tensorParallel && !isSamePlacement;
+      }) ?? [],
+    [detail, devices, perDeviceRequired, source, tensorParallel, workers],
+  );
+  const isIdenticalPlacement =
+    !!source &&
+    workerId === source.workerId &&
+    devices.length === source.deviceIndices.length &&
+    source.deviceIndices.every((index) => devices.includes(index));
 
   useEffect(() => {
     if (!source) return;
@@ -72,6 +115,7 @@ export function MoveModelModal({
     setDevices([]);
     setError(null);
     setMoveIds(null);
+    setReplacementWasObserved(false);
   }, [source]);
   useEffect(
     () =>
@@ -80,9 +124,17 @@ export function MoveModelModal({
       ),
     [compatible],
   );
+  useEffect(() => {
+    if (
+      moveIds &&
+      detail?.instances.some((instance) => instance.instanceId === moveIds.replacement)
+    ) {
+      setReplacementWasObserved(true);
+    }
+  }, [detail?.instances, moveIds]);
 
   const submit = () => {
-    if (!source || devices.length !== tensorParallel) return;
+    if (!source || devices.length !== tensorParallel || isIdenticalPlacement) return;
     setError(null);
     move.mutate(
       {
@@ -111,55 +163,61 @@ export function MoveModelModal({
       variant={ModalVariant.small}
       isOpen={isOpen}
       onClose={onClose}
-      aria-label={t('move.title')}
+      aria-label={t('detail.move.title')}
     >
-      <ModalHeader title={t('move.title')} />
+      <ModalHeader title={t('detail.move.title')} />
       <ModalBody>
-        <p>{t('move.description', { instanceId: source?.instanceId })}</p>
+        <p>{t('detail.move.description', { instanceId: source?.instanceId })}</p>
         {error && (
-          <Alert variant="danger" isInline title={t('move.failed')}>
+          <Alert variant="danger" isInline title={t('detail.move.failed')}>
             {error}
           </Alert>
         )}
         {moveIds && (
           <MoveProgressAlert
-            progress={classifyMoveProgress(detail?.instances, moveIds.source, moveIds.replacement)}
+            progress={classifyMoveProgress(
+              detail?.instances,
+              moveIds.source,
+              moveIds.replacement,
+              replacementWasObserved,
+            )}
           />
         )}
         {!detail || !workers ? (
-          <Spinner aria-label={t('move.loading')} />
+          <Spinner aria-label={t('detail.move.loading')} />
         ) : (
           <Form>
-            <FormGroup label={t('move.worker')} fieldId="move-worker">
+            <FormGroup label={t('detail.move.worker')} fieldId="move-worker">
               <FormSelect
                 id="move-worker"
                 value={workerId}
                 onChange={(_event, value) => setWorkerId(value)}
               >
-                <FormSelectOption value="" label={t('move.selectWorker')} isPlaceholder />
-                {workers
-                  .filter((worker) => worker.status === WorkerStatus.ONLINE)
-                  .map((worker) => (
-                    <FormSelectOption
-                      key={worker.workerId}
-                      value={worker.workerId}
-                      label={worker.workerId}
-                    />
-                  ))}
+                <FormSelectOption value="" label={t('detail.move.selectWorker')} isPlaceholder />
+                {eligibleWorkers.map((worker) => (
+                  <FormSelectOption
+                    key={worker.workerId}
+                    value={worker.workerId}
+                    label={worker.workerId}
+                  />
+                ))}
               </FormSelect>
             </FormGroup>
-            <FormGroup label={t('move.devices', { count: tensorParallel })} fieldId="move-devices">
+            <FormGroup
+              label={t('detail.move.devices', { count: tensorParallel })}
+              fieldId="move-devices"
+            >
               {compatible.map((device) => (
                 <Checkbox
                   key={device.deviceIndex}
                   id={`move-device-${device.deviceIndex}`}
-                  label={`${t('move.gpu')} ${device.deviceIndex}`}
+                  label={`${t('detail.move.gpu')} ${device.deviceIndex}`}
                   isChecked={devices.includes(device.deviceIndex)}
                   onChange={(_event, checked) => toggleDevice(device.deviceIndex, checked)}
                 />
               ))}
               {workerId && compatible.length === 0 && (
-                <Alert variant="warning" isInline title={t('move.noCompatibleDevices')} />
+                <Alert variant="warning" isInline title={t('detail.move.noCompatibleDevices')} />
               )}
             </FormGroup>
           </Form>
@@ -170,12 +228,18 @@ export function MoveModelModal({
           variant="primary"
           onClick={submit}
           isLoading={move.isPending}
-          isDisabled={!!moveIds || !workerId || devices.length !== tensorParallel || move.isPending}
+          isDisabled={
+            !!moveIds ||
+            !workerId ||
+            devices.length !== tensorParallel ||
+            isIdenticalPlacement ||
+            move.isPending
+          }
         >
-          {t('move.submit')}
+          {t('detail.move.submit')}
         </Button>
         <Button variant="link" onClick={onClose}>
-          {t(moveIds ? 'move.close' : 'move.cancel')}
+          {t(moveIds ? 'detail.move.close' : 'detail.move.cancel')}
         </Button>
       </ModalFooter>
     </Modal>
@@ -190,5 +254,5 @@ function MoveProgressAlert({ progress }: { progress: MoveProgress }) {
       : progress === 'complete'
         ? 'success'
         : 'info';
-  return <Alert variant={variant} isInline title={t(`move.progress.${progress}`)} />;
+  return <Alert variant={variant} isInline title={t(`detail.move.progress.${progress}`)} />;
 }

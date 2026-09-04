@@ -256,7 +256,7 @@ paths:
             `INVALID_STATE`; the transient-state body names the offending instance
             and its state, and the in-progress-operation body carries a
             `details.reason` (`delete-in-progress` / `stop-in-progress` /
-            `instance-operation-in-progress`) so a client can distinguish them.
+            `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them.
           content:
             application/json:
               schema:
@@ -370,7 +370,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is not in a state that can be put to sleep
+          description: "Model is not in a state that can be put to sleep, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -422,7 +422,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is not in a wakeable state
+          description: "Model is not in a wakeable state, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -478,7 +478,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is already stopping
+          description: "Model is already stopping, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -555,8 +555,8 @@ paths:
           description: >-
             Model already has runtime state (running or transitioning), or a
             delete is already in progress for the model. Both use code
-            `INVALID_STATE`; the in-progress-delete body carries
-            `details.reason: delete-in-progress`.
+            `INVALID_STATE`; an in-progress operation carries `details.reason`
+            (`delete-in-progress` or `move-in-progress`).
           content:
             application/json:
               schema:
@@ -626,8 +626,9 @@ paths:
         "409":
           description: >-
             A delete is already in progress for the model — a new instance
-            cannot be minted for a model whose teardown is backgrounding. Code
-            `INVALID_STATE`, `details.reason: delete-in-progress`.
+            cannot be minted for a model whose teardown is backgrounding, or a move
+            is in progress. Code `INVALID_STATE`, `details.reason: delete-in-progress`
+            or `move-in-progress`.
           content:
             application/json:
               schema:
@@ -703,7 +704,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress
+          description: "Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -839,7 +840,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Instance is not in a state that can be put to sleep
+          description: "Instance is not in a state that can be put to sleep, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -897,7 +898,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Instance is not in a wakeable state
+          description: "Instance is not in a wakeable state, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:

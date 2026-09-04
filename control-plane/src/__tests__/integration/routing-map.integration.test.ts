@@ -226,4 +226,23 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
     parsed = JSON.parse(raw as string) as { protocol: string };
     expect(parsed.protocol).toBe('oip');
   });
+
+  it('does not restore a cutover weight when a state refresh races it', async () => {
+    const MODEL = 'state-weight-race-model';
+    const ep: RunnerEndpoint = { host: '10.0.0.12', port: 8012, weight: 1, healthy: true };
+    await harness.routingMap.addEndpoint(MODEL, ep);
+
+    await Promise.all(
+      Array.from({ length: 20 }, () =>
+        Promise.all([
+          harness.routingMap.setModelState(MODEL, ModelState.ACTIVE),
+          harness.routingMap.updateEndpointWeight(MODEL, ep.host, ep.port, 0),
+        ]),
+      ),
+    );
+    // One last cutover establishes the desired order; concurrent state updates above prove it
+    // cannot write its stale endpoint snapshot back over the Lua mutation.
+    await harness.routingMap.updateEndpointWeight(MODEL, ep.host, ep.port, 0);
+    expect((await harness.routingMap.getEntry(MODEL))?.endpoints[0]?.weight).toBe(0);
+  });
 });

@@ -28,6 +28,9 @@ describe('isValidTransition', () => {
     [ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
     [ModelLifecycleState.ERROR, ModelLifecycleState.STOPPED],
     [ModelLifecycleState.ERROR, ModelLifecycleState.STARTING],
+    // Retains an ambiguous teardown for reconciliation instead of leaving a STOPPED key that
+    // blocks start forever.
+    [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR],
   ];
 
   for (const [from, to] of validTransitions) {
@@ -44,7 +47,6 @@ describe('isValidTransition', () => {
     [ModelLifecycleState.SLEEPING, ModelLifecycleState.ACTIVE],
     [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING],
     [ModelLifecycleState.STOPPED, ModelLifecycleState.ACTIVE],
-    [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR],
   ];
 
   for (const [from, to] of invalidTransitions) {

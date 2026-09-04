@@ -131,6 +131,7 @@ interface DeployOverrides {
   getInstancesForModel?: ReturnType<typeof vi.fn>;
   removeInstance?: ReturnType<typeof vi.fn>;
   stopModel?: ReturnType<typeof vi.fn>;
+  sleepModel?: ReturnType<typeof vi.fn>;
   refreshAll?: ReturnType<typeof vi.fn>;
   deployModel?: ReturnType<typeof vi.fn>;
   findAll?: ReturnType<typeof vi.fn>;
@@ -144,6 +145,7 @@ interface DeployOverrides {
   getInstance?: ReturnType<typeof vi.fn>;
   getWorker?: ReturnType<typeof vi.fn>;
   updateEndpointWeight?: ReturnType<typeof vi.fn>;
+  getEntry?: ReturnType<typeof vi.fn>;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -220,6 +222,8 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     sleepWake: {
       stopModel: over.stopModel ?? vi.fn(() => Promise.resolve()),
+      sleepModel: over.sleepModel ?? vi.fn(() => Promise.resolve()),
+      wakeModel: vi.fn(() => Promise.resolve()),
     },
     deployOrchestration: {
       deployModel: over.deployModel ?? vi.fn(() => Promise.resolve()),
@@ -228,6 +232,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
       setModelState: over.setModelState ?? vi.fn(() => Promise.resolve()),
       removeModel: vi.fn(() => Promise.resolve()),
       updateEndpointWeight: over.updateEndpointWeight ?? vi.fn(() => Promise.resolve(true)),
+      getEntry: over.getEntry ?? vi.fn(() => Promise.resolve(null)),
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
@@ -410,6 +415,112 @@ describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
       replacementInstanceId: expect.stringMatching(/^inst-/) as string,
     });
     expect(createInstanceRecord).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it('retains the replacement when a cutover reply is lost after Redis committed weight zero', async () => {
+    const source = { ...ACTIVE_STATE, deviceIndices: [0], runnerEnginePort: 8001 };
+    const updateEndpointWeight = vi.fn(() => Promise.reject(new Error('connection reset')));
+    const getEntry = vi.fn(() =>
+      Promise.resolve({
+        modelName: 'm1',
+        state: 'ACTIVE',
+        protocol: 'openai',
+        endpoints: [{ host: 'localhost', port: 8001, healthy: true, weight: 0 }],
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    const stopModel = vi.fn(() => Promise.resolve());
+    const { app, deps } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      getWorker: vi.fn(() => ({
+        workerId: 'worker-2',
+        managementUrl: 'http://worker-2',
+        devices: [{ deviceIndex: 1 }],
+      })),
+      placeFixed: vi.fn(() => ({
+        workerId: 'worker-2',
+        runnerType: 'vllm',
+        devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+      })),
+      updateEndpointWeight,
+      getEntry,
+      stopModel,
+    });
+    (deps.workerPool as { getAllWorkers: ReturnType<typeof vi.fn> }).getAllWorkers.mockReturnValue([
+      { workerId: 'worker-2', devices: [{ deviceIndex: 1 }], capabilities: [], status: 'ONLINE' },
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(res.statusCode).toBe(202);
+    await vi.waitFor(() => expect(updateEndpointWeight).toHaveBeenCalledOnce());
+    // Unknown/lost replies are never allowed to tear down the only known replacement.
+    expect(stopModel).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects move admission while any instance operation on the model is claimed', async () => {
+    let finishSleep!: () => void;
+    const sleepModel = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSleep = resolve;
+        }),
+    );
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      sleepModel,
+    });
+    const sleep = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep`,
+    });
+    expect(sleep.statusCode).toBe(202);
+    const move = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(move.statusCode).toBe(409);
+    expect(move.json<{ details: { reason: string } }>().details.reason).toBe(
+      'operation-in-progress',
+    );
+    finishSleep();
     await app.close();
   });
 });

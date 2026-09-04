@@ -175,6 +175,10 @@ function GpuCard({
                 key={`move-${source.instanceId}`}
                 variant="link"
                 isInline
+                aria-label={t('overview.modelsPlacement.moveInstance', {
+                  modelName: source.modelName,
+                  instanceId: source.instanceId,
+                })}
                 style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
                 onClick={() =>
                   onMove({
@@ -185,7 +189,10 @@ function GpuCard({
                   })
                 }
               >
-                {t('overview.modelsPlacement.move')}
+                {t('overview.modelsPlacement.moveInstance', {
+                  modelName: source.modelName,
+                  instanceId: source.instanceId,
+                })}
               </Button>
             ) : null;
           })}

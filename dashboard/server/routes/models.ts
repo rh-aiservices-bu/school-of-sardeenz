@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
@@ -163,7 +164,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const { status, data } = await deps.controlPlane.moveInstance(
         request.params.name,
         request.params.instanceId,
-        request.body as { targetWorkerId: string; targetDeviceIndices: number[] },
+        request.body as ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
       );
       return reply.code(status).send(data);
     },

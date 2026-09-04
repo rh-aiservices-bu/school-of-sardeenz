@@ -94,8 +94,11 @@ export class PlacementPipeline {
     if (deviceIndices.length !== request.tensorParallel) return null;
     const worker = workers.find((candidate) => candidate.workerId === workerId);
     if (!worker || this.filterByHealth([worker]).length === 0) return null;
-    if (this.filterByRunnerType(request, [worker]).length === 0) return null;
-    if (this.filterByHardware(request, this.filterByRunnerType(request, [worker])).length === 0) {
+    const runnerCandidates = this.filterByRunnerType(request, [worker]);
+    if (runnerCandidates.length === 0) return null;
+    const capability = runnerCandidates[0].capability;
+    if (request.tensorParallel > capability.maxTensorParallelism) return null;
+    if (this.filterByHardware(request, runnerCandidates).length === 0) {
       return null;
     }
 
@@ -110,7 +113,8 @@ export class PlacementPipeline {
         (device) =>
           !device ||
           device.availableBytes < perDeviceRequired ||
-          (request.deviceType !== undefined && device.deviceType !== request.deviceType),
+          (request.deviceType !== undefined && device.deviceType !== request.deviceType) ||
+          !capability.supportedDeviceTypes.includes(device.deviceType as DeviceType),
       )
     ) {
       return null;
@@ -161,14 +165,14 @@ export class PlacementPipeline {
     request: PlacementRequest,
     candidates: { worker: WorkerRecord; capability: WorkerCapability }[],
   ): { worker: WorkerRecord; capability: WorkerCapability }[] {
-    if (!request.deviceType) return candidates;
-
     return candidates.filter(({ worker, capability }) => {
-      const hasDevice = worker.devices.some((d) => d.deviceType === request.deviceType);
-      const supportsDevice = capability.supportedDeviceTypes.includes(
-        request.deviceType as DeviceType,
+      if (request.tensorParallel > capability.maxTensorParallelism) return false;
+      // Even an unconstrained model may only land on actual device types the runner supports.
+      return worker.devices.some(
+        (d) =>
+          (!request.deviceType || String(d.deviceType) === request.deviceType) &&
+          capability.supportedDeviceTypes.includes(d.deviceType),
       );
-      return hasDevice && supportsDevice;
     });
   }
 
@@ -184,7 +188,11 @@ export class PlacementPipeline {
       const budget = budgets.get(worker.workerId);
       if (!budget || budget.stale) continue;
 
-      let eligibleDevices = budget.devices.filter((d) => d.availableBytes >= perDeviceRequired);
+      let eligibleDevices = budget.devices.filter(
+        (d) =>
+          d.availableBytes >= perDeviceRequired &&
+          capability.supportedDeviceTypes.includes(d.deviceType as DeviceType),
+      );
 
       if (request.deviceType) {
         eligibleDevices = eligibleDevices.filter((d) => d.deviceType === request.deviceType);

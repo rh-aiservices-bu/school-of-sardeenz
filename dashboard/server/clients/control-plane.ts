@@ -1,4 +1,5 @@
 import type { Config } from '../config.js';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 import { BffError } from '../errors.js';
 
 export interface ProxyResult {
@@ -116,7 +117,7 @@ export class ControlPlaneClient {
   async moveInstance(
     name: string,
     instanceId: string,
-    body: { targetWorkerId: string; targetDeviceIndices: number[] },
+    body: ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
   ): Promise<ProxyResult> {
     return this.request(
       'POST',

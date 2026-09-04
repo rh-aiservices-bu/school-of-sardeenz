@@ -149,6 +149,24 @@ async function teardownInstance(
     await deps.instanceRepository.delete(instance.instanceId).catch(() => {});
     return true;
   } catch (err: unknown) {
+    // stopModel deliberately settles STOPPING → STOPPED before this helper reaps the worker
+    // process. If the reap is ambiguous, STOPPED would strand a retained lifecycle record and
+    // make /start reject it forever. Reclassify it as an observable, reconcilable ERROR while
+    // preserving its worker/device/runner bookkeeping.
+    try {
+      const retained = await deps.lifecycle.getInstance(modelName, instance.instanceId);
+      if (retained?.state === ModelLifecycleState.STOPPED) {
+        await deps.lifecycle.transition(modelName, instance.instanceId, ModelLifecycleState.ERROR, {
+          errorMessage: `${context}: runner teardown could not be confirmed`,
+        });
+        await refreshModelRoutingState(deps.lifecycle, deps.routingMap, modelName);
+      }
+    } catch (stateErr) {
+      app.log.warn(
+        { err: stateErr, modelName, instanceId: instance.instanceId },
+        `${context}: could not persist retained teardown error state`,
+      );
+    }
     app.log.error(
       { err, modelName, instanceId: instance.instanceId },
       `${context}: instance teardown failed`,
@@ -169,6 +187,8 @@ interface RouteClaims {
   readonly instanceOpInFlight: Set<string>;
   readonly deletingInFlight: Set<string>;
   readonly movingInFlight: Set<string>;
+  /** Add/start launch is between its snapshot and dispatch; a move cannot safely enter then. */
+  readonly launchingInFlight: Set<string>;
 }
 
 interface DeployFromRecordOptions {
@@ -208,22 +228,25 @@ async function deployFromRecord(
   // reached from the launch side. Refuse before any Redis/budget state is created. This is the
   // top-of-pipeline guard shared by all three callers; the reclamation branch below re-checks
   // right before its (post-await) dispatch.
-  if (claims.deletingInFlight.has(record.name)) {
-    throw ControlPlaneError.operationInProgress(
-      record.name,
-      'start a new instance for',
-      'delete-in-progress',
-      'a delete is already in progress',
-    );
-  }
-  if (claims.movingInFlight.has(record.name) && !options.allowMoveClaim) {
-    throw ControlPlaneError.operationInProgress(
-      record.name,
-      'start a new instance for',
-      'move-in-progress',
-      'a move is already in progress',
-    );
-  }
+  const assertLaunchAllowed = (): void => {
+    if (claims.deletingInFlight.has(record.name)) {
+      throw ControlPlaneError.operationInProgress(
+        record.name,
+        'start a new instance for',
+        'delete-in-progress',
+        'a delete is already in progress',
+      );
+    }
+    if (claims.movingInFlight.has(record.name) && !options.allowMoveClaim) {
+      throw ControlPlaneError.operationInProgress(
+        record.name,
+        'start a new instance for',
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+  };
+  assertLaunchAllowed();
 
   // Re-checked here (not just at deploy time) so a stored modelPath that predates a narrowed
   // weightsDir, or that reached the table by any path other than the validated deploy route,
@@ -315,6 +338,7 @@ async function deployFromRecord(
           'a delete is already in progress',
         );
       }
+      assertLaunchAllowed();
 
       const deployment = deps.deployOrchestration.deployModel({
         modelName: record.name,
@@ -483,6 +507,7 @@ async function deployFromRecord(
           );
           return;
         }
+        assertLaunchAllowed();
 
         deps.deployOrchestration
           .deployModel({
@@ -612,6 +637,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   // A move owns the model from replacement reservation until the old runner has been reaped.
   // The leader-only mutation model makes this process-local claim sufficient.
   const movingInFlight = new Set<string>();
+  const launchingInFlight = new Set<string>();
 
   // Bundle the three sets so the shared `deployFromRecord` pipeline can see `deletingInFlight`
   // (#173). The bare names above are still used directly by the route handlers in this closure.
@@ -620,6 +646,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     instanceOpInFlight,
     deletingInFlight,
     movingInFlight,
+    launchingInFlight,
   };
   const assertNoMove = (modelName: string, action: string): void => {
     if (movingInFlight.has(modelName)) {
@@ -628,6 +655,31 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         action,
         'move-in-progress',
         'a move is already in progress',
+      );
+    }
+  };
+  const hasInstanceOperation = (modelName: string): boolean =>
+    [...instanceOpInFlight].some((key) => key.startsWith(`${modelName}:`));
+  const assertMoveAdmission = (modelName: string): void => {
+    if (movingInFlight.has(modelName)) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'move',
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+    if (
+      deletingInFlight.has(modelName) ||
+      stoppingInFlight.has(modelName) ||
+      launchingInFlight.has(modelName) ||
+      hasInstanceOperation(modelName)
+    ) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'move',
+        'operation-in-progress',
+        'another lifecycle operation is already in progress',
       );
     }
   };
@@ -764,9 +816,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (!record) {
         throw ControlPlaneError.modelNotFound(modelName);
       }
-
+      assertNoMove(modelName, 'add an instance for');
       const instanceId = mintInstanceId();
-      const { state, message } = await deployFromRecord(app, deps, claims, record, instanceId);
+      launchingInFlight.add(modelName);
+      let state: ModelLifecycleState;
+      let message: string;
+      try {
+        ({ state, message } = await deployFromRecord(app, deps, claims, record, instanceId));
+      } finally {
+        launchingInFlight.delete(modelName);
+      }
 
       return reply.code(202).send({ modelName, instanceId, state, message });
     },
@@ -814,26 +873,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         },
       );
     }
-    if (movingInFlight.has(modelName)) {
-      throw ControlPlaneError.operationInProgress(
-        modelName,
-        'move',
-        'move-in-progress',
-        'a move is already in progress',
-      );
-    }
-    if (
-      deletingInFlight.has(modelName) ||
-      stoppingInFlight.has(modelName) ||
-      instanceOpInFlight.has(`${modelName}:${instanceId}`)
-    ) {
-      throw ControlPlaneError.operationInProgress(
-        modelName,
-        'move',
-        'operation-in-progress',
-        'another lifecycle operation is already in progress',
-      );
-    }
+    assertMoveAdmission(modelName);
     if (source.state !== ModelLifecycleState.ACTIVE) {
       throw ControlPlaneError.invalidState(`${modelName}/${instanceId}`, source.state, 'move');
     }
@@ -882,6 +922,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       );
     }
 
+    // The snapshot and target checks above contain no mutation, but another operation can claim
+    // while their asynchronous reads settle. Claim only after rechecking every model operation.
+    assertMoveAdmission(modelName);
     movingInFlight.add(modelName);
     const replacementInstanceId = mintInstanceId();
     try {
@@ -891,10 +934,46 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         allowMoveClaim: true,
       });
       // Redis lifecycle state, SQL row, and capacity holds now exist: safe to acknowledge.
-      void (async () => {
+      const notifyBestEffort = (
+        title: string,
+        description: string,
+        variant: 'success' | 'danger',
+      ) => {
+        void deps.notifications
+          .createNotification({
+            title,
+            description,
+            variant,
+            source: { type: 'model', name: modelName },
+          })
+          .catch((notifyErr: unknown) => {
+            app.log.debug({ err: notifyErr, modelName }, 'Failed to create move notification');
+          });
+      };
+      const sourceIsConfirmedSelectable = async (): Promise<boolean | undefined> => {
+        try {
+          const entry = await deps.routingMap.getEntry(modelName);
+          if (!entry) return undefined;
+          const endpoint = entry.endpoints.find(
+            (candidate) =>
+              candidate.host === source.runnerHost &&
+              candidate.port === (source.runnerEnginePort ?? source.runnerPort),
+          );
+          // An absent endpoint is not evidence that it is safe to remove the replacement: it
+          // could be a successful cutover followed by a lost Lua reply or a concurrent refresh.
+          return endpoint?.healthy === true && endpoint.weight > 0 ? true : undefined;
+        } catch (readErr) {
+          app.log.warn({ err: readErr, modelName, instanceId }, 'Could not classify move cutover');
+          return undefined;
+        }
+      };
+      const runMove = async (): Promise<void> => {
         let cutoverComplete = false;
         try {
           await launch.deployment;
+          if (!deps.leaderElection.isLeader) {
+            throw new Error('leadership lost before traffic cutover');
+          }
           const currentSource = await deps.lifecycle.getInstance(modelName, instanceId);
           if (
             currentSource?.state !== ModelLifecycleState.ACTIVE ||
@@ -904,14 +983,37 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             throw new Error('source instance changed before traffic cutover');
           }
           const endpointPort = currentSource.runnerEnginePort ?? currentSource.runnerPort;
-          const cutOver = await deps.routingMap.updateEndpointWeight(
-            modelName,
-            currentSource.runnerHost,
-            endpointPort,
-            0,
-          );
-          if (!cutOver) throw new Error('source routing endpoint was not found before cutover');
-          cutoverComplete = true;
+          try {
+            const cutOver = await deps.routingMap.updateEndpointWeight(
+              modelName,
+              currentSource.runnerHost,
+              endpointPort,
+              0,
+            );
+            if (!cutOver) throw new Error('source routing endpoint was not found before cutover');
+            cutoverComplete = true;
+          } catch (cutoverErr) {
+            // Redis can commit the Lua script and lose its reply. Classify from the latest map
+            // before deciding whether replacement cleanup is safe; unknown is deliberately
+            // conservative and retains the replacement so a weight-0 source cannot cause outage.
+            const sourceSelectable = await sourceIsConfirmedSelectable();
+            if (sourceSelectable === true) throw cutoverErr;
+            cutoverComplete = true;
+            throw new Error(
+              `traffic cutover outcome is ambiguous; retaining replacement: ${cutoverErr instanceof Error ? cutoverErr.message : String(cutoverErr)}`,
+            );
+          }
+
+          // Persist a post-cutover marker before teardown. If this leader loses its lease now,
+          // detail/reconciliation can distinguish a drained source from a normal active replica.
+          await deps.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
+          await refreshModelRoutingState(deps.lifecycle, deps.routingMap, modelName);
+
+          if (!deps.leaderElection.isLeader) {
+            // Weight=0 is durable. Do not roll it back or tear either side down after lease loss;
+            // retained state is observable and reconciliation/manual operations can finish it.
+            throw new Error('leadership lost after traffic cutover; source teardown deferred');
+          }
 
           const stopped = await teardownInstance(
             app,
@@ -921,42 +1023,59 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             'Move source teardown',
           );
           if (!stopped) {
-            await deps.notifications.createNotification({
-              title: 'Model move completed with source teardown failure',
-              description: `${modelName} (${instanceId}) no longer receives traffic but could not be stopped`,
-              variant: 'danger',
-              source: { type: 'model', name: modelName },
-            });
+            notifyBestEffort(
+              'Model move completed with source teardown failure',
+              `${modelName} (${instanceId}) no longer receives traffic but could not be stopped`,
+              'danger',
+            );
             return;
           }
-          await deps.notifications.createNotification({
-            title: 'Model moved',
-            description: `${modelName} moved to ${body.targetWorkerId}`,
-            variant: 'success',
-            source: { type: 'model', name: modelName },
-          });
+          notifyBestEffort(
+            'Model moved',
+            `${modelName} moved to ${body.targetWorkerId}`,
+            'success',
+          );
         } catch (err) {
           app.log.error(
             { err, modelName, instanceId, replacementInstanceId, cutoverComplete },
             'Model move orchestration failed',
           );
-          // Before the atomic Redis cutover the source must remain untouched. The replacement is
-          // safe to reap; retained bookkeeping on a failed reap makes the failure observable.
+          // Cleanup is safe only when the map positively proves the source is still selectable.
+          // A failed/missing Lua reply is ambiguous, so retaining the replacement is the only
+          // outage-safe choice. Once cut over, never roll back or remove the replacement.
           if (!cutoverComplete) {
-            const replacement = await deps.lifecycle.getInstance(modelName, replacementInstanceId);
-            if (replacement)
-              await teardownInstance(app, deps, modelName, replacement, 'Move replacement cleanup');
+            const sourceSelectable = await sourceIsConfirmedSelectable();
+            if (sourceSelectable === true) {
+              const replacement = await deps.lifecycle.getInstance(
+                modelName,
+                replacementInstanceId,
+              );
+              if (replacement)
+                await teardownInstance(
+                  app,
+                  deps,
+                  modelName,
+                  replacement,
+                  'Move replacement cleanup',
+                );
+            }
           }
-          await deps.notifications.createNotification({
-            title: 'Model move failed',
-            description: `${modelName}: ${err instanceof Error ? err.message : String(err)}`,
-            variant: 'danger',
-            source: { type: 'model', name: modelName },
-          });
+          notifyBestEffort(
+            'Model move failed',
+            `${modelName}: ${err instanceof Error ? err.message : String(err)}`,
+            'danger',
+          );
         } finally {
           movingInFlight.delete(modelName);
         }
-      })();
+      };
+      void runMove().catch((err: unknown) => {
+        // A detached orchestration must never reach the process-level unhandled rejection hook.
+        app.log.error(
+          { err, modelName, instanceId, replacementInstanceId },
+          'Move task terminated',
+        );
+      });
       return reply
         .code(202)
         .send({ modelName, sourceInstanceId: instanceId, replacementInstanceId });
@@ -1102,6 +1221,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       if (instances.length === 0 && record) {
+        assertNoMove(modelName, 'delete');
         await deps.modelRepository.delete(modelName);
         return reply.code(202).send({
           modelName,
@@ -1136,6 +1256,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           'a delete is already in progress',
         );
       }
+      assertNoMove(modelName, 'delete');
 
       // #173: a Stop or an instance-scoped op (delete/sleep/wake) can be claimed but not yet past
       // its first state transition, so its instances still read as settled and slip past the
@@ -1248,6 +1369,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           );
         }
       }
+      assertNoMove(modelName, 'sleep');
 
       // Atomically claim ACTIVE → DRAINING for every active instance before launching
       // background work.
@@ -1332,6 +1454,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           );
         }
       }
+      assertNoMove(modelName, 'wake');
 
       // Atomically claim SLEEPING → STARTING for every sleeping instance before launching
       // background work. Concurrent wake requests will fail this transition for instances
@@ -1482,6 +1605,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (stoppingInFlight.has(modelName)) {
         throw ControlPlaneError.invalidState(modelName, aggregateState, 'stop');
       }
+      assertNoMove(modelName, 'stop');
       stoppingInFlight.add(modelName);
 
       const stoppable = instances.filter((i) => STOPPABLE_STATES.has(i.state));
@@ -1556,14 +1680,22 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         throw ControlPlaneError.invalidState(modelName, deriveAggregateState(instances), 'start');
       }
 
+      assertNoMove(modelName, 'start');
       const instanceId = mintInstanceId();
-      const { state: newState, message } = await deployFromRecord(
-        app,
-        deps,
-        claims,
-        record,
-        instanceId,
-      );
+      launchingInFlight.add(modelName);
+      let newState: ModelLifecycleState;
+      let message: string;
+      try {
+        ({ state: newState, message } = await deployFromRecord(
+          app,
+          deps,
+          claims,
+          record,
+          instanceId,
+        ));
+      } finally {
+        launchingInFlight.delete(modelName);
+      }
 
       return reply.code(202).send({
         modelName,
@@ -1598,6 +1730,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           'delete',
         );
       }
+      assertNoMove(modelName, 'delete an instance for');
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {
@@ -1670,6 +1803,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           `Instance ${instanceId} of ${modelName} has no runner endpoint`,
         );
       }
+      assertNoMove(modelName, 'sleep an instance for');
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {
@@ -1754,6 +1888,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           `Instance ${instanceId} of ${modelName} has no runner endpoint`,
         );
       }
+      assertNoMove(modelName, 'wake an instance for');
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {

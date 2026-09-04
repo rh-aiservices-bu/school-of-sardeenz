@@ -1786,7 +1786,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description An instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress`) so a client can distinguish them. */
+            /** @description An instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1904,7 +1904,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model is not in a state that can be put to sleep */
+            /** @description Model is not in a state that can be put to sleep, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1963,7 +1963,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model is not in a wakeable state */
+            /** @description Model is not in a wakeable state, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2022,7 +2022,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model is already stopping */
+            /** @description Model is already stopping, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2102,7 +2102,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model already has runtime state (running or transitioning), or a delete is already in progress for the model. Both use code `INVALID_STATE`; the in-progress-delete body carries `details.reason: delete-in-progress`. */
+            /** @description Model already has runtime state (running or transitioning), or a delete is already in progress for the model. Both use code `INVALID_STATE`; an in-progress operation carries `details.reason` (`delete-in-progress` or `move-in-progress`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2173,7 +2173,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A delete is already in progress for the model — a new instance cannot be minted for a model whose teardown is backgrounding. Code `INVALID_STATE`, `details.reason: delete-in-progress`. */
+            /** @description A delete is already in progress for the model — a new instance cannot be minted for a model whose teardown is backgrounding, or a move is in progress. Code `INVALID_STATE`, `details.reason: delete-in-progress` or `move-in-progress`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2246,7 +2246,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress */
+            /** @description Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2397,7 +2397,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Instance is not in a state that can be put to sleep */
+            /** @description Instance is not in a state that can be put to sleep, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2458,7 +2458,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Instance is not in a wakeable state */
+            /** @description Instance is not in a wakeable state, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;

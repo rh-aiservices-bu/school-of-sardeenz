@@ -83,25 +83,39 @@ export class RoutingMapService {
   }
 
   async setModelState(modelName: string, state: ModelState, protocol?: Protocol): Promise<void> {
-    const entry = await this.getEntry(modelName);
     const now = new Date().toISOString();
-
-    const updated: RoutingEntry = entry
-      ? { ...entry, state, ...(protocol ? { protocol } : {}), updatedAt: now }
-      : { modelName, state, protocol: protocol ?? Protocol.openai, endpoints: [], updatedAt: now };
-
-    const update: RoutingMapUpdate = {
-      type: entry ? RoutingMapUpdateType.MODEL_STATE_CHANGED : RoutingMapUpdateType.MODEL_ADDED,
+    // Do not HGET/HSET in JavaScript here. A state refresh can race the move cutover Lua
+    // mutation and otherwise write a stale endpoints array back over its weight=0 result.
+    const luaScript = `
+      ${LUA_ENCODE_ROUTING_ENTRY}
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      local entry
+      local existed = raw ~= false and raw ~= nil
+      if existed then
+        entry = cjson.decode(raw)
+      else
+        entry = { modelName = ARGV[1], protocol = ARGV[3], endpoints = {} }
+      end
+      entry.state = ARGV[2]
+      if ARGV[3] ~= '' then entry.protocol = ARGV[3] end
+      entry.updatedAt = ARGV[4]
+      redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
+      local updateType = existed and 'MODEL_STATE_CHANGED' or 'MODEL_ADDED'
+      redis.call('PUBLISH', KEYS[2], cjson.encode({
+        type = updateType, modelName = ARGV[1], state = ARGV[2], timestamp = ARGV[4]
+      }))
+      return existed and 1 or 0
+    `;
+    await this.redis.eval(
+      luaScript,
+      2,
+      this.hashKey,
+      this.pubsubChannel,
       modelName,
       state,
-      timestamp: now,
-    };
-
-    await this.redis
-      .multi()
-      .hset(this.hashKey, modelName, JSON.stringify(updated))
-      .publish(this.pubsubChannel, JSON.stringify(update))
-      .exec();
+      protocol ?? '',
+      now,
+    );
   }
 
   async removeModel(modelName: string): Promise<void> {

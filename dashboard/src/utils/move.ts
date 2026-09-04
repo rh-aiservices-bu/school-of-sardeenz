@@ -16,12 +16,19 @@ export function classifyMoveProgress(
   instances: InstanceDetail[] | undefined,
   sourceInstanceId: string,
   replacementInstanceId: string,
+  replacementWasObserved = false,
 ): MoveProgress {
   if (!instances) return 'unavailable';
   const source = instances.find((instance) => instance.instanceId === sourceInstanceId);
   const replacement = instances.find((instance) => instance.instanceId === replacementInstanceId);
-  if (!replacement) return source ? 'failed-before-cutover' : 'unavailable';
-  if (replacement.state === ModelLifecycleState.ERROR) return 'failed-before-cutover';
+  // A 202 can precede cache/SSE propagation. Missing once is pending, not a failed move; only a
+  // disappearance after observation is terminal evidence before cutover.
+  if (!replacement) return source && replacementWasObserved ? 'failed-before-cutover' : 'deploying';
+  if (
+    replacement.state === ModelLifecycleState.ERROR ||
+    replacement.state === ModelLifecycleState.STOPPED
+  )
+    return 'failed-before-cutover';
   if (!source) return replacement.state === ModelLifecycleState.ACTIVE ? 'complete' : 'unavailable';
   if (
     replacement.state === ModelLifecycleState.ACTIVE &&
