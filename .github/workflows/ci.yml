@@ -60,6 +60,120 @@ jobs:
         if: always()
         run: cargo --version && cd proxy && cargo clippy --version
 
+  containers:
+    name: ${{ matrix.service }} container smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: proxy
+            context: ./proxy
+            file: ./proxy/Dockerfile
+            image: sardeenz-proxy:ci
+            port: 9099
+          - service: control-plane
+            context: .
+            file: ./containers/control-plane/Dockerfile
+            image: sardeenz-control-plane:ci
+            port: 3000
+          - service: dashboard
+            context: .
+            file: ./containers/dashboard/Dockerfile
+            image: sardeenz-dashboard:ci
+            port: 4000
+    services:
+      redis:
+        image: valkey/valkey:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sardeenz
+          POSTGRES_PASSWORD: sardeenz
+          POSTGRES_DB: sardeenz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sardeenz"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SARDEENZ_REDIS_URL: redis://host.docker.internal:6379
+      SARDEENZ_DATABASE_URL: postgresql://sardeenz:sardeenz@host.docker.internal:5432/sardeenz
+      SARDEENZ_SINGLE_INSTANCE: 'true'
+      AUTH_MODE: simple
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: ci-admin-password
+      JWT_SECRET: ci-jwt-secret-for-container-smoke-tests
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          tags: ${{ matrix.image }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          cache-from: type=gha,scope=containers-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=containers-${{ matrix.service }},ignore-error=true
+
+      - name: Start ${{ matrix.service }} container
+        run: |
+          docker run --detach \
+            --name sardeenz-${{ matrix.service }}-ci \
+            --add-host host.docker.internal:host-gateway \
+            --publish 127.0.0.1:${{ matrix.port }}:${{ matrix.port }} \
+            --env SARDEENZ_REDIS_URL \
+            --env SARDEENZ_DATABASE_URL \
+            --env SARDEENZ_SINGLE_INSTANCE \
+            --env AUTH_MODE \
+            --env ADMIN_USERNAME \
+            --env ADMIN_PASSWORD \
+            --env JWT_SECRET \
+            ${{ matrix.image }}
+
+      - name: Wait for ${{ matrix.service }} health endpoint
+        run: |
+          container=sardeenz-${{ matrix.service }}-ci
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:${{ matrix.port }}/healthz; then
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)" != "true" ]; then
+              echo "$container exited before its health endpoint became available"
+              docker logs "$container" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "$container did not become healthy within 60 seconds"
+          docker logs "$container" || true
+          exit 1
+
+      - name: Diagnose container smoke-test failure
+        if: failure()
+        run: |
+          docker ps --all
+          docker logs sardeenz-${{ matrix.service }}-ci || true
+
+      - name: Remove ${{ matrix.service }} container
+        if: always()
+        run: docker rm --force sardeenz-${{ matrix.service }}-ci || true
+
   e2e:
     name: dashboard e2e (Playwright)
     runs-on: ubuntu-latest
@@ -107,6 +221,7 @@ jobs:
 # Deliberately NOT gated here (tracked separately, not part of #82):
 #   - `make format-check`: `npx prettier --check .` fails on 34 files today; it
 #     is not in `make all`, so excluding it does not weaken this pipeline.
-#   - `make test-integration`: needs Redis + Postgres service containers —
-#     belongs in a separate job later.
+#   - `make test-integration`: remains a separate application integration suite.
 #   - index-completeness check (#81).
+# Container image builds and `/healthz` smoke tests run above; runner/SIF images,
+# image publishing, scanning, multi-architecture builds, and branch protection remain out of scope.

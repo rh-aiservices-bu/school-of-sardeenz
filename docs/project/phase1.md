@@ -411,7 +411,7 @@ From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connecti
 - [x] Circuit breaker trips after configurable failure threshold and recovers after backoff
 - [x] All four request flows from the architecture overview pass integration tests
 - [x] Structured output compatibility approach documented and validated
-- [ ] Container image builds and runs in CI
+- [x] Container image builds and runs in CI
 - [x] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
 - [x] OpenAPI spec passes `redocly lint` with zero errors
 - [x] Generated Rust types compile cleanly (`cargo check`)

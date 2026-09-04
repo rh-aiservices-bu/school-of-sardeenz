@@ -703,7 +703,7 @@ From the [overall project plan](overall-plan.md#phase-2-control-plane-sleepwake-
 - [x] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
 - [x] `npm run lint` passes with zero warnings
 - [x] `npm run typecheck` passes with zero errors
-- [x] Container image builds and runs successfully
+- [x] Control plane container image builds and runs successfully in CI
 - [x] Prometheus metrics endpoint exposes: model counts, worker counts, memory budgets, placement latency, eviction counts, wake trigger counts, state transitions, leader status
 
 ## Open Questions
