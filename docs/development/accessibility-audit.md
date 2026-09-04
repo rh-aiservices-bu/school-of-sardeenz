@@ -7,6 +7,7 @@ Practical checklist for auditing the Sardeenz dashboard. Run this after signific
 Automated axe-core scanning covers the following views:
 
 - Cluster Overview (`/`)
+- Notification Drawer (populated state)
 - Model List with data and empty state (`/models`)
 - Worker List with data and empty state (`/workers`)
 - Model Detail (`/models/:name`)

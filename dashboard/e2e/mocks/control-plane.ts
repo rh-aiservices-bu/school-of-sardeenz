@@ -8,6 +8,7 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { EventEmitter } from 'node:events';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 
 // ---------------------------------------------------------------------------
 // Types mirroring the shapes the BFF and frontend expect
@@ -149,6 +150,8 @@ export interface MockSseEvent {
   message?: string;
 }
 
+type MockNotification = ControlPlaneComponents['schemas']['Notification'];
+
 // ---------------------------------------------------------------------------
 // State store
 // ---------------------------------------------------------------------------
@@ -163,6 +166,7 @@ interface MockState {
   clusterStatus: MockClusterStatus;
   clusterMemory: MockClusterMemory;
   catalog: MockRunnerCatalog;
+  notifications: MockNotification[];
   healthy: boolean;
   apiError: boolean;
 }
@@ -197,6 +201,7 @@ export class MockControlPlane {
       },
       clusterMemory: { workers: [] },
       catalog: MockControlPlane.defaultCatalog(),
+      notifications: [],
       healthy: true,
       apiError: false,
     };
@@ -425,6 +430,14 @@ export class MockControlPlane {
       return reply.send(this.state.catalog);
     });
 
+    // Notifications
+    app.get('/api/v1/notifications', async (req, reply) => {
+      const query = req.query as Record<string, string | undefined>;
+      const limit = query['limit'] ? Number(query['limit']) : 50;
+      const offset = query['offset'] ? Number(query['offset']) : 0;
+      return reply.send({ notifications: this.state.notifications.slice(offset, offset + limit) });
+    });
+
     // SSE — push events from sseEmitter
     app.get('/api/v1/events', async (req, reply) => {
       reply.hijack();
@@ -583,6 +596,11 @@ export class MockControlPlane {
   /** Replace the mock runner catalog (deploy form's Runtime Module source). */
   setCatalog(catalog: MockRunnerCatalog): void {
     this.state.catalog = catalog;
+  }
+
+  /** Replace the notification history returned by the control plane. */
+  setNotifications(notifications: MockNotification[]): void {
+    this.state.notifications = notifications;
   }
 
   /** Mark the health endpoint as healthy or unhealthy. */

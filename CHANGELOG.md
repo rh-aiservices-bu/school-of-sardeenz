@@ -81,6 +81,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard notification drawer accessibility coverage (#179).** The empty-state bell now uses
+  the semantic subtle text token, and the Playwright axe suite seeds notification history through
+  the BFF/mock-control-plane path and scans the open, labeled drawer region, including read/unread
+  items, timestamps, remove controls, and inline header actions.
+
 - **Dashboard public-asset freshness guard (#178).** Bare Playwright runs now reject
   `dist/client` builds older than recursively scanned `dashboard/public/` assets, including
   directory-only changes caused by deletes or renames. Isolated filesystem tests cover nested
