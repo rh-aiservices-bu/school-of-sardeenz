@@ -6,7 +6,7 @@ Sardeenz development uses a containerized environment ([ccbox](https://github.co
 
 - **Node.js** >= 22 with npm (version pinned in `.nvmrc`)
 - **Rust** stable toolchain (via [rustup](https://rustup.rs/)) with `rust-analyzer`, `clippy`, and `rustfmt` components
-- **Podman** with `podman-compose` (or Docker with Docker Compose) — for dev services (Redis/Valkey, later PostgreSQL)
+- **Podman** with `podman-compose` (or Docker with Docker Compose) — for dev services (Redis/Valkey, PostgreSQL)
 - **direnv** (recommended — auto-switches Node version on `cd` via `.envrc`)
 - **ripgrep** (recommended for fast code search)
 
@@ -102,7 +102,7 @@ make dev-proxy      # Proxy (cargo watch, requires Rust)
 
 ## Dev Services
 
-Backend services (Redis/Valkey, and later PostgreSQL) run via Podman Compose. The compose file is at the repo root (`compose.yaml`).
+Backend services (Redis/Valkey and PostgreSQL) run via Podman Compose. The compose file is at the repo root (`compose.yaml`).
 
 ```bash
 # Start all services in the background
@@ -162,22 +162,22 @@ name doesn't end in `_test`**.
 
 ## Common Commands
 
-| Command              | Description                               |
-| -------------------- | ----------------------------------------- |
-| `make` / `make help` | List all targets with descriptions        |
-| `make all`           | Type-check and lint everything            |
-| `make lint`          | ESLint + clippy + OpenAPI spec validation |
-| `make lint-specs`    | Validate OpenAPI specs only (Redocly)     |
-| `make format`        | Auto-format all files                     |
-| `make format-check`  | Check formatting (CI-safe)                |
-| `make typecheck`     | TypeScript `tsc --build` + `cargo check`  |
-| `make test`          | Run all test suites (Vitest + cargo test) |
+| Command              | Description                                                                     |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `make` / `make help` | List all targets with descriptions                                              |
+| `make all`           | Type-check and lint everything                                                  |
+| `make lint`          | ESLint + clippy + OpenAPI spec validation                                       |
+| `make lint-specs`    | Validate OpenAPI specs only (Redocly)                                           |
+| `make format`        | Auto-format all files                                                           |
+| `make format-check`  | Check formatting (CI-safe)                                                      |
+| `make typecheck`     | TypeScript `tsc --build` + `cargo check`                                        |
+| `make test`          | Run all test suites (Vitest + cargo test)                                       |
 | `make test-python`   | Run the Python runner-shim + conformance suites (after `make test-python-deps`) |
-| `make test-coverage` | Run tests with V8 coverage                |
-| `make codegen`       | Regenerate types from OpenAPI specs       |
-| `make services`      | Start dev services (Redis + Postgres)     |
-| `make services-stop` | Stop dev services                         |
-| `make clean`         | Remove all build artifacts                |
+| `make test-coverage` | Run tests with V8 coverage                                                      |
+| `make codegen`       | Regenerate types from OpenAPI specs                                             |
+| `make services`      | Start dev services (Redis + Postgres)                                           |
+| `make services-stop` | Stop dev services                                                               |
+| `make clean`         | Remove all build artifacts                                                      |
 
 ## Logs
 

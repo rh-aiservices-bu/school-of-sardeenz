@@ -491,41 +491,41 @@ main.tsx
 
 ### Header / Chrome
 
-- [ ] Masthead shows the sardine SVG logo (not plain text)
-- [ ] Hamburger button toggles sidebar open/closed
-- [ ] Sun/Moon toggle switches between light and dark themes
-- [ ] Theme persists across page reloads via localStorage
-- [ ] First visit respects `prefers-color-scheme` media query
-- [ ] User dropdown shows username and role (admin/admin-readonly)
-- [ ] Logout action in user dropdown works (redirects to login)
-- [ ] User dropdown is disabled when `authMode === 'none'`
-- [ ] Sidebar footer shows GitHub link with theme-aware icon
+- [x] Masthead shows the sardine SVG logo (not plain text)
+- [x] Hamburger button toggles sidebar open/closed
+- [x] Sun/Moon toggle switches between light and dark themes
+- [x] Theme persists across page reloads via localStorage
+- [x] First visit respects `prefers-color-scheme` media query
+- [x] User dropdown shows username and role (admin/admin-readonly)
+- [x] Logout action in user dropdown works (redirects to login)
+- [x] User dropdown is disabled when `authMode === 'none'`
+- [x] Sidebar footer shows GitHub link with theme-aware icon
 
 ### Notifications — Backend
 
-- [ ] NotificationService stores notifications in a capped Redis list (max 200)
-- [ ] Notifications are published to Redis pub/sub on creation
-- [ ] REST endpoints for list, mark-read, mark-all-read, remove, clear-all
-- [ ] Model deploy success/failure generates notifications
-- [ ] Worker join/leave generates notifications
-- [ ] Model eviction generates notifications
-- [ ] Stuck model recovery generates notifications
-- [ ] Sleep/wake/delete actions generate notifications
+- [x] NotificationService stores notifications in a capped Redis list (max 200)
+- [x] Notifications are published to Redis pub/sub on creation
+- [x] REST endpoints for list, mark-read, mark-all-read, remove, clear-all
+- [x] Model deploy success/failure generates notifications
+- [x] Worker join/leave generates notifications
+- [x] Model eviction generates notifications
+- [x] Stuck model recovery generates notifications
+- [x] Sleep/wake/delete actions generate notifications
 
 ### Notifications — Frontend
 
-- [ ] Notification bell badge shows unread count
-- [ ] Clicking bell opens notification drawer with list of notifications
-- [ ] Notification history loaded from API on mount
-- [ ] SSE-pushed notifications appear in real time without page refresh
-- [ ] Toast alerts appear for new notifications and auto-dismiss
-- [ ] Mark as read / mark all as read updates both UI and backend
-- [ ] Remove / clear all updates both UI and backend
-- [ ] Deduplication prevents identical notifications within 500ms
+- [x] Notification bell badge shows unread count
+- [x] Clicking bell opens notification drawer with list of notifications
+- [x] Notification history loaded from API on mount
+- [x] SSE-pushed notifications appear in real time without page refresh
+- [x] Toast alerts appear for new notifications and auto-dismiss
+- [x] Mark as read / mark all as read updates both UI and backend
+- [x] Remove / clear all updates both UI and backend
+- [x] Deduplication prevents identical notifications within 500ms
 
 ### Quality
 
-- [ ] All new strings use i18n keys
-- [ ] All unit tests pass
-- [ ] `npm run lint` and `npm run typecheck` pass across all workspaces
-- [ ] OpenAPI spec is valid and types regenerate cleanly
+- [x] All new strings use i18n keys
+- [x] All unit tests pass
+- [x] `npm run lint` and `npm run typecheck` pass across all workspaces
+- [x] OpenAPI spec is valid and types regenerate cleanly

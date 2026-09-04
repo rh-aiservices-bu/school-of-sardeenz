@@ -43,6 +43,20 @@ dashboard, e.g. `https://sardeenz.example.com`. It is used to:
 - Decide whether the SSE auth cookie is issued with `Secure` — derived from the `https:` scheme of
   `SARDEENZ_PUBLIC_URL` when set, falling back to a localhost heuristic in local dev.
 
+## Service-to-Service Tokens
+
+Two optional shared secrets add defense in depth between components. Both are bearer tokens
+compared in constant time; leaving them unset is only acceptable in local development (a startup
+warning is logged).
+
+| Variable                | Checked by                                                              | Must also be set on                          |
+| ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
+| `SARDEENZ_API_TOKEN`    | Control plane, on every `/api/v1/*` request (`Authorization: Bearer …`) | Dashboard BFF and proxy (wake-trigger calls) |
+| `SARDEENZ_WORKER_TOKEN` | Worker agent, on every route except `/healthz`                          | Control plane (`WorkerClient`)               |
+
+Store them in Kubernetes Secrets, not in manifests
+([ADR-013](../architecture/adrs/adr-013-secrets-management.md)).
+
 ## Control Plane Network Isolation
 
 The control plane does not implement its own authentication. It **must only be deployed within a trusted network boundary** — for example, a Kubernetes namespace with NetworkPolicy restricting ingress to trusted services only.

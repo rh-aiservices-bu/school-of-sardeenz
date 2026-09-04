@@ -23,12 +23,14 @@ All four communicate through OpenAPI contracts (the single source of truth for c
 
 ## Delivery Phases
 
-The project is delivered in five sequential phases. Each phase produces a usable increment and has clear entry/exit criteria.
+The project was delivered in seven sequential phases (0, 1, 2, 3, 3.5, 3.6, 4), all complete. Each phase produced a usable increment with clear entry/exit criteria. Since Phase 4, work continues on two tracks: a **milestone backlog** (M2 onward, groomed GitHub milestones on `dev`) and **Phase 5**. Current state: [`status.md`](status.md).
 
 ```text
-Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 3.6        Phase 4
-Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners
-(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)
+Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 3.6        Phase 4          Phase 5
+Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners ──►  kvcached
+(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)      co-location
+                                                                                                          │
+                                                                                          Milestones M2 … M13 (backlog track)
 ```
 
 Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while the runtime work starts), but the critical path runs through Phases 0 → 1 → 2.
@@ -112,13 +114,13 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 #### Definition of Done
 
 - [ ] Proxy routes requests to active models with < 1ms overhead (p99, excluding network transit)
-- [ ] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
-- [ ] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
-- [ ] Circuit breaker trips after configurable failure threshold and recovers after backoff
-- [ ] All four request flows from the [architecture overview](../architecture/overview.md#request-flows) pass integration tests
-- [ ] Structured output compatibility approach documented and validated
+- [x] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
+- [x] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
+- [x] Circuit breaker trips after configurable failure threshold and recovers after backoff
+- [x] All four request flows from the [architecture overview](../architecture/overview.md#request-flows) pass integration tests
+- [x] Structured output compatibility approach documented and validated
 - [ ] Container image builds and runs in CI
-- [ ] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
+- [x] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
 
 #### Dependencies
 
@@ -169,15 +171,15 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Definition of Done
 
-- [ ] Model lifecycle state machine covers all transitions, including error recovery (e.g., runner fails to start → state returns to `STOPPED`)
-- [ ] Placement pipeline correctly matches models to workers across the three scenarios: GPU with capacity, GPU without capacity (triggers eviction), CPU-only fallback
-- [ ] LRU eviction frees enough memory for a new deployment by sleeping the least-recently-used model(s)
-- [ ] Sleep/wake round-trip works end-to-end: control plane sends sleep → runner offloads → control plane sends wake → runner reloads → model serves traffic
-- [ ] Worker join/leave detected within 30 seconds without control plane restart
-- [ ] Leader failover completes within the K8s Lease duration (typically 15s); inference traffic is unaffected during failover (proxy continues forwarding to active runners)
-- [ ] All OpenAPI specs pass `redocly lint`
-- [ ] Generated TypeScript types compile cleanly
-- [ ] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
+- [x] Model lifecycle state machine covers all transitions, including error recovery (e.g., runner fails to start → state returns to `STOPPED`)
+- [x] Placement pipeline correctly matches models to workers across the three scenarios: GPU with capacity, GPU without capacity (triggers eviction), CPU-only fallback
+- [x] LRU eviction frees enough memory for a new deployment by sleeping the least-recently-used model(s)
+- [x] Sleep/wake round-trip works end-to-end: control plane sends sleep → runner offloads → control plane sends wake → runner reloads → model serves traffic
+- [x] Worker join/leave detected within 30 seconds without control plane restart
+- [x] Leader failover completes within the K8s Lease duration (typically 15s); inference traffic is unaffected during failover (proxy continues forwarding to active runners)
+- [x] All OpenAPI specs pass `redocly lint`
+- [x] Generated TypeScript types compile cleanly
+- [x] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
 
 #### Dependencies
 
@@ -235,14 +237,14 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Definition of Done
 
-- [ ] Admin can deploy a model through the dashboard and see it transition through `STARTING` → `ACTIVE`
-- [ ] Admin can sleep and wake a model through the dashboard
-- [ ] Cluster overview shows real-time GPU memory utilization (updates within 5 seconds of state change)
-- [ ] Device memory visualization renders correctly for workers with 1, 2, 4, and 8 GPUs
-- [ ] Dashboard remains responsive and displays cached state during a brief control plane restart (BFF reads from Redis/Prometheus independently)
-- [ ] All views pass PatternFly 6 accessibility standards (WCAG 2.1 AA)
-- [ ] Playwright E2E tests cover: model deploy, model sleep/wake, cluster overview loads, worker detail loads
-- [ ] Frontend builds with zero TypeScript errors and zero ESLint warnings
+- [x] Admin can deploy a model through the dashboard and see it transition through `STARTING` → `ACTIVE`
+- [x] Admin can sleep and wake a model through the dashboard
+- [x] Cluster overview shows real-time GPU memory utilization (updates within 5 seconds of state change)
+- [x] Device memory visualization renders correctly for workers with 1, 2, 4, and 8 GPUs
+- [x] Dashboard remains responsive and displays cached state during a brief control plane restart (BFF reads from Redis/Prometheus independently)
+- [x] All views pass PatternFly 6 accessibility standards (WCAG 2.1 AA)
+- [x] Playwright E2E tests cover: model deploy, model sleep/wake, cluster overview loads, worker detail loads
+- [x] Frontend builds with zero TypeScript errors and zero ESLint warnings
 
 #### Dependencies
 
@@ -380,6 +382,30 @@ breakdown is in [`phase4.md`](phase4.md).
 
 ---
 
+### Phase 5: kvcached Oversubscription and Co-location Policy
+
+**Objective:** Let the control plane place several models on one GPU when their runners declare
+`kvCacheElasticSharing`, treating KV-cache memory as reclaimable rather than fixed. Phase 4 proved
+two vLLM runners can share a GPU via kvcached (spike Gate 9); Phase 5 turns that into a placement
+policy: which models may co-locate, how much oversubscription is allowed, and how eviction reacts
+when a shared pool is under pressure.
+
+**Status:** not started. Detailed scope will be written as `phase5.md` when the milestone backlog
+in front of it (M13) is closed.
+
+**Dependencies:** Phase 4 complete; measured-only VRAM telemetry (#163/#164) so pool pressure is
+observed, not estimated; per-device kvcached pool reporting from the runner contract.
+
+---
+
+## Milestone Track
+
+Alongside the phases, issues from the full audit (August 2026) are grouped into GitHub milestones
+and executed one milestone per branch, merged to `dev`. M2 through M12 are complete; M13 is next.
+The list of themes and what each delivered is maintained in [`status.md`](status.md).
+
+---
+
 ## Cross-Cutting Concerns
 
 These concerns span all phases and must be addressed continuously rather than in a single phase.
@@ -410,7 +436,7 @@ The monorepo uses a unified Makefile. CI runs `make all` (typecheck + lint) and 
 
 - The proxy does not handle authentication (handled by ingress/sidecar)
 - The control plane API is internal — not exposed to end users
-- The dashboard backend enforces authorization (integration point TBD)
+- The dashboard BFF enforces authentication (`simple` / `oauth` modes) and holds the control plane API token; the control plane and worker agents check shared bearer tokens as defense in depth (see [deployment security](../usage/deployment-security.md))
 - Runner contract communication is cluster-internal (no public network exposure)
 
 ---
@@ -425,6 +451,7 @@ The monorepo uses a unified Makefile. CI runs `make all` (typecheck + lint) and 
 
 **Supporting documents:**
 
+- [Project Status](status.md) — delivered phases and milestones, what is next
 - [Architecture Overview](../architecture/overview.md) — system design, diagrams, request flows
 - [Architecture Decision Records](../architecture/adrs/) — rationale for every major technical choice
 - [Development Setup](../development/setup.md) — how to build and run locally

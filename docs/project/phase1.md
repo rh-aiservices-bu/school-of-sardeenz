@@ -406,17 +406,17 @@ Run with: `cargo test --features redis-integration test_redis`
 From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connection-parking):
 
 - [ ] Proxy routes requests to active models with < 1ms overhead (p99, excluding network transit)
-- [ ] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
-- [ ] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
-- [ ] Circuit breaker trips after configurable failure threshold and recovers after backoff
-- [ ] All four request flows from the architecture overview pass integration tests
-- [ ] Structured output compatibility approach documented and validated
+- [x] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
+- [x] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
+- [x] Circuit breaker trips after configurable failure threshold and recovers after backoff
+- [x] All four request flows from the architecture overview pass integration tests
+- [x] Structured output compatibility approach documented and validated
 - [ ] Container image builds and runs in CI
-- [ ] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
-- [ ] OpenAPI spec passes `redocly lint` with zero errors
-- [ ] Generated Rust types compile cleanly (`cargo check`)
-- [ ] Generated TypeScript types compile cleanly (`make typecheck`)
-- [ ] `cargo clippy -- -D warnings` passes with zero warnings
+- [x] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
+- [x] OpenAPI spec passes `redocly lint` with zero errors
+- [x] Generated Rust types compile cleanly (`cargo check`)
+- [x] Generated TypeScript types compile cleanly (`make typecheck`)
+- [x] `cargo clippy -- -D warnings` passes with zero warnings
 
 ## Open Questions
 

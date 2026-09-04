@@ -491,43 +491,43 @@ Proxy routes inference traffic to runner stub ports.
 
 ### Worker agent
 
-- [ ] Dev worker registers in Redis and is discovered by the control plane within one reconciliation cycle (≤ 30s)
-- [ ] Heartbeat keeps the worker in ONLINE status while the process is running
-- [ ] Worker disappears from the control plane within the heartbeat timeout after the process stops
-- [ ] `POST /runners` starts a runner stub on a unique port and returns the endpoint
-- [ ] `DELETE /runners/{runnerId}` stops the runner stub and frees simulated memory
-- [ ] Multiple runners can run simultaneously on a single worker
-- [ ] Graceful shutdown stops all runners and cleans up Redis keys
+- [x] Dev worker registers in Redis and is discovered by the control plane within one reconciliation cycle (≤ 30s)
+- [x] Heartbeat keeps the worker in ONLINE status while the process is running
+- [x] Worker disappears from the control plane within the heartbeat timeout after the process stops
+- [x] `POST /runners` starts a runner stub on a unique port and returns the endpoint
+- [x] `DELETE /runners/{runnerId}` stops the runner stub and frees simulated memory
+- [x] Multiple runners can run simultaneously on a single worker
+- [x] Graceful shutdown stops all runners and cleans up Redis keys
 
 ### Runner stubs
 
-- [ ] All six runner contract endpoints (`/health`, `/memory-report`, `/sleep`, `/wake`, `/sleep-status`, `/progress`, `/capabilities`) return valid responses matching the OpenAPI schemas
-- [ ] State machine transitions follow the correct lifecycle: STARTING → READY ↔ SLEEPING
-- [ ] Simulated loading progress reports phase transitions during STARTING
-- [ ] Sleep frees simulated device memory; wake re-allocates it
-- [ ] `activeRequests` counter in health response reflects in-flight inference requests
+- [x] All six runner contract endpoints (`/health`, `/memory-report`, `/sleep`, `/wake`, `/sleep-status`, `/progress`, `/capabilities`) return valid responses matching the OpenAPI schemas
+- [x] State machine transitions follow the correct lifecycle: STARTING → READY ↔ SLEEPING
+- [x] Simulated loading progress reports phase transitions during STARTING
+- [x] Sleep frees simulated device memory; wake re-allocates it
+- [x] `activeRequests` counter in health response reflects in-flight inference requests
 
 ### End-to-end flow
 
-- [ ] Deploy a model via the dashboard or admin API → control plane places it on the dev worker → runner stub starts → model reaches ACTIVE → proxy routes inference requests → canned response returns
-- [ ] Sleep a model → runner stub transitions to SLEEPING → proxy parks new requests
-- [ ] Wake a model (via proxy wake trigger or admin API) → runner stub transitions back to READY → parked requests are released
-- [ ] Evict a model (by deploying more models than device memory allows) → LRU model is slept → new model is deployed
+- [x] Deploy a model via the dashboard or admin API → control plane places it on the dev worker → runner stub starts → model reaches ACTIVE → proxy routes inference requests → canned response returns
+- [x] Sleep a model → runner stub transitions to SLEEPING → proxy parks new requests
+- [x] Wake a model (via proxy wake trigger or admin API) → runner stub transitions back to READY → parked requests are released
+- [x] Evict a model (by deploying more models than device memory allows) → LRU model is slept → new model is deployed
 
 ### Simulated inference
 
-- [ ] Non-streaming `POST /v1/chat/completions` returns a valid ChatCompletion response
-- [ ] Streaming `POST /v1/chat/completions` returns valid SSE frames with token-by-token output
-- [ ] Response includes the correct model name matching the deployment
-- [ ] Inference endpoint returns 503 when runner is not in READY state
+- [x] Non-streaming `POST /v1/chat/completions` returns a valid ChatCompletion response
+- [x] Streaming `POST /v1/chat/completions` returns valid SSE frames with token-by-token output
+- [x] Response includes the correct model name matching the deployment
+- [x] Inference endpoint returns 503 when runner is not in READY state
 
 ### Quality
 
-- [ ] `npm run lint` and `npm run typecheck` pass across all workspaces
-- [ ] OpenAPI spec is valid (`npm run validate -w @sardeenz/contracts`)
-- [ ] Generated types compile cleanly
-- [ ] All unit tests pass
-- [ ] Integration test passes with running Redis
+- [x] `npm run lint` and `npm run typecheck` pass across all workspaces
+- [x] OpenAPI spec is valid (`npm run validate -w @sardeenz/contracts`)
+- [x] Generated types compile cleanly
+- [x] All unit tests pass
+- [x] Integration test passes with running Redis
 
 ## Open Questions
 

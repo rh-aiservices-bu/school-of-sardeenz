@@ -75,6 +75,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the proxy does not read `stream`. `i18n.md`: `playground` namespace. `deployment/README.md`:
   `control-plane/` in the layout tree. `docs/project/README.md`: index the M6/M7/M9 PR drafts and
   `status.md`. Root `README.md`: replaced "Coming soon" placeholders with links.
+  `overall-plan.md`: seven phases not five, Phase 5 and milestone-track sections, BFF auth no
+  longer "TBD". Acceptance checkboxes ticked on completed phases 1/2/3.5/3.6 (two left open: the
+  unmeasured "< 1ms p99" proxy overhead and "container image builds in CI", which CI does not do).
+  `setup.md`: Postgres is no longer "later". New `docs/usage/api-reference.md` pointing at the
+  OpenAPI specs; `deployment-security.md` gains a service-to-service tokens section.
 
 - **vLLM engine bind host configurable, default `0.0.0.0` (#159).** The vLLM runner shim
   started the engine with a hardcoded `--host 127.0.0.1`, so the engine port was unreachable
