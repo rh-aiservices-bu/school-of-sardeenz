@@ -33,3 +33,4 @@ export type {
   operations as WorkerAgentOperations,
   paths as WorkerAgentPaths,
 } from './generated/worker-agent.js';
+export { RunnerByInstanceResponseState } from './generated/worker-agent.js';

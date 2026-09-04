@@ -25,6 +25,7 @@ import { CatalogService } from './services/catalog-service.js';
 import { ModuleStoreService } from './services/module-store.js';
 import { WeightsBrowserService } from './services/weights-browser.js';
 import { ProxyProtocolsService } from './services/proxy-protocols.js';
+import { MoveOrchestrationService } from './services/move-orchestration.js';
 import { StubImporter, OrasImporter, type SifImporter } from './services/sif-importer.js';
 import { WorkerClient } from './clients/worker.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
@@ -135,6 +136,22 @@ async function main(): Promise<void> {
     leaseDurationMs: 30_000,
     logger: notificationLogger,
   });
+  const createWorkerClient = (baseUrl: string) =>
+    new WorkerClient({ baseUrl, token: config.workerToken });
+  const moveOrchestration = new MoveOrchestrationService(
+    lifecycle,
+    routingMap,
+    sleepWake,
+    workerPool,
+    memoryBudget,
+    instanceRepository,
+    leaderElection,
+    (host, port) => new RunnerClient({ host, port }),
+    createWorkerClient,
+    config.deployTimeoutSecs * 1000,
+    notificationLogger,
+    notifications,
+  );
 
   const app = await buildServer({
     config,
@@ -152,6 +169,7 @@ async function main(): Promise<void> {
       eviction,
       sleepWake,
       deployOrchestration,
+      moveOrchestration,
       leaderElection,
       notifications,
       catalogService,
@@ -159,7 +177,7 @@ async function main(): Promise<void> {
       weightsBrowser,
       proxyProtocols,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
-      createWorkerClient: (baseUrl) => new WorkerClient({ baseUrl, token: config.workerToken }),
+      createWorkerClient,
     },
   });
 
@@ -184,7 +202,8 @@ async function main(): Promise<void> {
     notifications,
     instanceRepository,
     modelRepository,
-    (baseUrl) => new WorkerClient({ baseUrl, token: config.workerToken }),
+    createWorkerClient,
+    moveOrchestration,
   );
 
   // Leader election runs before the one-shot startup tick below so `isLeader` already reflects

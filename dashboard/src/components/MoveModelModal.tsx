@@ -15,10 +15,14 @@ import {
   ModalVariant,
   Spinner,
 } from '@patternfly/react-core';
-import { WorkerStatus } from '@sardeenz/types';
 import { useMoveInstance, useModel } from '../hooks/useModels';
 import { useRunnerTypes, useWorkerCapabilities, useWorkers } from '../hooks/useWorkers';
-import { classifyMoveProgress, type MoveProgress } from '../utils/move';
+import {
+  classifyMoveProgress,
+  compatibleMoveDevices,
+  isEligibleMoveTargetWorker,
+  type MoveProgress,
+} from '../utils/move';
 
 export interface MoveSource {
   modelName: string;
@@ -52,60 +56,20 @@ export function MoveModelModal({
   const isOpen = source !== null;
   const tensorParallel = detail?.tensorParallel ?? source?.deviceIndices.length ?? 1;
   const target = workers?.find((worker) => worker.workerId === workerId);
-  const perDeviceRequired = (detail?.requiredMemory ?? 0) / tensorParallel;
   const compatible = useMemo(() => {
     if (!target || !detail) return [];
-    const capability = target.runnerCapabilities?.find(
-      (capability) =>
-        capability.runnerType === detail.runnerType &&
-        capability.maxTensorParallelism >= tensorParallel &&
-        (!detail.deviceType ||
-          capability.supportedDeviceTypes.includes(detail.deviceType as never)),
-    );
     const runnerKnown =
       capabilitiesFallback ||
       (capabilities.some((capability) => capability.runnerType === detail.runnerType) &&
         runnerTypes.some((option) => option.value === detail.runnerType));
-    return capability && runnerKnown
-      ? target.devices.filter(
-          (device) =>
-            (!detail.deviceType || device.deviceType === detail.deviceType) &&
-            capability.supportedDeviceTypes.includes(device.deviceType as never) &&
-            device.memoryAvailableBytes >= perDeviceRequired,
-        )
-      : [];
-  }, [
-    capabilities,
-    capabilitiesFallback,
-    detail,
-    perDeviceRequired,
-    runnerTypes,
-    target,
-    tensorParallel,
-  ]);
+    return runnerKnown ? compatibleMoveDevices(target, detail) : [];
+  }, [capabilities, capabilitiesFallback, detail, runnerTypes, target]);
   const eligibleWorkers = useMemo(
     () =>
-      workers?.filter((worker) => {
-        if (worker.status !== WorkerStatus.ONLINE || !detail || !source) return false;
-        const capability = worker.runnerCapabilities?.find(
-          (candidate) =>
-            candidate.runnerType === detail.runnerType &&
-            candidate.maxTensorParallelism >= tensorParallel,
-        );
-        if (!capability) return false;
-        const eligibleCount = worker.devices.filter(
-          (device) =>
-            (!detail.deviceType || device.deviceType === detail.deviceType) &&
-            capability.supportedDeviceTypes.includes(device.deviceType as never) &&
-            device.memoryAvailableBytes >= perDeviceRequired,
-        ).length;
-        const isSamePlacement =
-          worker.workerId === source.workerId &&
-          source.deviceIndices.length === tensorParallel &&
-          source.deviceIndices.every((index) => devices.includes(index));
-        return eligibleCount >= tensorParallel && !isSamePlacement;
-      }) ?? [],
-    [detail, devices, perDeviceRequired, source, tensorParallel, workers],
+      workers?.filter(
+        (worker) => !!detail && !!source && isEligibleMoveTargetWorker(worker, detail, source),
+      ) ?? [],
+    [detail, source, workers],
   );
   const isIdenticalPlacement =
     !!source &&

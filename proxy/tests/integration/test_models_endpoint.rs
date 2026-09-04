@@ -60,7 +60,10 @@ async fn test_models_endpoint_active_and_sleeping() {
 
     assert!(ids.contains(&active_model), "active model should appear in /openai/v1/models");
     assert!(ids.contains(&sleeping_model), "sleeping model should appear in /openai/v1/models");
-    assert!(!ids.contains(&draining_model), "draining model should NOT appear in /openai/v1/models");
+    assert!(
+        !ids.contains(&draining_model),
+        "draining model should NOT appear in /openai/v1/models"
+    );
 
     // Standard OpenAI model object fields.
     let active =

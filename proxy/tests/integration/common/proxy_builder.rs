@@ -112,18 +112,37 @@ impl TestProxy {
             },
             None,
             false, // redis_connected = false
+            true,  // routing map was loaded before the simulated disconnect
+        )
+        .await
+    }
+
+    /// Spawn the one deliberately not-ready state used by the readiness probe test.
+    pub async fn spawn_before_routing_map_loaded(control_plane_url: &str) -> Self {
+        Self::spawn_inner_full(
+            TestProxyConfig {
+                control_plane_url: control_plane_url.to_string(),
+                ..Default::default()
+            },
+            None,
+            true,
+            false,
         )
         .await
     }
 
     async fn spawn_inner(cfg: TestProxyConfig, existing_cache: Option<RoutingMapCache>) -> Self {
-        Self::spawn_inner_full(cfg, existing_cache, true).await
+        // Most integration tests inject entries after spawning instead of providing an existing
+        // cache. They model a completed empty HGETALL followed by later updates, so mark the
+        // initial routing load complete even when the injected map starts empty.
+        Self::spawn_inner_full(cfg, existing_cache, true, true).await
     }
 
     async fn spawn_inner_full(
         cfg: TestProxyConfig,
         existing_cache: Option<RoutingMapCache>,
         redis_connected: bool,
+        routing_map_loaded: bool,
     ) -> Self {
         // build_recorder() does NOT install a global recorder, so multiple
         // tests in the same binary can each call this without panicking.
@@ -173,6 +192,7 @@ impl TestProxy {
             existing_cache.clone(),
             redis_connected,
         );
+        state.set_routing_map_loaded(routing_map_loaded);
 
         let routing_cache = state.routing_cache.clone();
         let parking = state.parking.clone();

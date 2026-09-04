@@ -92,6 +92,11 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
     expect(body.code).toBe('NOT_FOUND');
   });
 
+  it('returns 404 for an unknown instance identity', async () => {
+    const res = await fetch(`${baseUrl}/runners/by-instance/inst-does-not-exist/status`);
+    expect(res.status).toBe(404);
+  });
+
   it('returns 200 for a running runner, then 404 again after it is stopped', async () => {
     const { runnerId } = await manager.startRunner({
       modelName: 'liveness-model',
@@ -109,9 +114,60 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
     expect(upBody.runnerId).toBe(runnerId);
     expect(upBody.instanceId).toBe('inst-liveness-model');
 
+    const byInstanceRes = await fetch(`${baseUrl}/runners/by-instance/inst-liveness-model/status`);
+    expect(byInstanceRes.status).toBe(200);
+    expect(await byInstanceRes.json()).toMatchObject({
+      instanceId: 'inst-liveness-model',
+      runnerId,
+      state: 'READY',
+      host: 'localhost',
+      port: 19600,
+      enginePort: 19601,
+    });
+
     await manager.stopRunner(runnerId);
 
     const goneRes = await fetch(`${baseUrl}/runners/${runnerId}`);
     expect(goneRes.status).toBe(404);
+  });
+
+  it('returns 202 with the assigned runner id while startup is in flight', async () => {
+    let finish!: (handle: LaunchHandle) => void;
+    const deferredLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: () =>
+        new Promise<LaunchHandle>((resolve) => {
+          finish = resolve;
+        }),
+    };
+    const pendingManager = new RunnerManager(makeConfig(), makeRegistration(), deferredLauncher);
+    const pendingServer = Fastify({ logger: false });
+    registerRunnerRoutes(pendingServer, pendingManager);
+    const pendingBaseUrl = await pendingServer.listen({ port: 0, host: '127.0.0.1' });
+
+    const start = pendingManager.startRunner({
+      modelName: 'pending-model',
+      instanceId: 'inst-pending-model',
+      runnerType: 'vllm',
+      modelPath: '/models/pending',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    const response = await fetch(`${pendingBaseUrl}/runners/by-instance/inst-pending-model/status`);
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as { runnerId: string; state: string };
+    expect(body).toMatchObject({ state: 'STARTING' });
+    expect(body.runnerId).toMatch(/^runner-/);
+
+    finish({
+      host: 'localhost',
+      port: 19600,
+      enginePort: 19601,
+      stop: () => Promise.resolve(),
+    });
+    const started = await start;
+    await pendingManager.stopRunner(started.runnerId);
+    await pendingServer.close();
   });
 });

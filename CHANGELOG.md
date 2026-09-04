@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Resumable move-model action for the placement board (#146).** Operators can move an active
+  instance to an explicit compatible worker/GPU set. The control plane persists a non-expiring
+  move transaction before launching the replacement, resumes it after leader changes, recovers
+  ambiguous worker starts by `instanceId`, and waits for every traffic-serving proxy to apply the
+  weight-zero cutover and finish requests on the old route before stopping the source runner. The
+  dashboard exposes the action with target validation and live progress states.
+
 - **Per-user Playground inference concurrency cap (#149).** The dashboard BFF now limits each
   verified user to four concurrent inference requests by default (configurable with
   `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER`), returns `429 RATE_LIMITED` before

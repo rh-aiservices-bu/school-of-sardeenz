@@ -1,7 +1,7 @@
 # Warnings that are correct-by-design, not defects.
 #
-# RoutingMapUpdate — intentionally unused component, defined for Phase 2
-# consumption. Remove once the schema is referenced by an operation.
+# RoutingMapUpdate and RoutingPropagationBarrier are Redis pub/sub payloads,
+# not HTTP operation bodies. They are consumed directly by the proxy.
 #
 # OipModelList — the shape of the proxy's own GET /oip/v2/models response.
 # The proxy answers this route itself from the routing map (never forwarded)
@@ -14,6 +14,7 @@
 specs/proxy-control-plane.yaml:
   no-unused-components:
     - '#/components/schemas/RoutingMapUpdate'
+    - '#/components/schemas/RoutingPropagationBarrier'
     - '#/components/schemas/OipModelList'
     - '#/components/schemas/ProxyProtocolSet'
 

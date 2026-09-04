@@ -37,6 +37,7 @@ function toDeps(mockNotifications: MockNotifications): RouteDeps {
     eviction: {} as RouteDeps['eviction'],
     sleepWake: {} as RouteDeps['sleepWake'],
     deployOrchestration: {} as RouteDeps['deployOrchestration'],
+    moveOrchestration: {} as RouteDeps['moveOrchestration'],
     leaderElection: {} as RouteDeps['leaderElection'],
     notifications: mockNotifications as unknown as RouteDeps['notifications'],
     catalogService: {} as RouteDeps['catalogService'],

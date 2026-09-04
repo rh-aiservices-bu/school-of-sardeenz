@@ -35,6 +35,7 @@ export interface MockInstanceInfo {
   instanceId: string;
   state: string;
   workerId?: string;
+  deviceIndices?: number[];
   runnerEndpoint?: { host: string; port: number };
   createdAt?: string;
   /** NVML-measured device memory for this instance (#163). Absent when unmeasured. */
@@ -72,6 +73,14 @@ export interface MockWorkerInfo {
   status: string;
   devices: MockDeviceInfo[];
   modelCount?: number;
+  runnerCapabilities?: Array<{
+    runnerType: string;
+    engineName: string;
+    supportedModelTypes: string[];
+    supportedDeviceTypes: string[];
+    maxTensorParallelism?: number;
+    kvCacheElasticSharing?: boolean;
+  }>;
   lastHeartbeatAt?: string;
 }
 
@@ -404,6 +413,33 @@ export class MockControlPlane {
         });
       },
     );
+
+    app.post<{
+      Params: { name: string; instanceId: string };
+      Body: { targetWorkerId: string; targetDeviceIndices: number[] };
+    }>('/api/v1/models/:name/instances/:instanceId/move', async (req, reply) => {
+      const model = this.state.models.find((candidate) => candidate.modelName === req.params.name);
+      if (!model) return reply.code(404).send({ error: 'not found' });
+      const source = this.instancesFor(model.modelName).find(
+        (instance) => instance.instanceId === req.params.instanceId,
+      );
+      if (!source) return reply.code(404).send({ error: 'not found' });
+      const replacementInstanceId = `inst-move${(++this.instanceCounter).toString().padStart(4, '0')}`;
+      this.instancesFor(model.modelName).push({
+        instanceId: replacementInstanceId,
+        state: 'STARTING',
+        workerId: req.body.targetWorkerId,
+        deviceIndices: req.body.targetDeviceIndices,
+        createdAt: new Date().toISOString(),
+      });
+      model.instanceCount = this.instancesFor(model.modelName).length;
+      model.workerId = undefined;
+      return reply.code(202).send({
+        modelName: model.modelName,
+        sourceInstanceId: source.instanceId,
+        replacementInstanceId,
+      });
+    });
 
     // Workers
     app.get('/api/v1/workers', async (_req, reply) => {

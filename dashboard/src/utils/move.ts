@@ -1,6 +1,13 @@
-import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
+import { ModelLifecycleState, WorkerStatus, type ControlPlaneComponents } from '@sardeenz/types';
 
 type InstanceDetail = ControlPlaneComponents['schemas']['InstanceDetail'];
+type ModelDetail = ControlPlaneComponents['schemas']['ModelDetail'];
+type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
+
+export interface MovePlacementSource {
+  workerId: string;
+  deviceIndices: number[];
+}
 
 export type MoveProgress =
   | 'deploying'
@@ -15,7 +22,39 @@ export type MoveProgress =
 // unbounded spinner if the pre-cutover replacement was immediately removed.
 export const MOVE_REPLACEMENT_OBSERVATION_TIMEOUT_MS = 30_000;
 
-/** Interpret the two observable instance records; moves intentionally have no durable operation. */
+/** Apply the same runner, hardware, tensor-parallel and per-device VRAM checks as placement. */
+export function compatibleMoveDevices(worker: WorkerInfo, model: ModelDetail) {
+  if (worker.status !== WorkerStatus.ONLINE) return [];
+  const tensorParallel = model.tensorParallel ?? 1;
+  const capability = worker.runnerCapabilities?.find(
+    (candidate) =>
+      candidate.runnerType === model.runnerType &&
+      candidate.maxTensorParallelism >= tensorParallel &&
+      (!model.deviceType || candidate.supportedDeviceTypes.includes(model.deviceType as never)),
+  );
+  if (!capability) return [];
+  const perDeviceRequired = model.requiredMemory / tensorParallel;
+  return worker.devices.filter(
+    (device) =>
+      (!model.deviceType || device.deviceType === model.deviceType) &&
+      capability.supportedDeviceTypes.includes(device.deviceType as never) &&
+      device.memoryAvailableBytes >= perDeviceRequired,
+  );
+}
+
+export function isEligibleMoveTargetWorker(
+  worker: WorkerInfo,
+  model: ModelDetail,
+  source: MovePlacementSource,
+): boolean {
+  const devices = compatibleMoveDevices(worker, model);
+  const hasDistinctPlacement =
+    worker.workerId !== source.workerId ||
+    devices.some((device) => !source.deviceIndices.includes(device.deviceIndex));
+  return devices.length >= (model.tensorParallel ?? 1) && hasDistinctPlacement;
+}
+
+/** Interpret instance records; the durable server-side transaction is intentionally not exposed. */
 export function classifyMoveProgress(
   instances: InstanceDetail[] | undefined,
   sourceInstanceId: string,

@@ -205,6 +205,8 @@ interface DeployFromRecordOptions {
   awaitDeployment?: boolean;
   /** The move that owns the claim may launch its own replacement. */
   allowMoveClaim?: boolean;
+  /** Durable move ownership to verify immediately before dispatching a replacement runner. */
+  moveOperationId?: string;
 }
 
 /**
@@ -251,6 +253,18 @@ async function deployFromRecord(
         'start a new instance for',
         'move-in-progress',
         'a move is already in progress',
+      );
+    }
+  };
+  const assertMoveStillOwned = async (): Promise<void> => {
+    if (!options.moveOperationId) return;
+    const operation = await deps.lifecycle.getMoveOperation(record.name);
+    if (operation?.operationId !== options.moveOperationId) {
+      throw ControlPlaneError.operationInProgress(
+        record.name,
+        'start a move replacement for',
+        'move-ownership-lost',
+        'the durable move transaction is no longer owned by this request',
       );
     }
   };
@@ -347,6 +361,9 @@ async function deployFromRecord(
         );
       }
       assertLaunchAllowed();
+      // A leader handoff can remove an abandoned move record while the old request is between
+      // placement and dispatch. Never create a runner after losing the durable transaction.
+      await assertMoveStillOwned();
 
       const deployment = deps.deployOrchestration.deployModel({
         modelName: record.name,
@@ -364,6 +381,7 @@ async function deployFromRecord(
         protocol: runnerMeta.protocol,
         entrypoint: runnerMeta.entrypoint,
         devices: result.devices,
+        ...(options.moveOperationId ? { isStillOwner: () => deps.leaderElection.isLeader } : {}),
       });
       if (!options.awaitDeployment) {
         void deployment.catch((err: unknown) => {
@@ -419,7 +437,7 @@ async function deployFromRecord(
       throw ControlPlaneError.placementFailed(record.name, 'No worker with sufficient capacity');
     }
 
-    void (async () => {
+    const deployment = (async () => {
       try {
         const stopTimer = deps.eviction.startTimer();
         // Registry semantics: DB row for the *model* is kept; only the evicted instance's Redis
@@ -517,30 +535,23 @@ async function deployFromRecord(
         }
         assertLaunchAllowed();
 
-        deps.deployOrchestration
-          .deployModel({
-            modelName: record.name,
-            instanceId,
-            workerId: reclaimed.workerId,
-            runnerType: record.runnerType,
-            modelPath: record.modelPath,
-            requiredMemory,
-            deviceType: record.deviceType ?? undefined,
-            tensorParallel,
-            engineConfig: record.engineConfig ?? undefined,
-            engineArgs: record.engineArgs ?? undefined,
-            runtimeModule: record.runtimeModule ?? undefined,
-            servedModelName: record.servedModelName ?? undefined,
-            protocol: runnerMeta.protocol,
-            entrypoint: runnerMeta.entrypoint,
-            devices: reclaimed.devices,
-          })
-          .catch((err: unknown) => {
-            app.log.error(
-              { err, modelName: record.name, instanceId },
-              'Background deploy orchestration failed',
-            );
-          });
+        await deps.deployOrchestration.deployModel({
+          modelName: record.name,
+          instanceId,
+          workerId: reclaimed.workerId,
+          runnerType: record.runnerType,
+          modelPath: record.modelPath,
+          requiredMemory,
+          deviceType: record.deviceType ?? undefined,
+          tensorParallel,
+          engineConfig: record.engineConfig ?? undefined,
+          engineArgs: record.engineArgs ?? undefined,
+          runtimeModule: record.runtimeModule ?? undefined,
+          servedModelName: record.servedModelName ?? undefined,
+          protocol: runnerMeta.protocol,
+          entrypoint: runnerMeta.entrypoint,
+          devices: reclaimed.devices,
+        });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         app.log.error(
@@ -577,6 +588,7 @@ async function deployFromRecord(
       instanceId,
       state: ModelLifecycleState.PENDING,
       message: 'Capacity reclamation in progress',
+      deployment,
     };
   } catch (err) {
     if (redisCreated) {
@@ -643,7 +655,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   const deletingInFlight = new Set<string>();
 
   // A move owns the model from replacement reservation until the old runner has been reaped.
-  // The local set closes same-leader races; a private Redis lease below fences a leader handoff.
+  // The local set closes same-leader races; the durable MoveOperation fences a leader handoff.
   const movingInFlight = new Set<string>();
   const launchingInFlight = new Set<string>();
   const modelLifecycleInFlight = new Set<string>();
@@ -658,8 +670,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     launchingInFlight,
     modelLifecycleInFlight,
   };
-  const assertNoMove = (modelName: string, action: string): void => {
-    if (movingInFlight.has(modelName)) {
+  const assertNoMove = async (modelName: string, action: string): Promise<void> => {
+    const durableMove = await deps.lifecycle.getMoveOperation(modelName);
+    // Re-read the process-local fence after the await: a concurrent request may have claimed it
+    // while Redis was being queried.
+    if (movingInFlight.has(modelName) || durableMove) {
       throw ControlPlaneError.operationInProgress(
         modelName,
         action,
@@ -670,8 +685,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   };
   const hasInstanceOperation = (modelName: string): boolean =>
     [...instanceOpInFlight].some((key) => key.startsWith(`${modelName}:`));
-  const assertMoveAdmission = (modelName: string): void => {
-    if (movingInFlight.has(modelName)) {
+  const assertMoveAdmission = async (modelName: string): Promise<void> => {
+    const durableMove = await deps.lifecycle.getMoveOperation(modelName);
+    if (movingInFlight.has(modelName) || durableMove) {
       throw ControlPlaneError.operationInProgress(
         modelName,
         'move',
@@ -827,7 +843,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (!record) {
         throw ControlPlaneError.modelNotFound(modelName);
       }
-      assertNoMove(modelName, 'add an instance for');
+      await assertNoMove(modelName, 'add an instance for');
       const instanceId = mintInstanceId();
       launchingInFlight.add(modelName);
       let state: ModelLifecycleState;
@@ -899,7 +915,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         },
       );
     }
-    assertMoveAdmission(modelName);
+    await assertMoveAdmission(modelName);
     if (source.state !== ModelLifecycleState.ACTIVE) {
       throw ControlPlaneError.invalidState(`${modelName}/${instanceId}`, source.state, 'move');
     }
@@ -950,18 +966,22 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
     // The snapshot and target checks above contain no mutation, but another operation can claim
     // while their asynchronous reads settle. Claim only after rechecking every model operation.
-    assertMoveAdmission(modelName);
-    movingInFlight.add(modelName);
-    const moveLeaseToken = randomUUID();
-    // This private lease is deliberately bounded. The persisted DRAINING source marker remains
-    // the durable post-cutover recovery signal if a leader dies after its lease expires.
-    const hasLease = await deps.lifecycle.acquireMoveLease?.(
+    await assertMoveAdmission(modelName);
+    const operationId = randomUUID();
+    const replacementInstanceId = mintInstanceId();
+    const now = new Date().toISOString();
+    const operationCreated = await deps.lifecycle.createMoveOperation({
+      operationId,
       modelName,
-      moveLeaseToken,
-      15 * 60_000,
-    );
-    if (hasLease === false) {
-      movingInFlight.delete(modelName);
+      sourceInstanceId: instanceId,
+      replacementInstanceId,
+      targetWorkerId: body.targetWorkerId,
+      targetDeviceIndices: body.targetDeviceIndices,
+      phase: 'REPLACEMENT_STARTING',
+      createdAt: now,
+      updatedAt: now,
+    });
+    if (!operationCreated) {
       throw ControlPlaneError.operationInProgress(
         modelName,
         'move',
@@ -969,168 +989,30 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         'a move is already in progress',
       );
     }
-    const replacementInstanceId = mintInstanceId();
+    movingInFlight.add(modelName);
     try {
       const launch = await deployFromRecord(app, deps, claims, record, replacementInstanceId, {
         fixedPlacement: { workerId: body.targetWorkerId, deviceIndices: body.targetDeviceIndices },
         awaitDeployment: true,
         allowMoveClaim: true,
+        moveOperationId: operationId,
       });
-      // Redis lifecycle state, SQL row, and capacity holds now exist: safe to acknowledge.
-      const notifyBestEffort = (
-        title: string,
-        description: string,
-        variant: 'success' | 'danger',
-      ) => {
-        void deps.notifications
-          .createNotification({
-            title,
-            description,
-            variant,
-            source: { type: 'model', name: modelName },
-          })
-          .catch((notifyErr: unknown) => {
-            app.log.debug({ err: notifyErr, modelName }, 'Failed to create move notification');
-          });
-      };
-      const sourceRoutingState = async (): Promise<'selectable' | 'weight-zero' | 'unknown'> => {
-        try {
-          const entry = await deps.routingMap.getEntry(modelName);
-          if (!entry) return 'unknown';
-          const endpoint = entry.endpoints.find(
-            (candidate) =>
-              candidate.host === source.runnerHost &&
-              candidate.port === (source.runnerEnginePort ?? source.runnerPort),
-          );
-          if (endpoint?.healthy === true && endpoint.weight > 0) return 'selectable';
-          // Weight zero is positive evidence that this exact Lua cutover committed. An absent
-          // endpoint remains ambiguous: it may be a later refresh, not proof it is safe to reap.
-          return endpoint?.weight === 0 ? 'weight-zero' : 'unknown';
-        } catch (readErr) {
-          app.log.warn({ err: readErr, modelName, instanceId }, 'Could not classify move cutover');
-          return 'unknown';
-        }
-      };
       const runMove = async (): Promise<void> => {
-        let cutoverComplete = false;
-        let cutoverAttempted = false;
         try {
           await launch.deployment;
-          if (!deps.leaderElection.isLeader) {
-            throw new Error('leadership lost before traffic cutover');
-          }
-          const currentSource = await deps.lifecycle.getInstance(modelName, instanceId);
-          if (
-            currentSource?.state !== ModelLifecycleState.ACTIVE ||
-            !currentSource.runnerHost ||
-            !currentSource.runnerPort
-          ) {
-            throw new Error('source instance changed before traffic cutover');
-          }
-          const endpointPort = currentSource.runnerEnginePort ?? currentSource.runnerPort;
-          try {
-            cutoverAttempted = true;
-            const cutOver = await deps.routingMap.updateEndpointWeight(
-              modelName,
-              currentSource.runnerHost,
-              endpointPort,
-              0,
-            );
-            if (!cutOver) throw new Error('source routing endpoint was not found before cutover');
-            cutoverComplete = true;
-          } catch (cutoverErr) {
-            // Redis can commit the Lua script and lose its reply. Classify from the latest map
-            // before deciding whether replacement cleanup is safe; unknown is deliberately
-            // conservative and retains the replacement so a weight-0 source cannot cause outage.
-            const routingState = await sourceRoutingState();
-            if (routingState === 'selectable') throw cutoverErr;
-            if (routingState !== 'weight-zero') {
-              throw new Error(
-                `traffic cutover outcome is ambiguous; retaining replacement: ${cutoverErr instanceof Error ? cutoverErr.message : String(cutoverErr)}`,
-              );
-            }
-            // The write committed but the reply was lost. Continue through the normal
-            // post-cutover path so the durable DRAINING marker and graceful drain happen.
-            cutoverComplete = true;
-          }
-
-          // Persist a post-cutover marker before teardown. If this leader loses its lease now,
-          // detail/reconciliation can distinguish a drained source from a normal active replica.
-          await deps.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
-          await refreshModelRoutingState(deps.lifecycle, deps.routingMap, modelName);
-
-          if (!deps.leaderElection.isLeader) {
-            // Weight=0 is durable. Do not roll it back or tear either side down after lease loss;
-            // retained state is observable and reconciliation/manual operations can finish it.
-            throw new Error('leadership lost after traffic cutover; source teardown deferred');
-          }
-
-          const stopped = await teardownInstance(
-            app,
-            deps,
-            modelName,
-            currentSource,
-            'Move source teardown',
-          );
-          if (!stopped) {
-            notifyBestEffort(
-              'Model move completed with source teardown failure',
-              `${modelName} (${instanceId}) no longer receives traffic but could not be stopped`,
-              'danger',
-            );
-            return;
-          }
-          notifyBestEffort(
-            'Model moved',
-            `${modelName} moved to ${body.targetWorkerId}`,
-            'success',
-          );
+          if (!deps.leaderElection.isLeader) return;
+          await deps.lifecycle.updateMoveOperation(modelName, operationId, {
+            phase: 'REPLACEMENT_READY',
+          });
         } catch (err) {
-          app.log.error(
-            {
-              err,
-              modelName,
-              instanceId,
-              replacementInstanceId,
-              cutoverComplete,
-              cutoverAttempted,
-            },
-            'Model move orchestration failed',
-          );
-          // Cleanup is safe only when the map positively proves the source is still selectable.
-          // A failed/missing Lua reply is ambiguous, so retaining the replacement is the only
-          // outage-safe choice. Once cut over, never roll back or remove the replacement.
-          if (!cutoverComplete) {
-            // Before attempting the mutation, no cutover can have happened. Once attempted,
-            // cleanup requires affirmative proof that the source still has selectable traffic.
-            const routingState = cutoverAttempted ? await sourceRoutingState() : 'selectable';
-            if (routingState === 'selectable') {
-              const replacement = await deps.lifecycle.getInstance(
-                modelName,
-                replacementInstanceId,
-              );
-              if (replacement)
-                await teardownInstance(
-                  app,
-                  deps,
-                  modelName,
-                  replacement,
-                  'Move replacement cleanup',
-                );
-            }
-          }
-          notifyBestEffort(
-            'Model move failed',
-            `${modelName}: ${err instanceof Error ? err.message : String(err)}`,
-            'danger',
-          );
+          if (!deps.leaderElection.isLeader) return;
+          await deps.lifecycle.updateMoveOperation(modelName, operationId, {
+            phase: 'REPLACEMENT_CLEANUP',
+            errorMessage: err instanceof Error ? err.message : String(err),
+          });
         } finally {
+          await deps.moveOrchestration.resume(modelName);
           movingInFlight.delete(modelName);
-          if (hasLease !== undefined) {
-            await deps.lifecycle.releaseMoveLease?.(modelName, moveLeaseToken).catch((leaseErr) => {
-              app.log.warn({ err: leaseErr, modelName }, 'Failed to release move lease');
-            });
-          }
         }
       };
       void runMove().catch((err: unknown) => {
@@ -1145,9 +1027,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         .send({ modelName, sourceInstanceId: instanceId, replacementInstanceId });
     } catch (err) {
       movingInFlight.delete(modelName);
-      if (hasLease !== undefined) {
-        await deps.lifecycle.releaseMoveLease?.(modelName, moveLeaseToken).catch(() => {});
-      }
+      await deps.lifecycle.removeMoveOperation(modelName, operationId).catch(() => {});
       throw err;
     }
   });
@@ -1276,7 +1156,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'delete');
+      await assertNoMove(modelName, 'delete');
 
       const [instances, record] = await Promise.all([
         deps.lifecycle.getInstancesForModel(modelName),
@@ -1288,7 +1168,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       if (instances.length === 0 && record) {
-        assertNoMove(modelName, 'delete');
+        await assertNoMove(modelName, 'delete');
         await deps.modelRepository.delete(modelName);
         return reply.code(202).send({
           modelName,
@@ -1323,7 +1203,15 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           'a delete is already in progress',
         );
       }
-      assertNoMove(modelName, 'delete');
+      await assertNoMove(modelName, 'delete');
+      if (deletingInFlight.has(modelName)) {
+        throw ControlPlaneError.operationInProgress(
+          modelName,
+          'delete',
+          'delete-in-progress',
+          'a delete is already in progress',
+        );
+      }
 
       // #173: a Stop or an instance-scoped op (delete/sleep/wake) can be claimed but not yet past
       // its first state transition, so its instances still read as settled and slip past the
@@ -1434,7 +1322,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'sleep');
+      await assertNoMove(modelName, 'sleep');
 
       const instances = await deps.lifecycle.getInstancesForModel(modelName);
       if (instances.length === 0) {
@@ -1455,7 +1343,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           );
         }
       }
-      assertNoMove(modelName, 'sleep');
+      await assertNoMove(modelName, 'sleep');
       if (modelLifecycleInFlight.has(modelName)) {
         throw ControlPlaneError.operationInProgress(
           modelName,
@@ -1533,7 +1421,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'wake');
+      await assertNoMove(modelName, 'wake');
 
       const instances = await deps.lifecycle.getInstancesForModel(modelName);
       if (instances.length === 0) {
@@ -1564,7 +1452,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           );
         }
       }
-      assertNoMove(modelName, 'wake');
+      await assertNoMove(modelName, 'wake');
       if (modelLifecycleInFlight.has(modelName)) {
         throw ControlPlaneError.operationInProgress(
           modelName,
@@ -1718,7 +1606,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'stop');
+      await assertNoMove(modelName, 'stop');
 
       const instances = await deps.lifecycle.getInstancesForModel(modelName);
       if (instances.length === 0) {
@@ -1735,7 +1623,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (stoppingInFlight.has(modelName)) {
         throw ControlPlaneError.invalidState(modelName, aggregateState, 'stop');
       }
-      assertNoMove(modelName, 'stop');
+      await assertNoMove(modelName, 'stop');
+      if (stoppingInFlight.has(modelName)) {
+        throw ControlPlaneError.invalidState(modelName, aggregateState, 'stop');
+      }
       stoppingInFlight.add(modelName);
 
       const stoppable = instances.filter((i) => STOPPABLE_STATES.has(i.state));
@@ -1810,7 +1701,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         throw ControlPlaneError.invalidState(modelName, deriveAggregateState(instances), 'start');
       }
 
-      assertNoMove(modelName, 'start');
+      await assertNoMove(modelName, 'start');
       const instanceId = mintInstanceId();
       launchingInFlight.add(modelName);
       let newState: ModelLifecycleState;
@@ -1853,7 +1744,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'delete an instance for');
+      await assertNoMove(modelName, 'delete an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {
@@ -1867,7 +1758,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           'delete',
         );
       }
-      assertNoMove(modelName, 'delete an instance for');
+      await assertNoMove(modelName, 'delete an instance for');
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {
@@ -1922,7 +1813,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'sleep an instance for');
+      await assertNoMove(modelName, 'sleep an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {
@@ -1940,7 +1831,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           `Instance ${instanceId} of ${modelName} has no runner endpoint`,
         );
       }
-      assertNoMove(modelName, 'sleep an instance for');
+      await assertNoMove(modelName, 'sleep an instance for');
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {
@@ -1997,7 +1888,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
-      assertNoMove(modelName, 'wake an instance for');
+      await assertNoMove(modelName, 'wake an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {
@@ -2025,7 +1916,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           `Instance ${instanceId} of ${modelName} has no runner endpoint`,
         );
       }
-      assertNoMove(modelName, 'wake an instance for');
+      await assertNoMove(modelName, 'wake an instance for');
 
       const claimKey = `${modelName}:${instanceId}`;
       if (instanceOpInFlight.has(claimKey)) {

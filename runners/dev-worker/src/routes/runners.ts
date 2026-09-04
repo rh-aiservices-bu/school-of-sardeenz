@@ -70,6 +70,41 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
     }
   });
 
+  // Recovery lookup for an ambiguous POST /runners outcome. `instanceRunners` is populated
+  // before the launcher is awaited, while `runners` is populated only after startup succeeds,
+  // so the two maps distinguish a still-running cold start (202) from a ready runner (200)
+  // without guessing from timing.
+  app.get<{ Params: { instanceId: string } }>(
+    '/runners/by-instance/:instanceId/status',
+    (req, reply) => {
+      const runnerId = runnerManager.getRunnerIdForInstance(req.params.instanceId);
+      if (!runnerId) {
+        return reply.status(404).send({
+          error: `Runner for instance ${req.params.instanceId} not found`,
+          code: 'NOT_FOUND',
+        });
+      }
+
+      const record = runnerManager.getRunner(runnerId);
+      if (!record) {
+        return reply.status(202).send({
+          instanceId: req.params.instanceId,
+          runnerId,
+          state: 'STARTING',
+        });
+      }
+
+      return reply.status(200).send({
+        instanceId: record.instanceId,
+        runnerId: record.runnerId,
+        state: 'READY',
+        host: record.host,
+        port: record.port,
+        enginePort: record.enginePort,
+      });
+    },
+  );
+
   // Liveness probe for one runner (worker-agent contract `getRunner`, issue #166): the control
   // plane's reconciliation calls this to detect an instance whose record still claims a runner
   // the worker no longer hosts (e.g. a blank worker restart under the same workerId). Liveness

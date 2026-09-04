@@ -156,26 +156,26 @@ describe('ModelLifecycleService.createInstance', () => {
   });
 });
 
-describe('ModelLifecycleService move leases', () => {
-  it('uses NX/PX acquire and token-safe release', async () => {
+describe('ModelLifecycleService durable move operations', () => {
+  it('uses a non-expiring NX record as the transaction and admission fence', async () => {
     const set = vi.fn().mockResolvedValue('OK');
-    const evalScript = vi.fn().mockResolvedValue(1);
-    const redis = {
-      set,
-      eval: evalScript,
-    } as unknown as Redis;
+    const redis = { set } as unknown as Redis;
     const service = new ModelLifecycleService(redis, 'test');
 
-    await expect(service.acquireMoveLease('m1', 'owner-a', 12_000)).resolves.toBe(true);
-    await service.releaseMoveLease('m1', 'owner-a');
+    const operation = {
+      operationId: 'move-1',
+      modelName: 'm1',
+      sourceInstanceId: 'inst-source',
+      replacementInstanceId: 'inst-replacement',
+      targetWorkerId: 'worker-2',
+      targetDeviceIndices: [1],
+      phase: 'REPLACEMENT_STARTING' as const,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    await expect(service.createMoveOperation(operation)).resolves.toBe(true);
 
-    expect(set).toHaveBeenCalledWith('test:moves:m1', 'owner-a', 'PX', 12_000, 'NX');
-    expect(evalScript).toHaveBeenCalledWith(
-      expect.stringContaining("redis.call('GET', KEYS[1])"),
-      1,
-      'test:moves:m1',
-      'owner-a',
-    );
+    expect(set).toHaveBeenCalledWith('test:move-operations:m1', JSON.stringify(operation), 'NX');
   });
 });
 

@@ -1,7 +1,19 @@
-import type { WorkerAgentComponents } from '@sardeenz/types';
+import { RunnerByInstanceResponseState, type WorkerAgentComponents } from '@sardeenz/types';
 
 export type StartRunnerRequest = WorkerAgentComponents['schemas']['StartRunnerRequest'];
 export type StartRunnerResponse = WorkerAgentComponents['schemas']['StartRunnerResponse'];
+export type RunnerByInstanceResponse = WorkerAgentComponents['schemas']['RunnerByInstanceResponse'];
+
+export type RunnerByInstanceLookup =
+  | { status: 'absent' }
+  | { status: 'starting'; runnerId: string }
+  | {
+      status: 'ready';
+      runnerId: string;
+      host: string;
+      port: number;
+      enginePort: number;
+    };
 
 /**
  * Thrown by `stopRunner` on a non-OK response. Carries the HTTP status so callers can distinguish
@@ -123,6 +135,45 @@ export class WorkerClient {
     return true;
   }
 
+  /**
+   * Resolve the worker-assigned identity for a control-plane instance after a transport failure
+   * made POST /runners ambiguous. A 404 is a confirmed absence only once the caller's startup
+   * grace period has elapsed; this method deliberately reports facts without applying timing
+   * policy.
+   */
+  async getRunnerByInstance(instanceId: string): Promise<RunnerByInstanceLookup> {
+    const response = await fetch(
+      `${this.baseUrl}/runners/by-instance/${encodeURIComponent(instanceId)}/status`,
+      {
+        headers: { ...this.authHeaders() },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      },
+    );
+    if (response.status === 404) return { status: 'absent' };
+    if (response.status !== 200 && response.status !== 202) {
+      const body = await response.text();
+      throw new WorkerHttpError(
+        `Worker GET /runners/by-instance/${instanceId}/status returned ${response.status}: ${body}`,
+        response.status,
+      );
+    }
+
+    const body = (await response.json()) as RunnerByInstanceResponse;
+    if (response.status === 202 || body.state === RunnerByInstanceResponseState.STARTING) {
+      return { status: 'starting', runnerId: body.runnerId };
+    }
+    if (!body.host || !body.port) {
+      throw new Error(`Worker returned READY runner ${body.runnerId} without an endpoint`);
+    }
+    return {
+      status: 'ready',
+      runnerId: body.runnerId,
+      host: body.host,
+      port: body.port,
+      enginePort: body.enginePort ?? body.port,
+    };
+  }
+
   async stopRunner(runnerId: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}`, {
       method: 'DELETE',
@@ -151,7 +202,10 @@ export class WorkerClient {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Worker ${path} returned ${response.status}: ${text}`);
+      throw new WorkerHttpError(
+        `Worker ${path} returned ${response.status}: ${text}`,
+        response.status,
+      );
     }
     return response.json() as Promise<T>;
   }

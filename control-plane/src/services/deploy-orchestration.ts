@@ -1,6 +1,6 @@
 import { ModelLifecycleState, Protocol, RunnerState } from '@sardeenz/types';
 import type { RunnerClient } from '../clients/runner.js';
-import type { WorkerClient, StartRunnerRequest } from '../clients/worker.js';
+import { WorkerHttpError, type WorkerClient, type StartRunnerRequest } from '../clients/worker.js';
 import {
   deployDuration,
   deployTriggersTotal,
@@ -31,6 +31,19 @@ export interface DeployModelParams {
   protocol: Protocol;
   entrypoint?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
+  /**
+   * Optional fence for a deployment owned by a leader-scoped durable operation. When it turns
+   * false, leave the instance and its capacity intact for the next leader to recover by
+   * instanceId; treating leadership loss as a deployment failure could kill a healthy runner.
+   */
+  isStillOwner?: () => boolean;
+}
+
+class DeployOwnershipLostError extends Error {
+  constructor() {
+    super('Deployment ownership was lost during runner startup');
+    this.name = 'DeployOwnershipLostError';
+  }
 }
 
 export class DeployOrchestrationService {
@@ -54,14 +67,21 @@ export class DeployOrchestrationService {
     // reconciliation can establish the runner's fate.
     let startDispatched = false;
     let startReplyReceived = false;
+    const assertStillOwner = (): void => {
+      if (params.isStillOwner && !params.isStillOwner()) {
+        throw new DeployOwnershipLostError();
+      }
+    };
 
     try {
+      assertStillOwner();
       // The route handler has already created this instance's Redis record (PENDING, then
       // STARTING) before calling deployModel() in the background — refresh the model-level
       // routing aggregate from all instances rather than stomping it to STARTING, since another
       // instance of this model may already be ACTIVE (a second replica deploying must not make
       // an already-healthy model look like it's starting from scratch).
       await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
+      assertStillOwner();
 
       const worker = this.workerPool.getWorker(params.workerId);
       if (!worker) {
@@ -84,9 +104,11 @@ export class DeployOrchestrationService {
         entrypoint: params.entrypoint,
         devices: params.devices as StartRunnerRequest['devices'],
       };
+      assertStillOwner();
       startDispatched = true;
       const runnerInfo = await workerClient.startRunner(startRequest);
       startReplyReceived = true;
+      assertStillOwner();
 
       // The management port drives health/sleep/wake; the engine port (when the runner reports a
       // distinct one, e.g. vLLM's OpenAI server) is where inference is served and what the proxy
@@ -102,10 +124,12 @@ export class DeployOrchestrationService {
         port: runnerInfo.port,
         enginePort,
       });
+      assertStillOwner();
 
       // Health-poll the management shim, not the engine port.
       const runnerClient = this.createRunnerClient(runnerInfo.host, runnerInfo.port);
       await this.waitForReady(params.modelName, params.instanceId, runnerClient);
+      assertStillOwner();
 
       // Route inference to the engine port so the proxy reaches the OpenAI server, not the shim.
       const endpoint: RunnerEndpoint = {
@@ -116,6 +140,7 @@ export class DeployOrchestrationService {
         runnerId: runnerInfo.runnerId,
       };
       await this.routingMap.addEndpoint(params.modelName, endpoint, params.protocol);
+      assertStillOwner();
 
       await this.lifecycle.transition(
         params.modelName,
@@ -128,6 +153,7 @@ export class DeployOrchestrationService {
           runnerId: runnerInfo.runnerId,
         },
       );
+      assertStillOwner();
       await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
       this.memoryBudget.releaseInstanceReservations(params.instanceId);
 
@@ -142,7 +168,23 @@ export class DeployOrchestrationService {
 
       deployDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
-      const startReplyAmbiguous = startDispatched && !startReplyReceived;
+      // A new leader owns cleanup/recovery now. Preserve the STARTING/ACTIVE record and capacity;
+      // the durable move transaction will resolve the worker's stable instanceId. Also recognize
+      // a race where ownership changed between the last explicit check and another awaited write.
+      if (
+        err instanceof DeployOwnershipLostError ||
+        (params.isStillOwner && !params.isStillOwner())
+      ) {
+        throw err instanceof DeployOwnershipLostError ? err : new DeployOwnershipLostError();
+      }
+      // A validation/auth rejection is a definite worker response. A conflict means this
+      // instance already has a runner, and a server error can happen after the worker committed
+      // the start but before it serialized the reply; both are ambiguous just like a transport
+      // failure and must retain capacity until instance-id reconciliation establishes the fact.
+      const startReplyAmbiguous =
+        startDispatched &&
+        !startReplyReceived &&
+        (!(err instanceof WorkerHttpError) || err.status === 409 || err.status >= 500);
       await this.transitionToError(
         params.modelName,
         params.instanceId,

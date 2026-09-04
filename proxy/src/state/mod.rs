@@ -25,6 +25,7 @@ pub struct AppState {
     pub forwarding_limiter: ForwardingLimiter,
     pub inference_tracker: InferenceTracker,
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+    proxy_id: Arc<str>,
     redis_connected: Arc<AtomicBool>,
     routing_map_loaded: Arc<AtomicBool>,
 }
@@ -72,6 +73,7 @@ impl AppState {
             forwarding_limiter,
             inference_tracker,
             metrics_handle,
+            proxy_id: Arc::from(uuid::Uuid::new_v4().to_string()),
             redis_connected: Arc::new(AtomicBool::new(redis_connected)),
             routing_map_loaded: Arc::new(AtomicBool::new(has_existing_cache)),
         }
@@ -88,5 +90,9 @@ impl AppState {
 
     pub fn set_routing_map_loaded(&self, loaded: bool) {
         self.routing_map_loaded.store(loaded, Ordering::Release);
+    }
+
+    pub fn proxy_id(&self) -> &str {
+        &self.proxy_id
     }
 }

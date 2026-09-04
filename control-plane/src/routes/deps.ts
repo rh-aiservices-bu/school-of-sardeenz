@@ -15,6 +15,7 @@ import type { CatalogService } from '../services/catalog-service.js';
 import type { ModuleStoreService } from '../services/module-store.js';
 import type { WeightsBrowserService } from '../services/weights-browser.js';
 import type { ProxyProtocolsService } from '../services/proxy-protocols.js';
+import type { MoveOrchestrationService } from '../services/move-orchestration.js';
 import type { RunnerClient } from '../clients/runner.js';
 import type { WorkerClient } from '../clients/worker.js';
 
@@ -30,6 +31,7 @@ export interface RouteDeps {
   eviction: EvictionEngine;
   sleepWake: SleepWakeService;
   deployOrchestration: DeployOrchestrationService;
+  moveOrchestration: MoveOrchestrationService;
   leaderElection: LeaderElectionService;
   notifications: NotificationService;
   catalogService: CatalogService;

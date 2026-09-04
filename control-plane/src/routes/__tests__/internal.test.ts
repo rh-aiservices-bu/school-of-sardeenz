@@ -104,6 +104,7 @@ function toDeps(mocks: Mocks): RouteDeps {
     eviction: {} as RouteDeps['eviction'],
     sleepWake: mocks.sleepWake as unknown as RouteDeps['sleepWake'],
     deployOrchestration: {} as RouteDeps['deployOrchestration'],
+    moveOrchestration: {} as RouteDeps['moveOrchestration'],
     leaderElection: mocks.leaderElection as unknown as RouteDeps['leaderElection'],
     notifications: {} as RouteDeps['notifications'],
     catalogService: {} as RouteDeps['catalogService'],

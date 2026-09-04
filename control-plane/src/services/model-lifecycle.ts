@@ -105,6 +105,28 @@ export function isTerminalState(state: ModelLifecycleState): boolean {
 }
 
 const MODEL_STATE_PREFIX = 'models';
+const MOVE_OPERATION_PREFIX = 'move-operations';
+
+export type MoveOperationPhase =
+  | 'REPLACEMENT_STARTING'
+  | 'REPLACEMENT_READY'
+  | 'CUTTING_OVER'
+  | 'SOURCE_DRAINING'
+  | 'REPLACEMENT_CLEANUP';
+
+/** Durable move transaction state. Redis, rather than process memory, owns admission/recovery. */
+export interface MoveOperation {
+  operationId: string;
+  modelName: string;
+  sourceInstanceId: string;
+  replacementInstanceId: string;
+  targetWorkerId: string;
+  targetDeviceIndices: number[];
+  phase: MoveOperationPhase;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+}
 
 function instanceStateKey(prefix: string, modelName: string, instanceId: string): string {
   return redisKey(prefix, MODEL_STATE_PREFIX, modelName, instanceId);
@@ -376,25 +398,86 @@ export class ModelLifecycleService {
   }
 
   /**
-   * A short-lived, token-owned distributed fence for a move.  This is intentionally private
-   * orchestration state, not an API resource: it only closes the leader-handoff admission
-   * window.  Release compares the token so an expired lease can never delete a newer owner's
-   * lease.
+   * Atomically create the durable transaction fence for one logical model. Unlike the retired
+   * time-limited move lease, this record cannot expire halfway through a large deployment; the
+   * leader reconciliation loop resumes and removes it only after one side is safely cleaned up.
    */
-  async acquireMoveLease(modelName: string, token: string, ttlMs: number): Promise<boolean> {
-    const key = redisKey(this.keyPrefix, 'moves', modelName);
-    const result = await this.redis.set(key, token, 'PX', ttlMs, 'NX');
+  async createMoveOperation(operation: MoveOperation): Promise<boolean> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, operation.modelName);
+    const result = await this.redis.set(key, JSON.stringify(operation), 'NX');
     return result === 'OK';
   }
 
-  async releaseMoveLease(modelName: string, token: string): Promise<void> {
-    const key = redisKey(this.keyPrefix, 'moves', modelName);
-    await this.redis.eval(
-      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+  async getMoveOperation(modelName: string): Promise<MoveOperation | null> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, modelName);
+    const raw = await this.redis.get(key);
+    return raw ? (JSON.parse(raw) as MoveOperation) : null;
+  }
+
+  async getAllMoveOperations(): Promise<MoveOperation[]> {
+    const pattern = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, '*');
+    const keys = await this.scanKeys(pattern);
+    if (keys.length === 0) return [];
+    const pipeline = this.redis.pipeline();
+    for (const key of keys) pipeline.get(key);
+    const results = await pipeline.exec();
+    if (!results) return [];
+    return results.flatMap(([err, raw]) =>
+      !err && typeof raw === 'string' ? [JSON.parse(raw) as MoveOperation] : [],
+    );
+  }
+
+  async updateMoveOperation(
+    modelName: string,
+    operationId: string,
+    updates: Partial<Pick<MoveOperation, 'phase' | 'errorMessage'>>,
+  ): Promise<MoveOperation | null> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, modelName);
+    const luaScript = `
+      local raw = redis.call('GET', KEYS[1])
+      if not raw then return nil end
+      local operation = cjson.decode(raw)
+      if operation['operationId'] ~= ARGV[1] then return nil end
+      local updates = cjson.decode(ARGV[2])
+      if updates['phase'] and updates['phase'] ~= operation['phase'] then
+        local allowed = {
+          REPLACEMENT_STARTING = { REPLACEMENT_READY = true, REPLACEMENT_CLEANUP = true },
+          REPLACEMENT_READY = { CUTTING_OVER = true, REPLACEMENT_CLEANUP = true },
+          CUTTING_OVER = { SOURCE_DRAINING = true, REPLACEMENT_CLEANUP = true }
+        }
+        local from = allowed[operation['phase']]
+        if not from or not from[updates['phase']] then return nil end
+      end
+      for k, v in pairs(updates) do operation[k] = v end
+      operation['updatedAt'] = ARGV[3]
+      local encoded = cjson.encode(operation)
+      redis.call('SET', KEYS[1], encoded)
+      return encoded
+    `;
+    const raw = await this.redis.eval(
+      luaScript,
       1,
       key,
-      token,
+      operationId,
+      JSON.stringify(updates),
+      new Date().toISOString(),
     );
+    return raw ? (JSON.parse(raw as string) as MoveOperation) : null;
+  }
+
+  async removeMoveOperation(modelName: string, operationId: string): Promise<boolean> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, modelName);
+    const removed = await this.redis.eval(
+      `local raw = redis.call('GET', KEYS[1])
+       if not raw then return 0 end
+       local operation = cjson.decode(raw)
+       if operation['operationId'] ~= ARGV[1] then return 0 end
+       return redis.call('DEL', KEYS[1])`,
+      1,
+      key,
+      operationId,
+    );
+    return removed === 1 || removed === '1';
   }
 
   async getLastInferenceTimestamps(modelNames: string[]): Promise<Map<string, string>> {

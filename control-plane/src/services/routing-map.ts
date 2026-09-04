@@ -1,7 +1,9 @@
 import { ModelState, Protocol, RoutingMapUpdateType } from '@sardeenz/types';
+import { randomUUID } from 'node:crypto';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 import { ControlPlaneError } from '../errors.js';
+import { delaySafe } from '../utils.js';
 
 export interface RunnerEndpoint {
   host: string;
@@ -30,6 +32,10 @@ export interface RoutingMapUpdate {
 
 const ROUTING_MAP_FIELD = 'routing-map';
 const ROUTING_UPDATES_CHANNEL = 'routing-updates';
+const ROUTING_BARRIERS_CHANNEL = 'routing-barriers';
+const ROUTING_BARRIER_ACKS = 'routing-barrier-acks';
+const PROXY_PRESENCE_PREFIX = 'proxies';
+const ROUTING_BARRIER_TIMEOUT_MS = 30_000;
 
 // Shared Lua: encode a RoutingEntry with `endpoints` ALWAYS a JSON array. cjson.encode
 // serializes an empty Lua table as `{}`, but the proxy consumer types endpoints as an array
@@ -340,5 +346,116 @@ export class RoutingMapService {
       JSON.stringify(update),
     );
     return updated === 1 || updated === '1';
+  }
+
+  /**
+   * Remove an endpoint from selection and wait until every traffic-serving proxy has both applied
+   * the new map and quiesced requests admitted through the previous entry. TTL'd presence keys
+   * keep a just-disconnected process in the barrier until it stops admitting traffic and its lease
+   * expires. A timeout is deliberately not rolled back: the caller retains both source and
+   * replacement and reconciliation can publish a fresh barrier.
+   */
+  async cutoverEndpointAndWait(modelName: string, host: string, port: number): Promise<boolean> {
+    const cutoverStartedMs = Date.now();
+    const now = new Date().toISOString();
+    const barrierId = randomUUID();
+    const ackKey = redisKey(this.keyPrefix, ROUTING_BARRIER_ACKS, barrierId);
+    const barrierChannel = redisKey(this.keyPrefix, ROUTING_BARRIERS_CHANNEL);
+    const update: RoutingMapUpdate = {
+      type: RoutingMapUpdateType.ENDPOINT_UPDATED,
+      modelName,
+      timestamp: now,
+    };
+    const barrier = { barrierId, modelName, timestamp: now };
+    const luaScript = `
+      ${LUA_ENCODE_ROUTING_ENTRY}
+      local raw = redis.call('HGET', KEYS[1], ARGV[1])
+      if not raw then return {0, 0} end
+      local entry = cjson.decode(raw)
+      local changed = nil
+      for i, e in ipairs(entry.endpoints) do
+        if e.host == ARGV[2] and e.port == tonumber(ARGV[3]) then
+          e.weight = 0
+          entry.endpoints[i] = e
+          changed = e
+          break
+        end
+      end
+      if not changed then return {0, 0} end
+      entry.updatedAt = ARGV[4]
+      redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
+      redis.call('PUBLISH', KEYS[2], ARGV[5])
+      local subscribers = redis.call('PUBLISH', KEYS[3], ARGV[6])
+      return {1, subscribers}
+    `;
+    const result = (await this.redis.eval(
+      luaScript,
+      3,
+      this.hashKey,
+      this.pubsubChannel,
+      barrierChannel,
+      modelName,
+      host,
+      port.toString(),
+      now,
+      JSON.stringify(update),
+      JSON.stringify(barrier),
+    )) as [number | string, number | string] | null;
+
+    const updated = result?.[0] === 1 || result?.[0] === '1';
+    if (!updated) return false;
+    // Snapshot every proxy that had declared itself ready before this cutover. A proxy that
+    // reconnects afterward loads weight=0 before becoming ready and never selected the old route,
+    // so it does not need to acknowledge this generation. A disconnected proxy remains in this
+    // snapshot until its short presence TTL expires.
+    const presencePattern = redisKey(this.keyPrefix, PROXY_PRESENCE_PREFIX, '*');
+    const requiredProxies = new Map<string, string>();
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        'MATCH',
+        presencePattern,
+        'COUNT',
+        100,
+      );
+      cursor = nextCursor;
+      for (const key of keys) {
+        const connectedAt = Number(await this.redis.get(key));
+        if (Number.isFinite(connectedAt) && connectedAt <= cutoverStartedMs) {
+          requiredProxies.set(key.slice(key.lastIndexOf(':') + 1), key);
+        }
+      }
+    } while (cursor !== '0');
+
+    if (requiredProxies.size === 0) {
+      // No proxy was serving the old generation. The barrier is vacuously quiescent (a proxy
+      // that is still bootstrapping cannot admit inference until after loading this new map).
+      return true;
+    }
+
+    const signal = AbortSignal.timeout(ROUTING_BARRIER_TIMEOUT_MS);
+    try {
+      while (!signal.aborted) {
+        const acknowledged = new Set(await this.redis.smembers(ackKey));
+        let outstanding = 0;
+        for (const [proxyId, presenceKey] of requiredProxies) {
+          if (acknowledged.has(proxyId)) continue;
+          const connectedAt = Number(await this.redis.get(presenceKey));
+          // Missing means its TTL elapsed; a newer timestamp means this process reconnected and
+          // loaded the current weight-zero map before becoming ready.
+          if (Number.isFinite(connectedAt) && connectedAt <= cutoverStartedMs) outstanding += 1;
+        }
+        if (outstanding === 0) return true;
+        await delaySafe(50, signal);
+      }
+      throw new Error(
+        `traffic cutover barrier timed out (${requiredProxies.size} serving proxy acknowledgement(s) required)`,
+      );
+    } finally {
+      // A proxy also TTLs the set when acknowledging. Keep that backstop for a lost DEL reply,
+      // but clean successful and timed-out barriers eagerly in the common case.
+      await this.redis.del(ackKey).catch(() => {});
+    }
   }
 }

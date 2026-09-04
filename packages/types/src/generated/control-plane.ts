@@ -310,9 +310,12 @@ export type paths = {
         /**
          * Move an active model instance to an explicit worker and GPU set
          * @description Creates a replacement instance on the requested placement, waits for it to become
-         *     active, then atomically removes traffic from and drains the source instance. Poll
-         *     `GET /api/v1/models/{modelName}` after the `202` response to observe the replacement
-         *     and source lifecycle states. Only one move per logical model may run at a time.
+         *     active, then atomically removes traffic from the source and waits for all serving
+         *     proxies to apply and quiesce that routing generation before draining it. The move is a
+         *     durable, resumable transaction: a new control-plane leader continues an interrupted
+         *     cutover or cleanup without launching a second replacement. Poll `GET
+         *     /api/v1/models/{modelName}` after the `202` response to observe the replacement and
+         *     source lifecycle states. Only one move per logical model may run at a time.
          */
         post: operations["moveModelInstance"];
         delete?: never;

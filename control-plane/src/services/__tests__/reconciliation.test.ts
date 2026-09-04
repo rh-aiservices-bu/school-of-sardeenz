@@ -90,6 +90,7 @@ interface MockDeps {
   workerClient: {
     stopRunner: ReturnType<typeof vi.fn>;
     getRunner: ReturnType<typeof vi.fn>;
+    getRunnerByInstance: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -180,6 +181,7 @@ function createMocks(): MockDeps {
       // Default "runner present" — the missing-runner step is a no-op for existing tests that
       // never wire createWorkerClient, and safe for the new tests that don't set it explicitly.
       getRunner: vi.fn().mockResolvedValue(true),
+      getRunnerByInstance: vi.fn().mockResolvedValue({ status: 'absent' }),
     },
   };
 }
@@ -551,7 +553,10 @@ describe('ReconciliationService', () => {
         }),
       );
       expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('ghost-model', 'w1', 8000);
-      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('ghost-model', 'inst-ghost-model');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'ghost-model',
+        'inst-ghost-model',
+      );
       expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
         'inst-ghost-model',
       );
@@ -655,7 +660,10 @@ describe('ReconciliationService', () => {
       await probeService.tick();
 
       expect(mocks.workerClient.getRunner).toHaveBeenCalledWith('runner-stale');
-      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('stale-starting', 'inst-stale-starting');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'stale-starting',
+        'inst-stale-starting',
+      );
     });
 
     it('treats a failed probe as inconclusive — skips the reap and retries next tick', async () => {
@@ -678,6 +686,85 @@ describe('ReconciliationService', () => {
         expect.objectContaining({ modelName: 'flaky-model', instanceId: 'inst-flaky-model' }),
         'Runner liveness probe failed — skipping reap, will retry next tick',
       );
+    });
+  });
+
+  describe('tick — ambiguous runner-start recovery (#146)', () => {
+    const liveWorker = makeWorker({
+      workerId: 'w1',
+      status: WorkerStatus.ONLINE,
+      managementUrl: 'http://w1:9000',
+    });
+
+    function ambiguous(ageMs: number): InstanceState {
+      return makeModelState({
+        modelName: 'ambiguous-start',
+        state: ModelLifecycleState.ERROR,
+        workerId: 'w1',
+        runnerId: null,
+        runnerStartAmbiguous: true,
+        stateChangedAt: new Date(Date.now() - ageMs).toISOString(),
+      });
+    }
+
+    it('stops a recovered live runner and releases its retained capacity after the grace', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([ambiguous(120_000)]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunnerByInstance.mockResolvedValue({
+        status: 'ready',
+        runnerId: 'runner-recovered',
+        host: 'w1',
+        port: 8000,
+        enginePort: 8001,
+      });
+      const recovering = createService(mocks, {
+        withWorkerClient: true,
+        config: { ...DEFAULT_CONFIG, missingRunnerProbeGraceSecs: 60 },
+      });
+
+      await recovering.tick();
+
+      expect(mocks.workerClient.getRunnerByInstance).toHaveBeenCalledWith('inst-ambiguous-start');
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-recovered');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'ambiguous-start',
+        'inst-ambiguous-start',
+      );
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
+        'inst-ambiguous-start',
+      );
+    });
+
+    it('retains an in-flight runner start for a later reconciliation tick', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([ambiguous(120_000)]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunnerByInstance.mockResolvedValue({
+        status: 'starting',
+        runnerId: 'runner-starting',
+      });
+      const recovering = createService(mocks, {
+        withWorkerClient: true,
+        config: { ...DEFAULT_CONFIG, missingRunnerProbeGraceSecs: 60 },
+      });
+
+      await recovering.tick();
+
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
+      expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
+    });
+
+    it('probes early but does not treat a 404 as proof that a dispatched start cannot still arrive', async () => {
+      mocks.lifecycle.getAllInstances.mockResolvedValue([ambiguous(30_000)]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      const recovering = createService(mocks, {
+        withWorkerClient: true,
+        config: { ...DEFAULT_CONFIG, missingRunnerProbeGraceSecs: 60 },
+      });
+
+      await recovering.tick();
+
+      expect(mocks.workerClient.getRunnerByInstance).toHaveBeenCalledWith('inst-ambiguous-start');
+      expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalled();
     });
   });
 

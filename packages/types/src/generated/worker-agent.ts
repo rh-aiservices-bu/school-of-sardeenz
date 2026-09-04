@@ -68,6 +68,32 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/runners/by-instance/{instanceId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a runner by control-plane instance identity
+         * @description Recovers the worker-assigned runner identity after an ambiguous
+         *     `POST /runners` outcome. Returns the full endpoint once the runner is
+         *     live, `202` while its start is still in flight, and `404` when this
+         *     worker has no current or in-flight runner for the instance.
+         *
+         *     The control plane uses this endpoint to reconcile a lost start reply
+         *     without either leaking the runner or releasing its capacity early.
+         */
+        get: operations["getRunnerByInstance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runners/{runnerId}/logs": {
         parameters: {
             query?: never;
@@ -306,6 +332,24 @@ export type components = {
              *     this port as the model's routing endpoint so the proxy forwards
              *     inference here. When omitted, inference is served on `port`.
              */
+            enginePort?: number;
+        };
+        /**
+         * @description Worker-side runner identity recovered from a control-plane instance
+         *     id. Endpoint fields are present only once `state` is `READY`.
+         */
+        RunnerByInstanceResponse: {
+            /** @description Control-plane-assigned instance identity. */
+            instanceId: string;
+            /** @description Worker-assigned runner identity. */
+            runnerId: string;
+            /** @enum {string} */
+            state: RunnerByInstanceResponseState;
+            /** @description Hostname or IP where the live runner is listening. */
+            host?: string;
+            /** @description Management port of the live runner. */
+            port?: number;
+            /** @description Inference port of the live runner. */
             enginePort?: number;
         };
         /**
@@ -660,6 +704,47 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getRunnerByInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Control-plane-assigned instance identity. */
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Runner is live and its endpoint is recoverable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerByInstanceResponse"];
+                };
+            };
+            /** @description Runner start is still in flight */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerByInstanceResponse"];
+                };
+            };
+            /** @description No live or in-flight runner exists for this instance */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Internal worker error */
             500: {
                 headers: {
@@ -798,6 +883,10 @@ export interface operations {
 export enum RunnerLogLineStream {
     stdout = "stdout",
     stderr = "stderr"
+}
+export enum RunnerByInstanceResponseState {
+    STARTING = "STARTING",
+    READY = "READY"
 }
 export enum DeviceType {
     CUDA = "CUDA",

@@ -15,7 +15,8 @@ async fn test_draining_model_returns_503() {
     let model = "draining-model/v1";
 
     let dead_addr = "127.0.0.1:1".parse().unwrap();
-    insert_model(&proxy.routing_cache, model, ModelState::Draining, Protocol::Openai, dead_addr).await;
+    insert_model(&proxy.routing_cache, model, ModelState::Draining, Protocol::Openai, dead_addr)
+        .await;
 
     let client = reqwest::Client::new();
     let resp = client

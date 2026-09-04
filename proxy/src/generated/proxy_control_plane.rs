@@ -163,6 +163,16 @@ pub struct RoutingMapUpdate {
     pub timestamp: String,
 }
 
+/// Destructive routing-map update that every connected proxy must apply and quiesce before the
+/// control plane tears down the old runner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingPropagationBarrier {
+    pub barrier_id: String,
+    pub model_name: String,
+    pub timestamp: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
