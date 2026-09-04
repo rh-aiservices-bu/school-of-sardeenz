@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Codex milestone skill (`.agents/skills/implement-milestone/`).** Added a project-scoped,
+  restart-safe adaptation of the Claude Code milestone workflow. It preserves issue-spec planning,
+  per-issue worktree isolation, independent implementation/review/acceptance agents, sequential
+  integration, verification, changelog discipline, and local-only PR preparation while mapping
+  roles to the Codex model and concurrency controls.
+
 - **Per-component `AGENTS.md` agent guides.** The root `AGENTS.md` is now a lean entry point
   (component table, first-pass design facts, workflow rules, status pointer) and each component
   has a targeted guide with a `CLAUDE.md` symlink: `proxy/` (trimmed to layout + rules + build),
