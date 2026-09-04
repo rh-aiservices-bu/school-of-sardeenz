@@ -431,7 +431,7 @@ From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connecti
 
 - **Phase 0 outputs** — runner contract spec for model state definitions (`RunnerState` enum) and health check schemas
 - **Redis/Valkey instance** — required for routing map storage and pub/sub
-- **Rust toolchain** — Rust 1.82+, cargo, clippy (see [setup guide](../development/setup.md))
+- **Rust toolchain** — Rust 1.86+, cargo, clippy (see [setup guide](../development/setup.md))
 - **v1 repo access** — for studying proxy patterns in Task 1.1
 
 ## Risks

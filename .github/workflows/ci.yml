@@ -161,7 +161,10 @@ jobs:
       - name: Wait for ${{ matrix.service }} health endpoint
         run: |
           container=sardeenz-${{ matrix.service }}-ci
-          for attempt in $(seq 1 60); do
+          # Thirty checks, each with a one-second request timeout and a one-second
+          # pause, give the service roughly one minute to start without claiming a
+          # strict wall-clock bound for command overhead.
+          for attempt in $(seq 1 30); do
             if curl --connect-timeout 1 --max-time 1 --fail --silent --show-error http://127.0.0.1:${{ matrix.port }}/healthz; then
               exit 0
             fi
@@ -172,7 +175,7 @@ jobs:
             fi
             sleep 1
           done
-          echo "$container did not become healthy within 60 seconds"
+          echo "$container did not become healthy after 30 checks (roughly one minute)"
           docker logs "$container" || true
           exit 1
 

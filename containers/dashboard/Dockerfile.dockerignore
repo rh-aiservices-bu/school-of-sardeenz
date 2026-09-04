@@ -16,6 +16,17 @@
 !dashboard/
 !dashboard/**
 
-# Do not re-include local environment files from an allowed directory.
+# These exclusions must stay after the allowlist above: Docker applies the last
+# matching rule, so an allowed source tree cannot re-include local build output,
+# dependencies, credentials, or test artifacts into the root build context.
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+**/*.log
+**/logs/
+**/.npmrc
+**/coverage/
+**/test-results/
+**/playwright-report/
 **/.env
 **/.env.*

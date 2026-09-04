@@ -56,6 +56,13 @@ for (const service of ['control-plane', 'dashboard']) {
     dockerignore.includes('# This Dockerfile builds from the repository root.'),
     `${service} must use a Dockerfile-specific ignore file for its root build context`,
   );
+  const allowlistRule = `!${service}/**`;
+  const dockerignoreRules = dockerignore
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  const allowlistIndex = dockerignoreRules.indexOf(allowlistRule);
+  assert(allowlistIndex !== -1, `${service} Docker ignore must allow its source tree`);
   for (const requiredInput of [
     'package.json',
     'package-lock.json',
@@ -71,6 +78,30 @@ for (const service of ['control-plane', 'dashboard']) {
       `${service} Docker ignore must allow required input ${requiredInput}`,
     );
   }
+  for (const excludedArtifact of [
+    '**/node_modules/',
+    '**/dist/',
+    '**/*.tsbuildinfo',
+    '**/*.log',
+    '**/logs/',
+    '**/.npmrc',
+    '**/coverage/',
+    '**/test-results/',
+    '**/playwright-report/',
+    '**/.env',
+    '**/.env.*',
+  ]) {
+    const exclusionIndex = dockerignoreRules.lastIndexOf(excludedArtifact);
+    assert(exclusionIndex !== -1, `${service} Docker ignore must exclude ${excludedArtifact}`);
+    assert(
+      exclusionIndex > allowlistIndex,
+      `${service} Docker ignore must place ${excludedArtifact} after ${allowlistRule}`,
+    );
+  }
+  assert(
+    dockerignoreRules.slice(allowlistIndex + 1).every((rule) => !rule.startsWith('!')),
+    `${service} Docker ignore must not re-include paths after its terminal exclusions`,
+  );
 }
 
 const compiledTypes = join(typesDirectory, 'dist');
