@@ -22,12 +22,12 @@ across two **protocol-family path prefixes** — `/openai` for the OpenAI-compat
 `/oip` for the KServe V2 Open Inference Protocol surface (see [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)):
 
 | Endpoint                       | Method | Purpose                                         |
-| ------------------------------- | ------ | ------------------------------------------------ |
+| ------------------------------ | ------ | ----------------------------------------------- |
 | `/openai/v1/chat/completions`  | `POST` | OpenAI chat inference (forwarded)               |
 | `/openai/v1/completions`       | `POST` | OpenAI text completion (forwarded)              |
 | `/openai/v1/models`            | `GET`  | List `openai`-protocol models                   |
 | `/oip/v2/models/{model}/infer` | `POST` | KServe V2 (OIP) inference (forwarded)           |
-| `/oip/v2/models/{model}/ready` | `GET`  | KServe V2 readiness (503 for sleeping, no wake)  |
+| `/oip/v2/models/{model}/ready` | `GET`  | KServe V2 readiness (503 for sleeping, no wake) |
 | `/oip/v2/models`               | `GET`  | List `oip`-protocol models                      |
 
 The prefix names the **protocol family, never the engine** — it is stripped before forwarding, so
@@ -55,7 +55,7 @@ The proxy is designed to run as multiple stateless replicas behind a load balanc
 
 Every inference request follows the same steps:
 
-1. Read the raw request body (buffered, max 10 MiB)
+1. Read the raw request body (buffered, max 1 MiB by default — `SARDEENZ_PROXY_MAX_BODY_BYTES`)
 2. Extract the `model` field — from the JSON body for `/openai/*` requests, from the `{model}` URL
    path segment for `/oip/*` requests. The rest of the path (resolve/park/wake/forward/circuit-break)
    is protocol-agnostic.
@@ -213,13 +213,14 @@ The parking loop checks for the following terminal conditions on every wake from
 
 ### Timeout and Backpressure
 
-Two independent limits protect the proxy from runaway parking:
+Three independent limits protect the proxy from runaway parking:
 
-| Limit         | Config key                       | Default | Scope              |
-| ------------- | -------------------------------- | ------- | ------------------ |
-| Per-model cap | `SARDEENZ_PARKING_MAX_PER_MODEL` | 1000    | Per model name     |
-| Global cap    | `SARDEENZ_PARKING_MAX_GLOBAL`    | 10000   | Across all models  |
-| Deadline      | `SARDEENZ_PARKING_TIMEOUT_SECS`  | 120     | Per parked request |
+| Limit         | Config key                       | Default | Scope                        |
+| ------------- | -------------------------------- | ------- | ---------------------------- |
+| Per-model cap | `SARDEENZ_PARKING_MAX_PER_MODEL` | 1000    | Per model name               |
+| Global cap    | `SARDEENZ_PARKING_MAX_GLOBAL`    | 10000   | Across all models            |
+| Byte cap      | `SARDEENZ_PARKING_MAX_BYTES`     | 1 GiB   | Sum of parked request bodies |
+| Deadline      | `SARDEENZ_PARKING_TIMEOUT_SECS`  | 120     | Per parked request           |
 
 Limits are checked before incrementing the count. Excess requests receive a 503 (`parking_limit_reached`). The deadline uses `tokio::time::sleep_until` inside a `select!` with the `receiver.changed()` future — if the deadline fires first, the task returns `Err(ParkingTimeout)` → 503 (`parking_timeout`).
 
@@ -398,6 +399,9 @@ All configuration is read from environment variables at startup via `Config::fro
 | `SARDEENZ_PARKING_TIMEOUT_SECS`           | `u64`        | `120`                    | Max time a request can be parked before returning 503                                              |
 | `SARDEENZ_PARKING_MAX_PER_MODEL`          | `usize`      | `1000`                   | Max concurrently parked requests per model                                                         |
 | `SARDEENZ_PARKING_MAX_GLOBAL`             | `usize`      | `10000`                  | Max concurrently parked requests across all models                                                 |
+| `SARDEENZ_PARKING_MAX_BYTES`              | `usize`      | `1073741824`             | Max total bytes of parked request bodies (1 GiB)                                                   |
+| `SARDEENZ_PROXY_MAX_BODY_BYTES`           | `usize`      | `1048576`                | Max buffered request body size (1 MiB); larger bodies are rejected                                 |
+| `SARDEENZ_API_TOKEN`                      | `String`     | unset                    | Bearer token sent on wake-trigger calls to the control plane (required when its auth is enabled)   |
 | `SARDEENZ_CB_FAILURE_THRESHOLD`           | `u32`        | `5`                      | Failures within window to trip a circuit breaker                                                   |
 | `SARDEENZ_CB_FAILURE_WINDOW_SECS`         | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                                                |
 | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS`       | `u64`        | `15`                     | Time before an open circuit transitions to half-open                                               |

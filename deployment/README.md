@@ -24,6 +24,7 @@ set here:
 ```
 deployment/
 ├── README.md               # this file (format decision)
+├── control-plane/          # control-plane NetworkPolicy + catalog-import requirements
 ├── sif-runner/             # worker security posture + worker Deployment (Task 8)
 └── librarian/              # SIF build/sign/convert Job + signing keys (Task 7)
 ```

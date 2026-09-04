@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Per-component `AGENTS.md` agent guides.** The root `AGENTS.md` is now a lean entry point
+  (component table, first-pass design facts, workflow rules, status pointer) and each component
+  has a targeted guide with a `CLAUDE.md` symlink: `proxy/` (trimmed to layout + rules + build),
+  `control-plane/`, `dashboard/`, `runners/`, `packages/contracts/`, and `deployment/` (covers
+  `containers/` too). Delivered-phase and milestone history moved from the root file to the new
+  [`docs/project/status.md`](docs/project/status.md).
+
 - **Python runner-shim + conformance suites gated in CI (#161).** A dedicated `python` GitHub
   Actions job (`actions/setup-python` pinned by SHA, Python 3.12 via a new root
   `.python-version`) installs the two shims' `[test]` extras — `pytest`, `fastapi`, `httpx`
@@ -61,6 +68,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Docs drift sweep.** `proxy.md`: body limit is 1 MiB (`SARDEENZ_PROXY_MAX_BODY_BYTES`),
+  added `SARDEENZ_PARKING_MAX_BYTES` and `SARDEENZ_API_TOKEN` to the configuration tables.
+  `dashboard.md`: added the `/gpu-memory`, `/catalog`, `/playground` routes, the `catalog` and
+  `playground` i18n namespaces, and `SARDEENZ_INFERENCE_URL`. `structured-output-compatibility.md`:
+  the proxy does not read `stream`. `i18n.md`: `playground` namespace. `deployment/README.md`:
+  `control-plane/` in the layout tree. `docs/project/README.md`: index the M6/M7/M9 PR drafts and
+  `status.md`. Root `README.md`: replaced "Coming soon" placeholders with links.
+  `overall-plan.md`: seven phases not five, Phase 5 and milestone-track sections, BFF auth no
+  longer "TBD". Acceptance checkboxes ticked on completed phases 1/2/3.5/3.6 (two left open: the
+  unmeasured "< 1ms p99" proxy overhead and "container image builds in CI", which CI does not do).
+  `setup.md`: Postgres is no longer "later". New `docs/usage/api-reference.md` pointing at the
+  OpenAPI specs; `deployment-security.md` gains a service-to-service tokens section.
+
 - **vLLM engine bind host configurable, default `0.0.0.0` (#159).** The vLLM runner shim
   started the engine with a hardcoded `--host 127.0.0.1`, so the engine port was unreachable
   from a proxy running on another node/pod even though the worker's `advertiseHost` is
@@ -108,7 +128,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `runners/dev-worker/` had no local vitest config, so the workspace-scoped invocation fell
   back to the root `vitest.config.ts`, whose `test.projects` entries are resolved relative to
   the cwd (`runners/dev-worker`) and dangle (`Startup Error: Projects definition references a
-  non-existing file or a directory: …/runners/dev-worker/packages/types`). A minimal
+non-existing file or a directory: …/runners/dev-worker/packages/types`). A minimal
   `runners/dev-worker/vitest.config.ts` (no `projects` key) was added — the same arrangement
   `control-plane/` and `dashboard/` already use — so the workspace-scoped run and the root
   multi-project run share one correctly-resolving config. Root `vitest run` now loads it as the

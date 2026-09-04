@@ -692,19 +692,19 @@ Integration tests that validate the control plane's core orchestration scenarios
 
 From the [overall project plan](overall-plan.md#phase-2-control-plane-sleepwake-orchestration):
 
-- [ ] Model lifecycle state machine covers all transitions, including error recovery (e.g., runner fails to start → state returns to `STOPPED`)
-- [ ] Placement pipeline correctly matches models to workers across the three scenarios: GPU with capacity, GPU without capacity (triggers eviction), CPU-only fallback
-- [ ] LRU eviction frees enough memory for a new deployment by sleeping the least-recently-used model(s)
-- [ ] Sleep/wake round-trip works end-to-end: control plane sends sleep → runner offloads → control plane sends wake → runner reloads → model serves traffic
-- [ ] Worker join/leave detected within 30 seconds without control plane restart
-- [ ] Leader failover completes within the K8s Lease duration (typically 15s); inference traffic is unaffected during failover
-- [ ] All OpenAPI specs pass `redocly lint`
-- [ ] Generated TypeScript types compile cleanly (`make typecheck`)
-- [ ] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
-- [ ] `npm run lint` passes with zero warnings
-- [ ] `npm run typecheck` passes with zero errors
-- [ ] Container image builds and runs successfully
-- [ ] Prometheus metrics endpoint exposes: model counts, worker counts, memory budgets, placement latency, eviction counts, wake trigger counts, state transitions, leader status
+- [x] Model lifecycle state machine covers all transitions, including error recovery (e.g., runner fails to start → state returns to `STOPPED`)
+- [x] Placement pipeline correctly matches models to workers across the three scenarios: GPU with capacity, GPU without capacity (triggers eviction), CPU-only fallback
+- [x] LRU eviction frees enough memory for a new deployment by sleeping the least-recently-used model(s)
+- [x] Sleep/wake round-trip works end-to-end: control plane sends sleep → runner offloads → control plane sends wake → runner reloads → model serves traffic
+- [x] Worker join/leave detected within 30 seconds without control plane restart
+- [x] Leader failover completes within the K8s Lease duration (typically 15s); inference traffic is unaffected during failover
+- [x] All OpenAPI specs pass `redocly lint`
+- [x] Generated TypeScript types compile cleanly (`make typecheck`)
+- [x] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
+- [x] `npm run lint` passes with zero warnings
+- [x] `npm run typecheck` passes with zero errors
+- [x] Container image builds and runs successfully
+- [x] Prometheus metrics endpoint exposes: model counts, worker counts, memory budgets, placement latency, eviction counts, wake trigger counts, state transitions, leader status
 
 ## Open Questions
 

@@ -130,6 +130,9 @@ The frontend never constructs PromQL queries. The BFF owns the query templates a
 | `/models/:modelName` | `ModelDetail`      | Model detail with progress/error display                                          |
 | `/workers`           | `WorkerList`       | Worker list table                                                                 |
 | `/workers/:workerId` | `WorkerDetail`     | Per-worker GPU memory breakdown                                                   |
+| `/gpu-memory`        | `GpuMemory`        | Cluster-wide measured GPU memory view                                             |
+| `/catalog`           | `RunnerCatalog`    | Runner catalog: browse and import runner SIFs                                     |
+| `/playground`        | `Playground`       | Chat playground against the inference endpoint (admin only)                       |
 | `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts                                              |
 
 ### State management
@@ -257,6 +260,7 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 | `SARDEENZ_REDIS_URL`         | `redis://localhost:6379` | Redis/Valkey connection string                                 |
 | `SARDEENZ_REDIS_KEY_PREFIX`  | `sardeenz`               | Prefix for all Redis keys                                      |
 | `SARDEENZ_PROMETHEUS_URL`    | `http://localhost:9090`  | Prometheus query API base URL                                  |
+| `SARDEENZ_INFERENCE_URL`     | `http://localhost:8080`  | Proxy inference base URL used by the Playground                |
 | `SARDEENZ_LOG_LEVEL`         | `info`                   | Pino log level                                                 |
 | `AUTH_MODE`                  | `none`                   | Authentication mode: `none`, `simple`, or `oauth`              |
 | `ADMIN_USERNAME`             | `admin`                  | Admin username for `simple` auth mode                          |
@@ -351,14 +355,16 @@ The frontend uses **react-i18next** with a namespace-per-page pattern.
 
 ### Namespaces
 
-| Namespace | Pages / components                                                       |
-| --------- | ------------------------------------------------------------------------ |
-| `common`  | Shared strings: nav labels, action names, status labels, degraded banner |
-| `cluster` | Cluster Overview page                                                    |
-| `models`  | Model List, Model Detail, Model Deploy pages                             |
-| `workers` | Worker List, Worker Detail pages                                         |
-| `metrics` | Metrics Dashboard page                                                   |
-| `auth`    | Login page, OAuth callback page                                          |
+| Namespace    | Pages / components                                                       |
+| ------------ | ------------------------------------------------------------------------ |
+| `common`     | Shared strings: nav labels, action names, status labels, degraded banner |
+| `cluster`    | Cluster Overview page                                                    |
+| `models`     | Model List, Model Detail, Model Deploy pages                             |
+| `workers`    | Worker List, Worker Detail pages                                         |
+| `metrics`    | Metrics Dashboard page                                                   |
+| `auth`       | Login page, OAuth callback page                                          |
+| `catalog`    | Runner Catalog page                                                      |
+| `playground` | Playground page                                                          |
 
 ### Configuration
 

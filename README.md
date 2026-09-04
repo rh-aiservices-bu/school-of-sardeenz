@@ -27,19 +27,19 @@ For individual design decisions, see the [ADRs](docs/architecture/adrs/).
 
 ## Getting Started
 
-_Coming soon._
+Clone the repo, then follow [First-Time Setup](docs/development/setup.md#first-time-setup): `npm install`, `make services`, and `make dev` start the proxy, control plane, dashboard, and BFF locally.
 
 ## Development
 
-_Coming soon._ <!-- See docs/development/ when available -->
+See [`docs/development/setup.md`](docs/development/setup.md) for prerequisites, dev services, and common commands, and [`AGENTS.md`](AGENTS.md) for the repository map.
 
 ## Deployment
 
-_Coming soon._ <!-- See docs/usage/ when available -->
+See [`deployment/`](deployment/README.md) for the Kustomize manifests, [`docs/usage/deployment-security.md`](docs/usage/deployment-security.md) for the security requirements, and [`docs/usage/runner-catalog.md`](docs/usage/runner-catalog.md) for importing runner SIFs.
 
 ## Project Status
 
-Sardeenz is in early development. See the [overall plan](docs/project/overall-plan.md) for the delivery phases.
+Phases 0–4 and milestones M2–M12 are complete. See [`docs/project/status.md`](docs/project/status.md) for details and the [overall plan](docs/project/overall-plan.md) for the delivery phases.
 
 ## License
 

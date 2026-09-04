@@ -1,6 +1,7 @@
 # Project
 
 - [`overall-plan.md`](overall-plan.md) — Delivery phases, scope, and sequencing
+- [`status.md`](status.md) — Current status: delivered phases and milestones, what is next
 - [`phase0.md`](phase0.md) — Phase 0 task breakdown and progress tracker
 - [`phase1.md`](phase1.md) — Phase 1 task breakdown and progress tracker
 - [`phase2.md`](phase2.md) — Phase 2 task breakdown and progress tracker
@@ -14,3 +15,6 @@
 - [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) — Milestone M3 PR draft
 - [`milestone-M4-pr-draft.md`](milestone-M4-pr-draft.md) — Milestone M4 PR draft
 - [`milestone-M5-pr-draft.md`](milestone-M5-pr-draft.md) — Milestone M5 PR draft
+- [`milestone-M6-pr-draft.md`](milestone-M6-pr-draft.md) — Milestone M6 PR draft
+- [`milestone-M7-pr-draft.md`](milestone-M7-pr-draft.md) — Milestone M7 PR draft
+- [`milestone-M9-pr-draft.md`](milestone-M9-pr-draft.md) — Milestone M9 PR draft
