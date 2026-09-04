@@ -54,6 +54,12 @@ for (const service of ['control-plane', 'dashboard']) {
     ),
     `${service} runtime image must use the shared runtime package manifest`,
   );
+  if (service === 'dashboard') {
+    assert(
+      dockerfile.includes('COPY --from=deps /app/package.json ./package.json'),
+      'dashboard build image must copy the root manifest before running a workspace script',
+    );
+  }
   assert(
     dockerignore.includes('# This Dockerfile builds from the repository root.'),
     `${service} must use a Dockerfile-specific ignore file for its root build context`,

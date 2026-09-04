@@ -19,6 +19,7 @@ FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
 COPY --from=deps /app/dashboard/node_modules ./dashboard/node_modules
+COPY --from=deps /app/package.json ./package.json
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/types/ packages/types/
