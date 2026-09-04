@@ -17,17 +17,22 @@ engine-agnostic (ADR-010, [phase4.md](../../docs/project/phase4.md) Task 5).
 - Launches `vllm serve <model> --host 0.0.0.0 --port <engine-port> --enable-sleep-mode` (bind host
   configurable via `--engine-host`; #159) as a child process (the OpenAI-compatible inference
   server). Inference traffic flows straight to that port via the proxy — it is **not** part of
-  this contract.
+  this contract. This is an unauthenticated, proxy-only backend: do not expose the engine port
+  through a direct Service, Ingress, or Route.
 - Serves the runner-contract management API on `--port`:
 
-  | Endpoint                             | Behaviour                                                                           |
-  | ------------------------------------ | ----------------------------------------------------------------------------------- |
-  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies |
-  | `GET /capabilities`                  | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on       |
+  | Endpoint                             | Behaviour                                                                                                             |
+  | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies                                   |
+  | `GET /capabilities`                  | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on                                         |
   | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`); per-device `kvCache` pool block when a kvcached pool is visible |
-  | `POST /sleep`                        | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM)                     |
-  | `POST /wake`                         | vLLM `/wake_up`                                                                     |
-  | `GET /sleep-status`, `GET /progress` | State introspection                                                                 |
+  | `POST /sleep`                        | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM)                                                       |
+  | `POST /wake`                         | vLLM `/wake_up`                                                                                                       |
+  | `GET /sleep-status`, `GET /progress` | State introspection                                                                                                   |
+
+  The management endpoint is unauthenticated. `SARDEENZ_WORKER_TOKEN` protects the worker agent
+  only, not this shim or its engine. vLLM does not bind the gRPC or metrics ports reserved in the
+  worker's four-port block.
 
 - On SIGTERM (uvicorn → lifespan shutdown) it SIGTERMs the vLLM process group, then SIGKILLs after
   a grace period — the whole tree drains on one signal (spike Gate 5).

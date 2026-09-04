@@ -31,14 +31,17 @@ identity out of the `--served-model-name` passthrough instead of forwarding it.
   before forwarding) — it is **not** part of this contract.
 - Serves the runner-contract management API on `--port`:
 
-  | Endpoint                             | Behaviour                                                                             |
-  | ------------------------------------ | -------------------------------------------------------------------------------------- |
+  | Endpoint                             | Behaviour                                                                               |
+  | ------------------------------------ | --------------------------------------------------------------------------------------- |
   | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once MLServer serves; `ERROR` if it dies |
-  | `GET /capabilities`                  | Static declaration (`PREDICTIVE`, `LLM`, `EMBEDDING`; `kvCacheElasticSharing: false`)  |
-  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`; 409 for CPU-only sklearn models)  |
-  | `POST /sleep`                        | `L1_HOST_RAM` → KServe V2 `POST /v2/repository/models/{name}/unload`                   |
-  | `POST /wake`                         | KServe V2 `POST /v2/repository/models/{name}/load`                                     |
+  | `GET /capabilities`                  | Static declaration (`PREDICTIVE`, `LLM`, `EMBEDDING`; `kvCacheElasticSharing: false`)   |
+  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`; 409 for CPU-only sklearn models)   |
+  | `POST /sleep`                        | `L1_HOST_RAM` → KServe V2 `POST /v2/repository/models/{name}/unload`                    |
+  | `POST /wake`                         | KServe V2 `POST /v2/repository/models/{name}/load`                                      |
   | `GET /sleep-status`, `GET /progress` | State introspection                                                                     |
+
+  The management endpoint is unauthenticated. `SARDEENZ_WORKER_TOKEN` protects the worker agent
+  only, not this shim, the MLServer engine, or its auxiliary listeners.
 
 - On SIGTERM (uvicorn → lifespan shutdown) it SIGTERMs the MLServer process group, then SIGKILLs
   after a grace period — the whole tree drains on one signal (mirrors the vLLM shim / spike Gate 5).
@@ -57,14 +60,12 @@ advertises `supportedSleepLevels: ["L1_HOST_RAM"]` for v1 (it is the best availa
 - `MLSERVER_HOST=0.0.0.0` (matching the vLLM shim's `--engine-host` default since #159) and
   `MLSERVER_HTTP_PORT=<engine-port>` configure MLServer's bind via env, the documented
   `MLSERVER_`-prefixed override mechanism.
-- MLServer also binds a gRPC server and a Prometheus metrics server even in this REST-only
-  deployment. The shim derives `MLSERVER_GRPC_PORT`/`MLSERVER_METRICS_PORT` from
-  `SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT`. As of #160, the worker's port
-  allocator reserves a contiguous 4-port block (management, engine, gRPC, metrics) per runner and
-  passes the gRPC/metrics ports explicitly via those two env vars on every worker-launched runner,
-  so the `+10000`/`+20000` offset derivation is now only a fallback for standalone/direct SIF
-  invocation (outside a worker launch) — its 65535 ceiling can no longer be reached from a worker
-  launch.
+- MLServer also binds unauthenticated gRPC and Prometheus metrics servers even in this REST-only
+  deployment. The worker reserves a contiguous four-port block (management, HTTP engine, gRPC,
+  metrics) and passes `SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT` explicitly
+  on every worker-launched runner. The `+10000`/`+20000` derivation remains only a fallback for a
+  standalone/direct SIF invocation; it is not a supported worker-deployment configuration. The
+  default worker NetworkPolicy admits no ingress to these auxiliary ports.
 - **v1 limitation:** any `engineArgs` forwarded after `--served-model-name` are parsed off and
   **ignored** (with a startup warning) — MLServer's configuration is file/env-based, so there is no
   argv pass-through equivalent to vLLM's.

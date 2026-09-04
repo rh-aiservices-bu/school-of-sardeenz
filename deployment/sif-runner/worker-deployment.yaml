@@ -88,6 +88,11 @@ spec:
             failureThreshold: 3
           env:
             - { name: SARDEENZ_WORKER_MODE, value: apptainer }
+            # Keep these in lockstep with networkpolicy.yaml. It explicitly allow-lists this
+            # 32-runner, four-port-block envelope; patch both files together in an overlay.
+            - { name: SARDEENZ_WORKER_PORT, value: '9100' }
+            - { name: SARDEENZ_RUNNER_PORT_START, value: '9101' }
+            - { name: SARDEENZ_MAX_RUNNERS, value: '32' }
             # The worker agent measures VRAM in-process via NVML (ts-nvml, #163);
             # `utility` makes the driver injector mount libnvidia-ml.so.1, `compute`
             # keeps CUDA available for the engines the worker launches.

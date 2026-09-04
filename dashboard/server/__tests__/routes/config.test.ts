@@ -19,6 +19,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://prom.test',
     inferenceUrl: 'http://inference.test:8080',
+    maxConcurrentInferenceRequestsPerUser: 4,
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: 'admin-secret-should-never-leak',

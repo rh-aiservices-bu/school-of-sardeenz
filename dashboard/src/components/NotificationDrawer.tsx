@@ -65,13 +65,13 @@ export function NotificationDrawer() {
   };
 
   return (
-    <PFNotificationDrawer>
+    <PFNotificationDrawer role="region" aria-label={t('notifications.title')}>
       <NotificationDrawerHeader count={unreadCount} title={t('notifications.title')}>
         <Dropdown
           id="notification-drawer-actions"
           isOpen={isDropdownOpen}
           onSelect={onDropdownSelect}
-          popperProps={{ position: 'right' }}
+          popperProps={{ position: 'right', appendTo: 'inline' }}
           onOpenChange={(isOpen: boolean) => !isOpen && setIsDropdownOpen(false)}
           toggle={(toggleRef) => (
             <MenuToggle
@@ -101,7 +101,7 @@ export function NotificationDrawer() {
             <BellIcon
               style={{
                 fontSize: 'var(--pf-t--global--font--size--3xl)',
-                color: 'var(--pf-t--global--color--nonstatus--gray--default)',
+                color: 'var(--pf-t--global--text--color--subtle)',
               }}
             />
             <EmptyStateBody>{t('notifications.noNotificationsBody')}</EmptyStateBody>

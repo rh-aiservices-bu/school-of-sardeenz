@@ -9,6 +9,7 @@ export interface Config {
   readonly redisKeyPrefix: string;
   readonly prometheusUrl: string;
   readonly inferenceUrl: string;
+  readonly maxConcurrentInferenceRequestsPerUser: number;
   readonly authMode: AuthMode;
   readonly adminUsername: string;
   readonly adminPassword: string;
@@ -25,6 +26,18 @@ export interface Config {
 
 function optionalEnv(name: string, fallback: string): string {
   return process.env[name] ?? fallback;
+}
+
+function positiveSafeIntegerEnv(name: string, fallback: number): number {
+  const value = optionalEnv(name, String(fallback));
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new Error(`${name} must be a positive safe integer.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive safe integer.`);
+  }
+  return parsed;
 }
 
 export function loadConfig(): Config {
@@ -50,6 +63,10 @@ export function loadConfig(): Config {
     redisKeyPrefix: optionalEnv('SARDEENZ_REDIS_KEY_PREFIX', 'sardeenz'),
     prometheusUrl: optionalEnv('SARDEENZ_PROMETHEUS_URL', 'http://localhost:9090'),
     inferenceUrl: optionalEnv('SARDEENZ_INFERENCE_URL', 'http://localhost:8080'),
+    maxConcurrentInferenceRequestsPerUser: positiveSafeIntegerEnv(
+      'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
+      4,
+    ),
     authMode,
     adminUsername: optionalEnv('ADMIN_USERNAME', 'admin'),
     adminPassword: optionalEnv('ADMIN_PASSWORD', ''),

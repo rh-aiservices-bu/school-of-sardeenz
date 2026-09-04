@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Per-user Playground inference concurrency cap (#149).** The dashboard BFF now limits each
+  verified user to four concurrent inference requests by default (configurable with
+  `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER`), returns `429 RATE_LIMITED` before
+  contacting the proxy when the cap is reached, and releases permits across normal completion,
+  upstream failure, and client disconnect paths. Anonymous development mode shares one bucket;
+  enforcement is intentionally in-memory per BFF replica.
+
+- **Codex milestone skill (`.agents/skills/implement-milestone/`).** Added a project-scoped,
+  restart-safe adaptation of the Claude Code milestone workflow. It preserves issue-spec planning,
+  per-issue worktree isolation, independent implementation/review/acceptance agents, sequential
+  integration, verification, changelog discipline, and local-only PR preparation while mapping
+  roles to the Codex model and concurrency controls.
+
 - **Per-component `AGENTS.md` agent guides.** The root `AGENTS.md` is now a lean entry point
   (component table, first-pass design facts, workflow rules, status pointer) and each component
   has a targeted guide with a `CLAUDE.md` symlink: `proxy/` (trimmed to layout + rules + build),
@@ -68,6 +81,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard notification drawer accessibility coverage (#179).** The empty-state bell now uses
+  the semantic subtle text token, and the Playwright axe suite seeds notification history through
+  the BFF/mock-control-plane path and scans the open, labeled drawer region, including read/unread
+  items, timestamps, remove controls, and inline header actions.
+
+- **Dashboard public-asset freshness guard (#178).** Bare Playwright runs now reject
+  `dist/client` builds older than recursively scanned `dashboard/public/` assets, including
+  directory-only changes caused by deletes or renames. Isolated filesystem tests cover nested
+  assets, deletion and rename mtimes, missing source trees, and symlink rejection without touching
+  the real dashboard build.
+
+- **Scoped worker ingress for runner management and inference (#181).** The shipped worker
+  NetworkPolicy now permits only the control plane to reach the worker API and per-runner
+  management ports, and only the routing proxy to reach unauthenticated engine HTTP ports. The
+  MLServer gRPC and metrics ports remain denied. Deployment defaults, operator security guidance,
+  runner documentation, and manifest regression tests now keep the four-port runner layout and
+  label-based trust boundary explicit and synchronized.
+
 - **Docs drift sweep.** `proxy.md`: body limit is 1 MiB (`SARDEENZ_PROXY_MAX_BODY_BYTES`),
   added `SARDEENZ_PARKING_MAX_BYTES` and `SARDEENZ_API_TOKEN` to the configuration tables.
   `dashboard.md`: added the `/gpu-memory`, `/catalog`, `/playground` routes, the `catalog` and
@@ -88,8 +119,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `0.0.0.0`), matching the MLServer shim's day-one behavior (#125); the dev-worker launcher
   passes nothing and relies on the default. The shim's own health/sleep/wake calls to its
   engine stay on loopback. Regression tests cover the default and a custom host; READMEs
-  updated. Follow-up #181 tracks the proxy-scoped NetworkPolicy ingress rule still needed
-  for the engine port off-node.
+  updated. The proxy-scoped NetworkPolicy ingress required for off-node engine access is now
+  shipped under #181.
 
 - **Dashboard e2e: runner-catalog mock, deploy-flow tests re-enabled, stale-build guard (#155).**
   The e2e mock control plane now serves `GET /api/v1/catalog` with a minimal `RunnerCatalogView`

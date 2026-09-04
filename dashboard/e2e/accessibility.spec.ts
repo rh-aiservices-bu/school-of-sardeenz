@@ -8,6 +8,7 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
+import { NotificationVariant, type ControlPlaneComponents } from '@sardeenz/types';
 import { test, expect, bffUrl } from './fixtures.js';
 
 // ---------------------------------------------------------------------------
@@ -88,6 +89,24 @@ const MODELS = [
 ];
 
 const ACTIVE_MODEL = MODELS[0];
+const NOTIFICATIONS: ControlPlaneComponents['schemas']['Notification'][] = [
+  {
+    id: '00000000-0000-4000-8000-000000000001',
+    title: 'Model is ready',
+    description: 'meta-llama/Llama-3.1-8B-Instruct is ready for inference.',
+    variant: NotificationVariant.success,
+    timestamp: '2025-01-15T12:30:00.000Z',
+    isRead: false,
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000002',
+    title: 'Worker memory is low',
+    description: 'worker-a1b2 has limited available GPU memory.',
+    variant: NotificationVariant.warning,
+    timestamp: '2025-01-14T08:15:00.000Z',
+    isRead: true,
+  },
+];
 const WORKER_DETAIL = {
   ...WORKERS[0],
   models: [
@@ -144,6 +163,54 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
 
     // Wait for the main content to be visible
     await expect(page.getByText('Workers')).toBeVisible();
+
+    await runA11yCheck(page);
+  });
+
+  test('Notification Drawer has no accessibility violations', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    mockControlPlane.setClusterStatus(CLUSTER_STATUS);
+    mockControlPlane.setNotifications(NOTIFICATIONS);
+
+    await page.goto(bffUrl(bffPort, '/'));
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+
+    const notificationDrawer = page.getByRole('region', { name: 'Notifications', exact: true });
+    await expect(notificationDrawer).toBeVisible();
+    for (const notification of NOTIFICATIONS) {
+      const notificationItem = notificationDrawer.getByRole('listitem').filter({
+        has: page.getByRole('heading', {
+          name: `Notification ${notification.title}`,
+          exact: true,
+        }),
+      });
+
+      await expect(notificationItem).toBeVisible();
+      await expect(
+        notificationItem.getByRole('button', {
+          name: `Remove notification: ${notification.title}`,
+          exact: true,
+        }),
+      ).toBeVisible();
+      const timestamp = await page.evaluate(
+        (value) => new Date(value).toLocaleString(),
+        notification.timestamp,
+      );
+      await expect(notificationItem.getByText(timestamp, { exact: true })).toBeVisible();
+    }
+
+    await page.getByRole('button', { name: 'Notification actions', exact: true }).click();
+    await expect(
+      notificationDrawer.getByRole('menuitem', { name: 'Mark all as read', exact: true }),
+    ).toBeVisible();
+    await expect(
+      notificationDrawer.getByRole('menuitem', { name: 'Clear all', exact: true }),
+    ).toBeVisible();
 
     await runA11yCheck(page);
   });

@@ -25,16 +25,16 @@ wheels, nothing to compile):
 
 > **Build context is the repo root** (the shim lives at `runners/mlserver/`, outside this
 > directory): `podman build -f containers/runner-mlserver/Containerfile -t
-> sardeenz-runner-mlserver:1.6 .`
+sardeenz-runner-mlserver:1.6 .`
 
 ## Pins (keep in sync; re-test on any bump)
 
-| Input                        | Value                          | Note                                             |
-| ----------------------------- | ------------------------------ | ------------------------------------------------- |
-| base image                    | `nvidia/cuda:12.6.3-runtime-ubi9` | **placeholder — pin `@sha256` before publishing** |
-| `mlserver`                    | `1.6.1`                        |                                                   |
-| `mlserver-sklearn`            | `1.6.1`                        | CPU-classical baseline                           |
-| `mlserver-huggingface`        | `1.6.1`                        | GPU torch runtime                                |
+| Input                  | Value                             | Note                                              |
+| ---------------------- | --------------------------------- | ------------------------------------------------- |
+| base image             | `nvidia/cuda:12.6.3-runtime-ubi9` | **placeholder — pin `@sha256` before publishing** |
+| `mlserver`             | `1.6.1`                           |                                                   |
+| `mlserver-sklearn`     | `1.6.1`                           | CPU-classical baseline                            |
+| `mlserver-huggingface` | `1.6.1`                           | GPU torch runtime                                 |
 
 On any bump, re-run the MLServer shim's pytest suite (`runners/mlserver`) and re-validate the
 gRPC/metrics aux-port offsets (`sardeenz_mlserver_runner/cli.py`) before publishing.
@@ -43,14 +43,16 @@ gRPC/metrics aux-port offsets (`sardeenz_mlserver_runner/cli.py`) before publish
 
 - **`MLSERVER_HOST=0.0.0.0`**: the shim sets this explicitly (not MLServer's implicit default) so
   the proxy can reach the engine's bind address — see the shim README's `#159` note.
-- **gRPC/metrics ports**: MLServer also binds a gRPC server and a Prometheus metrics server even in
-  this REST-only deployment; the shim derives non-colliding ports from `--engine-port`. Cluster
-  validation of the offset defaults is tracked as a follow-up (see the shim README).
+- **gRPC/metrics ports**: MLServer also binds gRPC and Prometheus listeners. A worker launch
+  reserves a four-port block and supplies their exact ports through
+  `SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT`; the shim's offset derivation is
+  standalone/direct-SIF fallback only. The production worker NetworkPolicy permits no ingress to
+  either auxiliary listener.
 - **Offline at runtime:** the image keeps `HF_HUB_OFFLINE=1`; weights are pre-staged on the
   weights volume. Only the model-staging step overrides it.
 - **Launch:** `apptainer exec --nv --bind /weights --bind /scratch <sif> python3 -m
-  sardeenz_mlserver_runner --model /weights/<model> --port <PORT> -- --served-model-name
-  <served-name>` — same launch shape as `runner-vllm`, sharing the worker's argv-construction path
+sardeenz_mlserver_runner --model /weights/<model> --port <PORT> -- --served-model-name
+<served-name>` — same launch shape as `runner-vllm`, sharing the worker's argv-construction path
   (`ApptainerLauncher`).
 
 ## Convert to a SIF
