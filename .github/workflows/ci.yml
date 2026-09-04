@@ -2,8 +2,8 @@ name: CI
 
 # No CI existed before this workflow (#82). It enforces every quality gate that
 # previously ran only manually: typecheck, ESLint, clippy, OpenAPI spec
-# validation (redocly), unit tests (vitest + cargo test), and contract-codegen
-# drift.
+# validation (redocly), unit tests (vitest + cargo test), contract-codegen
+# drift, and build-and-run smoke tests for the three service images.
 on:
   pull_request:
     branches: [dev, main]

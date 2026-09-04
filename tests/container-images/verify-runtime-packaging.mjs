@@ -10,8 +10,10 @@ import {
   rmSync,
   symlinkSync,
 } from 'node:fs';
+import { log } from 'node:console';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { execPath } from 'node:process';
 import { spawnSync } from 'node:child_process';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
@@ -127,7 +129,7 @@ try {
   assert(lstatSync(packageLink).isSymbolicLink(), 'runtime workspace link must be a symlink');
 
   const result = spawnSync(
-    process.execPath,
+    execPath,
     ['--input-type=module', '--eval', "await import('@sardeenz/types')"],
     { cwd: fixture, encoding: 'utf8' },
   );
@@ -139,4 +141,4 @@ try {
   rmSync(fixture, { recursive: true, force: true });
 }
 
-console.log('Verified service runtime package resolution.');
+log('Verified service runtime package resolution.');
