@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Per-user Playground inference concurrency cap (#149).** The dashboard BFF now limits each
+  verified user to four concurrent inference requests by default (configurable with
+  `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER`), returns `429 RATE_LIMITED` before
+  contacting the proxy when the cap is reached, and releases permits across normal completion,
+  upstream failure, and client disconnect paths. Anonymous development mode shares one bucket;
+  enforcement is intentionally in-memory per BFF replica.
+
 - **Codex milestone skill (`.agents/skills/implement-milestone/`).** Added a project-scoped,
   restart-safe adaptation of the Claude Code milestone workflow. It preserves issue-spec planning,
   per-issue worktree isolation, independent implementation/review/acceptance agents, sequential

@@ -39,6 +39,7 @@ async function main(): Promise<void> {
       redisUrl: redactUrl(config.redisUrl),
       prometheusUrl: redactUrl(config.prometheusUrl),
       inferenceUrl: redactUrl(config.inferenceUrl),
+      maxConcurrentInferenceRequestsPerUser: config.maxConcurrentInferenceRequestsPerUser,
     },
     'Dashboard BFF started',
   );

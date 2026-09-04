@@ -8,6 +8,12 @@ The dashboard BFF enforces secure authentication defaults at startup:
 - **Simple mode**: `ADMIN_PASSWORD` must be explicitly set to a non-empty value. The server will not start with an empty or default password, regardless of environment.
 - **Development**: `AUTH_MODE=none` is permitted but logs a prominent warning. Do not expose development instances beyond a trusted network.
 
+### Inference concurrency defense in depth
+
+The BFF limits simultaneous `POST /api/inference/chat/completions` responses per verified user with `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` (default `4`). It rejects excess requests with `429` before they reach the proxy, and releases slots when the response ends or the client disconnects. In `AUTH_MODE=none`, all callers intentionally share one `anonymous` identity.
+
+This limiter is in-memory and scoped to each BFF replica. With multiple replicas, a user can consume up to the configured cap on each replica, so use an ingress/API-gateway per-user limit as the aggregate, cluster-wide control. The BFF cap remains useful as a local defense if that outer control is bypassed or misconfigured.
+
 ### Required environment variables by auth mode
 
 | Auth Mode | Required Variables                                                                                                               |

@@ -253,25 +253,26 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 
 ### BFF environment variables
 
-| Variable                     | Default                  | Description                                                    |
-| ---------------------------- | ------------------------ | -------------------------------------------------------------- |
-| `SARDEENZ_BFF_LISTEN_ADDR`   | `0.0.0.0:4000`           | BFF listen address and port                                    |
-| `SARDEENZ_CONTROL_PLANE_URL` | `http://localhost:3000`  | Control plane base URL                                         |
-| `SARDEENZ_REDIS_URL`         | `redis://localhost:6379` | Redis/Valkey connection string                                 |
-| `SARDEENZ_REDIS_KEY_PREFIX`  | `sardeenz`               | Prefix for all Redis keys                                      |
-| `SARDEENZ_PROMETHEUS_URL`    | `http://localhost:9090`  | Prometheus query API base URL                                  |
-| `SARDEENZ_INFERENCE_URL`     | `http://localhost:8080`  | Proxy inference base URL used by the Playground                |
-| `SARDEENZ_LOG_LEVEL`         | `info`                   | Pino log level                                                 |
-| `AUTH_MODE`                  | `none`                   | Authentication mode: `none`, `simple`, or `oauth`              |
-| `ADMIN_USERNAME`             | `admin`                  | Admin username for `simple` auth mode                          |
-| `ADMIN_PASSWORD`             | _(empty)_                | Admin password for `simple` auth mode                          |
-| `JWT_SECRET`                 | _(empty)_                | JWT signing secret (required when `AUTH_MODE` is not `none`)   |
-| `JWT_EXPIRATION_HOURS`       | `8`                      | JWT token expiration in hours                                  |
-| `OAUTH_CLIENT_ID`            | `sardeenz`               | OAuth client ID (for `oauth` mode)                             |
-| `OAUTH_CLIENT_SECRET`        | _(empty)_                | OAuth client secret (for `oauth` mode)                         |
-| `OAUTH_ISSUER_URL`           | _(empty)_                | OAuth OIDC issuer URL (for `oauth` mode)                       |
-| `K8S_API_URL`                | _(empty)_                | Kubernetes API URL for RBAC role resolution (for `oauth` mode) |
-| `NAMESPACE`                  | `sardeenz`               | Kubernetes namespace for RBAC scope (for `oauth` mode)         |
+| Variable                                                  | Default                  | Description                                                                 |
+| --------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------- |
+| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`           | BFF listen address and port                                                 |
+| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`  | Control plane base URL                                                      |
+| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379` | Redis/Valkey connection string                                              |
+| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`               | Prefix for all Redis keys                                                   |
+| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`  | Prometheus query API base URL                                               |
+| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`  | Proxy inference base URL used by the Playground                             |
+| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                      | Maximum active chat-completions responses for one identity, per BFF replica |
+| `SARDEENZ_LOG_LEVEL`                                      | `info`                   | Pino log level                                                              |
+| `AUTH_MODE`                                               | `none`                   | Authentication mode: `none`, `simple`, or `oauth`                           |
+| `ADMIN_USERNAME`                                          | `admin`                  | Admin username for `simple` auth mode                                       |
+| `ADMIN_PASSWORD`                                          | _(empty)_                | Admin password for `simple` auth mode                                       |
+| `JWT_SECRET`                                              | _(empty)_                | JWT signing secret (required when `AUTH_MODE` is not `none`)                |
+| `JWT_EXPIRATION_HOURS`                                    | `8`                      | JWT token expiration in hours                                               |
+| `OAUTH_CLIENT_ID`                                         | `sardeenz`               | OAuth client ID (for `oauth` mode)                                          |
+| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                | OAuth client secret (for `oauth` mode)                                      |
+| `OAUTH_ISSUER_URL`                                        | _(empty)_                | OAuth OIDC issuer URL (for `oauth` mode)                                    |
+| `K8S_API_URL`                                             | _(empty)_                | Kubernetes API URL for RBAC role resolution (for `oauth` mode)              |
+| `NAMESPACE`                                               | `sardeenz`               | Kubernetes namespace for RBAC scope (for `oauth` mode)                      |
 
 ### Frontend environment variables
 
@@ -288,6 +289,10 @@ Single container image (`containers/dashboard/Dockerfile`) using a multi-stage b
 3. **runtime stage** — Node.js 22 slim with compiled BFF, frontend static assets, and production dependencies
 
 The BFF serves both the API and the frontend from a single port (4000). This simplifies deployment for an internal admin tool where scaling the frontend independently is unnecessary.
+
+### Inference request lifecycle
+
+`POST /api/inference/chat/completions` takes a per-user slot before it begins an upstream request and holds it until the response body ends, including a non-streaming response. In `simple` and `oauth` modes the identity is the verified JWT `username`; in `none` mode all requests share `anonymous`. Excess requests receive `429 RATE_LIMITED` without contacting the inference proxy. Disconnects abort the upstream request and release the slot. The limiter is an in-memory, per-replica guard, so it protects each BFF process but does not create a cluster-wide cap.
 
 ## Testing Strategy
 

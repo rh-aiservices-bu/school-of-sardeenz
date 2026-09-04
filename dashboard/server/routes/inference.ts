@@ -1,109 +1,134 @@
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { JwtPayload } from '../plugins/auth.js';
+import { InferenceConcurrencyLimiter } from '../inference-concurrency-limiter.js';
 import type { RouteDeps } from './deps.js';
 
-/**
- * Streams a chat completion request to the browser via the Rust proxy's OpenAI-compatible
- * `/v1/chat/completions`.
- *
- * This is the BFF's second streaming proxy, after `model-logs.ts` — same hijack-and-pipe shape,
- * with four deltas driven by this route being a POST with a body rather than a GET:
- *
- *   1. The request body is forwarded upstream as JSON (buffering the *request* is fine and
- *      unavoidable — the proxy buffers it too); only the *response* must stream unbuffered.
- *   2. The upstream Content-Type is copied through rather than hardcoded, since the proxy
- *      returns `text/event-stream` when the request body has `stream: true` and
- *      `application/json` otherwise.
- *   3. An `AbortController` is created for the upstream `fetch` and aborted from `cleanup`, so a
- *      client disconnect (Stop button, tab close) actually cancels the runner generation instead
- *      of leaving it running for nobody. The disconnect signal is `reply.raw`'s `close` event
- *      (the response socket), NOT `request.raw`'s — for a GET route like `model-logs.ts` the
- *      request has no body, so `request.raw`'s `close` happens to track the connection. Here the
- *      request carries a body; Node fires `request.raw`'s `close` as soon as that body has been
- *      fully read (i.e. almost immediately, well before the client goes away), which would abort
- *      the upstream generation right after it starts. `reply.raw`'s `close` fires when the
- *      underlying connection is actually torn down, which is the signal this route needs.
- *   4. Non-OK upstream responses (and an unreachable proxy) are surfaced as a normal JSON reply
- *      with the upstream status, before `reply.hijack()` — after hijacking, Fastify no longer
- *      manages the response and a structured error can no longer be sent.
- */
+function inferenceUsername(
+  request: FastifyRequest,
+  authMode: RouteDeps['config']['authMode'],
+): string {
+  // In authenticated modes, this value is set only by successful jwtVerify(). Do not derive
+  // identity from a request body, arbitrary header, or client address.
+  return authMode === 'none' ? 'anonymous' : (request.user as JwtPayload).username;
+}
+
+/** Registers the BFF's authenticated, streaming OpenAI chat-completions proxy. */
 export function registerInferenceRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  const limiter = new InferenceConcurrencyLimiter(
+    deps.config.maxConcurrentInferenceRequestsPerUser,
+  );
+
   app.post(
     '/api/inference/chat/completions',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const body = request.body;
+      const username = inferenceUsername(request, deps.config.authMode);
+      const release = limiter.tryAcquire(username);
+      if (!release) {
+        app.log.warn(
+          { username, cap: deps.config.maxConcurrentInferenceRequestsPerUser },
+          'Inference concurrency limit reached',
+        );
+        return reply.code(429).send({
+          error: 'Too many concurrent inference requests',
+          code: 'RATE_LIMITED',
+        });
+      }
+
       const controller = new AbortController();
-
-      let upstream: Response;
-      try {
-        upstream = await deps.inference.chatCompletions(body, controller.signal);
-      } catch (err) {
-        app.log.error({ err }, 'Inference proxy unreachable');
-        return reply
-          .code(502)
-          .send({ error: 'Inference proxy unreachable', code: 'UPSTREAM_ERROR' });
-      }
-
-      // Surface a non-OK upstream response (e.g. 400 bad/missing model) as a normal JSON reply
-      // BEFORE hijacking the socket, so the browser gets a proper HTTP error instead of a stream
-      // that opens and immediately dies.
-      if (!upstream.ok || !upstream.body) {
-        let data: unknown;
-        try {
-          data = await upstream.json();
-        } catch {
-          data = { error: `Proxy returned ${upstream.status}`, code: 'UPSTREAM_ERROR' };
-        }
-        return reply.code(upstream.status).send(data);
-      }
-
-      reply.hijack();
-      const upstreamCT = upstream.headers.get('content-type') ?? 'application/json';
-      reply.raw.writeHead(200, {
-        'Content-Type': upstreamCT,
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-      reply.raw.flushHeaders();
-
-      // See model-logs.ts for why the type cast is needed (lib.dom vs node:stream/web
-      // ReadableStream types diverge; they're runtime-compatible).
-      const upstreamStream = Readable.fromWeb(
-        upstream.body as unknown as NodeWebReadableStream<Uint8Array>,
-      );
-
+      let upstreamStream: Readable | undefined;
+      let hijacked = false;
+      let clientDisconnected = false;
       let cleanedUp = false;
+      let resolveCompletion: (() => void) | undefined;
+      const completion = new Promise<void>((resolve) => {
+        resolveCompletion = resolve;
+      });
+
+      // This must be established before fetch: a model may be waking while the client leaves.
       const cleanup = (): void => {
         if (cleanedUp) return;
         cleanedUp = true;
         controller.abort();
-        upstreamStream.destroy();
-        if (!reply.raw.writableEnded) {
+        upstreamStream?.destroy();
+        release();
+        if (hijacked && !reply.raw.writableEnded && !reply.raw.destroyed) {
           reply.raw.end();
         }
+        resolveCompletion?.();
+      };
+      reply.raw.on('close', () => {
+        clientDisconnected = true;
+        cleanup();
+      });
+      reply.raw.on('error', () => {
+        clientDisconnected = true;
+        cleanup();
+      });
+      reply.raw.on('finish', cleanup);
+
+      const sendBeforeHijack = async (status: number, data: unknown): Promise<void> => {
+        if (clientDisconnected || reply.raw.destroyed) return;
+        reply.code(status).send(data);
+        await completion;
       };
 
-      // Pipe with `end: false` so we control when the reply ends via `cleanup`, keeping the
-      // end-of-stream and error/close paths identical.
-      upstreamStream.pipe(reply.raw, { end: false });
-      upstreamStream.on('end', cleanup);
-      upstreamStream.on('error', cleanup);
+      try {
+        let upstream: Response;
+        try {
+          upstream = await deps.inference.chatCompletions(request.body, controller.signal);
+        } catch (err) {
+          if (!clientDisconnected && !controller.signal.aborted) {
+            app.log.error({ err }, 'Inference proxy unreachable');
+            await sendBeforeHijack(502, {
+              error: 'Inference proxy unreachable',
+              code: 'UPSTREAM_ERROR',
+            });
+          }
+          return;
+        }
 
-      reply.raw.on('close', cleanup);
-      reply.raw.on('error', cleanup);
+        if (clientDisconnected) return;
 
-      app.log.debug('Inference stream client connected');
+        // Non-OK responses stay under Fastify's normal JSON reply handling. A successful
+        // response without a body is treated the same way so it cannot leak a slot.
+        if (!upstream.ok || !upstream.body) {
+          let data: unknown;
+          try {
+            data = await upstream.json();
+          } catch {
+            data = { error: `Proxy returned ${upstream.status}`, code: 'UPSTREAM_ERROR' };
+          }
+          await sendBeforeHijack(upstream.status, data);
+          return;
+        }
 
-      // Keep the handler alive until either side closes the stream.
-      await new Promise<void>((resolve) => {
-        reply.raw.on('close', resolve);
-        reply.raw.on('error', resolve);
-        upstreamStream.on('end', resolve);
-        upstreamStream.on('error', resolve);
-      });
+        reply.hijack();
+        hijacked = true;
+        reply.raw.writeHead(200, {
+          'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        reply.raw.flushHeaders();
+
+        upstreamStream = Readable.fromWeb(
+          upstream.body as unknown as NodeWebReadableStream<Uint8Array>,
+        );
+        // Attach completion handlers before piping; a synchronously-ending source must not race
+        // past cleanup and leave its user's slot held.
+        upstreamStream.on('end', cleanup);
+        upstreamStream.on('error', cleanup);
+        upstreamStream.pipe(reply.raw, { end: false });
+
+        app.log.debug({ username }, 'Inference stream client connected');
+        await completion;
+      } finally {
+        cleanup();
+      }
     },
   );
 }

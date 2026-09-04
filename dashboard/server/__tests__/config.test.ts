@@ -17,6 +17,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://localhost:9090',
     inferenceUrl: 'http://localhost:8080',
+    maxConcurrentInferenceRequestsPerUser: 4,
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: '',
@@ -225,6 +226,7 @@ describe('loadConfig auth defaults', () => {
     'JWT_SECRET',
     'SARDEENZ_PUBLIC_URL',
     'SARDEENZ_INFERENCE_URL',
+    'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
   ];
 
   beforeEach(() => {
@@ -292,4 +294,23 @@ describe('loadConfig auth defaults', () => {
     const config = loadConfig();
     expect(config.inferenceUrl).toBe('http://proxy.example.com:8080');
   });
+
+  it('defaults the per-user inference concurrency cap to four', () => {
+    expect(loadConfig().maxConcurrentInferenceRequestsPerUser).toBe(4);
+  });
+
+  it('reads a valid per-user inference concurrency cap from the environment', () => {
+    process.env['SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER'] = '12';
+    expect(loadConfig().maxConcurrentInferenceRequestsPerUser).toBe(12);
+  });
+
+  it.each(['0', '-1', '1.5', 'not-a-number', '', '9007199254740992'])(
+    'rejects an invalid per-user inference concurrency cap of %j',
+    (value) => {
+      process.env['SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER'] = value;
+      expect(() => loadConfig()).toThrow(
+        'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER must be a positive safe integer.',
+      );
+    },
+  );
 });
