@@ -240,9 +240,8 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
         ]),
       ),
     );
-    // One last cutover establishes the desired order; concurrent state updates above prove it
-    // cannot write its stale endpoint snapshot back over the Lua mutation.
-    await harness.routingMap.updateEndpointWeight(MODEL, ep.host, ep.port, 0);
+    // Do not mask the race with a final write: the old HGET/HSET implementation could leave 1
+    // here when a stale state refresh committed after the last cutover.
     expect((await harness.routingMap.getEntry(MODEL))?.endpoints[0]?.weight).toBe(0);
   });
 });

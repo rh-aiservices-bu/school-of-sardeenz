@@ -43,7 +43,11 @@ export function MoveModelModal({
   const [workerId, setWorkerId] = useState('');
   const [devices, setDevices] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [moveIds, setMoveIds] = useState<{ source: string; replacement: string } | null>(null);
+  const [moveIds, setMoveIds] = useState<{
+    source: string;
+    replacement: string;
+    acceptedAt: number;
+  } | null>(null);
   const [replacementWasObserved, setReplacementWasObserved] = useState(false);
   const isOpen = source !== null;
   const tensorParallel = detail?.tensorParallel ?? source?.deviceIndices.length ?? 1;
@@ -148,6 +152,7 @@ export function MoveModelModal({
           setMoveIds({
             source: result.sourceInstanceId,
             replacement: result.replacementInstanceId,
+            acceptedAt: Date.now(),
           }),
         onError: (err) => setError(err instanceof Error ? err.message : String(err)),
       },
@@ -180,6 +185,7 @@ export function MoveModelModal({
               moveIds.source,
               moveIds.replacement,
               replacementWasObserved,
+              moveIds.acceptedAt,
             )}
           />
         )}
@@ -207,15 +213,21 @@ export function MoveModelModal({
               label={t('detail.move.devices', { count: tensorParallel })}
               fieldId="move-devices"
             >
-              {compatible.map((device) => (
-                <Checkbox
-                  key={device.deviceIndex}
-                  id={`move-device-${device.deviceIndex}`}
-                  label={`${t('detail.move.gpu')} ${device.deviceIndex}`}
-                  isChecked={devices.includes(device.deviceIndex)}
-                  onChange={(_event, checked) => toggleDevice(device.deviceIndex, checked)}
-                />
-              ))}
+              <div
+                id="move-devices"
+                role="group"
+                aria-label={t('detail.move.devices', { count: tensorParallel })}
+              >
+                {compatible.map((device) => (
+                  <Checkbox
+                    key={device.deviceIndex}
+                    id={`move-device-${device.deviceIndex}`}
+                    label={`${t('detail.move.gpu')} ${device.deviceIndex}`}
+                    isChecked={devices.includes(device.deviceIndex)}
+                    onChange={(_event, checked) => toggleDevice(device.deviceIndex, checked)}
+                  />
+                ))}
+              </div>
               {workerId && compatible.length === 0 && (
                 <Alert variant="warning" isInline title={t('detail.move.noCompatibleDevices')} />
               )}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
-import { classifyMoveProgress } from '../../utils/move';
+import { classifyMoveProgress, MOVE_REPLACEMENT_OBSERVATION_TIMEOUT_MS } from '../../utils/move';
 
 const source = { instanceId: 'old', state: ModelLifecycleState.ACTIVE, createdAt: '' };
 const replacement = { instanceId: 'new', state: ModelLifecycleState.STARTING, createdAt: '' };
@@ -27,6 +27,20 @@ describe('classifyMoveProgress', () => {
         [{ ...replacement, state: ModelLifecycleState.STOPPED }, source],
         'old',
         'new',
+      ),
+    ).toBe('failed-before-cutover');
+  });
+
+  it('eventually reports a missing pre-cutover replacement as failed instead of deploying forever', () => {
+    const acceptedAt = 1_000;
+    expect(
+      classifyMoveProgress(
+        [source],
+        'old',
+        'new',
+        false,
+        acceptedAt,
+        acceptedAt + MOVE_REPLACEMENT_OBSERVATION_TIMEOUT_MS,
       ),
     ).toBe('failed-before-cutover');
   });

@@ -418,7 +418,7 @@ describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
     await app.close();
   });
 
-  it('retains the replacement when a cutover reply is lost after Redis committed weight zero', async () => {
+  it('continues to persist DRAINING and drain the source when a cutover reply is lost after Redis committed weight zero', async () => {
     const source = { ...ACTIVE_STATE, deviceIndices: [0], runnerEnginePort: 8001 };
     const updateEndpointWeight = vi.fn(() => Promise.reject(new Error('connection reset')));
     const getEntry = vi.fn(() =>
@@ -473,8 +473,14 @@ describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
     });
     expect(res.statusCode).toBe(202);
     await vi.waitFor(() => expect(updateEndpointWeight).toHaveBeenCalledOnce());
-    // Unknown/lost replies are never allowed to tear down the only known replacement.
-    expect(stopModel).not.toHaveBeenCalled();
+    // Weight zero positively proves the cutover committed. The source is marked DRAINING and
+    // passed through teardown (whose stopModel drains active requests before killing it).
+    await vi.waitFor(() =>
+      expect(stopModel).toHaveBeenCalledWith('m1', INSTANCE_ID, expect.anything()),
+    );
+    expect(
+      (deps.lifecycle as { transition: ReturnType<typeof vi.fn> }).transition,
+    ).toHaveBeenCalledWith('m1', INSTANCE_ID, ModelLifecycleState.DRAINING);
     await app.close();
   });
 
@@ -521,6 +527,48 @@ describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
       'operation-in-progress',
     );
     finishSleep();
+    await app.close();
+  });
+
+  it('rejects move admission while a model-wide sleep is draining', async () => {
+    let releaseSleep!: () => void;
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const sleepModel = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSleep = resolve;
+        }),
+    );
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstancesForModel: vi.fn(() => Promise.resolve([source])),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      sleepModel,
+    });
+
+    const sleeping = await app.inject({ method: 'POST', url: '/api/v1/models/m1/sleep' });
+    expect(sleeping.statusCode).toBe(202);
+    const move = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(move.statusCode).toBe(409);
+    releaseSleep();
     await app.close();
   });
 });
@@ -1151,6 +1199,50 @@ describe('launch/stop/instance paths fenced against an in-flight model DELETE (#
 });
 
 describe('teardownInstance reaps the runner process (#157)', () => {
+  it('retains lifecycle and SQL bookkeeping when a runner start reply was ambiguous', async () => {
+    const ambiguous = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.ERROR,
+      runnerStartAmbiguous: true,
+    };
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const deleteInstance = vi.fn(() => Promise.resolve(true));
+    const stopModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ambiguous)),
+      removeInstance,
+      deleteInstance,
+      stopModel,
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+    expect(response.statusCode).toBe(202);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stopModel).not.toHaveBeenCalled();
+    expect(removeInstance).not.toHaveBeenCalled();
+    expect(deleteInstance).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('does not CASCADE a model row when one of its runner starts has an ambiguous reply', async () => {
+    const ambiguous = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.ERROR,
+      runnerStartAmbiguous: true,
+    };
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({ getInstance: vi.fn(() => Promise.resolve(ambiguous)), deleteModel });
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(response.statusCode).toBe(202);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(deleteModel).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('DELETE /api/v1/models/:modelName calls stopRunner with the instance runnerId, then still cleans up state', async () => {
     const removeInstance = vi.fn(() => Promise.resolve());
     const deleteInstance = vi.fn(() => Promise.resolve(true));

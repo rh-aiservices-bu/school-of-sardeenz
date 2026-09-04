@@ -88,6 +88,11 @@ export interface InstanceState {
   lastInferenceAt: string | null;
   stateChangedAt: string;
   errorMessage: string | null;
+  /**
+   * A POST /runners request was sent but its reply was lost.  The worker may still own a
+   * runner, so this ERROR record and its capacity hold must be retained for reconciliation.
+   */
+  runnerStartAmbiguous?: boolean;
 }
 
 export function isValidTransition(from: ModelLifecycleState, to: ModelLifecycleState): boolean {
@@ -236,6 +241,7 @@ export class ModelLifecycleService {
         | 'runnerId'
         | 'deviceIndices'
         | 'errorMessage'
+        | 'runnerStartAmbiguous'
       >
     >,
   ): Promise<InstanceState> {
@@ -367,6 +373,28 @@ export class ModelLifecycleService {
   async removeInstance(modelName: string, instanceId: string): Promise<void> {
     const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
     await this.redis.del(key);
+  }
+
+  /**
+   * A short-lived, token-owned distributed fence for a move.  This is intentionally private
+   * orchestration state, not an API resource: it only closes the leader-handoff admission
+   * window.  Release compares the token so an expired lease can never delete a newer owner's
+   * lease.
+   */
+  async acquireMoveLease(modelName: string, token: string, ttlMs: number): Promise<boolean> {
+    const key = redisKey(this.keyPrefix, 'moves', modelName);
+    const result = await this.redis.set(key, token, 'PX', ttlMs, 'NX');
+    return result === 'OK';
+  }
+
+  async releaseMoveLease(modelName: string, token: string): Promise<void> {
+    const key = redisKey(this.keyPrefix, 'moves', modelName);
+    await this.redis.eval(
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+      1,
+      key,
+      token,
+    );
   }
 
   async getLastInferenceTimestamps(modelNames: string[]): Promise<Map<string, string>> {

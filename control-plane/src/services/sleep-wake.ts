@@ -232,14 +232,18 @@ export class SleepWakeService {
     try {
       const currentState = instanceState.state;
 
-      // If ACTIVE, drain first.
+      // Move persists DRAINING before it tears the source down.  DRAINING therefore means
+      // "not accepting new traffic" rather than "already empty"; always poll it before stop.
       if (currentState === ModelLifecycleState.ACTIVE) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
         await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
-
-        if (runnerClient) {
-          await this.waitForDrain(modelName, instanceId, runnerClient);
-        }
+      }
+      if (
+        runnerClient &&
+        (currentState === ModelLifecycleState.ACTIVE ||
+          currentState === ModelLifecycleState.DRAINING)
+      ) {
+        await this.waitForDrain(modelName, instanceId, runnerClient);
       }
 
       // Remove the endpoint so routing stops immediately. Match on the same (host, engine port)

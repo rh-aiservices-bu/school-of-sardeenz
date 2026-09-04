@@ -49,6 +49,11 @@ export class DeployOrchestrationService {
   async deployModel(params: DeployModelParams): Promise<void> {
     const startedAt = Date.now();
     deployTriggersTotal.inc();
+    // A network failure after POST has been sent is not evidence that the worker did not start
+    // the runner.  Keep the placement observable (and its capacity accounted for) until
+    // reconciliation can establish the runner's fate.
+    let startDispatched = false;
+    let startReplyReceived = false;
 
     try {
       // The route handler has already created this instance's Redis record (PENDING, then
@@ -79,7 +84,9 @@ export class DeployOrchestrationService {
         entrypoint: params.entrypoint,
         devices: params.devices as StartRunnerRequest['devices'],
       };
+      startDispatched = true;
       const runnerInfo = await workerClient.startRunner(startRequest);
+      startReplyReceived = true;
 
       // The management port drives health/sleep/wake; the engine port (when the runner reports a
       // distinct one, e.g. vLLM's OpenAI server) is where inference is served and what the proxy
@@ -135,12 +142,14 @@ export class DeployOrchestrationService {
 
       deployDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
+      const startReplyAmbiguous = startDispatched && !startReplyReceived;
       await this.transitionToError(
         params.modelName,
         params.instanceId,
         err instanceof Error ? err.message : String(err),
+        startReplyAmbiguous,
       );
-      this.releaseReservations(params);
+      if (!startReplyAmbiguous) this.releaseReservations(params);
       throw err;
     }
   }
@@ -200,10 +209,12 @@ export class DeployOrchestrationService {
     modelName: string,
     instanceId: string,
     errorMessage: string,
+    runnerStartAmbiguous = false,
   ): Promise<void> {
     try {
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ERROR, {
         errorMessage,
+        ...(runnerStartAmbiguous ? { runnerStartAmbiguous: true } : {}),
       });
       await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
       this.notifications

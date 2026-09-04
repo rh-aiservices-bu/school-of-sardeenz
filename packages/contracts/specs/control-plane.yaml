@@ -764,7 +764,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MoveModelInstanceResponse"
         "400":
-          description: Malformed target, incompatible placement, nonexistent device, or source-equivalent placement.
+          description: Malformed target, nonexistent device, or source-equivalent placement.
           content:
             application/json:
               schema:

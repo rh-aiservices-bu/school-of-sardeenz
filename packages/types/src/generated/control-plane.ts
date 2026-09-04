@@ -2300,7 +2300,7 @@ export interface operations {
                     "application/json": components["schemas"]["MoveModelInstanceResponse"];
                 };
             };
-            /** @description Malformed target, incompatible placement, nonexistent device, or source-equivalent placement. */
+            /** @description Malformed target, nonexistent device, or source-equivalent placement. */
             400: {
                 headers: {
                     [name: string]: unknown;

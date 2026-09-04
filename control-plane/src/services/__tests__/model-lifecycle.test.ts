@@ -156,6 +156,29 @@ describe('ModelLifecycleService.createInstance', () => {
   });
 });
 
+describe('ModelLifecycleService move leases', () => {
+  it('uses NX/PX acquire and token-safe release', async () => {
+    const set = vi.fn().mockResolvedValue('OK');
+    const evalScript = vi.fn().mockResolvedValue(1);
+    const redis = {
+      set,
+      eval: evalScript,
+    } as unknown as Redis;
+    const service = new ModelLifecycleService(redis, 'test');
+
+    await expect(service.acquireMoveLease('m1', 'owner-a', 12_000)).resolves.toBe(true);
+    await service.releaseMoveLease('m1', 'owner-a');
+
+    expect(set).toHaveBeenCalledWith('test:moves:m1', 'owner-a', 'PX', 12_000, 'NX');
+    expect(evalScript).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1])"),
+      1,
+      'test:moves:m1',
+      'owner-a',
+    );
+  });
+});
+
 describe('ModelLifecycleService instance-keyed round trips', () => {
   it('two instances of one model coexist under distinct keys', async () => {
     const store = new Map<string, string>();

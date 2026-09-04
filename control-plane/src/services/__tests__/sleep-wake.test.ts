@@ -154,6 +154,24 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
     expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledWith('test-model', '10.0.0.1', 5002);
   });
 
+  it('drains an already-DRAINING move source before removing its endpoint', async () => {
+    mocks.lifecycle.getInstance.mockResolvedValue(
+      makeState({ state: ModelLifecycleState.DRAINING }),
+    );
+    mocks.runnerClient.getHealth
+      .mockResolvedValueOnce({ state: RunnerState.BUSY, activeRequests: 2 })
+      .mockResolvedValueOnce({ state: RunnerState.READY, activeRequests: 0 });
+
+    await service.stopModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
+
+    expect(mocks.runnerClient.getHealth).toHaveBeenCalledTimes(2);
+    expect(mocks.routingMap.removeEndpoint).toHaveBeenCalledAfter(mocks.runnerClient.getHealth);
+  });
+
   it('falls back to the management port when no engine port is recorded (legacy state)', async () => {
     // State persisted before the engine-port split carries no runnerEnginePort.
     mocks.lifecycle.getInstance.mockResolvedValue(

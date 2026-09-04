@@ -113,7 +113,9 @@ export class RoutingMapService {
       this.pubsubChannel,
       modelName,
       state,
-      protocol ?? '',
+      // A newly-created routing entry must never carry an empty protocol. Existing entries keep
+      // their persisted protocol when callers omit it; new entries use the legacy OpenAI default.
+      protocol ?? Protocol.openai,
       now,
     );
   }

@@ -212,9 +212,8 @@ describe('DeployOrchestrationService', () => {
       // would have persisted for an oip deploy, while preserving the existing mock's dynamic
       // state tracking (so the second refresh still observes the ACTIVE transition).
       const originalImpl = mocks.lifecycle.getInstancesForModel.getMockImplementation()!;
-      mocks.lifecycle.getInstancesForModel.mockImplementation(
-        (): InstanceState[] =>
-          (originalImpl() as InstanceState[]).map((i) => ({ ...i, protocol: Protocol.oip })),
+      mocks.lifecycle.getInstancesForModel.mockImplementation((): InstanceState[] =>
+        (originalImpl() as InstanceState[]).map((i) => ({ ...i, protocol: Protocol.oip })),
       );
 
       await service.deployModel(makeParams({ protocol: Protocol.oip }));
@@ -406,7 +405,7 @@ describe('DeployOrchestrationService', () => {
   });
 
   describe('deployModel — startRunner failure', () => {
-    it('transitions to ERROR and releases capacity', async () => {
+    it('retains an observable ERROR placement and capacity when the start reply is lost', async () => {
       mocks.workerClient.startRunner.mockRejectedValue(new Error('connection refused'));
 
       await expect(service.deployModel(makeParams())).rejects.toThrow('connection refused');
@@ -415,9 +414,9 @@ describe('DeployOrchestrationService', () => {
         'test-model',
         INSTANCE_ID,
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: 'connection refused' }),
+        expect.objectContaining({ errorMessage: 'connection refused', runnerStartAmbiguous: true }),
       );
-      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
+      expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
     });
   });
 
