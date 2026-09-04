@@ -81,6 +81,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard public-asset freshness guard (#178).** Bare Playwright runs now reject
+  `dist/client` builds older than recursively scanned `dashboard/public/` assets, including
+  directory-only changes caused by deletes or renames. Isolated filesystem tests cover nested
+  assets, deletion and rename mtimes, missing source trees, and symlink rejection without touching
+  the real dashboard build.
+
 - **Scoped worker ingress for runner management and inference (#181).** The shipped worker
   NetworkPolicy now permits only the control plane to reach the worker API and per-runner
   management ports, and only the routing proxy to reach unauthenticated engine HTTP ports. The
