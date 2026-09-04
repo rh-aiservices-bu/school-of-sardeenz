@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -47,6 +49,14 @@ jobs:
       - run: make all # typecheck (tsc --build + cargo check) + lint (eslint + clippy + redocly)
 
       - run: make test # vitest run + cargo test
+
+      - name: Verify proxy Docker MSRV
+        run: |
+          rustup toolchain install 1.86.0 --profile minimal
+          ./tests/container-images/verify-proxy-msrv.sh
+
+      - name: Verify service runtime package resolution
+        run: node tests/container-images/verify-runtime-packaging.mjs
 
       - name: Codegen drift
         run: |
@@ -116,6 +126,8 @@ jobs:
       JWT_SECRET: ci-jwt-secret-for-container-smoke-tests
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -150,7 +162,7 @@ jobs:
         run: |
           container=sardeenz-${{ matrix.service }}-ci
           for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error http://127.0.0.1:${{ matrix.port }}/healthz; then
+            if curl --connect-timeout 1 --max-time 1 --fail --silent --show-error http://127.0.0.1:${{ matrix.port }}/healthz; then
               exit 0
             fi
             if [ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)" != "true" ]; then
@@ -192,6 +204,8 @@ jobs:
       SARDEENZ_REDIS_URL: redis://127.0.0.1:6379
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
@@ -208,6 +222,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version-file: .python-version

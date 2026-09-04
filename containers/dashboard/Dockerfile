@@ -44,7 +44,9 @@ COPY --from=deps /app/dashboard/node_modules ./dashboard/node_modules
 
 # Shared types
 COPY --from=build /app/packages/types/dist ./packages/types/dist
-COPY --from=build /app/packages/types/package.json ./packages/types/
+# Runtime images contain compiled shared types, not TypeScript source. Use the
+# runtime manifest so Node resolves @sardeenz/types to dist/index.js.
+COPY --from=build /app/packages/types/package.runtime.json ./packages/types/package.json
 
 # BFF compiled server
 COPY --from=build /app/dashboard/dist/server ./dashboard/dist/server

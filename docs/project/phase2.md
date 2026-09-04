@@ -636,20 +636,24 @@ Health endpoints and Prometheus metrics.
 
 **Depends on:** Task 2.16
 
-Multi-stage Docker build at `control-plane/Dockerfile`.
+Multi-stage Docker build at `containers/control-plane/Dockerfile`, using the repository root as
+its build context.
 
-**Build stage:** Node.js 22, install dependencies, compile TypeScript, prune dev dependencies.
+**Build stage:** Node.js 22, install workspace dependencies and compile TypeScript.
 
-**Runtime stage:** Node.js 22 slim image with only production dependencies and compiled JavaScript.
+**Runtime stage:** Node.js 22 slim image with the installed dependency tree and compiled
+JavaScript. Production-dependency pruning is not currently part of this image build.
 
 **Image requirements:**
 
 - Runs as a non-root user
 - Exposes the configured listen port
-- Health check instruction using `/healthz`
+- `/healthz` endpoint for deployment probes and the CI image smoke test (the Dockerfile does not
+  define a `HEALTHCHECK`)
 - Node.js configured for production (`NODE_ENV=production`)
 
-**Build:** `docker build -t sardeenz-control-plane ./control-plane` from the repo root.
+**Build:** `docker build -f containers/control-plane/Dockerfile -t sardeenz-control-plane .` from
+the repo root.
 
 **Verification:** Build succeeds. Container starts and responds to health checks.
 

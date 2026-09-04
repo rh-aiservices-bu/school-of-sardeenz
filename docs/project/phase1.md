@@ -354,7 +354,8 @@ Multi-stage Docker build at `proxy/Dockerfile`.
 - No shell, no package manager, no unnecessary system libraries
 - Runs as a non-root user
 - Exposes the configured listen port
-- Health check instruction using `/healthz`
+- `/healthz` endpoint for deployment probes and the CI image smoke test (the distroless image
+  intentionally omits a Dockerfile `HEALTHCHECK`)
 
 **Build:** `docker build -t sardeenz-proxy ./proxy` from the repo root.
 

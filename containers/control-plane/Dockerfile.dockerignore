@@ -1,0 +1,21 @@
+# This Dockerfile builds from the repository root. Keep the context allowlist
+# narrow so Git metadata, local credentials, and unrelated services never reach
+# BuildKit.
+**
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!tsconfig.json
+!packages/
+!packages/contracts/
+!packages/contracts/**
+!packages/types/
+!packages/types/**
+!packages/utils/
+!packages/utils/package.json
+!control-plane/
+!control-plane/**
+
+# Do not re-include local environment files from an allowed directory.
+**/.env
+**/.env.*

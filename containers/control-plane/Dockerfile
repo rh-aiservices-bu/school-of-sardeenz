@@ -56,7 +56,9 @@ COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
 COPY --from=deps /app/control-plane/node_modules ./control-plane/node_modules
 
 COPY --from=build /app/packages/types/dist ./packages/types/dist
-COPY --from=build /app/packages/types/package.json ./packages/types/
+# Runtime images contain compiled shared types, not TypeScript source. Use the
+# runtime manifest so Node resolves @sardeenz/types to dist/index.js.
+COPY --from=build /app/packages/types/package.runtime.json ./packages/types/package.json
 COPY --from=build /app/control-plane/dist ./control-plane/dist
 COPY --from=build /app/control-plane/package.json ./control-plane/
 COPY control-plane/migrations/ control-plane/migrations/
