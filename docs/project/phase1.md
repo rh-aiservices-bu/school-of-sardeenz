@@ -354,7 +354,8 @@ Multi-stage Docker build at `proxy/Dockerfile`.
 - No shell, no package manager, no unnecessary system libraries
 - Runs as a non-root user
 - Exposes the configured listen port
-- Health check instruction using `/healthz`
+- `/healthz` endpoint for deployment probes and the CI image smoke test (the distroless image
+  intentionally omits a Dockerfile `HEALTHCHECK`)
 
 **Build:** `docker build -t sardeenz-proxy ./proxy` from the repo root.
 
@@ -411,7 +412,7 @@ From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connecti
 - [x] Circuit breaker trips after configurable failure threshold and recovers after backoff
 - [x] All four request flows from the architecture overview pass integration tests
 - [x] Structured output compatibility approach documented and validated
-- [ ] Container image builds and runs in CI
+- [x] Container image builds and runs in CI
 - [x] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
 - [x] OpenAPI spec passes `redocly lint` with zero errors
 - [x] Generated Rust types compile cleanly (`cargo check`)
@@ -430,7 +431,7 @@ From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connecti
 
 - **Phase 0 outputs** — runner contract spec for model state definitions (`RunnerState` enum) and health check schemas
 - **Redis/Valkey instance** — required for routing map storage and pub/sub
-- **Rust toolchain** — Rust 1.82+, cargo, clippy (see [setup guide](../development/setup.md))
+- **Rust toolchain** — Rust 1.86+, cargo, clippy (see [setup guide](../development/setup.md))
 - **v1 repo access** — for studying proxy patterns in Task 1.1
 
 ## Risks

@@ -1,0 +1,32 @@
+# This Dockerfile builds from the repository root. Keep the context allowlist
+# narrow so Git metadata, local credentials, and unrelated services never reach
+# BuildKit.
+**
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!tsconfig.json
+!packages/
+!packages/contracts/
+!packages/contracts/**
+!packages/types/
+!packages/types/**
+!packages/utils/
+!packages/utils/package.json
+!dashboard/
+!dashboard/**
+
+# These exclusions must stay after the allowlist above: Docker applies the last
+# matching rule, so an allowed source tree cannot re-include local build output,
+# dependencies, credentials, or test artifacts into the root build context.
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+**/*.log
+**/logs/
+**/.npmrc
+**/coverage/
+**/test-results/
+**/playwright-report/
+**/.env
+**/.env.*

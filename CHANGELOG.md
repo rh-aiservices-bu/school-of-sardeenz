@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Service container build and smoke-test CI (#187).** A required matrix job now builds the
+  proxy, control plane, and dashboard images on every pull request with per-service BuildKit
+  caching, starts each image without pushing it, and waits for its `/healthz` endpoint. Packaging
+  checks keep the proxy builder aligned with its Rust MSRV and verify that the Node runtime images
+  ship resolvable compiled workspace types.
+
 - **Resumable move-model action for the placement board (#146).** Operators can move an active
   instance to an explicit compatible worker/GPU set. The control plane persists a non-expiring
   move transaction before launching the replacement, resumes it after leader changes, recovers

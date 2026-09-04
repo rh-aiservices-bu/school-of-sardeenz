@@ -258,15 +258,16 @@ gh pr create --base main --head dev
 
 ## Tooling Overview
 
-| Tool               | Purpose                      | Config file                       |
-| ------------------ | ---------------------------- | --------------------------------- |
-| TypeScript 5.x     | Type checking                | `tsconfig.base.json`              |
-| ESLint 9           | Linting (flat config)        | `eslint.config.js`                |
-| Prettier           | Code formatting              | `.prettierrc.json`                |
-| Vitest             | Testing                      | `vitest.config.ts`                |
-| Redocly            | OpenAPI spec validation      | `packages/contracts/redocly.yaml` |
-| openapi-typescript | Generate TS types from specs | —                                 |
-| Cargo / clippy     | Rust build and linting       | `proxy/Cargo.toml`                |
+| Tool               | Purpose                             | Config file                       |
+| ------------------ | ----------------------------------- | --------------------------------- |
+| TypeScript 5.x     | Type checking                       | `tsconfig.base.json`              |
+| ESLint 9           | Linting (flat config)               | `eslint.config.js`                |
+| Prettier           | Code formatting                     | `.prettierrc.json`                |
+| Vitest             | Testing                             | `vitest.config.ts`                |
+| Redocly            | OpenAPI spec validation             | `packages/contracts/redocly.yaml` |
+| openapi-typescript | Generate TS types from specs        | —                                 |
+| Cargo / clippy     | Rust build and linting              | `proxy/Cargo.toml`                |
+| Docker Buildx      | CI service-image health smoke tests | `.github/workflows/ci.yml`        |
 
 ## Versioning
 
