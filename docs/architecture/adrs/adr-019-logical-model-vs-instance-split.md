@@ -121,14 +121,15 @@ Map<string, string>` (the unambiguous conflict/lookup key). `StartRunnerRequest.
     allocation (`allocatePorts`, lowest-free contiguous 4-port block scan — management, engine,
     gRPC, metrics, since #160) is unchanged in spirit — it already assigns each of N same-model
     runners its own block.
-11. **Move-model is a scripted composition on top of these primitives, not a new endpoint.** Deploy
+11. **Move-model is a scripted composition on top of these primitives.** Deploy
     a new instance elsewhere (`POST .../instances`) → shift traffic via a new internal-only
     `RoutingMapService.updateEndpointWeight(modelName, host, port, weight)` primitive (Lua, mirrors
     `updateEndpointHealth`; sets an **existing** `RunnerEndpoint.weight` field, so the Rust-mirrored
     `proxy-control-plane.yaml` needs no change) → wait for the balancer to stop selecting the old
     endpoint (`weight === 0`) → drain → `DELETE .../instances/{oldInstanceId}`. `updateEndpointWeight`
-    has no HTTP route in M7 — its only consumer is the scripted-move integration test; a move-model
-    UI/route is M8 (tracked separately).
+    originally had no HTTP route in M7. The later first-class endpoint accepts an explicit target,
+    persists the replacement before `202`, and uses the Redis weight update as the cutover boundary;
+    it still composes these same primitives rather than introducing a durable move resource.
 12. **In-place upgrade over pre-#120 Redis state is self-healing, not a hazard.** The old lifecycle
     key shape was a single segment, `{prefix}:models:{modelName}` (no instance id) — a bare
     `models:*` SCAN also matches that shape (glob `*` matches `:` too), which would surface it as a
@@ -170,8 +171,8 @@ Map<string, string>` (the unambiguous conflict/lookup key). `StartRunnerRequest.
 
 - Load-aware / multi-instance wake-on-request fan-out.
 - Scale-out auto-balancing (how many replicas, automatic rebalancing).
-- Move-model UI or a dedicated `/move` endpoint — M8, built on `updateEndpointWeight` +
-  `POST .../instances` + `DELETE .../instances/{id}`.
+- Automatic move balancing, cancellation, durable status, or rollback after cutover. The
+  first-class move UI/endpoint deliberately polls model detail for its observable progress.
 - Per-instance replica-level LRU eviction ordering.
 - Fixing #140 (endpoint add/remove race) — pre-existing, separately tracked.
 

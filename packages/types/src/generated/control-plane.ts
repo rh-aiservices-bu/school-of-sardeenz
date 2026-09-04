@@ -298,6 +298,29 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/{modelName}/instances/{instanceId}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move an active model instance to an explicit worker and GPU set
+         * @description Creates a replacement instance on the requested placement, waits for it to become
+         *     active, then atomically removes traffic from and drains the source instance. Poll
+         *     `GET /api/v1/models/{modelName}` after the `202` response to observe the replacement
+         *     and source lifecycle states. Only one move per logical model may run at a time.
+         */
+        post: operations["moveModelInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models/{modelName}/instances/{instanceId}/sleep": {
         parameters: {
             query?: never;
@@ -930,6 +953,17 @@ export type components = {
              * @description When this instance was created.
              */
             createdAt: string;
+        };
+        MoveModelInstanceRequest: {
+            /** @description Worker that must host the replacement instance. */
+            targetWorkerId: string;
+            /** @description Exact zero-based device indices for the replacement instance. */
+            targetDeviceIndices: number[];
+        };
+        MoveModelInstanceResponse: {
+            modelName: string;
+            sourceInstanceId: string;
+            replacementInstanceId: string;
         };
         /**
          * @description Detailed information about a single model including deployment
@@ -2231,6 +2265,87 @@ export interface operations {
                 };
             };
             /** @description The control plane cannot accept the request (not leader) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    moveModelInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelName: string;
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveModelInstanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Move accepted; poll model detail for progress. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoveModelInstanceResponse"];
+                };
+            };
+            /** @description Malformed target, incompatible placement, nonexistent device, or source-equivalent placement. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model, source instance, or target worker not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Source is not active or another mutating operation/move is in progress (`INVALID_STATE`, with `details.reason` for an in-progress move). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Corrupt active source endpoint. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not leader or target cannot satisfy the fixed placement without eviction. */
             503: {
                 headers: {
                     [name: string]: unknown;

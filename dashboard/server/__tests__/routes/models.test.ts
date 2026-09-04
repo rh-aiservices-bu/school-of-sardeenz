@@ -48,6 +48,7 @@ const sampleModel: ModelInfo = {
 const listModelsFn = vi.fn();
 const getModelFn = vi.fn();
 const deployModelFn = vi.fn();
+const moveInstanceFn = vi.fn();
 const listRedisModelsFn = vi.fn();
 const getRedisModelFn = vi.fn();
 
@@ -59,6 +60,7 @@ function buildDeps(): RouteDeps {
       listModels: listModelsFn,
       getModel: getModelFn,
       deployModel: deployModelFn,
+      moveInstance: moveInstanceFn,
       deleteModel: vi.fn(),
       sleepModel: vi.fn(),
       wakeModel: vi.fn(),
@@ -212,6 +214,30 @@ describe('POST /api/models', () => {
     await app.close();
 
     expect(res.statusCode).toBe(202);
+    expect(listRedisModelsFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/models/:name/instances/:instanceId/move', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('proxies the encoded target and body without a Redis fallback', async () => {
+    moveInstanceFn.mockResolvedValue({
+      status: 202,
+      data: { modelName: 'org/model', sourceInstanceId: 'inst/a', replacementInstanceId: 'inst-b' },
+    });
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/models/org%2Fmodel/instances/inst%2Fa/move',
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    await app.close();
+    expect(res.statusCode).toBe(202);
+    expect(moveInstanceFn).toHaveBeenCalledWith('org/model', 'inst/a', {
+      targetWorkerId: 'worker-2',
+      targetDeviceIndices: [1],
+    });
     expect(listRedisModelsFn).not.toHaveBeenCalled();
   });
 });

@@ -140,6 +140,10 @@ interface DeployOverrides {
   createInstanceRecord?: ReturnType<typeof vi.fn>;
   resolveRunnerMetadata?: ReturnType<typeof vi.fn>;
   getMeasuredByInstance?: ReturnType<typeof vi.fn>;
+  placeFixed?: ReturnType<typeof vi.fn>;
+  getInstance?: ReturnType<typeof vi.fn>;
+  getWorker?: ReturnType<typeof vi.fn>;
+  updateEndpointWeight?: ReturnType<typeof vi.fn>;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -189,11 +193,14 @@ function buildDeployApp(over: DeployOverrides = {}): {
       getAllInstances: over.getAllInstances ?? vi.fn(() => Promise.resolve([])),
       getInstancesForModel: over.getInstancesForModel ?? vi.fn(() => Promise.resolve([])),
       getLastInferenceTimestamps: vi.fn(() => Promise.resolve(new Map())),
-      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstance: over.getInstance ?? vi.fn(() => Promise.resolve(null)),
       transition: over.transition ?? vi.fn(() => Promise.resolve()),
       removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
     },
-    workerPool: { getAllWorkers: vi.fn(() => []) },
+    workerPool: {
+      getAllWorkers: vi.fn(() => []),
+      getWorker: over.getWorker ?? vi.fn(() => null),
+    },
     memoryBudget: {
       getAllBudgets: vi.fn(() => []),
       reserveCapacity: vi.fn(),
@@ -203,6 +210,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     placement: {
       place: over.place ?? vi.fn(() => null),
+      placeFixed: over.placeFixed ?? vi.fn(() => null),
       eligibleWorkerIds: over.eligibleWorkerIds ?? vi.fn(() => new Set(['w1'])),
     },
     eviction: {
@@ -219,6 +227,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
     routingMap: {
       setModelState: over.setModelState ?? vi.fn(() => Promise.resolve()),
       removeModel: vi.fn(() => Promise.resolve()),
+      updateEndpointWeight: over.updateEndpointWeight ?? vi.fn(() => Promise.resolve(true)),
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
@@ -349,6 +358,59 @@ describe('POST /api/v1/models deploy-path eviction', () => {
 
     expect(res.statusCode).toBe(503);
     expect(res.json<{ code: string }>().code).toBe('PLACEMENT_FAILED');
+  });
+});
+
+describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
+  it('persists a fixed-target replacement before returning 202', async () => {
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const createInstanceRecord = vi.fn(() => Promise.resolve({}));
+    const { app, deps } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      getWorker: vi.fn(() => ({
+        workerId: 'worker-2',
+        managementUrl: 'http://worker-2',
+        devices: [{ deviceIndex: 1 }],
+      })),
+      placeFixed: vi.fn(() => ({
+        workerId: 'worker-2',
+        runnerType: 'vllm',
+        devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+      })),
+      createInstanceRecord,
+    });
+    (deps.workerPool as { getAllWorkers: ReturnType<typeof vi.fn> }).getAllWorkers.mockReturnValue([
+      { workerId: 'worker-2', devices: [{ deviceIndex: 1 }], capabilities: [], status: 'ONLINE' },
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({
+      modelName: 'm1',
+      sourceInstanceId: INSTANCE_ID,
+      replacementInstanceId: expect.stringMatching(/^inst-/) as string,
+    });
+    expect(createInstanceRecord).toHaveBeenCalledOnce();
+    await app.close();
   });
 });
 
@@ -1105,7 +1167,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     );
   });
 
-  it('warns and continues when the worker is not found in the pool', async () => {
+  it('retains bookkeeping when the worker is not found in the pool', async () => {
     const removeInstance = vi.fn(() => Promise.resolve());
     const { app, stopRunner, logWarn } = buildApp({
       getWorker: vi.fn(() => null),
@@ -1119,7 +1181,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(stopRunner).not.toHaveBeenCalled();
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).not.toHaveBeenCalled();
     expect(logWarn).toHaveBeenCalledWith(
       { modelName: 'm1', instanceId: INSTANCE_ID, workerId: 'worker-1' },
       expect.stringContaining('cannot reap runner process; worker unknown') as string,

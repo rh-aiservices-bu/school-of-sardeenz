@@ -118,6 +118,23 @@ describe('ControlPlaneClient', () => {
     });
   });
 
+  describe('moveInstance', () => {
+    it('encodes both path segments and sends the explicit target body', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+      await client.moveInstance('org/model', 'inst/a', {
+        targetWorkerId: 'worker-2',
+        targetDeviceIndices: [1],
+      });
+      expect(firstCallUrl()).toBe(
+        'http://cp.test/api/v1/models/org%2Fmodel/instances/inst%2Fa/move',
+      );
+      expect(firstCallInit().method).toBe('POST');
+      expect(firstCallInit().body).toBe(
+        JSON.stringify({ targetWorkerId: 'worker-2', targetDeviceIndices: [1] }),
+      );
+    });
+  });
+
   describe('browseWeights', () => {
     it('lists the weights root with no path query', async () => {
       fetchSpy.mockResolvedValue(makeFetchResponse(200, { root: '/weights', entries: [] }));

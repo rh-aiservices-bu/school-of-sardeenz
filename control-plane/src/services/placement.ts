@@ -79,6 +79,53 @@ export class PlacementPipeline {
     }
   }
 
+  /**
+   * Validate a caller-selected placement using the same health, runner, hardware and budget
+   * predicates as automatic placement. Fixed placement deliberately never evicts: a move must
+   * reserve capacity alongside its still-serving source before it can be accepted.
+   */
+  placeFixed(
+    request: PlacementRequest,
+    workerId: string,
+    deviceIndices: number[],
+    workers: WorkerRecord[],
+    budgets: Map<string, WorkerBudget>,
+  ): PlacementResult | null {
+    if (deviceIndices.length !== request.tensorParallel) return null;
+    const worker = workers.find((candidate) => candidate.workerId === workerId);
+    if (!worker || this.filterByHealth([worker]).length === 0) return null;
+    if (this.filterByRunnerType(request, [worker]).length === 0) return null;
+    if (this.filterByHardware(request, this.filterByRunnerType(request, [worker])).length === 0) {
+      return null;
+    }
+
+    const budget = budgets.get(workerId);
+    if (!budget || budget.stale) return null;
+    const perDeviceRequired = request.requiredMemory / request.tensorParallel;
+    const devices = deviceIndices.map((deviceIndex) =>
+      budget.devices.find((device) => device.deviceIndex === deviceIndex),
+    );
+    if (
+      devices.some(
+        (device) =>
+          !device ||
+          device.availableBytes < perDeviceRequired ||
+          (request.deviceType !== undefined && device.deviceType !== request.deviceType),
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      workerId,
+      runnerType: request.runnerType,
+      devices: devices.map((device) => ({
+        deviceIndex: device!.deviceIndex,
+        deviceType: device!.deviceType,
+      })),
+    };
+  }
+
   eligibleWorkerIds(request: PlacementRequest, workers: WorkerRecord[]): Set<string> {
     const healthyWorkers = this.filterByHealth(workers);
     if (healthyWorkers.length === 0) return new Set();

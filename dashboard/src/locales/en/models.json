@@ -218,6 +218,30 @@
         "actions": "Actions"
       }
     },
+    "move": {
+      "title": "Move model instance",
+      "description": "Move instance {{instanceId}} to an explicit worker and GPU set.",
+      "loading": "Loading move targets",
+      "worker": "Target worker",
+      "selectWorker": "Select a worker",
+      "devices": "Select {{count}} GPU",
+      "devices_plural": "Select {{count}} GPUs",
+      "gpu": "GPU",
+      "noCompatibleDevices": "This worker has no compatible devices for this model.",
+      "submit": "Move instance",
+      "close": "Close",
+      "cancel": "Cancel",
+      "failed": "Move could not be started",
+      "progress": {
+        "deploying": "Deploying replacement instance…",
+        "cutting-over": "Replacement is active; moving traffic…",
+        "draining-source": "Traffic moved; draining the source instance…",
+        "complete": "Move complete.",
+        "failed-before-cutover": "Move failed before traffic cutover; the source is still serving.",
+        "failed-after-cutover": "Traffic moved, but source teardown failed. The replacement remains serving.",
+        "unavailable": "Move status is temporarily unavailable."
+      }
+    },
     "instance": {
       "sleep": {
         "button": "Sleep"

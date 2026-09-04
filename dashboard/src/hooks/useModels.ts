@@ -1,7 +1,12 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { ModelLifecycleState } from '@sardeenz/types';
-import { api, type ModelInfo, type ModelDeploymentRequest } from '../api/client';
+import {
+  api,
+  type ModelInfo,
+  type ModelDeploymentRequest,
+  type MoveModelInstanceRequest,
+} from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
 import { useEventStream } from './useEventStream';
 
@@ -240,5 +245,20 @@ export function useWakeInstance() {
     mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
       api.models.wakeInstance(modelName, instanceId),
     onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+/** Move intentionally has no optimistic aggregate update: model detail is authoritative. */
+export function useMoveInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      modelName,
+      instanceId,
+      targetWorkerId,
+      targetDeviceIndices,
+    }: MoveModelInstanceRequest & { modelName: string; instanceId: string }) =>
+      api.models.moveInstance(modelName, instanceId, { targetWorkerId, targetDeviceIndices }),
+    onSettled: (_data, _err, variables) => invalidateModelQueries(queryClient, variables.modelName),
   });
 }

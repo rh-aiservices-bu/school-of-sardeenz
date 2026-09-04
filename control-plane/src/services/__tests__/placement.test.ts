@@ -80,6 +80,39 @@ describe('PlacementPipeline', () => {
     expect(result!.devices).toHaveLength(1);
   });
 
+  it('validates an exact fixed target and rejects an insufficient selected GPU', () => {
+    const workers = [
+      makeWorker(
+        'w1',
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
+          { deviceIndex: 1, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
+        ],
+      ),
+    ];
+    const budgets = new Map([
+      [
+        'w1',
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+          { deviceIndex: 1, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 15e9 },
+        ]),
+      ],
+    ]);
+    const request = {
+      modelName: 'test',
+      runnerType: 'vllm',
+      requiredMemory: 8e9,
+      tensorParallel: 1,
+    };
+
+    expect(pipeline.placeFixed(request, 'w1', [0], workers, budgets)?.devices).toEqual([
+      { deviceIndex: 0, deviceType: DeviceType.CUDA },
+    ]);
+    expect(pipeline.placeFixed(request, 'w1', [1], workers, budgets)).toBeNull();
+  });
+
   it('returns null when no worker has the required runner type', () => {
     const workers = [
       makeWorker(

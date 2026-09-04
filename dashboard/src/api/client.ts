@@ -5,6 +5,8 @@ import { parseSseBuffer, extractDelta } from '../utils/parseSse';
 type ModelInfo = ControlPlaneComponents['schemas']['ModelInfo'];
 type ModelDetail = ControlPlaneComponents['schemas']['ModelDetail'];
 type ModelDeploymentRequest = ControlPlaneComponents['schemas']['ModelDeploymentRequest'];
+type MoveModelInstanceRequest = ControlPlaneComponents['schemas']['MoveModelInstanceRequest'];
+type MoveModelInstanceResponse = ControlPlaneComponents['schemas']['MoveModelInstanceResponse'];
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
 type ClusterMemory = ControlPlaneComponents['schemas']['ClusterMemory'];
 type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
@@ -21,6 +23,8 @@ export {
   type ModelInfo,
   type ModelDetail,
   type ModelDeploymentRequest,
+  type MoveModelInstanceRequest,
+  type MoveModelInstanceResponse,
   type ClusterStatus,
   type ClusterMemory,
   type WorkerInfo,
@@ -266,6 +270,11 @@ export const api = {
       request<unknown>(
         `/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/wake`,
         { method: 'POST' },
+      ),
+    moveInstance: (name: string, instanceId: string, body: MoveModelInstanceRequest) =>
+      request<MoveModelInstanceResponse>(
+        `/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/move`,
+        { method: 'POST', body: JSON.stringify(body) },
       ),
   },
   workers: {

@@ -113,6 +113,18 @@ export class ControlPlaneClient {
     );
   }
 
+  async moveInstance(
+    name: string,
+    instanceId: string,
+    body: { targetWorkerId: string; targetDeviceIndices: number[] },
+  ): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/move`,
+      body,
+    );
+  }
+
   async browseWeights(path?: string): Promise<ProxyResult> {
     const qs = path ? `?path=${encodeURIComponent(path)}` : '';
     return this.request('GET', `/api/v1/weights${qs}`);

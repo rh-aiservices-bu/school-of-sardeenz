@@ -30,6 +30,11 @@ interface DeployBody {
   pinned?: boolean;
 }
 
+interface MoveBody {
+  targetWorkerId: string;
+  targetDeviceIndices: number[];
+}
+
 // Mirrors the worker-agent contract's runtimeModule pattern; it becomes a SIF filename segment.
 const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
@@ -129,6 +134,9 @@ async function teardownInstance(
           { modelName, instanceId: instance.instanceId, workerId: state.workerId },
           `${context}: cannot reap runner process; worker unknown`,
         );
+        // Do not discard lifecycle/SQL bookkeeping when we cannot establish that the runner
+        // stopped. Reconciliation can retry once the worker returns.
+        throw new Error(`worker ${state.workerId} is unknown`);
       }
     } else {
       app.log.warn(
@@ -160,6 +168,15 @@ interface RouteClaims {
   readonly stoppingInFlight: Set<string>;
   readonly instanceOpInFlight: Set<string>;
   readonly deletingInFlight: Set<string>;
+  readonly movingInFlight: Set<string>;
+}
+
+interface DeployFromRecordOptions {
+  fixedPlacement?: { workerId: string; deviceIndices: number[] };
+  /** A move needs this promise; ordinary deployments remain fire-and-forget. */
+  awaitDeployment?: boolean;
+  /** The move that owns the claim may launch its own replacement. */
+  allowMoveClaim?: boolean;
 }
 
 /**
@@ -177,7 +194,13 @@ async function deployFromRecord(
   claims: RouteClaims,
   record: ModelRecord,
   instanceId: string,
-): Promise<{ instanceId: string; state: ModelLifecycleState; message: string }> {
+  options: DeployFromRecordOptions = {},
+): Promise<{
+  instanceId: string;
+  state: ModelLifecycleState;
+  message: string;
+  deployment?: Promise<void>;
+}> {
   // #173: a model DELETE claims `deletingInFlight` synchronously, then backgrounds the teardown
   // over a snapshot of the model's instances. A launch dispatched into that window (add-instance,
   // start, or a same-named deploy) mints an instance the snapshot never saw, so its runner
@@ -191,6 +214,14 @@ async function deployFromRecord(
       'start a new instance for',
       'delete-in-progress',
       'a delete is already in progress',
+    );
+  }
+  if (claims.movingInFlight.has(record.name) && !options.allowMoveClaim) {
+    throw ControlPlaneError.operationInProgress(
+      record.name,
+      'start a new instance for',
+      'move-in-progress',
+      'a move is already in progress',
     );
   }
 
@@ -237,7 +268,15 @@ async function deployFromRecord(
       tensorParallel,
     };
 
-    const result = deps.placement.place(placementRequest, workers, budgets);
+    const result = options.fixedPlacement
+      ? deps.placement.placeFixed(
+          placementRequest,
+          options.fixedPlacement.workerId,
+          options.fixedPlacement.deviceIndices,
+          workers,
+          budgets,
+        )
+      : deps.placement.place(placementRequest, workers, budgets);
 
     if (result) {
       for (const device of result.devices) {
@@ -277,36 +316,45 @@ async function deployFromRecord(
         );
       }
 
-      deps.deployOrchestration
-        .deployModel({
-          modelName: record.name,
-          instanceId,
-          workerId: result.workerId,
-          runnerType: record.runnerType,
-          modelPath: record.modelPath,
-          requiredMemory,
-          deviceType: record.deviceType ?? undefined,
-          tensorParallel,
-          engineConfig: record.engineConfig ?? undefined,
-          engineArgs: record.engineArgs ?? undefined,
-          runtimeModule: record.runtimeModule ?? undefined,
-          servedModelName: record.servedModelName ?? undefined,
-          protocol: runnerMeta.protocol,
-          entrypoint: runnerMeta.entrypoint,
-          devices: result.devices,
-        })
-        .catch((err: unknown) => {
+      const deployment = deps.deployOrchestration.deployModel({
+        modelName: record.name,
+        instanceId,
+        workerId: result.workerId,
+        runnerType: record.runnerType,
+        modelPath: record.modelPath,
+        requiredMemory,
+        deviceType: record.deviceType ?? undefined,
+        tensorParallel,
+        engineConfig: record.engineConfig ?? undefined,
+        engineArgs: record.engineArgs ?? undefined,
+        runtimeModule: record.runtimeModule ?? undefined,
+        servedModelName: record.servedModelName ?? undefined,
+        protocol: runnerMeta.protocol,
+        entrypoint: runnerMeta.entrypoint,
+        devices: result.devices,
+      });
+      if (!options.awaitDeployment) {
+        void deployment.catch((err: unknown) => {
           app.log.error(
             { err, modelName: record.name, instanceId },
             'Background deploy orchestration failed',
           );
         });
+      }
 
       return {
         instanceId,
         state: ModelLifecycleState.STARTING,
         message: `Placed on worker ${result.workerId}`,
+        deployment: options.awaitDeployment ? deployment : undefined,
       };
+    }
+
+    if (options.fixedPlacement) {
+      throw ControlPlaneError.placementFailed(
+        record.name,
+        'fixed-target-insufficient-capacity-or-incompatible',
+      );
     }
 
     const eligibleWorkerIds = deps.placement.eligibleWorkerIds(placementRequest, workers);
@@ -561,9 +609,28 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   // are orthogonal operations that need only each exclude themselves.
   const deletingInFlight = new Set<string>();
 
+  // A move owns the model from replacement reservation until the old runner has been reaped.
+  // The leader-only mutation model makes this process-local claim sufficient.
+  const movingInFlight = new Set<string>();
+
   // Bundle the three sets so the shared `deployFromRecord` pipeline can see `deletingInFlight`
   // (#173). The bare names above are still used directly by the route handlers in this closure.
-  const claims: RouteClaims = { stoppingInFlight, instanceOpInFlight, deletingInFlight };
+  const claims: RouteClaims = {
+    stoppingInFlight,
+    instanceOpInFlight,
+    deletingInFlight,
+    movingInFlight,
+  };
+  const assertNoMove = (modelName: string, action: string): void => {
+    if (movingInFlight.has(modelName)) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        action,
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+  };
 
   app.post<{ Body: DeployBody }>('/api/v1/models', async (request, reply) => {
     if (!deps.leaderElection.isLeader) {
@@ -705,6 +772,200 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     },
   );
 
+  app.post<{
+    Params: { modelName: string; instanceId: string };
+    Body: MoveBody;
+  }>('/api/v1/models/:modelName/instances/:instanceId/move', async (request, reply) => {
+    if (!deps.leaderElection.isLeader) throw ControlPlaneError.notLeader();
+
+    const { modelName, instanceId } = request.params;
+    const body = request.body;
+    assertValidModelName(modelName);
+    if (
+      !body ||
+      typeof body.targetWorkerId !== 'string' ||
+      body.targetWorkerId.length === 0 ||
+      !Array.isArray(body.targetDeviceIndices) ||
+      body.targetDeviceIndices.length === 0 ||
+      body.targetDeviceIndices.some((index) => !Number.isInteger(index) || index < 0) ||
+      new Set(body.targetDeviceIndices).size !== body.targetDeviceIndices.length
+    ) {
+      throw new ControlPlaneError(
+        400,
+        'INVALID_REQUEST',
+        'A target worker and unique non-negative device indices are required',
+        { reason: 'invalid-move-target' },
+      );
+    }
+
+    const [record, source] = await Promise.all([
+      deps.modelRepository.findByName(modelName),
+      deps.lifecycle.getInstance(modelName, instanceId),
+    ]);
+    if (!record || !source) {
+      throw new ControlPlaneError(
+        404,
+        'MODEL_NOT_FOUND',
+        `Model instance not found: ${modelName}/${instanceId}`,
+        {
+          modelName,
+          instanceId,
+          reason: 'instance-not-found',
+        },
+      );
+    }
+    if (movingInFlight.has(modelName)) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'move',
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+    if (
+      deletingInFlight.has(modelName) ||
+      stoppingInFlight.has(modelName) ||
+      instanceOpInFlight.has(`${modelName}:${instanceId}`)
+    ) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'move',
+        'operation-in-progress',
+        'another lifecycle operation is already in progress',
+      );
+    }
+    if (source.state !== ModelLifecycleState.ACTIVE) {
+      throw ControlPlaneError.invalidState(`${modelName}/${instanceId}`, source.state, 'move');
+    }
+    if (!source.workerId || !source.runnerHost || !source.runnerPort) {
+      throw new ControlPlaneError(
+        500,
+        'INTERNAL_ERROR',
+        `Active instance ${instanceId} of ${modelName} has no runner endpoint`,
+      );
+    }
+    if (body.targetDeviceIndices.length !== record.tensorParallel) {
+      throw new ControlPlaneError(
+        400,
+        'INVALID_REQUEST',
+        'Target device count must equal tensor parallelism',
+        { reason: 'tensor-parallel-mismatch' },
+      );
+    }
+    const targetWorker = deps.workerPool.getWorker(body.targetWorkerId);
+    if (!targetWorker) throw ControlPlaneError.workerNotFound(body.targetWorkerId);
+    if (
+      body.targetDeviceIndices.some(
+        (index) => !targetWorker.devices.some((device) => device.deviceIndex === index),
+      )
+    ) {
+      throw new ControlPlaneError(
+        400,
+        'INVALID_REQUEST',
+        'Target device does not exist on target worker',
+        {
+          reason: 'target-device-not-found',
+          targetWorkerId: body.targetWorkerId,
+        },
+      );
+    }
+    if (
+      source.workerId === body.targetWorkerId &&
+      source.deviceIndices?.length === body.targetDeviceIndices.length &&
+      source.deviceIndices.every((index) => body.targetDeviceIndices.includes(index))
+    ) {
+      throw new ControlPlaneError(
+        400,
+        'INVALID_REQUEST',
+        'Target placement is identical to source placement',
+        { reason: 'identical-source-placement' },
+      );
+    }
+
+    movingInFlight.add(modelName);
+    const replacementInstanceId = mintInstanceId();
+    try {
+      const launch = await deployFromRecord(app, deps, claims, record, replacementInstanceId, {
+        fixedPlacement: { workerId: body.targetWorkerId, deviceIndices: body.targetDeviceIndices },
+        awaitDeployment: true,
+        allowMoveClaim: true,
+      });
+      // Redis lifecycle state, SQL row, and capacity holds now exist: safe to acknowledge.
+      void (async () => {
+        let cutoverComplete = false;
+        try {
+          await launch.deployment;
+          const currentSource = await deps.lifecycle.getInstance(modelName, instanceId);
+          if (
+            currentSource?.state !== ModelLifecycleState.ACTIVE ||
+            !currentSource.runnerHost ||
+            !currentSource.runnerPort
+          ) {
+            throw new Error('source instance changed before traffic cutover');
+          }
+          const endpointPort = currentSource.runnerEnginePort ?? currentSource.runnerPort;
+          const cutOver = await deps.routingMap.updateEndpointWeight(
+            modelName,
+            currentSource.runnerHost,
+            endpointPort,
+            0,
+          );
+          if (!cutOver) throw new Error('source routing endpoint was not found before cutover');
+          cutoverComplete = true;
+
+          const stopped = await teardownInstance(
+            app,
+            deps,
+            modelName,
+            currentSource,
+            'Move source teardown',
+          );
+          if (!stopped) {
+            await deps.notifications.createNotification({
+              title: 'Model move completed with source teardown failure',
+              description: `${modelName} (${instanceId}) no longer receives traffic but could not be stopped`,
+              variant: 'danger',
+              source: { type: 'model', name: modelName },
+            });
+            return;
+          }
+          await deps.notifications.createNotification({
+            title: 'Model moved',
+            description: `${modelName} moved to ${body.targetWorkerId}`,
+            variant: 'success',
+            source: { type: 'model', name: modelName },
+          });
+        } catch (err) {
+          app.log.error(
+            { err, modelName, instanceId, replacementInstanceId, cutoverComplete },
+            'Model move orchestration failed',
+          );
+          // Before the atomic Redis cutover the source must remain untouched. The replacement is
+          // safe to reap; retained bookkeeping on a failed reap makes the failure observable.
+          if (!cutoverComplete) {
+            const replacement = await deps.lifecycle.getInstance(modelName, replacementInstanceId);
+            if (replacement)
+              await teardownInstance(app, deps, modelName, replacement, 'Move replacement cleanup');
+          }
+          await deps.notifications.createNotification({
+            title: 'Model move failed',
+            description: `${modelName}: ${err instanceof Error ? err.message : String(err)}`,
+            variant: 'danger',
+            source: { type: 'model', name: modelName },
+          });
+        } finally {
+          movingInFlight.delete(modelName);
+        }
+      })();
+      return reply
+        .code(202)
+        .send({ modelName, sourceInstanceId: instanceId, replacementInstanceId });
+    } catch (err) {
+      movingInFlight.delete(modelName);
+      throw err;
+    }
+  });
+
   app.get<{ Querystring: { state?: string } }>('/api/v1/models', async (request, reply) => {
     const stateFilter = request.query.state as ModelLifecycleState | undefined;
 
@@ -829,6 +1090,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'delete');
 
       const [instances, record] = await Promise.all([
         deps.lifecycle.getInstancesForModel(modelName),
@@ -965,6 +1227,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'sleep');
 
       const instances = await deps.lifecycle.getInstancesForModel(modelName);
       if (instances.length === 0) {
@@ -1038,6 +1301,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'wake');
 
       const instances = await deps.lifecycle.getInstancesForModel(modelName);
       if (instances.length === 0) {
@@ -1201,6 +1465,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'stop');
 
       const instances = await deps.lifecycle.getInstancesForModel(modelName);
       if (instances.length === 0) {
@@ -1319,6 +1584,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'delete an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {
@@ -1386,6 +1652,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'sleep an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {
@@ -1459,6 +1726,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertNoMove(modelName, 'wake an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
       if (!instance) {

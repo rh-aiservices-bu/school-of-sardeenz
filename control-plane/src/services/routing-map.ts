@@ -277,7 +277,7 @@ export class RoutingMapService {
     host: string,
     port: number,
     weight: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!Number.isInteger(weight) || weight < 0 || weight > 100) {
       throw ControlPlaneError.invalidRequest('weight must be an integer between 0 and 100');
     }
@@ -311,7 +311,7 @@ export class RoutingMapService {
       timestamp: now,
     };
 
-    await this.redis.eval(
+    const updated = await this.redis.eval(
       luaScript,
       2,
       this.hashKey,
@@ -323,5 +323,6 @@ export class RoutingMapService {
       now,
       JSON.stringify(update),
     );
+    return updated === 1 || updated === '1';
   }
 }
