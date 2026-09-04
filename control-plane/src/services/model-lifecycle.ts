@@ -18,13 +18,11 @@ const VALID_TRANSITIONS: ReadonlyMap<ModelLifecycleState, readonly ModelLifecycl
       [ModelLifecycleState.STARTING, ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
     ],
     [ModelLifecycleState.STOPPING, [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR]],
-    // STOPPED has no outgoing edges on purpose. Under the registry model (#121), a "stopped"
-    // model is represented by the *absence* of any Redis lifecycle record for it, not by a
-    // persisted STOPPED record: deleting an instance (or the last instance of a stop) removes
-    // its Redis key entirely. The read routes synthesize the STOPPED aggregate for a model with
-    // zero instances. A STOPPED → STARTING edge would therefore never be exercised on a
-    // persisted record — do not add one.
-    [ModelLifecycleState.STOPPED, []],
+    // A stopped model is normally represented by the absence of a Redis record, so there is no
+    // STOPPED → STARTING edge. ERROR is the sole repair edge: a failed teardown can discover
+    // only after stopModel settled that its worker identity is unavailable; retaining ERROR
+    // preserves observable placement bookkeeping for reconciliation.
+    [ModelLifecycleState.STOPPED, [ModelLifecycleState.ERROR]],
     [ModelLifecycleState.ERROR, [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING]],
   ],
 );
@@ -90,6 +88,11 @@ export interface InstanceState {
   lastInferenceAt: string | null;
   stateChangedAt: string;
   errorMessage: string | null;
+  /**
+   * A POST /runners request was sent but its reply was lost.  The worker may still own a
+   * runner, so this ERROR record and its capacity hold must be retained for reconciliation.
+   */
+  runnerStartAmbiguous?: boolean;
 }
 
 export function isValidTransition(from: ModelLifecycleState, to: ModelLifecycleState): boolean {
@@ -102,6 +105,28 @@ export function isTerminalState(state: ModelLifecycleState): boolean {
 }
 
 const MODEL_STATE_PREFIX = 'models';
+const MOVE_OPERATION_PREFIX = 'move-operations';
+
+export type MoveOperationPhase =
+  | 'REPLACEMENT_STARTING'
+  | 'REPLACEMENT_READY'
+  | 'CUTTING_OVER'
+  | 'SOURCE_DRAINING'
+  | 'REPLACEMENT_CLEANUP';
+
+/** Durable move transaction state. Redis, rather than process memory, owns admission/recovery. */
+export interface MoveOperation {
+  operationId: string;
+  modelName: string;
+  sourceInstanceId: string;
+  replacementInstanceId: string;
+  targetWorkerId: string;
+  targetDeviceIndices: number[];
+  phase: MoveOperationPhase;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string;
+}
 
 function instanceStateKey(prefix: string, modelName: string, instanceId: string): string {
   return redisKey(prefix, MODEL_STATE_PREFIX, modelName, instanceId);
@@ -238,6 +263,7 @@ export class ModelLifecycleService {
         | 'runnerId'
         | 'deviceIndices'
         | 'errorMessage'
+        | 'runnerStartAmbiguous'
       >
     >,
   ): Promise<InstanceState> {
@@ -369,6 +395,89 @@ export class ModelLifecycleService {
   async removeInstance(modelName: string, instanceId: string): Promise<void> {
     const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
     await this.redis.del(key);
+  }
+
+  /**
+   * Atomically create the durable transaction fence for one logical model. Unlike the retired
+   * time-limited move lease, this record cannot expire halfway through a large deployment; the
+   * leader reconciliation loop resumes and removes it only after one side is safely cleaned up.
+   */
+  async createMoveOperation(operation: MoveOperation): Promise<boolean> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, operation.modelName);
+    const result = await this.redis.set(key, JSON.stringify(operation), 'NX');
+    return result === 'OK';
+  }
+
+  async getMoveOperation(modelName: string): Promise<MoveOperation | null> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, modelName);
+    const raw = await this.redis.get(key);
+    return raw ? (JSON.parse(raw) as MoveOperation) : null;
+  }
+
+  async getAllMoveOperations(): Promise<MoveOperation[]> {
+    const pattern = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, '*');
+    const keys = await this.scanKeys(pattern);
+    if (keys.length === 0) return [];
+    const pipeline = this.redis.pipeline();
+    for (const key of keys) pipeline.get(key);
+    const results = await pipeline.exec();
+    if (!results) return [];
+    return results.flatMap(([err, raw]) =>
+      !err && typeof raw === 'string' ? [JSON.parse(raw) as MoveOperation] : [],
+    );
+  }
+
+  async updateMoveOperation(
+    modelName: string,
+    operationId: string,
+    updates: Partial<Pick<MoveOperation, 'phase' | 'errorMessage'>>,
+  ): Promise<MoveOperation | null> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, modelName);
+    const luaScript = `
+      local raw = redis.call('GET', KEYS[1])
+      if not raw then return nil end
+      local operation = cjson.decode(raw)
+      if operation['operationId'] ~= ARGV[1] then return nil end
+      local updates = cjson.decode(ARGV[2])
+      if updates['phase'] and updates['phase'] ~= operation['phase'] then
+        local allowed = {
+          REPLACEMENT_STARTING = { REPLACEMENT_READY = true, REPLACEMENT_CLEANUP = true },
+          REPLACEMENT_READY = { CUTTING_OVER = true, REPLACEMENT_CLEANUP = true },
+          CUTTING_OVER = { SOURCE_DRAINING = true, REPLACEMENT_CLEANUP = true }
+        }
+        local from = allowed[operation['phase']]
+        if not from or not from[updates['phase']] then return nil end
+      end
+      for k, v in pairs(updates) do operation[k] = v end
+      operation['updatedAt'] = ARGV[3]
+      local encoded = cjson.encode(operation)
+      redis.call('SET', KEYS[1], encoded)
+      return encoded
+    `;
+    const raw = await this.redis.eval(
+      luaScript,
+      1,
+      key,
+      operationId,
+      JSON.stringify(updates),
+      new Date().toISOString(),
+    );
+    return raw ? (JSON.parse(raw as string) as MoveOperation) : null;
+  }
+
+  async removeMoveOperation(modelName: string, operationId: string): Promise<boolean> {
+    const key = redisKey(this.keyPrefix, MOVE_OPERATION_PREFIX, modelName);
+    const removed = await this.redis.eval(
+      `local raw = redis.call('GET', KEYS[1])
+       if not raw then return 0 end
+       local operation = cjson.decode(raw)
+       if operation['operationId'] ~= ARGV[1] then return 0 end
+       return redis.call('DEL', KEYS[1])`,
+      1,
+      key,
+      operationId,
+    );
+    return removed === 1 || removed === '1';
   }
 
   async getLastInferenceTimestamps(modelNames: string[]): Promise<Map<string, string>> {

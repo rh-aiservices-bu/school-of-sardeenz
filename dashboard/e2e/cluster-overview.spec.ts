@@ -157,4 +157,123 @@ test.describe('Cluster Overview', () => {
     const alertsCard = page.getByTestId('summary-card-alerts');
     await expect(alertsCard.getByText('All clear')).toBeVisible();
   });
+
+  test('moves an active placement to a compatible worker and GPU', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    const gib = 1024 ** 3;
+    const capability = {
+      runnerType: 'vllm',
+      engineName: 'vLLM',
+      supportedModelTypes: ['LLM'],
+      supportedDeviceTypes: ['CUDA'],
+      maxTensorParallelism: 1,
+      kvCacheElasticSharing: false,
+    };
+    mockControlPlane.setModels([
+      {
+        modelName: 'move-model',
+        state: 'ACTIVE',
+        runnerType: 'vllm',
+        requiredMemory: 8 * gib,
+        workerId: 'worker-source',
+      },
+    ]);
+    mockControlPlane.setInstances('move-model', [
+      {
+        instanceId: 'inst-source',
+        state: 'ACTIVE',
+        workerId: 'worker-source',
+        deviceIndices: [0],
+      },
+    ]);
+    mockControlPlane.setWorkers([
+      {
+        workerId: 'worker-source',
+        status: 'ONLINE',
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryTotalBytes: 24 * gib,
+            memoryUsedBytes: 8 * gib,
+            memoryAvailableBytes: 16 * gib,
+          },
+        ],
+        runnerCapabilities: [capability],
+      },
+      {
+        workerId: 'worker-target',
+        status: 'ONLINE',
+        devices: [
+          {
+            deviceIndex: 1,
+            deviceType: 'CUDA',
+            memoryTotalBytes: 24 * gib,
+            memoryUsedBytes: 0,
+            memoryAvailableBytes: 24 * gib,
+          },
+        ],
+        runnerCapabilities: [capability],
+      },
+    ]);
+    mockControlPlane.setClusterMemory({
+      workers: [
+        {
+          workerId: 'worker-source',
+          devices: [
+            {
+              deviceIndex: 0,
+              deviceType: 'CUDA',
+              memoryTotalBytes: 24 * gib,
+              memoryUsedBytes: 8 * gib,
+              memoryAvailableBytes: 16 * gib,
+            },
+          ],
+          models: [
+            {
+              modelName: 'move-model',
+              instanceId: 'inst-source',
+              state: 'ACTIVE',
+              memoryUsedBytes: 8 * gib,
+              deviceIndices: [0],
+            },
+          ],
+        },
+        {
+          workerId: 'worker-target',
+          devices: [
+            {
+              deviceIndex: 1,
+              deviceType: 'CUDA',
+              memoryTotalBytes: 24 * gib,
+              memoryUsedBytes: 0,
+              memoryAvailableBytes: 24 * gib,
+            },
+          ],
+          models: [],
+        },
+      ],
+    });
+
+    await page.goto(bffUrl(bffPort, '/'));
+    await page.getByRole('button', { name: 'Move move-model (inst-source)' }).click();
+    await expect(page.getByRole('dialog', { name: 'Move model instance' })).toBeVisible();
+    await page.getByLabel('Target worker').selectOption('worker-target');
+    await page.getByLabel('GPU 1').check();
+
+    const requestPromise = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/move'),
+    );
+    await page.getByRole('button', { name: 'Move instance' }).click();
+    const request = await requestPromise;
+
+    expect(request.postDataJSON()).toEqual({
+      targetWorkerId: 'worker-target',
+      targetDeviceIndices: [1],
+    });
+    await expect(page.getByText('Deploying replacement instance…')).toBeVisible();
+  });
 });

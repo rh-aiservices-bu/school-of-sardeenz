@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { ControlPlaneComponents } from '@sardeenz/types';
 import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
@@ -150,6 +151,20 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const { status, data } = await deps.controlPlane.wakeInstance(
         request.params.name,
         request.params.instanceId,
+      );
+      return reply.code(status).send(data);
+    },
+  );
+
+  // POST /api/models/:name/instances/:instanceId/move — administrative write, never Redis fallback.
+  app.post<{ Params: { name: string; instanceId: string } }>(
+    '/api/models/:name/instances/:instanceId/move',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.moveInstance(
+        request.params.name,
+        request.params.instanceId,
+        request.body as ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
       );
       return reply.code(status).send(data);
     },

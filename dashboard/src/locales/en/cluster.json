@@ -59,6 +59,8 @@
     },
     "modelsPlacement": {
       "title": "Models placement",
+      "move": "Move",
+      "moveInstance": "Move {{modelName}} ({{instanceId}})",
       "pageTitle": "GPU Memory",
       "loading": "Loading GPU memory data",
       "errors": {

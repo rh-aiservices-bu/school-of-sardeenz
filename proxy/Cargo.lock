@@ -1347,6 +1347,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "futures-util",
+ "http-body",
  "hyper",
  "hyper-util",
  "metrics",

@@ -226,4 +226,98 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
     parsed = JSON.parse(raw as string) as { protocol: string };
     expect(parsed.protocol).toBe('oip');
   });
+
+  it('does not restore a cutover weight when a state refresh races it', async () => {
+    const MODEL = 'state-weight-race-model';
+    const ep: RunnerEndpoint = { host: '10.0.0.12', port: 8012, weight: 1, healthy: true };
+    await harness.routingMap.addEndpoint(MODEL, ep);
+
+    await Promise.all(
+      Array.from({ length: 20 }, () =>
+        Promise.all([
+          harness.routingMap.setModelState(MODEL, ModelState.ACTIVE),
+          harness.routingMap.updateEndpointWeight(MODEL, ep.host, ep.port, 0),
+        ]),
+      ),
+    );
+    // Do not mask the race with a final write: the old HGET/HSET implementation could leave 1
+    // here when a stale state refresh committed after the last cutover.
+    expect((await harness.routingMap.getEntry(MODEL))?.endpoints[0]?.weight).toBe(0);
+  });
+
+  it('waits for every proxy subscriber to acknowledge a destructive cutover', async () => {
+    const MODEL = 'barrier-model';
+    const endpoint: RunnerEndpoint = {
+      host: '10.0.0.20',
+      port: 8020,
+      weight: 1,
+      healthy: true,
+    };
+    await harness.routingMap.addEndpoint(MODEL, endpoint);
+
+    const proxy = harness.redis.duplicate();
+    await proxy.connect();
+    const barrierChannel = redisKey(harness.keyPrefix, 'routing-barriers');
+    await proxy.subscribe(barrierChannel);
+    await harness.redis.set(
+      redisKey(harness.keyPrefix, 'proxies', 'proxy-test'),
+      String(Date.now() - 1_000),
+      'PX',
+      5_000,
+    );
+    proxy.on('message', (_channel, payload) => {
+      const { barrierId } = JSON.parse(payload) as { barrierId: string };
+      void harness.redis
+        .sadd(redisKey(harness.keyPrefix, 'routing-barrier-acks', barrierId), 'proxy-test')
+        .catch(() => {});
+    });
+
+    try {
+      await expect(
+        harness.routingMap.cutoverEndpointAndWait(MODEL, endpoint.host, endpoint.port),
+      ).resolves.toBe(true);
+      expect((await harness.routingMap.getEntry(MODEL))?.endpoints[0]?.weight).toBe(0);
+    } finally {
+      proxy.disconnect();
+    }
+  });
+
+  it('treats a cutover as quiescent when no proxy was serving the old generation', async () => {
+    const MODEL = 'barrier-no-proxy';
+    const endpoint: RunnerEndpoint = {
+      host: '10.0.0.21',
+      port: 8021,
+      weight: 1,
+      healthy: true,
+    };
+    await harness.routingMap.addEndpoint(MODEL, endpoint);
+
+    await expect(
+      harness.routingMap.cutoverEndpointAndWait(MODEL, endpoint.host, endpoint.port),
+    ).resolves.toBe(true);
+    expect((await harness.routingMap.getEntry(MODEL))?.endpoints[0]?.weight).toBe(0);
+  });
+
+  it('waits for a disconnected serving proxy presence lease to expire', async () => {
+    const MODEL = 'barrier-disconnected-proxy';
+    const endpoint: RunnerEndpoint = {
+      host: '10.0.0.22',
+      port: 8022,
+      weight: 1,
+      healthy: true,
+    };
+    await harness.routingMap.addEndpoint(MODEL, endpoint);
+    await harness.redis.set(
+      redisKey(harness.keyPrefix, 'proxies', 'disconnected-proxy'),
+      String(Date.now() - 1_000),
+      'PX',
+      100,
+    );
+
+    const startedAt = Date.now();
+    await expect(
+      harness.routingMap.cutoverEndpointAndWait(MODEL, endpoint.host, endpoint.port),
+    ).resolves.toBe(true);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(50);
+  });
 });

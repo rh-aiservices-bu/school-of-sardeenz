@@ -124,7 +124,11 @@ async fn oip_ready_sleeping_503_no_wake() {
         .await
         .expect("request failed");
 
-    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "sleeping model's ready must be 503");
+    assert_eq!(
+        resp.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "sleeping model's ready must be 503"
+    );
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(body["ready"], false);
 
@@ -175,7 +179,8 @@ async fn oip_models_lists_only_oip() {
     let active_entry = by_name(active_oip).expect("active oip model missing from /oip/v2/models");
     assert_eq!(active_entry["ready"], true);
 
-    let sleeping_entry = by_name(sleeping_oip).expect("sleeping oip model missing from /oip/v2/models");
+    let sleeping_entry =
+        by_name(sleeping_oip).expect("sleeping oip model missing from /oip/v2/models");
     assert_eq!(sleeping_entry["ready"], false);
 
     assert!(by_name(active_openai).is_none(), "openai-protocol model must NOT appear under /oip");

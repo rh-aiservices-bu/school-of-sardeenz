@@ -28,6 +28,9 @@ describe('isValidTransition', () => {
     [ModelLifecycleState.STOPPING, ModelLifecycleState.ERROR],
     [ModelLifecycleState.ERROR, ModelLifecycleState.STOPPED],
     [ModelLifecycleState.ERROR, ModelLifecycleState.STARTING],
+    // Retains an ambiguous teardown for reconciliation instead of leaving a STOPPED key that
+    // blocks start forever.
+    [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR],
   ];
 
   for (const [from, to] of validTransitions) {
@@ -44,7 +47,6 @@ describe('isValidTransition', () => {
     [ModelLifecycleState.SLEEPING, ModelLifecycleState.ACTIVE],
     [ModelLifecycleState.STOPPED, ModelLifecycleState.STARTING],
     [ModelLifecycleState.STOPPED, ModelLifecycleState.ACTIVE],
-    [ModelLifecycleState.STOPPED, ModelLifecycleState.ERROR],
   ];
 
   for (const [from, to] of invalidTransitions) {
@@ -151,6 +153,29 @@ describe('ModelLifecycleService.createInstance', () => {
     const stored = JSON.parse(storedJson) as InstanceState;
     expect(stored.deviceIndices).toBeNull();
     expect(stored.instanceId).toBe('inst-aaa111');
+  });
+});
+
+describe('ModelLifecycleService durable move operations', () => {
+  it('uses a non-expiring NX record as the transaction and admission fence', async () => {
+    const set = vi.fn().mockResolvedValue('OK');
+    const redis = { set } as unknown as Redis;
+    const service = new ModelLifecycleService(redis, 'test');
+
+    const operation = {
+      operationId: 'move-1',
+      modelName: 'm1',
+      sourceInstanceId: 'inst-source',
+      replacementInstanceId: 'inst-replacement',
+      targetWorkerId: 'worker-2',
+      targetDeviceIndices: [1],
+      phase: 'REPLACEMENT_STARTING' as const,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    await expect(service.createMoveOperation(operation)).resolves.toBe(true);
+
+    expect(set).toHaveBeenCalledWith('test:move-operations:m1', JSON.stringify(operation), 'NX');
   });
 });
 

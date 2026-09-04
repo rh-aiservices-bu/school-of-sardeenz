@@ -79,6 +79,57 @@ export class PlacementPipeline {
     }
   }
 
+  /**
+   * Validate a caller-selected placement using the same health, runner, hardware and budget
+   * predicates as automatic placement. Fixed placement deliberately never evicts: a move must
+   * reserve capacity alongside its still-serving source before it can be accepted.
+   */
+  placeFixed(
+    request: PlacementRequest,
+    workerId: string,
+    deviceIndices: number[],
+    workers: WorkerRecord[],
+    budgets: Map<string, WorkerBudget>,
+  ): PlacementResult | null {
+    if (deviceIndices.length !== request.tensorParallel) return null;
+    const worker = workers.find((candidate) => candidate.workerId === workerId);
+    if (!worker || this.filterByHealth([worker]).length === 0) return null;
+    const runnerCandidates = this.filterByRunnerType(request, [worker]);
+    if (runnerCandidates.length === 0) return null;
+    const capability = runnerCandidates[0].capability;
+    if (request.tensorParallel > capability.maxTensorParallelism) return null;
+    if (this.filterByHardware(request, runnerCandidates).length === 0) {
+      return null;
+    }
+
+    const budget = budgets.get(workerId);
+    if (!budget || budget.stale) return null;
+    const perDeviceRequired = request.requiredMemory / request.tensorParallel;
+    const devices = deviceIndices.map((deviceIndex) =>
+      budget.devices.find((device) => device.deviceIndex === deviceIndex),
+    );
+    if (
+      devices.some(
+        (device) =>
+          !device ||
+          device.availableBytes < perDeviceRequired ||
+          (request.deviceType !== undefined && device.deviceType !== request.deviceType) ||
+          !capability.supportedDeviceTypes.includes(device.deviceType as DeviceType),
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      workerId,
+      runnerType: request.runnerType,
+      devices: devices.map((device) => ({
+        deviceIndex: device!.deviceIndex,
+        deviceType: device!.deviceType,
+      })),
+    };
+  }
+
   eligibleWorkerIds(request: PlacementRequest, workers: WorkerRecord[]): Set<string> {
     const healthyWorkers = this.filterByHealth(workers);
     if (healthyWorkers.length === 0) return new Set();
@@ -114,14 +165,14 @@ export class PlacementPipeline {
     request: PlacementRequest,
     candidates: { worker: WorkerRecord; capability: WorkerCapability }[],
   ): { worker: WorkerRecord; capability: WorkerCapability }[] {
-    if (!request.deviceType) return candidates;
-
     return candidates.filter(({ worker, capability }) => {
-      const hasDevice = worker.devices.some((d) => d.deviceType === request.deviceType);
-      const supportsDevice = capability.supportedDeviceTypes.includes(
-        request.deviceType as DeviceType,
+      if (request.tensorParallel > capability.maxTensorParallelism) return false;
+      // Even an unconstrained model may only land on actual device types the runner supports.
+      return worker.devices.some(
+        (d) =>
+          (!request.deviceType || String(d.deviceType) === request.deviceType) &&
+          capability.supportedDeviceTypes.includes(d.deviceType),
       );
-      return hasDevice && supportsDevice;
     });
   }
 
@@ -137,7 +188,11 @@ export class PlacementPipeline {
       const budget = budgets.get(worker.workerId);
       if (!budget || budget.stale) continue;
 
-      let eligibleDevices = budget.devices.filter((d) => d.availableBytes >= perDeviceRequired);
+      let eligibleDevices = budget.devices.filter(
+        (d) =>
+          d.availableBytes >= perDeviceRequired &&
+          capability.supportedDeviceTypes.includes(d.deviceType as DeviceType),
+      );
 
       if (request.deviceType) {
         eligibleDevices = eligibleDevices.filter((d) => d.deviceType === request.deviceType);

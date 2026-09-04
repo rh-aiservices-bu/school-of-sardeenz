@@ -110,11 +110,11 @@ The control plane is the brain of the system. It does not serve inference traffi
 
 Key responsibilities:
 
-- **Device memory budget tracking.** Maintains a global view of device memory allocation across all workers, built from worker self-reports in Redis/Valkey. Reports carry two distinct figures per device: the *allocation ledger* (sum of running runners' configured `requiredMemory` — the basis for placement and eviction) and, where the worker can measure (NVML via ts-nvml, #163), the *measured* usage including per-instance attribution — surfaced as telemetry (`currentMemory`, per-device measured bytes) but never fed into budget math.
+- **Device memory budget tracking.** Maintains a global view of device memory allocation across all workers, built from worker self-reports in Redis/Valkey. Reports carry two distinct figures per device: the _allocation ledger_ (sum of running runners' configured `requiredMemory` — the basis for placement and eviction) and, where the worker can measure (NVML via ts-nvml, #163), the _measured_ usage including per-instance attribution — surfaced as telemetry (`currentMemory`, per-device measured bytes) but never fed into budget math.
 - **Model lifecycle state machine.** Manages model states (starting, active, sleeping, stopping) and transitions.
 - **Eviction.** When device memory is constrained, applies an eviction strategy (initially LRU, behind a pluggable interface) to free capacity by sleeping or stopping models.
 - **Sleep/wake coordination.** Sends sleep and wake commands to runners through the runner contract.
-- **Workload placement.** Matches model requirements → compatible runner type → capable worker → best candidate (see [Worker and Runner Model](#worker-and-runner-model)).
+- **Workload placement.** Matches model requirements → compatible runner type → capable worker → best candidate (see [Worker and Runner Model](#worker-and-runner-model)). Operators can also move one active instance to an explicit compatible worker and device set. A durable transaction creates a healthy replacement, atomically sets the old endpoint's weight to zero, waits for every serving proxy to apply and quiesce the old routing generation, then drains and stops the source; leader reconciliation resumes any interrupted phase.
 - **Routing map management.** Writes the routing map to Redis/Valkey, which the proxy consumes.
 - **Worker pool management.** Detects workers joining or leaving the pool dynamically without requiring a restart.
 - **Runner catalog + SIF import.** Loads a catalog of available runner SIFs and imports them on demand by pulling signed SIFs from an OCI registry (ORAS) onto the shared module store — see [ADR-018](adrs/adr-018-runner-catalog-oras-distribution.md).

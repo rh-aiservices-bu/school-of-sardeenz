@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeviceType } from '@sardeenz/types';
 
-import { WorkerClient } from '../worker.js';
+import { WorkerClient, WorkerHttpError } from '../worker.js';
 
 const mockFetch = vi.fn();
 
@@ -80,6 +80,53 @@ describe('WorkerClient', () => {
           devices: [],
         }),
       ).rejects.toThrow('returned 503');
+      await expect(
+        client.startRunner({
+          modelName: 'm',
+          runnerType: 'vllm',
+          modelPath: '/p',
+          requiredMemory: 1,
+          tensorParallel: 1,
+          devices: [],
+        }),
+      ).rejects.toBeInstanceOf(WorkerHttpError);
+    });
+  });
+
+  describe('getRunnerByInstance', () => {
+    it.each([
+      [404, { error: 'missing' }, { status: 'absent' }],
+      [
+        202,
+        { instanceId: 'inst-1', runnerId: 'runner-1', state: 'STARTING' },
+        { status: 'starting', runnerId: 'runner-1' },
+      ],
+      [
+        200,
+        {
+          instanceId: 'inst-1',
+          runnerId: 'runner-1',
+          state: 'READY',
+          host: '10.0.0.1',
+          port: 8000,
+          enginePort: 8001,
+        },
+        {
+          status: 'ready',
+          runnerId: 'runner-1',
+          host: '10.0.0.1',
+          port: 8000,
+          enginePort: 8001,
+        },
+      ],
+    ])('maps worker status %i to a recovery fact', async (status, body, expected) => {
+      mockFetch.mockResolvedValue(jsonResponse(body, status));
+      const client = new WorkerClient({ baseUrl: 'http://worker-1:8080' });
+
+      await expect(client.getRunnerByInstance('inst-1')).resolves.toEqual(expected);
+      expect(mockFetch.mock.calls[0]?.[0]).toBe(
+        'http://worker-1:8080/runners/by-instance/inst-1/status',
+      );
     });
   });
 

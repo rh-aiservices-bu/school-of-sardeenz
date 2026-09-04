@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Worker Agent API
-  version: 0.1.1
+  version: 0.1.2
   description: |
     Management API exposed by each worker agent (dev or production). The control
     plane calls these endpoints to start and stop runner processes on a worker.
@@ -133,6 +133,47 @@ paths:
           description: Runner stopped successfully
         "404":
           description: Runner not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /runners/by-instance/{instanceId}/status:
+    get:
+      operationId: getRunnerByInstance
+      summary: Resolve a runner by control-plane instance identity
+      description: |
+        Recovers the worker-assigned runner identity after an ambiguous
+        `POST /runners` outcome. Returns the full endpoint once the runner is
+        live, `202` while its start is still in flight, and `404` when this
+        worker has no current or in-flight runner for the instance.
+
+        The control plane uses this endpoint to reconcile a lost start reply
+        without either leaking the runner or releasing its capacity early.
+      tags:
+        - Runners
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Control-plane-assigned instance identity.
+      responses:
+        "200":
+          description: Runner is live and its endpoint is recoverable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerByInstanceResponse"
+        "202":
+          description: Runner start is still in flight
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerByInstanceResponse"
+        "404":
+          description: No live or in-flight runner exists for this instance
           content:
             application/json:
               schema:
@@ -477,6 +518,41 @@ components:
             a port distinct from the management port; the control plane registers
             this port as the model's routing endpoint so the proxy forwards
             inference here. When omitted, inference is served on `port`.
+
+    RunnerByInstanceResponse:
+      type: object
+      description: |
+        Worker-side runner identity recovered from a control-plane instance
+        id. Endpoint fields are present only once `state` is `READY`.
+      required:
+        - instanceId
+        - runnerId
+        - state
+      properties:
+        instanceId:
+          type: string
+          description: Control-plane-assigned instance identity.
+        runnerId:
+          type: string
+          description: Worker-assigned runner identity.
+        state:
+          type: string
+          enum:
+            - STARTING
+            - READY
+        host:
+          type: string
+          description: Hostname or IP where the live runner is listening.
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Management port of the live runner.
+        enginePort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Inference port of the live runner.
 
     # -------------------------------------------------------------------------
     # Self-registration schemas (Redis data, not HTTP payloads)

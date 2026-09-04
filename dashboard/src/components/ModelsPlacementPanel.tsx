@@ -35,17 +35,20 @@ import {
   Content,
   Alert,
   Label,
+  Button,
 } from '@patternfly/react-core';
 import { CubesIcon, MoonIcon, ServerIcon } from '@patternfly/react-icons';
 import { ResponsiveBar } from '@nivo/bar';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { WorkerStatus, type ControlPlaneComponents } from '@sardeenz/types';
+import { ModelLifecycleState, WorkerStatus, type ControlPlaneComponents } from '@sardeenz/types';
 import { useClusterMemory } from '../hooks/useCluster';
 import { useWorkers } from '../hooks/useWorkers';
 import { formatBytes } from '../utils/format';
 import { getWorkerStatusColor } from '../utils/state-colors';
 import { getNivoTooltipTheme } from '../chartTheme';
+import { useAuth } from '../contexts/AuthContext';
+import { MoveModelModal, type MoveSource } from './MoveModelModal';
 import {
   attributeModelsToDevice,
   buildDeviceBarData,
@@ -79,10 +82,14 @@ function GpuCard({
   device,
   workerDeviceCount,
   models,
+  onMove,
+  canMove,
 }: {
   device: DeviceInfo;
   workerDeviceCount: number;
   models: WorkerModelInfo[] | undefined;
+  onMove: (source: MoveSource) => void;
+  canMove: boolean;
 }) {
   const { t } = useTranslation('cluster');
   const navigate = useNavigate();
@@ -150,6 +157,45 @@ function GpuCard({
           </FlexItem>
         )}
       </Flex>
+
+      {canMove &&
+        attributed
+          .filter((model) => {
+            const source = models?.find((candidate) => candidate.instanceId === model.instanceId);
+            return (
+              model.instanceId &&
+              model.state === ModelLifecycleState.ACTIVE &&
+              Math.min(...(source?.deviceIndices ?? [])) === device.deviceIndex
+            );
+          })
+          .map((model) => {
+            const source = models?.find((candidate) => candidate.instanceId === model.instanceId);
+            return source?.instanceId ? (
+              <Button
+                key={`move-${source.instanceId}`}
+                variant="link"
+                isInline
+                aria-label={t('overview.modelsPlacement.moveInstance', {
+                  modelName: source.modelName,
+                  instanceId: source.instanceId,
+                })}
+                style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
+                onClick={() =>
+                  onMove({
+                    modelName: source.modelName,
+                    instanceId: source.instanceId!,
+                    workerId: '',
+                    deviceIndices: source.deviceIndices ?? [device.deviceIndex],
+                  })
+                }
+              >
+                {t('overview.modelsPlacement.moveInstance', {
+                  modelName: source.modelName,
+                  instanceId: source.instanceId,
+                })}
+              </Button>
+            ) : null;
+          })}
 
       {/* VRAM info */}
       <div
@@ -295,10 +341,7 @@ function GpuCard({
               theme={getNivoTooltipTheme()}
             />
           </div>
-          <Flex
-            gap={{ default: 'gapSm' }}
-            style={{ marginTop: '2px' }}
-          >
+          <Flex gap={{ default: 'gapSm' }} style={{ marginTop: '2px' }}>
             <FlexItem>
               <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
                 <span style={{ color: KVCACHE_COLORS.Prealloc }}>●</span> Prealloc (
@@ -307,12 +350,14 @@ function GpuCard({
             </FlexItem>
             <FlexItem>
               <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-                <span style={{ color: KVCACHE_COLORS.Used }}>●</span> Used ({formatBytes(kvcache.usedBytes)})
+                <span style={{ color: KVCACHE_COLORS.Used }}>●</span> Used (
+                {formatBytes(kvcache.usedBytes)})
               </span>
             </FlexItem>
             <FlexItem>
               <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-                <span style={{ color: KVCACHE_COLORS.Free }}>●</span> Free ({formatBytes(kvcache.freeBytes)})
+                <span style={{ color: KVCACHE_COLORS.Free }}>●</span> Free (
+                {formatBytes(kvcache.freeBytes)})
               </span>
             </FlexItem>
           </Flex>
@@ -330,11 +375,15 @@ function WorkerSection({
   status,
   isExpanded,
   onToggle,
+  onMove,
+  canMove,
 }: {
   worker: MemoryWorker;
   status?: WorkerStatus;
   isExpanded: boolean;
   onToggle: () => void;
+  onMove: (source: MoveSource) => void;
+  canMove: boolean;
 }) {
   const { t } = useTranslation('cluster');
   const modelCount = worker.models?.length ?? 0;
@@ -429,6 +478,8 @@ function WorkerSection({
               device={device}
               workerDeviceCount={worker.devices.length}
               models={worker.models}
+              onMove={(source) => onMove({ ...source, workerId: worker.workerId })}
+              canMove={canMove}
             />
           ))}
         </div>
@@ -446,6 +497,8 @@ export function ModelsPlacementPanel() {
   const [isSelectOpen, setIsSelectOpen] = useState(false);
   const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set());
   const hasAutoExpanded = useRef(false);
+  const [moveSource, setMoveSource] = useState<MoveSource | null>(null);
+  const { isAdmin } = useAuth();
 
   const { data: memory, isLoading, error } = useClusterMemory(refreshInterval ?? false);
   const { data: workers } = useWorkers();
@@ -559,6 +612,8 @@ export function ModelsPlacementPanel() {
                 status={statusByWorkerId.get(worker.workerId)}
                 isExpanded={expandedWorkers.has(worker.workerId)}
                 onToggle={() => toggleWorker(worker.workerId)}
+                onMove={setMoveSource}
+                canMove={isAdmin}
               />
             ))}
 
@@ -583,6 +638,7 @@ export function ModelsPlacementPanel() {
             )}
           </>
         )}
+        <MoveModelModal source={moveSource} onClose={() => setMoveSource(null)} />
       </CardBody>
     </Card>
   );

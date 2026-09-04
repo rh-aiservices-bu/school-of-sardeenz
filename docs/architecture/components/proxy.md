@@ -230,10 +230,13 @@ Limits are checked before incrementing the count. Excess requests receive a 503 
 
 The control plane maintains the routing map as a Redis hash:
 
-| Key                        | Type            | Description                                                                           |
-| -------------------------- | --------------- | ------------------------------------------------------------------------------------- |
-| `sardeenz:routing-map`     | Hash            | One field per model. Field name = model name. Value = JSON-serialized `RoutingEntry`. |
-| `sardeenz:routing-updates` | Pub/sub channel | Receives `RoutingMapUpdate` JSON on every routing map change.                         |
+| Key                                         | Type            | Description                                                                                    |
+| ------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
+| `sardeenz:routing-map`                      | Hash            | One field per model. Field name = model name. Value = JSON-serialized `RoutingEntry`.          |
+| `sardeenz:routing-updates`                  | Pub/sub channel | Receives `RoutingMapUpdate` JSON on every routing map change.                                  |
+| `sardeenz:routing-barriers`                 | Pub/sub channel | Requests an applied-and-quiescent acknowledgement after a destructive routing change.          |
+| `sardeenz:routing-barrier-acks:{barrierId}` | Set             | Short-lived proxy process ids that have applied and quiesced one cutover.                      |
+| `sardeenz:proxies:{proxyId}`                | String + TTL    | Presence lease for a proxy that has loaded the current map and is admitting inference traffic. |
 
 ### RoutingEntry Format
 
@@ -284,7 +287,7 @@ The `port` in each endpoint is the runner's **engine (inference) port** — wher
 
 On startup, the proxy performs a full `HGETALL sardeenz:routing-map` and populates `RoutingMapCache`. It then subscribes to `sardeenz:routing-updates` for incremental updates.
 
-On any pub/sub message, the proxy re-fetches the full hash with `HGETALL` and replaces the in-memory map atomically. This avoids applying partial or out-of-order deltas — the map is small enough (one entry per deployed model) that a full re-read is safe and simpler.
+On any routing-update or barrier message, the proxy re-fetches the full hash with `HGETALL` and replaces the in-memory map atomically. This avoids applying partial or out-of-order deltas — the map is small enough (one entry per deployed model) that a full re-read is safe and simpler.
 
 ```
 pub/sub message received:
@@ -295,7 +298,19 @@ pub/sub message received:
      → notify.send(())          ← wakes all parked tasks
 ```
 
-Fields that fail JSON parsing are logged as warnings and dropped. A parse failure for one model does not block the refresh for others.
+Fields that fail JSON parsing are logged as warnings. A previous valid entry is retained when one
+exists; an invalid new entry is dropped. A parse failure for one model does not block the refresh
+for others.
+
+For a destructive change (an active model becomes unavailable, or a selectable endpoint is
+removed, made unhealthy, or assigned weight zero), requests hold a read lease on their selected
+routing generation through the complete upstream response. Cache replacement takes that
+generation's write lease, so it waits for those requests before acknowledging a propagation
+barrier. Endpoint additions and diagnostic-only changes reuse the existing lease and do not wait.
+The control plane snapshots the TTL-backed proxy presence keys at cutover and stops the old runner
+only after every pre-cutover proxy has acknowledged, disconnected long enough for its presence to
+expire, or reconnected and loaded the new map. A disconnected proxy rejects new inference rather
+than continuing to route from its stale cache.
 
 If the Redis connection drops, `start_redis_sync` returns an error. The main loop logs the error, marks the proxy as not ready (fails `/readyz`), and retries the connection after a 5-second back-off. The in-memory cache remains intact during the gap — it may become stale but does not clear.
 
@@ -437,22 +452,27 @@ Always returns `200 OK` with body `ok` if the process is running. This is a live
 
 Returns `200 OK` with body `ready` when the proxy has both an active Redis connection **and** a completed initial routing-map load (`routing_map_loaded`). Returns `503 Service Unavailable` with body `not ready` if either condition is not met.
 
-The readiness signal is set by `AppState::set_redis_connected(true)` at the start of `start_redis_sync()` and cleared to `false` when the Redis connection drops. `routing_map_loaded` is set once the first `HGETALL sardeenz:routing-map` completes successfully. Kubernetes should use this endpoint for readiness gates — a proxy with no Redis connection or no routing map loaded yet has a stale or empty routing cache and should not receive traffic.
+The readiness signal is set only after the proxy has subscribed, completed its first
+`HGETALL sardeenz:routing-map`, installed the cache, and written its presence lease. It is cleared when the
+Redis connection drops. Kubernetes should use this endpoint for readiness gates — inference
+handlers enforce the same readiness check, so a disconnected proxy cannot keep selecting an old
+endpoint while a move cutover is in progress.
 
 ## Relationship to the Control Plane
 
 The proxy and control plane communicate through two channels: Redis (shared state) and a direct HTTP call (wake trigger).
 
-### What the Proxy Reads
+### Redis Interactions
 
-| Redis key                            | Access pattern                                            | Purpose                            |
-| ------------------------------------ | --------------------------------------------------------- | ---------------------------------- |
-| `sardeenz:routing-map` (hash)        | Full read at startup; full re-read on every pub/sub event | Populate and refresh routing cache |
-| `sardeenz:routing-updates` (pub/sub) | Subscription                                              | Trigger routing cache refresh      |
+| Redis key                                         | Access pattern                                            | Purpose                                        |
+| ------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------- |
+| `sardeenz:routing-map` (hash)                     | Full read at startup; full re-read on every pub/sub event | Populate and refresh routing cache             |
+| `sardeenz:routing-updates` (pub/sub)              | Subscription                                              | Trigger ordinary routing cache refresh         |
+| `sardeenz:routing-barriers` (pub/sub)             | Subscription                                              | Trigger a refresh that must be acknowledged    |
+| `sardeenz:proxies:{proxyId}` (TTL string)         | Create and heartbeat while connected                      | Advertise that this process is serving traffic |
+| `sardeenz:routing-barrier-acks:{barrierId}` (set) | Add this process id after cache quiescence                | Confirm an old route is no longer in use       |
 
-The proxy never writes to Redis.
-
-### What the Proxy Writes
+### Direct HTTP Call
 
 The proxy makes exactly one HTTP call to the control plane: `POST /api/v1/wake` when a sleeping model needs to wake. This call is:
 

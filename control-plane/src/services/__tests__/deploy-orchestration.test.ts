@@ -14,7 +14,11 @@ import type { RoutingMapService } from '../routing-map.js';
 import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RunnerClient } from '../../clients/runner.js';
-import type { WorkerClient, StartRunnerResponse } from '../../clients/worker.js';
+import {
+  WorkerHttpError,
+  type WorkerClient,
+  type StartRunnerResponse,
+} from '../../clients/worker.js';
 
 const INSTANCE_ID = 'test-instance';
 
@@ -212,9 +216,8 @@ describe('DeployOrchestrationService', () => {
       // would have persisted for an oip deploy, while preserving the existing mock's dynamic
       // state tracking (so the second refresh still observes the ACTIVE transition).
       const originalImpl = mocks.lifecycle.getInstancesForModel.getMockImplementation()!;
-      mocks.lifecycle.getInstancesForModel.mockImplementation(
-        (): InstanceState[] =>
-          (originalImpl() as InstanceState[]).map((i) => ({ ...i, protocol: Protocol.oip })),
+      mocks.lifecycle.getInstancesForModel.mockImplementation((): InstanceState[] =>
+        (originalImpl() as InstanceState[]).map((i) => ({ ...i, protocol: Protocol.oip })),
       );
 
       await service.deployModel(makeParams({ protocol: Protocol.oip }));
@@ -378,6 +381,22 @@ describe('DeployOrchestrationService', () => {
 
       expect(mocks.lifecycle.setRunnerEndpoint).not.toHaveBeenCalled();
     });
+
+    it('leaves startup state and capacity for recovery when move ownership is lost', async () => {
+      let isOwner = true;
+      mocks.workerClient.startRunner.mockImplementation(() => {
+        isOwner = false;
+        return Promise.resolve(makeRunnerResponse());
+      });
+
+      await expect(
+        service.deployModel(makeParams({ isStillOwner: () => isOwner })),
+      ).rejects.toThrow('ownership was lost');
+
+      expect(mocks.lifecycle.setRunnerEndpoint).not.toHaveBeenCalled();
+      expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+      expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
+    });
   });
 
   describe('deployModel — worker errors', () => {
@@ -406,7 +425,7 @@ describe('DeployOrchestrationService', () => {
   });
 
   describe('deployModel — startRunner failure', () => {
-    it('transitions to ERROR and releases capacity', async () => {
+    it('retains an observable ERROR placement and capacity when the start reply is lost', async () => {
       mocks.workerClient.startRunner.mockRejectedValue(new Error('connection refused'));
 
       await expect(service.deployModel(makeParams())).rejects.toThrow('connection refused');
@@ -415,7 +434,40 @@ describe('DeployOrchestrationService', () => {
         'test-model',
         INSTANCE_ID,
         ModelLifecycleState.ERROR,
-        expect.objectContaining({ errorMessage: 'connection refused' }),
+        expect.objectContaining({ errorMessage: 'connection refused', runnerStartAmbiguous: true }),
+      );
+      expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
+    });
+
+    it.each([409, 500, 503])(
+      'retains capacity when an HTTP %i response cannot prove that no runner exists',
+      async (status) => {
+        mocks.workerClient.startRunner.mockRejectedValue(
+          new WorkerHttpError(`start returned ${status}`, status),
+        );
+
+        await expect(service.deployModel(makeParams())).rejects.toThrow(`start returned ${status}`);
+
+        expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+          'test-model',
+          INSTANCE_ID,
+          ModelLifecycleState.ERROR,
+          expect.objectContaining({ runnerStartAmbiguous: true }),
+        );
+        expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
+      },
+    );
+
+    it('releases capacity when the worker definitively rejects the request before starting', async () => {
+      mocks.workerClient.startRunner.mockRejectedValue(new WorkerHttpError('invalid request', 400));
+
+      await expect(service.deployModel(makeParams())).rejects.toThrow('invalid request');
+
+      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+        'test-model',
+        INSTANCE_ID,
+        ModelLifecycleState.ERROR,
+        expect.not.objectContaining({ runnerStartAmbiguous: true }),
       );
       expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });

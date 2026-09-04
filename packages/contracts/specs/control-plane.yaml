@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Control Plane API
-  version: 0.1.3
+  version: 0.1.4
   description: |
     Admin and orchestration API for the Sardeenz control plane. This is the
     single API surface consumed by both the admin dashboard backend and
@@ -256,7 +256,7 @@ paths:
             `INVALID_STATE`; the transient-state body names the offending instance
             and its state, and the in-progress-operation body carries a
             `details.reason` (`delete-in-progress` / `stop-in-progress` /
-            `instance-operation-in-progress`) so a client can distinguish them.
+            `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them.
           content:
             application/json:
               schema:
@@ -370,7 +370,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is not in a state that can be put to sleep
+          description: "Model is not in a state that can be put to sleep, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -422,7 +422,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is not in a wakeable state
+          description: "Model is not in a wakeable state, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -478,7 +478,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Model is already stopping
+          description: "Model is already stopping, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -555,8 +555,8 @@ paths:
           description: >-
             Model already has runtime state (running or transitioning), or a
             delete is already in progress for the model. Both use code
-            `INVALID_STATE`; the in-progress-delete body carries
-            `details.reason: delete-in-progress`.
+            `INVALID_STATE`; an in-progress operation carries `details.reason`
+            (`delete-in-progress` or `move-in-progress`).
           content:
             application/json:
               schema:
@@ -626,8 +626,9 @@ paths:
         "409":
           description: >-
             A delete is already in progress for the model — a new instance
-            cannot be minted for a model whose teardown is backgrounding. Code
-            `INVALID_STATE`, `details.reason: delete-in-progress`.
+            cannot be minted for a model whose teardown is backgrounding, or a move
+            is in progress. Code `INVALID_STATE`, `details.reason: delete-in-progress`
+            or `move-in-progress`.
           content:
             application/json:
               schema:
@@ -703,7 +704,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or a delete is already in progress
+          description: "Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -716,6 +717,81 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: The control plane cannot accept the request (not leader)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/instances/{instanceId}/move:
+    post:
+      operationId: moveModelInstance
+      summary: Move an active model instance to an explicit worker and GPU set
+      description: |
+        Creates a replacement instance on the requested placement, waits for it to become
+        active, then atomically removes traffic from the source and waits for all serving
+        proxies to apply and quiesce that routing generation before draining it. The move is a
+        durable, resumable transaction: a new control-plane leader continues an interrupted
+        cutover or cleanup without launching a second replacement. Poll `GET
+        /api/v1/models/{modelName}` after the `202` response to observe the replacement and
+        source lifecycle states. Only one move per logical model may run at a time.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: instanceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveModelInstanceRequest"
+      responses:
+        "202":
+          description: Move accepted; poll model detail for progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveModelInstanceResponse"
+        "400":
+          description: Malformed target, nonexistent device, or source-equivalent placement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Model, source instance, or target worker not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Source is not active or another mutating operation/move is in progress (`INVALID_STATE`, with `details.reason` for an in-progress move).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Corrupt active source endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Not leader or target cannot satisfy the fixed placement without eviction.
           content:
             application/json:
               schema:
@@ -767,7 +843,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Instance is not in a state that can be put to sleep
+          description: "Instance is not in a state that can be put to sleep, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -825,7 +901,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Instance is not in a wakeable state
+          description: "Instance is not in a wakeable state, or a move is in progress (`details.reason: move-in-progress`)"
           content:
             application/json:
               schema:
@@ -1838,6 +1914,39 @@ components:
           type: string
           format: date-time
           description: When this instance was created.
+
+    MoveModelInstanceRequest:
+      type: object
+      required:
+        - targetWorkerId
+        - targetDeviceIndices
+      properties:
+        targetWorkerId:
+          type: string
+          minLength: 1
+          description: Worker that must host the replacement instance.
+        targetDeviceIndices:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 0
+          description: Exact zero-based device indices for the replacement instance.
+
+    MoveModelInstanceResponse:
+      type: object
+      required:
+        - modelName
+        - sourceInstanceId
+        - replacementInstanceId
+      properties:
+        modelName:
+          type: string
+        sourceInstanceId:
+          type: string
+        replacementInstanceId:
+          type: string
 
     ModelDetail:
       type: object

@@ -12,6 +12,7 @@ import type { InstanceRepository } from './instance-repository.js';
 import type { ModelRepository } from './model-repository.js';
 import { refreshModelRoutingState } from './sleep-wake.js';
 import type { WorkerClient } from '../clients/worker.js';
+import type { MoveOrchestrationService } from './move-orchestration.js';
 import { WorkerHttpError } from '../clients/worker.js';
 import {
   reconciliationTicksTotal,
@@ -83,6 +84,7 @@ export class ReconciliationService {
     // (like instanceRepository/modelRepository above) so existing tests that don't wire it are
     // unaffected — reapOrphanedInstances itself already no-ops without modelRepository.
     private readonly createWorkerClient?: (baseUrl: string) => WorkerClient,
+    private readonly moveOrchestration?: MoveOrchestrationService,
   ) {
     this.clusterEventsChannel = redisKey(keyPrefix, CLUSTER_EVENTS_CHANNEL);
   }
@@ -170,7 +172,12 @@ export class ReconciliationService {
         }
       });
 
+      await this.safeStep(
+        'resumeMoves',
+        () => this.moveOrchestration?.resumeAll() ?? Promise.resolve(),
+      );
       await this.safeStep('recoverStuckInstances', () => this.recoverStuckInstances());
+      await this.safeStep('recoverAmbiguousStarts', () => this.recoverAmbiguousStarts());
       await this.safeStep('reconcileMissingRunners', () => this.reconcileMissingRunners());
       await this.safeStep('reconcileInstanceTable', () => this.reconcileInstanceTable());
       await this.safeStep('reapOrphanedInstances', () => this.reapOrphanedInstances());
@@ -667,6 +674,78 @@ export class ReconciliationService {
             err: err instanceof Error ? err.message : String(err),
           },
           'Failed to handle instance with missing runner',
+        );
+      }
+    }
+  }
+
+  /**
+   * Resolve POST /runners transport failures by the stable control-plane instance id. Capacity
+   * stays held during the full deploy grace only when the worker reports ABSENT: an early 404
+   * could merely mean the worker has not entered its handler yet. READY is explicitly stopped as
+   * soon as it is discoverable; STARTING and inconclusive probes remain for the next tick.
+   */
+  private async recoverAmbiguousStarts(): Promise<void> {
+    if (!this.createWorkerClient) return;
+    const graceMs = this.config.missingRunnerProbeGraceSecs * 1000;
+    const now = Date.now();
+    const candidates = (await this.lifecycle.getAllInstances()).filter(
+      (instance) =>
+        instance.state === ModelLifecycleState.ERROR &&
+        instance.runnerStartAmbiguous === true &&
+        instance.workerId !== null,
+    );
+
+    for (const instance of candidates) {
+      try {
+        const worker = this.workerPool.getWorker(instance.workerId!);
+        if (!worker || worker.status === WorkerStatus.OFFLINE) continue;
+        const client = this.createWorkerClient(worker.managementUrl);
+        const lookup = await client.getRunnerByInstance(instance.instanceId);
+        if (lookup.status === 'starting') continue;
+        if (
+          lookup.status === 'absent' &&
+          now - new Date(instance.stateChangedAt).getTime() <= graceMs
+        ) {
+          continue;
+        }
+        if (lookup.status === 'ready') {
+          try {
+            await client.stopRunner(lookup.runnerId);
+          } catch (err) {
+            if (!(err instanceof WorkerHttpError && err.status === 404)) throw err;
+          }
+        }
+
+        if (instance.runnerHost && instance.runnerPort) {
+          await this.routingMap.removeEndpoint(
+            instance.modelName,
+            instance.runnerHost,
+            instance.runnerEnginePort ?? instance.runnerPort,
+          );
+        }
+        await this.lifecycle.removeInstance(instance.modelName, instance.instanceId);
+        await this.instanceRepository?.delete(instance.instanceId);
+        this.memoryBudget.releaseInstanceReservations(instance.instanceId);
+        await refreshModelRoutingState(this.lifecycle, this.routingMap, instance.modelName);
+        this.logger.info(
+          {
+            modelName: instance.modelName,
+            instanceId: instance.instanceId,
+            workerId: instance.workerId,
+            recoveredStatus: lookup.status,
+          },
+          'Reconciled ambiguous runner start',
+        );
+      } catch (err) {
+        this.logger.warn(
+          {
+            modelName: instance.modelName,
+            instanceId: instance.instanceId,
+            workerId: instance.workerId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'Ambiguous runner start remains unresolved; retaining capacity for retry',
         );
       }
     }

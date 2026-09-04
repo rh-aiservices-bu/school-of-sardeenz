@@ -315,6 +315,29 @@ export type components = {
              */
             timestamp: string;
         };
+        /**
+         * @description Published to `{prefix}:routing-barriers` after the control plane has
+         *     committed a destructive routing-map change. Each subscribed proxy
+         *     refreshes its cache, waits for requests admitted through the previous
+         *     entry to finish, then adds its process id to the Redis set
+         *     `{prefix}:routing-barrier-acks:{barrierId}`. Ready proxies maintain a
+         *     short-lived `{prefix}:proxies:{proxyId}` presence key; the publisher
+         *     snapshots those keys and does not tear down the old runner until every
+         *     pre-cutover proxy acknowledges or its presence lease expires. A proxy
+         *     that reconnects after the cutover loads the new map before admitting
+         *     inference and therefore does not need to acknowledge the old generation.
+         */
+        RoutingPropagationBarrier: {
+            /** @description Unique id for this propagation barrier. */
+            barrierId: string;
+            /** @description Model whose routing entry changed. */
+            modelName: string;
+            /**
+             * Format: date-time
+             * @description ISO 8601 timestamp of the committed routing change.
+             */
+            timestamp: string;
+        };
         /** @description Error response returned by any endpoint on failure. */
         ErrorResponse: {
             /** @description Human-readable error message. */

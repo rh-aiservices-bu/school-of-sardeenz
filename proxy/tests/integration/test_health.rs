@@ -58,7 +58,7 @@ async fn test_readyz_when_redis_disconnected() {
 #[tokio::test]
 async fn test_readyz_before_routing_map_loaded() {
     // Redis connected but no cache injected — routing map not yet loaded.
-    let proxy = TestProxy::spawn("http://127.0.0.1:1").await;
+    let proxy = TestProxy::spawn_before_routing_map_loaded("http://127.0.0.1:1").await;
 
     let client = reqwest::Client::new();
     let resp =

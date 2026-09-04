@@ -7,7 +7,11 @@ import type { WorkerBudget, DeviceBudget } from '../memory-budget.js';
 
 function makeWorker(
   workerId: string,
-  capabilities: { runnerType: string; supportedDeviceTypes: DeviceType[] }[],
+  capabilities: {
+    runnerType: string;
+    supportedDeviceTypes: DeviceType[];
+    maxTensorParallelism?: number;
+  }[],
   devices: { deviceIndex: number; deviceType: DeviceType; memoryTotalBytes: number }[],
 ): WorkerRecord {
   return {
@@ -19,7 +23,7 @@ function makeWorker(
       supportedModelTypes: [ModelType.LLM],
       supportedDeviceTypes: c.supportedDeviceTypes,
       supportedSleepLevels: [SleepLevel.L1_HOST_RAM],
-      maxTensorParallelism: 1,
+      maxTensorParallelism: c.maxTensorParallelism ?? 1,
       kvCacheElasticSharing: false,
     })),
     devices,
@@ -78,6 +82,86 @@ describe('PlacementPipeline', () => {
     expect(result).not.toBeNull();
     expect(result!.workerId).toBe('w1');
     expect(result!.devices).toHaveLength(1);
+  });
+
+  it('validates an exact fixed target and rejects an insufficient selected GPU', () => {
+    const workers = [
+      makeWorker(
+        'w1',
+        [
+          {
+            runnerType: 'vllm',
+            supportedDeviceTypes: [DeviceType.CUDA],
+            maxTensorParallelism: 2,
+          },
+        ],
+        [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
+          { deviceIndex: 1, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
+        ],
+      ),
+    ];
+    const budgets = new Map([
+      [
+        'w1',
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+          { deviceIndex: 1, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 15e9 },
+        ]),
+      ],
+    ]);
+    const request = {
+      modelName: 'test',
+      runnerType: 'vllm',
+      requiredMemory: 8e9,
+      tensorParallel: 1,
+    };
+
+    expect(pipeline.placeFixed(request, 'w1', [0], workers, budgets)?.devices).toEqual([
+      { deviceIndex: 0, deviceType: DeviceType.CUDA },
+    ]);
+    expect(pipeline.placeFixed(request, 'w1', [1], workers, budgets)).toBeNull();
+  });
+
+  it('rejects fixed targets above runner TP capability and unsupported actual device types', () => {
+    const workers = [
+      makeWorker(
+        'w1',
+        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
+          { deviceIndex: 1, deviceType: DeviceType.ROCM, memoryTotalBytes: 16e9 },
+        ],
+      ),
+    ];
+    const budgets = new Map([
+      [
+        'w1',
+        makeBudget('w1', [
+          { deviceIndex: 0, deviceType: DeviceType.CUDA, totalBytes: 16e9, usedBytes: 0 },
+          { deviceIndex: 1, deviceType: DeviceType.ROCM, totalBytes: 16e9, usedBytes: 0 },
+        ]),
+      ],
+    ]);
+
+    expect(
+      pipeline.placeFixed(
+        { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 2 },
+        'w1',
+        [0, 1],
+        workers,
+        budgets,
+      ),
+    ).toBeNull();
+    expect(
+      pipeline.placeFixed(
+        { modelName: 'test', runnerType: 'vllm', requiredMemory: 8e9, tensorParallel: 1 },
+        'w1',
+        [1],
+        workers,
+        budgets,
+      ),
+    ).toBeNull();
   });
 
   it('returns null when no worker has the required runner type', () => {
@@ -217,7 +301,13 @@ describe('PlacementPipeline', () => {
     const workers = [
       makeWorker(
         'w1',
-        [{ runnerType: 'vllm', supportedDeviceTypes: [DeviceType.CUDA] }],
+        [
+          {
+            runnerType: 'vllm',
+            supportedDeviceTypes: [DeviceType.CUDA],
+            maxTensorParallelism: 2,
+          },
+        ],
         [
           { deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },
           { deviceIndex: 1, deviceType: DeviceType.CUDA, memoryTotalBytes: 16e9 },

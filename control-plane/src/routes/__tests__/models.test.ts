@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ModelLifecycleState, Protocol } from '@sardeenz/types';
 import { registerModelRoutes } from '../models.js';
 import type { RouteDeps } from '../deps.js';
-import type { InstanceState } from '../../services/model-lifecycle.js';
+import type { InstanceState, MoveOperation } from '../../services/model-lifecycle.js';
 import { WorkerHttpError } from '../../clients/worker.js';
 
 const INSTANCE_ID = 'inst-000000000001';
@@ -23,6 +23,18 @@ const ACTIVE_STATE: InstanceState = {
   errorMessage: null,
 };
 
+const DURABLE_MOVE: MoveOperation = {
+  operationId: 'move-existing',
+  modelName: 'm1',
+  sourceInstanceId: INSTANCE_ID,
+  replacementInstanceId: 'inst-replacement',
+  targetWorkerId: 'worker-2',
+  targetDeviceIndices: [1],
+  phase: 'REPLACEMENT_STARTING',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+};
+
 interface Overrides {
   stopModel?: ReturnType<typeof vi.fn>;
   sleepModel?: ReturnType<typeof vi.fn>;
@@ -36,6 +48,7 @@ interface Overrides {
   transition?: ReturnType<typeof vi.fn>;
   getWorker?: ReturnType<typeof vi.fn>;
   stopRunner?: ReturnType<typeof vi.fn>;
+  getMoveOperation?: ReturnType<typeof vi.fn>;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -73,6 +86,7 @@ function buildApp(over: Overrides = {}): {
       getAllInstances: vi.fn(() => Promise.resolve([])),
       removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
       transition: over.transition ?? vi.fn(() => Promise.resolve()),
+      getMoveOperation: over.getMoveOperation ?? vi.fn(() => Promise.resolve(null)),
     },
     sleepWake: {
       stopModel: over.stopModel ?? vi.fn(() => Promise.resolve()),
@@ -131,6 +145,7 @@ interface DeployOverrides {
   getInstancesForModel?: ReturnType<typeof vi.fn>;
   removeInstance?: ReturnType<typeof vi.fn>;
   stopModel?: ReturnType<typeof vi.fn>;
+  sleepModel?: ReturnType<typeof vi.fn>;
   refreshAll?: ReturnType<typeof vi.fn>;
   deployModel?: ReturnType<typeof vi.fn>;
   findAll?: ReturnType<typeof vi.fn>;
@@ -140,6 +155,15 @@ interface DeployOverrides {
   createInstanceRecord?: ReturnType<typeof vi.fn>;
   resolveRunnerMetadata?: ReturnType<typeof vi.fn>;
   getMeasuredByInstance?: ReturnType<typeof vi.fn>;
+  placeFixed?: ReturnType<typeof vi.fn>;
+  getInstance?: ReturnType<typeof vi.fn>;
+  getWorker?: ReturnType<typeof vi.fn>;
+  updateEndpointWeight?: ReturnType<typeof vi.fn>;
+  createMoveOperation?: ReturnType<typeof vi.fn>;
+  getMoveOperation?: ReturnType<typeof vi.fn>;
+  updateMoveOperation?: ReturnType<typeof vi.fn>;
+  resumeMove?: ReturnType<typeof vi.fn>;
+  getEntry?: ReturnType<typeof vi.fn>;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -148,6 +172,25 @@ function buildDeployApp(over: DeployOverrides = {}): {
   logError: ReturnType<typeof vi.fn>;
 } {
   const logError = vi.fn();
+  let currentMoveOperation: MoveOperation | null = null;
+  const createMoveOperation = vi.fn((operation: MoveOperation) => {
+    if (currentMoveOperation) return false;
+    currentMoveOperation = operation;
+    return true;
+  });
+  const getMoveOperation = vi.fn(() => Promise.resolve(currentMoveOperation));
+  const updateMoveOperation = vi.fn(
+    (_modelName: string, operationId: string, updates: Partial<MoveOperation>) => {
+      if (currentMoveOperation?.operationId !== operationId) return Promise.resolve(null);
+      currentMoveOperation = { ...currentMoveOperation, ...updates };
+      return Promise.resolve(currentMoveOperation);
+    },
+  );
+  const removeMoveOperation = vi.fn((_modelName: string, operationId: string) => {
+    if (currentMoveOperation?.operationId !== operationId) return Promise.resolve(false);
+    currentMoveOperation = null;
+    return Promise.resolve(true);
+  });
 
   const deps = {
     config: { weightsDir: '/weights' },
@@ -189,11 +232,18 @@ function buildDeployApp(over: DeployOverrides = {}): {
       getAllInstances: over.getAllInstances ?? vi.fn(() => Promise.resolve([])),
       getInstancesForModel: over.getInstancesForModel ?? vi.fn(() => Promise.resolve([])),
       getLastInferenceTimestamps: vi.fn(() => Promise.resolve(new Map())),
-      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstance: over.getInstance ?? vi.fn(() => Promise.resolve(null)),
       transition: over.transition ?? vi.fn(() => Promise.resolve()),
       removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
+      getMoveOperation: over.getMoveOperation ?? getMoveOperation,
+      createMoveOperation: over.createMoveOperation ?? createMoveOperation,
+      updateMoveOperation: over.updateMoveOperation ?? updateMoveOperation,
+      removeMoveOperation,
     },
-    workerPool: { getAllWorkers: vi.fn(() => []) },
+    workerPool: {
+      getAllWorkers: vi.fn(() => []),
+      getWorker: over.getWorker ?? vi.fn(() => null),
+    },
     memoryBudget: {
       getAllBudgets: vi.fn(() => []),
       reserveCapacity: vi.fn(),
@@ -203,6 +253,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     placement: {
       place: over.place ?? vi.fn(() => null),
+      placeFixed: over.placeFixed ?? vi.fn(() => null),
       eligibleWorkerIds: over.eligibleWorkerIds ?? vi.fn(() => new Set(['w1'])),
     },
     eviction: {
@@ -212,13 +263,20 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     sleepWake: {
       stopModel: over.stopModel ?? vi.fn(() => Promise.resolve()),
+      sleepModel: over.sleepModel ?? vi.fn(() => Promise.resolve()),
+      wakeModel: vi.fn(() => Promise.resolve()),
     },
     deployOrchestration: {
       deployModel: over.deployModel ?? vi.fn(() => Promise.resolve()),
     },
+    moveOrchestration: {
+      resume: over.resumeMove ?? vi.fn(() => Promise.resolve()),
+    },
     routingMap: {
       setModelState: over.setModelState ?? vi.fn(() => Promise.resolve()),
       removeModel: vi.fn(() => Promise.resolve()),
+      updateEndpointWeight: over.updateEndpointWeight ?? vi.fn(() => Promise.resolve(true)),
+      getEntry: over.getEntry ?? vi.fn(() => Promise.resolve(null)),
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
@@ -228,6 +286,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
         over.resolveRunnerMetadata ?? vi.fn(() => Promise.resolve({ protocol: Protocol.openai })),
     },
     createRunnerClient: vi.fn(() => ({})),
+    createWorkerClient: vi.fn(() => ({ stopRunner: vi.fn(() => Promise.resolve()) })),
   } as unknown as RouteDeps;
 
   const app = Fastify({ logger: false });
@@ -349,6 +408,369 @@ describe('POST /api/v1/models deploy-path eviction', () => {
 
     expect(res.statusCode).toBe(503);
     expect(res.json<{ code: string }>().code).toBe('PLACEMENT_FAILED');
+  });
+});
+
+describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
+  it('persists a fixed-target replacement before returning 202', async () => {
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const createInstanceRecord = vi.fn(() => Promise.resolve({}));
+    const { app, deps } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      getWorker: vi.fn(() => ({
+        workerId: 'worker-2',
+        managementUrl: 'http://worker-2',
+        devices: [{ deviceIndex: 1 }],
+      })),
+      placeFixed: vi.fn(() => ({
+        workerId: 'worker-2',
+        runnerType: 'vllm',
+        devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+      })),
+      createInstanceRecord,
+    });
+    (deps.workerPool as { getAllWorkers: ReturnType<typeof vi.fn> }).getAllWorkers.mockReturnValue([
+      { workerId: 'worker-2', devices: [{ deviceIndex: 1 }], capabilities: [], status: 'ONLINE' },
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({
+      modelName: 'm1',
+      sourceInstanceId: INSTANCE_ID,
+      replacementInstanceId: expect.stringMatching(/^inst-/) as string,
+    });
+    expect(createInstanceRecord).toHaveBeenCalledOnce();
+    await app.close();
+  });
+
+  it('persists replacement cleanup and invokes the resumable executor when deployment fails', async () => {
+    const source = { ...ACTIVE_STATE, deviceIndices: [0], runnerEnginePort: 8001 };
+    const deployModel = vi.fn(() => Promise.reject(new Error('runner start failed')));
+    const updateMoveOperation = vi.fn(() => Promise.resolve({}));
+    const resumeMove = vi.fn(() => Promise.resolve());
+    const { app, deps } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      getWorker: vi.fn(() => ({
+        workerId: 'worker-2',
+        managementUrl: 'http://worker-2',
+        devices: [{ deviceIndex: 1 }],
+      })),
+      placeFixed: vi.fn(() => ({
+        workerId: 'worker-2',
+        runnerType: 'vllm',
+        devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+      })),
+      deployModel,
+      updateMoveOperation,
+      resumeMove,
+    });
+    (deps.workerPool as { getAllWorkers: ReturnType<typeof vi.fn> }).getAllWorkers.mockReturnValue([
+      { workerId: 'worker-2', devices: [{ deviceIndex: 1 }], capabilities: [], status: 'ONLINE' },
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(res.statusCode).toBe(202);
+    await vi.waitFor(() =>
+      expect(updateMoveOperation).toHaveBeenCalledWith(
+        'm1',
+        expect.any(String),
+        expect.objectContaining({
+          phase: 'REPLACEMENT_CLEANUP',
+          errorMessage: 'runner start failed',
+        }),
+      ),
+    );
+    expect(resumeMove).toHaveBeenCalledWith('m1');
+    await app.close();
+  });
+
+  it('does not dispatch a replacement after losing durable move ownership during placement', async () => {
+    const source = { ...ACTIVE_STATE, deviceIndices: [0], runnerEnginePort: 8001 };
+    const getMoveOperation = vi.fn(() => Promise.resolve(null));
+    const deployModel = vi.fn(() => Promise.resolve());
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      getWorker: vi.fn(() => ({
+        workerId: 'worker-2',
+        managementUrl: 'http://worker-2',
+        devices: [{ deviceIndex: 1 }],
+      })),
+      placeFixed: vi.fn(() => ({
+        workerId: 'worker-2',
+        runnerType: 'vllm',
+        devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+      })),
+      getMoveOperation,
+      createMoveOperation: vi.fn(() => Promise.resolve(true)),
+      deployModel,
+      removeInstance,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ details: { reason: string } }>().details.reason).toBe(
+      'move-ownership-lost',
+    );
+    expect(deployModel).not.toHaveBeenCalled();
+    expect(removeInstance).toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects move admission while any instance operation on the model is claimed', async () => {
+    let finishSleep!: () => void;
+    const sleepModel = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSleep = resolve;
+        }),
+    );
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      sleepModel,
+    });
+    const sleep = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep`,
+    });
+    expect(sleep.statusCode).toBe(202);
+    const move = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(move.statusCode).toBe(409);
+    expect(move.json<{ details: { reason: string } }>().details.reason).toBe(
+      'operation-in-progress',
+    );
+    finishSleep();
+    await app.close();
+  });
+
+  it('rejects move admission while a model-wide sleep is draining', async () => {
+    let releaseSleep!: () => void;
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const sleepModel = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSleep = resolve;
+        }),
+    );
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          pinned: false,
+        }),
+      ),
+      getInstancesForModel: vi.fn(() => Promise.resolve([source])),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      sleepModel,
+    });
+
+    const sleeping = await app.inject({ method: 'POST', url: '/api/v1/models/m1/sleep' });
+    expect(sleeping.statusCode).toBe(202);
+    const move = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(move.statusCode).toBe(409);
+    releaseSleep();
+    await app.close();
+  });
+
+  it('rejects a move on a new leader when Redis already holds the transaction fence', async () => {
+    const source = { ...ACTIVE_STATE, deviceIndices: [0] };
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() => Promise.resolve({ name: 'm1' })),
+      getInstance: vi.fn(() => Promise.resolve(source)),
+      getMoveOperation: vi.fn(() => Promise.resolve(DURABLE_MOVE)),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ details: { reason: string } }>().details.reason).toBe(
+      'move-in-progress',
+    );
+    await app.close();
+  });
+
+  it('keeps move admission fenced through asynchronous capacity reclamation', async () => {
+    let releaseVictim!: () => void;
+    const victimStopped = new Promise<void>((resolve) => {
+      releaseVictim = resolve;
+    });
+    const source = { ...ACTIVE_STATE, deviceIndices: [0], runnerEnginePort: 8001 };
+    const victim = {
+      instanceId: 'inst-victim',
+      modelName: 'victim-model',
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'worker-1',
+      runnerHost: 'localhost',
+      runnerPort: 8100,
+      runnerId: 'runner-victim',
+      deviceIndices: [0],
+      lastInferenceAt: null,
+      stateChangedAt: '2026-01-01T00:00:00Z',
+      errorMessage: null,
+    };
+    const record = {
+      name: 'm1',
+      runnerType: 'vllm',
+      modelPath: '/weights/m1',
+      requiredMemory: 8e9,
+      deviceType: null,
+      tensorParallel: 1,
+      engineConfig: null,
+      engineArgs: null,
+      runtimeModule: null,
+      servedModelName: null,
+      pinned: false,
+    };
+    const deployModel = vi.fn(() => Promise.resolve());
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() => Promise.resolve(record)),
+      getInstance: vi.fn((_modelName: string, instanceId: string) =>
+        Promise.resolve(instanceId === INSTANCE_ID ? source : victim),
+      ),
+      getAllInstances: vi.fn(() => Promise.resolve([victim])),
+      place: vi
+        .fn()
+        .mockReturnValueOnce(null)
+        .mockReturnValue({ workerId: 'worker-1', devices: [{ deviceIndex: 0 }] }),
+      selectVictims: vi.fn(() => [victim]),
+      stopModel: vi.fn((modelName: string) =>
+        modelName === victim.modelName ? victimStopped : Promise.resolve(),
+      ),
+      deployModel,
+    });
+
+    const adding = await app.inject({ method: 'POST', url: '/api/v1/models/m1/instances' });
+    expect(adding.statusCode).toBe(202);
+
+    const moving = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/move`,
+      payload: { targetWorkerId: 'worker-2', targetDeviceIndices: [1] },
+    });
+    expect(moving.statusCode).toBe(409);
+    expect(moving.json<{ details: { reason: string } }>().details.reason).toBe(
+      'operation-in-progress',
+    );
+
+    releaseVictim();
+    await vi.waitFor(() => expect(deployModel).toHaveBeenCalledOnce());
+    await app.close();
+  });
+});
+
+describe('durable move fence blocks ordinary lifecycle mutations after leader handoff', () => {
+  it.each([
+    ['POST', '/api/v1/models/m1/stop'],
+    ['DELETE', '/api/v1/models/m1'],
+    ['POST', `/api/v1/models/m1/instances/${INSTANCE_ID}/sleep`],
+  ] as const)('%s %s returns move-in-progress', async (method, url) => {
+    const { app } = buildApp({
+      getMoveOperation: vi.fn(() => Promise.resolve(DURABLE_MOVE)),
+    });
+
+    const response = await app.inject({ method, url });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ details: { reason: string } }>().details.reason).toBe(
+      'move-in-progress',
+    );
+    await app.close();
   });
 });
 
@@ -978,6 +1400,50 @@ describe('launch/stop/instance paths fenced against an in-flight model DELETE (#
 });
 
 describe('teardownInstance reaps the runner process (#157)', () => {
+  it('retains lifecycle and SQL bookkeeping when a runner start reply was ambiguous', async () => {
+    const ambiguous = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.ERROR,
+      runnerStartAmbiguous: true,
+    };
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const deleteInstance = vi.fn(() => Promise.resolve(true));
+    const stopModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ambiguous)),
+      removeInstance,
+      deleteInstance,
+      stopModel,
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+    expect(response.statusCode).toBe(202);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stopModel).not.toHaveBeenCalled();
+    expect(removeInstance).not.toHaveBeenCalled();
+    expect(deleteInstance).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('does not CASCADE a model row when one of its runner starts has an ambiguous reply', async () => {
+    const ambiguous = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.ERROR,
+      runnerStartAmbiguous: true,
+    };
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({ getInstance: vi.fn(() => Promise.resolve(ambiguous)), deleteModel });
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(response.statusCode).toBe(202);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(deleteModel).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('DELETE /api/v1/models/:modelName calls stopRunner with the instance runnerId, then still cleans up state', async () => {
     const removeInstance = vi.fn(() => Promise.resolve());
     const deleteInstance = vi.fn(() => Promise.resolve(true));
@@ -1105,7 +1571,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     );
   });
 
-  it('warns and continues when the worker is not found in the pool', async () => {
+  it('retains bookkeeping when the worker is not found in the pool', async () => {
     const removeInstance = vi.fn(() => Promise.resolve());
     const { app, stopRunner, logWarn } = buildApp({
       getWorker: vi.fn(() => null),
@@ -1119,7 +1585,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(stopRunner).not.toHaveBeenCalled();
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).not.toHaveBeenCalled();
     expect(logWarn).toHaveBeenCalledWith(
       { modelName: 'm1', instanceId: INSTANCE_ID, workerId: 'worker-1' },
       expect.stringContaining('cannot reap runner process; worker unknown') as string,

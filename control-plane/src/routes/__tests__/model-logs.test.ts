@@ -97,6 +97,7 @@ function toDeps(mocks: Mocks, deployTimeoutSecs = 5): RouteDeps {
     eviction: {} as RouteDeps['eviction'],
     sleepWake: {} as RouteDeps['sleepWake'],
     deployOrchestration: {} as RouteDeps['deployOrchestration'],
+    moveOrchestration: {} as RouteDeps['moveOrchestration'],
     leaderElection: {} as RouteDeps['leaderElection'],
     notifications: {} as RouteDeps['notifications'],
     catalogService: {} as RouteDeps['catalogService'],
