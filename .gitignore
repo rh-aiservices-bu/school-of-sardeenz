@@ -74,6 +74,3 @@ opencode.json
 # Playwright e2e run artifacts
 dashboard/playwright-report/
 dashboard/test-results/
-
-# Blocking local overlays
-deployment/overlays
