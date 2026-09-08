@@ -25,18 +25,9 @@ set here:
 deployment/
 ├── README.md               # this file (format decision)
 ├── control-plane/          # control-plane NetworkPolicy + catalog-import requirements
-├── overlays/               # environment-specific namespace and resource composition
 ├── sif-runner/             # worker security posture + worker Deployment (Task 8)
 └── librarian/              # SIF build/sign/convert Job + signing keys (Task 7)
 ```
 
 Apply a base with `oc apply -k deployment/sif-runner/` (or via an overlay). See each directory's
 `README.md` for what it contains and the order to apply.
-
-To install the Librarian prerequisites and SIF runner into the `school-of-sardeenz` namespace,
-create the namespace first and apply the tracked environment overlay:
-
-```bash
-oc new-project school-of-sardeenz # omit if it already exists
-oc apply -k deployment/overlays/school-of-sardeenz/
-```

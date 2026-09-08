@@ -8,9 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **`school-of-sardeenz` deployment overlay.** A tracked Kustomize overlay now installs the
-  Librarian prerequisites and SIF runner into the `school-of-sardeenz` namespace.
-
 - **Manual platform-image publishing workflow.** A `workflow_dispatch` GitHub workflow builds and
   pushes the proxy, control plane, dashboard, worker base, and worker images to their canonical
   Quay repositories using the `QUAY_ROBOT_SARDEENZ_USERNAME` and
