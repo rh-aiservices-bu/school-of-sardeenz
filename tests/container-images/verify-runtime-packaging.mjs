@@ -112,6 +112,49 @@ for (const service of ['control-plane', 'dashboard']) {
   );
 }
 
+const workerBaseContainerfile = readFileSync(
+  join(repositoryRoot, 'containers/worker-base/Containerfile'),
+  'utf8',
+);
+assert(
+  workerBaseContainerfile.includes('ARG NODE_MAJOR=22'),
+  'worker-base must provide the Node.js major required by the repository and NVML binding',
+);
+
+const workerContainerfile = readFileSync(
+  join(repositoryRoot, 'containers/worker/Containerfile'),
+  'utf8',
+);
+const workerDockerignore = readFileSync(
+  join(repositoryRoot, 'containers/worker/Containerfile.dockerignore'),
+  'utf8',
+);
+for (const requiredInstruction of [
+  'ARG WORKER_BASE_IMAGE=',
+  'npx tsc --build runners/dev-worker/tsconfig.json',
+  'npm ci --omit=dev --workspace=@sardeenz/dev-worker',
+  'COPY --from=build /build/runners/dev-worker/dist ./runners/dev-worker/dist',
+  'CMD ["node", "dist/index.js", "--mode=apptainer"]',
+]) {
+  assert(
+    workerContainerfile.includes(requiredInstruction),
+    `worker Containerfile is missing required packaging instruction: ${requiredInstruction}`,
+  );
+}
+for (const requiredInput of [
+  'package.json',
+  'package-lock.json',
+  'tsconfig.base.json',
+  'tsconfig.json',
+  'packages/types/**',
+  'runners/dev-worker/**',
+]) {
+  assert(
+    workerDockerignore.includes(`!${requiredInput}`),
+    `worker Containerfile ignore must allow required input ${requiredInput}`,
+  );
+}
+
 const compiledTypes = join(typesDirectory, 'dist');
 assert(
   existsSync(join(compiledTypes, 'index.js')),
@@ -147,4 +190,4 @@ try {
   rmSync(fixture, { recursive: true, force: true });
 }
 
-log('Verified service runtime package resolution.');
+log('Verified service and worker runtime packaging.');

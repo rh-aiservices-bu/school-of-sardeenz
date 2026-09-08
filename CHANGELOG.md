@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Deployable production worker image.** `containers/worker/Containerfile` now layers the
+  compiled `runners/dev-worker` TypeScript agent and production dependencies onto `worker-base`,
+  matching the existing `sardeenz-worker` Deployment. The reusable base now uses Node.js 22 and is
+  documented explicitly as insufficient on its own for a worker Pod.
+
 - **Reproducible OpenShift runner-image publishing pipeline.** A parameterized librarian Job now
   accepts a Git repository/ref, Containerfile, OCI repository/tag, SIF name, and ORAS destination.
   It delegates the Containerfile build to OpenShift's native build service, converts the resulting

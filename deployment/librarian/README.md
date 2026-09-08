@@ -68,10 +68,11 @@ The librarian uses the same validated rootless Apptainer posture as Sardeenz wor
 4.15+, `crun`, unprivileged user namespaces, seccomp `Unconfined`, and `/dev/fuse` supplied by the
 CRI-O device annotation. It is not privileged and receives no added Linux capabilities.
 
-`SIF_BUILDER_IMAGE` must already be available to the cluster. Use the `worker-base` image deployed
-with Sardeenz, or build it once using `containers/worker-base/README.md`; prefer passing its
-digest-pinned reference. This bootstrap image is small compared with the runner images and changes
-infrequently.
+`SIF_BUILDER_IMAGE` must already be available to the cluster. Use `worker-base`, built as described
+in `containers/worker-base/README.md`, and prefer its digest-pinned reference. This is intentionally
+the base rather than the deployable `sardeenz-worker` image: SIF conversion needs Apptainer and
+FUSE, but not the TypeScript worker agent. The bootstrap image is small compared with the runner
+images and changes infrequently.
 
 ### 2. Install the pipeline scripts
 

@@ -1,8 +1,10 @@
 # worker-base
 
-The slim host image a Sardeenz **worker Pod** runs. It provides **Apptainer (rootless)** + FUSE
-helpers so the worker agent can `apptainer exec` engine **SIF** files straight off the shared
-module volume. No inference engine is baked in — engines ship as SIFs (see
+The reusable base for the production `sardeenz-worker` image and the librarian's SIF conversion
+container. It provides **Apptainer (rootless)** + FUSE helpers so the worker agent can `apptainer
+exec` engine **SIF** files straight off the shared module volume. It deliberately contains no
+worker-agent code and no inference engine — see [`../worker/`](../worker/) for the deployable
+worker image. Engines ship as SIFs (see
 [ADR-015](../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md)).
 
 ## What's in it
@@ -12,6 +14,7 @@ module volume. No inference engine is baked in — engines ship as SIFs (see
 - `tzdata` **and** `/etc/localtime` → Apptainer bind-mounts `/etc/localtime`/`/etc/hosts` by
   default; without them `apptainer exec` fails with `mount source /etc/localtime doesn't exist`
 - diagnostics: `procps-ng`, `iproute`, `jq`, `ca-certificates`
+- Node.js 22, used by the worker-agent layer
 
 ## How it must run (worker Pod)
 
@@ -30,12 +33,9 @@ The exact Deployment/SCC manifests are a Phase 4 deliverable (`deployment/`, Tas
 
 ## Build
 
-Built in-cluster (no local container tooling needed) or in CI:
-
-```bash
-oc new-build --name worker-base --binary --strategy=docker -n <project>
-oc start-build worker-base --from-dir=. --follow -n <project>
-```
+Build this base first, then build [`../worker/Containerfile`](../worker/Containerfile) with its
+registry-resolvable reference as `WORKER_BASE_IMAGE`. The worker README contains both OpenShift and
+local build recipes. Do not deploy `worker-base` directly: it has no worker-agent entrypoint.
 
 ## Provenance
 

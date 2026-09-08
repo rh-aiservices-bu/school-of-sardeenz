@@ -26,6 +26,9 @@ oc label namespace sardeenz sardeenz.io/module-guard=enforce
 
 The `sardeenz-worker` image is `worker-base` (Apptainer + Node) with the built TypeScript worker
 agent layered on top at `/opt/sardeenz/worker-agent` (running `node dist/index.js --mode=apptainer`).
+Its image definition and build instructions are in
+[`containers/worker/`](../../containers/worker/). `worker-base` by itself is not deployable as a
+worker because it intentionally contains no agent code.
 
 ## Runner port policy
 

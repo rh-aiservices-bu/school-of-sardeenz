@@ -46,7 +46,7 @@ parameters:
     value: quay.io/openshift/origin-cli:4.21
     required: true
   - name: SIF_BUILDER_IMAGE
-    description: Image containing Apptainer and FUSE helpers (worker-base)
+    description: Base image containing Apptainer and FUSE helpers; worker-agent code is not needed
     required: true
   - name: REGISTRY_SECRET
     description: Docker config Secret used for OCI pull/push and ORAS push

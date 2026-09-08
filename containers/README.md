@@ -2,11 +2,12 @@
 
 Container image definitions for Sardeenz. Two kinds live here:
 
-| Kind                  | Directory                      | What it is                                                                                                                                          |
-| --------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Service images**    | `control-plane/`, `dashboard/` | The TypeScript services, deployed as normal K8s workloads.                                                                                          |
-| **Worker host image** | `worker-base/`                 | The slim image a **worker Pod** runs: base OS + accelerator driver access + **Apptainer**. It `apptainer exec`s runner SIFs; no engine is baked in. |
-| **Runner images**     | `runner-<engine>/`             | The image that **becomes a SIF** for an engine (e.g. `runner-vllm/` = base vLLM + kvcached). One directory per runner type.                         |
+| Kind               | Directory                      | What it is                                                                                                                  |
+| ------------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| **Service images** | `control-plane/`, `dashboard/` | The TypeScript services, deployed as normal K8s workloads.                                                                  |
+| **Worker image**   | `worker/`                      | Deployable worker: compiled TypeScript worker agent layered on `worker-base`, running in `apptainer` mode.                  |
+| **Worker base**    | `worker-base/`                 | Reusable Apptainer/FUSE/Node base for `worker/` and the librarian SIF conversion stage; it has no worker-agent code.        |
+| **Runner images**  | `runner-<engine>/`             | The image that **becomes a SIF** for an engine (e.g. `runner-vllm/` = base vLLM + kvcached). One directory per runner type. |
 
 See [ADR-015](../docs/architecture/adrs/adr-015-sif-runtime-packaging.md) (SIF runtime delivery),
 [ADR-016](../docs/architecture/adrs/adr-016-sif-worker-security-posture.md) (worker security

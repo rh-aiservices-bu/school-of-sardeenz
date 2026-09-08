@@ -18,7 +18,8 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | Path                                                 | What                                                                    |
 | ---------------------------------------------------- | ----------------------------------------------------------------------- |
 | `containers/control-plane/`, `containers/dashboard/` | Service images (Dockerfile)                                             |
-| `containers/worker-base/`                            | Slim worker host: UBI + Apptainer + FUSE, execs SIFs, no engine         |
+| `containers/worker/`                                 | Deployable worker: worker-base + compiled TypeScript worker agent       |
+| `containers/worker-base/`                            | Reusable UBI + Apptainer + FUSE + Node base; no worker-agent code       |
 | `containers/runner-<engine>/`                        | Engine image that is converted to a SIF (`vllm`, `mlserver`)            |
 | `deployment/control-plane/`                          | NetworkPolicy for the control plane                                     |
 | `deployment/sif-runner/`                             | Worker SCC, RBAC, PVCs, NetworkPolicy, Deployment, PVC write-protection |
