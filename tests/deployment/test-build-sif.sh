@@ -21,7 +21,7 @@ APPTAINER_TMPDIR="$TEST_DIR/tmp" \
 APPTAINER_CACHEDIR="$TEST_DIR/cache" \
 APPTAINER_AUTH_FILE="$TEST_DIR/auth.json" \
   "$ROOT_DIR/scripts/build-sif.sh" \
-    --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --name runner-1 \
     --oras-ref oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:1 \
     --sign false \
@@ -43,7 +43,7 @@ APPTAINER_TMPDIR="$TEST_DIR/tmp" \
 APPTAINER_CACHEDIR="$TEST_DIR/cache" \
 SIF_SIGNING_KEY="$TEST_DIR/private.asc" \
   "$ROOT_DIR/scripts/build-sif.sh" \
-    --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --name runner-1 \
     --sign true \
     --modules-dir "$TEST_DIR/modules"
@@ -51,5 +51,17 @@ SIF_SIGNING_KEY="$TEST_DIR/private.asc" \
 grep -Eq '^key import .+/private.asc$' "$FAKE_APPTAINER_LOG"
 grep -Eq '^sign --keyidx 0 .+/runner-1.sif$' "$FAKE_APPTAINER_LOG"
 grep -Eq '^verify .+/runner-1.sif$' "$FAKE_APPTAINER_LOG"
+
+if PATH="$TEST_DIR/bin:$PATH" \
+  APPTAINER_TMPDIR="$TEST_DIR/tmp" \
+  APPTAINER_CACHEDIR="$TEST_DIR/cache" \
+    "$ROOT_DIR/scripts/build-sif.sh" \
+      --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+      --name runner-1 \
+      --sign false \
+      --modules-dir "$TEST_DIR/modules" >/dev/null 2>&1; then
+  echo 'tag-plus-digest image reference was accepted' >&2
+  exit 1
+fi
 
 echo 'build-sif signing-mode tests passed'

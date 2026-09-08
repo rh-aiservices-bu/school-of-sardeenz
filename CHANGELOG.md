@@ -116,6 +116,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Apptainer-compatible immutable OCI references.** The Librarian now passes runner images to
+  SIF conversion as `repository@digest` instead of the unsupported `repository:tag@digest` form,
+  while retaining the requested tag on the published OCI image.
+
 - **Portable deployment shell tests.** The SIF publishing tests now use ubiquitous `grep`
   instead of assuming GitHub runners provide the optional `rg` executable.
 

@@ -59,6 +59,10 @@ if ! [[ "$IMAGE" =~ @sha256:[a-fA-F0-9]{64}$ ]]; then
   echo "IMAGE must include a @sha256:<digest> suffix (mutable tags are not allowed)" >&2
   exit 2
 fi
+if [[ "$IMAGE" =~ :[^/@]+@sha256: ]]; then
+  echo "IMAGE must use a digest-only reference; tag@digest references are not supported by Apptainer" >&2
+  exit 2
+fi
 
 if [[ -n "$ORAS_REF" ]] && ! [[ "$ORAS_REF" =~ ^oras://[^[:space:]@]+:[A-Za-z0-9_.-]+$ ]]; then
   echo "Invalid ORAS destination '$ORAS_REF' (expected oras://registry/repository:tag)" >&2
