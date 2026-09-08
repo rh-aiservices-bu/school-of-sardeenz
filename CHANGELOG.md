@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **PoC cluster backing services.** A new `deployment/prereq/` Kustomize base provides persistent,
+  single-replica PostgreSQL 16 and Valkey 8 Services for evaluation clusters, with out-of-band
+  PostgreSQL credentials and explicit production limitations.
+
+- **Complete application deployment bases.** New Kustomize resources deploy the control plane,
+  routing proxy, and dashboard/BFF with Services, health probes, Lease RBAC, shared PVC mounts,
+  Secret-backed service authentication, and documented OpenShift exposure commands. A root
+  deployment base composes the application, backing services, worker, and Librarian prerequisites.
+
 - **Manual platform-image publishing workflow.** A `workflow_dispatch` GitHub workflow builds and
   pushes the proxy, control plane, dashboard, worker base, and worker images to their canonical
   Quay repositories using the `QUAY_ROBOT_SARDEENZ_USERNAME` and

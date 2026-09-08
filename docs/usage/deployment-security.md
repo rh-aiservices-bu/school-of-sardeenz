@@ -65,9 +65,12 @@ Store them in Kubernetes Secrets, not in manifests
 
 ## Control Plane Network Isolation
 
-The control plane does not implement its own authentication. It **must only be deployed within a trusted network boundary** — for example, a Kubernetes namespace with NetworkPolicy restricting ingress to trusted services only.
+The control plane supports shared bearer-token authentication through `SARDEENZ_API_TOKEN`, but
+it **must still be deployed within a trusted network boundary**. Use a dedicated Kubernetes
+namespace and a NetworkPolicy restricting ingress to trusted services; the token is defense in
+depth, not a reason to expose the control plane publicly.
 
-### What is exposed without network isolation
+### What is exposed if authentication or network isolation is missing
 
 Any caller with network access to the control plane can:
 

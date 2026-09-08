@@ -1,7 +1,7 @@
 # Restricts ingress to the control plane Service to the routing proxy and dashboard BFF only
-# (see docs/usage/deployment-security.md — the control plane has no authentication of its own
-# beyond the optional SARDEENZ_API_TOKEN shared secret, so network isolation is the primary
-# boundary). Any other pod in the namespace is denied.
+# (see docs/usage/deployment-security.md). SARDEENZ_API_TOKEN provides bearer authentication, and
+# network isolation remains a required defense-in-depth boundary. Any other pod in the namespace
+# is denied.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

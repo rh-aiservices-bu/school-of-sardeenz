@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sardeenz-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sardeenz-proxy
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          image: quay.io/rh-aiservices-bu/sardeenz-proxy:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SARDEENZ_PROXY_LISTEN_ADDR
+              value: 0.0.0.0:8080
+            - name: SARDEENZ_ADMIN_ADDR
+              value: 0.0.0.0:9099
+            - name: SARDEENZ_REDIS_URL
+              value: redis://sardeenz-redis:6379
+            - name: SARDEENZ_CONTROL_PLANE_URL
+              value: http://sardeenz-control-plane:3000
+            - name: SARDEENZ_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-service-tokens
+                  key: SARDEENZ_API_TOKEN
+          ports:
+            - name: inference
+              containerPort: 8080
+              protocol: TCP
+            - name: admin
+              containerPort: 9099
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: admin
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: '2'
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+            runAsNonRoot: true

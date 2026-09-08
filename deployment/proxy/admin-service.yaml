@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sardeenz-proxy-admin
+spec:
+  selector:
+    app.kubernetes.io/name: sardeenz-proxy
+  ports:
+    - name: admin
+      port: 9099
+      targetPort: admin

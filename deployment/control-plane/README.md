@@ -1,8 +1,26 @@
 # deployment/control-plane
 
-Deployment notes for the control plane's **runner-catalog import** path. (Full control-plane
-manifests are tracked separately; this documents only the catalog/module-store requirements added
-by the runner-catalog feature.)
+Deploys the control-plane API, its cluster-internal Service, leader-election RBAC, NetworkPolicy,
+and runner-catalog storage mounts. PostgreSQL, Valkey, the two service tokens, and the shared SIF
+runner PVCs must exist before the Pod becomes ready; the complete installation order is documented
+in [`../README.md`](../README.md).
+
+The control plane applies its SQL migrations at startup. It uses a Kubernetes Lease in its own
+namespace, even when deployed with one replica, so `SARDEENZ_LEASE_NAMESPACE` comes from the Pod's
+namespace and the ServiceAccount has narrowly scoped Lease permissions.
+
+## Apply
+
+After creating `sardeenz-postgres-credentials` and `sardeenz-service-tokens`, apply this component
+with its backing services and PVCs already installed:
+
+```bash
+oc apply -k deployment/control-plane/
+oc rollout status deployment/sardeenz-control-plane -n sardeenz
+```
+
+Keep `sardeenz-control-plane:3000` cluster-internal. The NetworkPolicy admits only the proxy and
+dashboard Pods.
 
 ## What the import path needs
 
