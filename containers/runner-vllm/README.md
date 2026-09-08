@@ -1,7 +1,8 @@
 # runner-vllm
 
-The **vLLM (+ kvcached)** runner image. It is not run as a container in production — it is built +
-signed in CI, converted to a **SIF** by the librarian job, and `apptainer exec`'d by a worker off
+The **vLLM (+ kvcached)** runner image. It is not run as a container in production — it is built by
+the OpenShift librarian pipeline, converted to a **SIF** (optionally signed for PoC versus
+production), and `apptainer exec`'d by a worker off
 the shared module volume. See [ADR-015](../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md),
 [ADR-017](../../docs/architecture/adrs/adr-017-runner-image-pipeline.md), and
 [`docs/project/phase4.md`](../../docs/project/phase4.md) (Task 3).
@@ -51,14 +52,8 @@ sardeenz_vllm_runner --model /weights/<model> --port <PORT>` (do **not** pass `-
 - **Offline at runtime:** the image keeps `HF_HUB_OFFLINE=1`; weights are pre-staged on the
   weights volume. Only the model-staging step overrides it.
 
-## Convert to a SIF
+## Build and publish
 
-Via the librarian job / `apptainer` (needs node-local scratch + ≥8Gi RAM; never on a serving
-worker):
-
-```bash
-export APPTAINER_TMPDIR=/var/tmp/scratch APPTAINER_CACHEDIR=/var/tmp/scratch/cache
-apptainer build vllm-0.21.sif docker-daemon://localhost/sardeenz-runner-vllm:0.21
-# apptainer sign /modules/vllm-0.21.sif
-apptainer push  vllm-0.21.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
-```
+Use the parameterized [`deployment/librarian`](../../deployment/librarian/) OpenShift Job. Set
+`GIT_REF`, `CONTAINERFILE=containers/runner-vllm/Containerfile`, the OCI/ORAS repositories and
+tags, and `SIGN_SIF=false` for PoC output or `true` after provisioning the signing key.

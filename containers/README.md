@@ -16,18 +16,21 @@ supply chain). Implementation plan: [`docs/project/phase4.md`](../docs/project/p
 ## How a runner runtime is produced
 
 Runner runtimes are **not** baked into the worker image and **not** Lmod modules (the superseded
-Highlander/EasyBuild plan, ADR-004). Each runtime is a `Containerfile` here → an OCI image → a
-signed **SIF** on the shared module volume:
+Highlander/EasyBuild plan, ADR-004). Each runtime is a `Containerfile` here → an OCI image → an
+ORAS-distributed **SIF** that an administrator imports onto the shared module volume:
 
 ```text
-containers/runner-<engine>/Containerfile
-        │  CI: build + scan + sign (normal image pipeline)
+Git ref + containers/runner-<engine>/Containerfile
+        │  OpenShift native Docker build
         ▼
-   OCI image in a registry
-        │  librarian Job: apptainer build/pull  +  apptainer sign   (node-local scratch, not on a serving worker)
+   tagged OCI image + immutable registry digest
+        │  librarian Job: apptainer build + optional sign + ORAS push (node-local scratch)
         ▼
-   <engine>-<version>.sif  →  shared RWX module PVC (write-new-then-symlink, versioned)
-        │  worker: apptainer exec --nv … (squashfuse, read-only, verify signature)
+   tagged SIF artifact in OCI registry
+        │  target admin: Runner Catalog → Import
+        ▼
+   <engine>-<version>.sif on shared RWX module PVC
+        │  worker: apptainer exec --nv … (squashfuse, read-only; verify when enabled)
         ▼
    Runner process serving the engine-runner contract + the engine
 ```
@@ -41,13 +44,17 @@ which has the control plane `apptainer pull oras://…` the SIF onto the module 
 signature). See [`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md). The librarian
 build/sign flow below remains for building your own SIFs.
 
+Maintainers can launch the complete Git-ref → OCI image → signed ORAS SIF operation from the
+parameterized OpenShift librarian Job; all heavy work stays in the build cluster.
+
 Key rules:
 
 - **Conversion is a librarian/CI step, never a serving worker.** It needs node-local scratch
   (`APPTAINER_TMPDIR` on an `emptyDir`, not the network volume — a network-FS tmp fails the
   hardlink-heavy OCI unpack with `unpriv.link … too many links`) and several GB of RAM.
-- **Sign at build, verify at exec.** SIFs on an RWX volume bypass cluster image admission; the
-  signature + RBAC-locked module PVC close that gap (ADR-017).
+- **Sign at build, verify at exec for production.** SIFs on an RWX volume bypass cluster image
+  admission; the signature + locked module PVC close that gap (ADR-017). The publisher supports an
+  explicit unsigned PoC mode, which requires verification to be disabled at import and exec.
 - **kvcached (and other patched runtimes) need a custom image** — base engine + the kvcached
   wheel + `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`. This is required for a plain container too, so
   it's SIF-neutral; it just makes the runner image a first-class, versioned artifact.
@@ -64,7 +71,7 @@ Key rules:
 1. Create `containers/runner-<engine>/Containerfile` (+ `README.md`) — base engine image, any
    patches (as installed wheels/packages, not from-source where avoidable), runtime enablement
    env, and the runner-contract shim entrypoint.
-2. Build in CI; convert to a signed SIF via the librarian job.
+2. Build and publish the OCI image + SIF via the parameterized OpenShift librarian Job.
 3. Add/adjust the runner shim under `runners/<engine>/` so the SIF serves the
    [engine runner contract](../packages/contracts/specs/engine-runner.yaml).
 

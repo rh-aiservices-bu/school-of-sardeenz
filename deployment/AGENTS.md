@@ -19,11 +19,11 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | ---------------------------------------------------- | ----------------------------------------------------------------------- |
 | `containers/control-plane/`, `containers/dashboard/` | Service images (Dockerfile)                                             |
 | `containers/worker-base/`                            | Slim worker host: UBI + Apptainer + FUSE, execs SIFs, no engine         |
-| `containers/runner-<engine>/`                        | Engine image that is converted to a signed SIF (`vllm`, `mlserver`)     |
+| `containers/runner-<engine>/`                        | Engine image that is converted to a SIF (`vllm`, `mlserver`)            |
 | `deployment/control-plane/`                          | NetworkPolicy for the control plane                                     |
 | `deployment/sif-runner/`                             | Worker SCC, RBAC, PVCs, NetworkPolicy, Deployment, PVC write-protection |
-| `deployment/librarian/`                              | Job that pulls/converts/signs SIFs onto the module PVC                  |
-| `scripts/build-sif.sh`                               | Local image → SIF conversion                                            |
+| `deployment/librarian/`                              | Parameterized OpenShift OCI + SIF + ORAS publishing Job                 |
+| `scripts/build-sif.sh`                               | OCI image → optional signed SIF conversion/publish                      |
 | `runners.yaml` (repo root)                           | Official runner catalog consumed by `SARDEENZ_RUNNER_CATALOG_URL`       |
 
 ## Rules
@@ -36,8 +36,8 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 - **Runner images become SIFs:** a new `containers/runner-<engine>/` needs the shim package in
   `runners/<engine>/`, a `runners.yaml` entry (digest-pinned `image`, required `protocol`), and a
   gate in `tests/gates/` if it changes the launch path.
-- **Images are built and signed by Sardeenz CI (ADR-017);** never point manifests at unsigned or
-  mutable tags.
+- **Production images are signed (ADR-017);** unsigned publishing is only for an explicitly
+  verification-disabled PoC. Catalog entries remain digest-pinned even during a PoC.
 - **NetworkPolicies allow-list ingress per flow** (control plane → worker agent port today).
   Add an explicit rule per new flow; the proxy → engine rule is tracked in #181.
 - Ports and env var names must match the code defaults (`control-plane/src/config.ts`,

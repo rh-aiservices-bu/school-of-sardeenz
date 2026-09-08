@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Reproducible OpenShift runner-image publishing pipeline.** A parameterized librarian Job now
+  accepts a Git repository/ref, Containerfile, OCI repository/tag, SIF name, and ORAS destination.
+  It delegates the Containerfile build to OpenShift's native build service, converts the resulting
+  immutable digest to SIF and publishes it through ORAS using a cluster-held registry Secret. SIF
+  signing is an explicit option (off by default for PoC work) backed by a separate signing Secret.
+
 - **Service container build and smoke-test CI (#187).** A required matrix job now builds the
   proxy, control plane, and dashboard images on every pull request with per-service BuildKit
   caching, starts each image without pushing it, and waits for its `/healthz` endpoint. Packaging

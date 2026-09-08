@@ -63,13 +63,14 @@ Signing/verification is defense-in-depth for a shared cluster, not a prerequisit
 runners working. During early experimentation — no CI, no librarian, no signing key yet — you can
 skip it entirely and turn it back on later (it is a runtime toggle; nothing built now is wasted).
 
-1. Build and push **without** `apptainer sign`, and **do not** use `scripts/build-sif.sh` (it
-   refuses to publish unsigned):
+1. Use the parameterized librarian pipeline with `SIGN_SIF=false`, or build and push manually
+   without `apptainer sign`:
 
    ```bash
    export APPTAINER_TMPDIR=/scratch APPTAINER_CACHEDIR=/scratch/cache
    apptainer build vllm-0.21.sif docker://quay.io/<ns>/sardeenz-runner-vllm:0.21
-   apptainer push  vllm-0.21.sif oras://quay.io/<ns>/sardeenz-runners/vllm:0.21
+   apptainer push --allow-unsigned vllm-0.21.sif \
+     oras://quay.io/<ns>/sardeenz-runners/vllm:0.21
    ```
 
 2. Set `SARDEENZ_VERIFY_SIF=false` on **both** the control plane (skips verify after the ORAS pull)
@@ -94,7 +95,7 @@ Anyone with registry/store write access can then build and publish — no keys, 
   description: Seldon MLServer 1.6 — KServe V2 Open Inference Protocol, sklearn/HF-backed.
   engine: MLServer
   runnerType: mlserver
-  version: "1.6"
+  version: '1.6'
   image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6@sha256:<digest>
   sifName: mlserver-1.6
   protocol: oip

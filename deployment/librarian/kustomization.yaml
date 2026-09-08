@@ -5,17 +5,21 @@ namespace: sardeenz
 
 resources:
   - serviceaccount.yaml
-  - job.yaml
+
+# job.yaml is an OpenShift Template. Process it with `oc process`, then create the resulting Job;
+# do not apply the Template as though it were a Job.
 
 # The build script is delivered to the Job as the `sardeenz-librarian-scripts` ConfigMap. It is
 # NOT generated here — kustomize forbids referencing files outside its root, and the canonical
 # script lives at scripts/build-sif.sh (single source of truth, also usable standalone). Create it
 # from the repo root before applying (see README):
 #   oc create configmap sardeenz-librarian-scripts \
-#     --from-file=build-sif.sh=scripts/build-sif.sh -n sardeenz
+#     --from-file=build-sif.sh=scripts/build-sif.sh \
+#     --from-file=build-runner-sif.sh=scripts/build-runner-sif.sh -n sardeenz
 
-# NOT included (create out-of-band; never commit a real key):
-#   - signing-key-secret.example.yaml   # template only — see README
+# NOT included (create out-of-band; never commit real credentials):
+#   - registry-secret.example.yaml
+#   - signing-key-secret.example.yaml   # optional when SIGN_SIF=false
 labels:
   - pairs:
       app.kubernetes.io/part-of: sardeenz

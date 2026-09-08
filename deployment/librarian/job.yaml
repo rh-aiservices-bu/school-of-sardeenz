@@ -1,84 +1,191 @@
-# SIF librarian build/sign/convert Job (ADR-017, Task 7). Edit IMAGE_REF + SIF_NAME, then apply.
-# Builds the runner OCI image into a signed, world-readable SIF on the module store using
-# node-local scratch and adequate memory (the OCI unpack OOMs on <8Gi and fails on a network-FS
-# tmpdir). NEVER scheduled on a serving worker.
-apiVersion: batch/v1
-kind: Job
+# Parameterized OpenShift pipeline: Git source -> OCI image -> signed SIF -> ORAS artifact.
+# Process this Template with `oc process`; the resulting object is an ordinary batch/v1 Job.
+apiVersion: template.openshift.io/v1
+kind: Template
 metadata:
-  name: sardeenz-librarian-build
-  labels:
-    app.kubernetes.io/name: sardeenz-librarian
-    app.kubernetes.io/part-of: sardeenz
-spec:
-  backoffLimit: 1
-  template:
+  name: sardeenz-runner-publish
+  annotations:
+    description: Build and publish a Sardeenz runner OCI image and signed SIF
+parameters:
+  - name: PIPELINE_NAME
+    description: Unique DNS-label name for this Job and its OpenShift Build
+    required: true
+  - name: GIT_URI
+    description: HTTPS URL of the Git repository containing the runner Containerfile
+    value: https://github.com/rh-aiservices-bu/school-of-sardeenz.git
+    required: true
+  - name: GIT_REF
+    description: Git branch, tag, or commit to build (for example dev or feature/my-runner)
+    value: dev
+    required: true
+  - name: CONTEXT_DIR
+    description: Build context directory relative to the repository root; use . for the root
+    value: '.'
+    required: true
+  - name: CONTAINERFILE
+    description: Containerfile path relative to CONTEXT_DIR
+    value: containers/runner-vllm/Containerfile
+    required: true
+  - name: OCI_REPOSITORY
+    description: OCI destination including registry/repository but excluding tag
+    required: true
+  - name: OCI_TAG
+    description: OCI image tag, including pre-release tags when appropriate
+    required: true
+  - name: SIF_NAME
+    description: Versioned SIF filename stem
+    required: true
+  - name: ORAS_REPOSITORY
+    description: SIF destination including registry/repository but excluding scheme and tag
+    required: true
+  - name: ORAS_TAG
+    description: ORAS artifact tag, including pre-release tags when appropriate
+    required: true
+  - name: CLI_IMAGE
+    description: OpenShift CLI image used by the OCI-build init container
+    value: quay.io/openshift/origin-cli:4.21
+    required: true
+  - name: SIF_BUILDER_IMAGE
+    description: Image containing Apptainer and FUSE helpers (worker-base)
+    required: true
+  - name: REGISTRY_SECRET
+    description: Docker config Secret used for OCI pull/push and ORAS push
+    value: sardeenz-librarian-registry
+    required: true
+  - name: SIGNING_SECRET
+    description: Secret containing private.asc and optional passphrase keys
+    value: sardeenz-sif-signing-key
+    required: true
+  - name: SIGN_SIF
+    description: Sign and verify the SIF; set true only after provisioning SIGNING_SECRET
+    value: 'false'
+    required: true
+  - name: OCI_BUILD_CPU_REQUEST
+    value: '2'
+  - name: OCI_BUILD_MEMORY_REQUEST
+    value: 8Gi
+  - name: OCI_BUILD_MEMORY_LIMIT
+    value: 16Gi
+  - name: OCI_BUILD_STORAGE_REQUEST
+    value: 50Gi
+  - name: OCI_BUILD_STORAGE_LIMIT
+    value: 100Gi
+  - name: SIF_BUILD_CPU_REQUEST
+    value: '2'
+  - name: SIF_BUILD_MEMORY_REQUEST
+    value: 8Gi
+  - name: SIF_BUILD_MEMORY_LIMIT
+    value: 16Gi
+  - name: SIF_BUILD_STORAGE_REQUEST
+    value: 60Gi
+  - name: SIF_BUILD_STORAGE_LIMIT
+    value: 100Gi
+objects:
+  - apiVersion: batch/v1
+    kind: Job
     metadata:
+      name: ${PIPELINE_NAME}
       labels:
         app.kubernetes.io/name: sardeenz-librarian
-      annotations:
-        # apptainer build needs /dev/fuse + userns, same as exec.
-        io.kubernetes.cri-o.Devices: '/dev/fuse'
+        app.kubernetes.io/part-of: sardeenz
     spec:
-      serviceAccountName: sardeenz-librarian
-      restartPolicy: Never
-      securityContext:
-        fsGroup: 0
-        seccompProfile:
-          type: Unconfined
-      containers:
-        - name: build
-          # worker-base ships Apptainer + FUSE; no engine needed to convert.
-          image: sardeenz-worker-base:latest
-          command: ['/bin/sh', '-c']
-          args:
-            - |
-              set -eu
-              mkdir -p /scratch/home /scratch/cache
-              exec /opt/librarian/build-sif.sh --image "$IMAGE_REF" --name "$SIF_NAME"
+      backoffLimit: 0
+      activeDeadlineSeconds: 10800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: sardeenz-librarian
+            app.kubernetes.io/part-of: sardeenz
+          annotations:
+            io.kubernetes.cri-o.Devices: '/dev/fuse'
+        spec:
+          serviceAccountName: sardeenz-librarian
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ${REGISTRY_SECRET}
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ['ALL']
-          env:
-            # EDIT THESE per build:
-            - {
-                name: IMAGE_REF,
-                value: 'quay.io/REPLACE_ME/sardeenz-runner-vllm:0.21@sha256:0000000000000000000000000000000000000000000000000000000000000000',
-              }
-            - { name: SIF_NAME, value: 'vllm-0.21' }
-            # Scratch MUST be node-local (see build-sif.sh header).
-            - { name: APPTAINER_TMPDIR, value: /scratch }
-            - { name: APPTAINER_CACHEDIR, value: /scratch/cache }
-            - { name: HOME, value: /scratch/home }
-            - { name: SIF_SIGNING_KEY, value: /etc/sardeenz/signing/private.asc }
-            # The librarian key is passphraseless (fully unattended CI); if a passphrase is ever
-            # required, source it from the Secret rather than setting it inline here.
-          resources:
-            requests:
-              memory: 8Gi
-              cpu: '2'
-              ephemeral-storage: 50Gi
-            limits:
-              memory: 16Gi
-              ephemeral-storage: 60Gi
-          volumeMounts:
-            - { name: modules, mountPath: /modules }
-            - { name: scratch, mountPath: /scratch }
-            - { name: script, mountPath: /opt/librarian }
-            - { name: signing-key, mountPath: /etc/sardeenz/signing, readOnly: true }
-      volumes:
-        - name: modules
-          persistentVolumeClaim:
-            # Librarian mounts the module store READ-WRITE (it is the only writer).
-            claimName: sardeenz-modules
-        - name: scratch
-          # Node-local, disk-backed. Sized to hold one uncompressed engine image (~50Gi).
-          emptyDir:
-            sizeLimit: 60Gi
-        - name: script
-          configMap:
-            name: sardeenz-librarian-scripts
-            defaultMode: 0755
-        - name: signing-key
-          secret:
-            secretName: sardeenz-sif-signing-key
+            fsGroup: 0
+            seccompProfile:
+              type: Unconfined
+          initContainers:
+            - name: build-oci
+              image: ${CLI_IMAGE}
+              command: ['/bin/bash', '/opt/librarian/build-runner-sif.sh', 'build-oci']
+              env:
+                - { name: PIPELINE_NAME, value: '${PIPELINE_NAME}' }
+                - { name: GIT_URI, value: '${GIT_URI}' }
+                - { name: GIT_REF, value: '${GIT_REF}' }
+                - { name: CONTEXT_DIR, value: '${CONTEXT_DIR}' }
+                - { name: CONTAINERFILE, value: '${CONTAINERFILE}' }
+                - { name: OCI_REPOSITORY, value: '${OCI_REPOSITORY}' }
+                - { name: OCI_TAG, value: '${OCI_TAG}' }
+                - { name: REGISTRY_SECRET, value: '${REGISTRY_SECRET}' }
+                - { name: OCI_BUILD_CPU_REQUEST, value: '${OCI_BUILD_CPU_REQUEST}' }
+                - { name: OCI_BUILD_MEMORY_REQUEST, value: '${OCI_BUILD_MEMORY_REQUEST}' }
+                - { name: OCI_BUILD_MEMORY_LIMIT, value: '${OCI_BUILD_MEMORY_LIMIT}' }
+                - { name: OCI_BUILD_STORAGE_REQUEST, value: '${OCI_BUILD_STORAGE_REQUEST}' }
+                - { name: OCI_BUILD_STORAGE_LIMIT, value: '${OCI_BUILD_STORAGE_LIMIT}' }
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { memory: 512Mi }
+              volumeMounts:
+                - { name: scripts, mountPath: /opt/librarian, readOnly: true }
+                - { name: results, mountPath: /results }
+          containers:
+            - name: publish-sif
+              image: ${SIF_BUILDER_IMAGE}
+              command: ['/bin/bash', '/opt/librarian/build-runner-sif.sh', 'publish-sif']
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ['ALL']
+              env:
+                - { name: PIPELINE_NAME, value: '${PIPELINE_NAME}' }
+                - { name: SIF_NAME, value: '${SIF_NAME}' }
+                - { name: ORAS_REPOSITORY, value: '${ORAS_REPOSITORY}' }
+                - { name: ORAS_TAG, value: '${ORAS_TAG}' }
+                - { name: SIGN_SIF, value: '${SIGN_SIF}' }
+                - { name: APPTAINER_TMPDIR, value: /scratch/tmp }
+                - { name: APPTAINER_CACHEDIR, value: /scratch/cache }
+                - { name: APPTAINER_AUTH_FILE, value: /etc/sardeenz/registry/auth.json }
+                - { name: HOME, value: /scratch/home }
+                - { name: SIF_SIGNING_KEY, value: /etc/sardeenz/signing/private.asc }
+                - name: APPTAINER_PASSPHRASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: ${SIGNING_SECRET}
+                      key: passphrase
+                      optional: true
+              resources:
+                requests:
+                  cpu: '${SIF_BUILD_CPU_REQUEST}'
+                  memory: ${SIF_BUILD_MEMORY_REQUEST}
+                  ephemeral-storage: ${SIF_BUILD_STORAGE_REQUEST}
+                limits:
+                  memory: ${SIF_BUILD_MEMORY_LIMIT}
+                  ephemeral-storage: ${SIF_BUILD_STORAGE_LIMIT}
+              volumeMounts:
+                - { name: scripts, mountPath: /opt/librarian, readOnly: true }
+                - { name: results, mountPath: /results }
+                - { name: scratch, mountPath: /scratch }
+                - { name: signing-key, mountPath: /etc/sardeenz/signing, readOnly: true }
+                - { name: registry-auth, mountPath: /etc/sardeenz/registry, readOnly: true }
+          volumes:
+            - name: scripts
+              configMap:
+                name: sardeenz-librarian-scripts
+                defaultMode: 0755
+            - { name: results, emptyDir: {} }
+            - name: scratch
+              emptyDir:
+                sizeLimit: ${SIF_BUILD_STORAGE_LIMIT}
+            - name: signing-key
+              secret:
+                secretName: ${SIGNING_SECRET}
+                optional: true
+            - name: registry-auth
+              secret:
+                secretName: ${REGISTRY_SECRET}
+                items:
+                  - { key: .dockerconfigjson, path: auth.json }
