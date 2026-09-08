@@ -39,11 +39,11 @@ REGISTRY_SECRET=sardeenz-librarian-registry \
 RESULTS_DIR="$TEST_DIR/results" \
   "$ROOT_DIR/scripts/build-runner-sif.sh" build-oci
 
-rg -q 'ref: feature/vllm-rc1' "$FAKE_OC_MANIFEST"
-rg -q 'name: quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21-rc1' \
+grep -Fq 'ref: feature/vllm-rc1' "$FAKE_OC_MANIFEST"
+grep -Fq 'name: quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21-rc1' \
   "$FAKE_OC_MANIFEST"
-rg -q 'dockerfilePath: containers/runner-vllm/Containerfile' "$FAKE_OC_MANIFEST"
-rg -q '@sha256:a{64}' "$TEST_DIR/results/oci-image-ref"
+grep -Fq 'dockerfilePath: containers/runner-vllm/Containerfile' "$FAKE_OC_MANIFEST"
+grep -Eq '@sha256:a{64}' "$TEST_DIR/results/oci-image-ref"
 
 # shellcheck disable=SC2016 # The single-quoted string is the generated fake executable.
 printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$@" >"$FAKE_BUILD_SIF_ARGS"' \
@@ -60,10 +60,10 @@ SIF_WORK_DIR="$TEST_DIR/scratch" \
 BUILD_SIF_SCRIPT="$TEST_DIR/build-sif.sh" \
   "$ROOT_DIR/scripts/build-runner-sif.sh" publish-sif
 
-rg -q '^oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21-rc1$' \
+grep -Fxq 'oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21-rc1' \
   "$FAKE_BUILD_SIF_ARGS"
-rg -q '^false$' "$FAKE_BUILD_SIF_ARGS"
-rg -q "^$TEST_DIR/scratch/published$" "$FAKE_BUILD_SIF_ARGS"
+grep -Fxq 'false' "$FAKE_BUILD_SIF_ARGS"
+grep -Fxq "$TEST_DIR/scratch/published" "$FAKE_BUILD_SIF_ARGS"
 
 if PIPELINE_NAME=vllm-rc1-test \
   SIF_NAME=vllm-0.21-rc1 \

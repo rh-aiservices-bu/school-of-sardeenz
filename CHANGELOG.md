@@ -116,6 +116,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Portable deployment shell tests.** The SIF publishing tests now use ubiquitous `grep`
+  instead of assuming GitHub runners provide the optional `rg` executable.
+
 - **Dashboard notification drawer accessibility coverage (#179).** The empty-state bell now uses
   the semantic subtle text token, and the Playwright axe suite seeds notification history through
   the BFF/mock-control-plane path and scans the open, labeled drawer region, including read/unread

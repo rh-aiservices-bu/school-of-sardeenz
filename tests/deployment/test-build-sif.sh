@@ -27,11 +27,11 @@ APPTAINER_AUTH_FILE="$TEST_DIR/auth.json" \
     --sign false \
     --modules-dir "$TEST_DIR/modules"
 
-rg -q '^build --force --authfile .+/auth.json .+/runner-1.sif docker://' \
+grep -Eq '^build --force --authfile .+/auth.json .+/runner-1.sif docker://' \
   "$FAKE_APPTAINER_LOG"
-rg -q '^push --allow-unsigned --authfile .+/auth.json .+ oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:1$' \
+grep -Eq '^push --allow-unsigned --authfile .+/auth.json .+ oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:1$' \
   "$FAKE_APPTAINER_LOG"
-if rg -q '^(sign|verify|key import)' "$FAKE_APPTAINER_LOG"; then
+if grep -Eq '^(sign|verify|key import)' "$FAKE_APPTAINER_LOG"; then
   echo 'unsigned build unexpectedly used signing commands' >&2
   exit 1
 fi
@@ -48,8 +48,8 @@ SIF_SIGNING_KEY="$TEST_DIR/private.asc" \
     --sign true \
     --modules-dir "$TEST_DIR/modules"
 
-rg -q '^key import .+/private.asc$' "$FAKE_APPTAINER_LOG"
-rg -q '^sign --keyidx 0 .+/runner-1.sif$' "$FAKE_APPTAINER_LOG"
-rg -q '^verify .+/runner-1.sif$' "$FAKE_APPTAINER_LOG"
+grep -Eq '^key import .+/private.asc$' "$FAKE_APPTAINER_LOG"
+grep -Eq '^sign --keyidx 0 .+/runner-1.sif$' "$FAKE_APPTAINER_LOG"
+grep -Eq '^verify .+/runner-1.sif$' "$FAKE_APPTAINER_LOG"
 
 echo 'build-sif signing-mode tests passed'
