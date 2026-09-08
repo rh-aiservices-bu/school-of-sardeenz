@@ -37,7 +37,7 @@ spec:
       containers:
         - name: worker
           # worker-base + the built TypeScript agent layered on top (see this dir's README).
-          image: sardeenz-worker:latest
+          image: quay.io/rh-aiservices-bu/sardeenz-worker:latest
           workingDir: /opt/sardeenz/worker-agent
           command: ['/bin/sh', '-c']
           args:

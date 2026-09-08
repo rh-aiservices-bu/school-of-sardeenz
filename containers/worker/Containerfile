@@ -1,7 +1,7 @@
 # Production Sardeenz worker: rootless Apptainer host plus the compiled TypeScript worker agent.
 # Build from the repository root and pass a registry-resolvable, preferably digest-pinned,
 # worker-base image through WORKER_BASE_IMAGE.
-ARG WORKER_BASE_IMAGE=sardeenz-worker-base:latest
+ARG WORKER_BASE_IMAGE=quay.io/rh-aiservices-bu/sardeenz-worker-base:latest
 
 FROM ${WORKER_BASE_IMAGE} AS build
 

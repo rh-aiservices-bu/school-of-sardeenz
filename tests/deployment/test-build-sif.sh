@@ -21,15 +21,15 @@ APPTAINER_TMPDIR="$TEST_DIR/tmp" \
 APPTAINER_CACHEDIR="$TEST_DIR/cache" \
 APPTAINER_AUTH_FILE="$TEST_DIR/auth.json" \
   "$ROOT_DIR/scripts/build-sif.sh" \
-    --image quay.io/example/runner:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --name runner-1 \
-    --oras-ref oras://quay.io/example/runners/runner:1 \
+    --oras-ref oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:1 \
     --sign false \
     --modules-dir "$TEST_DIR/modules"
 
 rg -q '^build --force --authfile .+/auth.json .+/runner-1.sif docker://' \
   "$FAKE_APPTAINER_LOG"
-rg -q '^push --allow-unsigned --authfile .+/auth.json .+ oras://quay.io/example/runners/runner:1$' \
+rg -q '^push --allow-unsigned --authfile .+/auth.json .+ oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:1$' \
   "$FAKE_APPTAINER_LOG"
 if rg -q '^(sign|verify|key import)' "$FAKE_APPTAINER_LOG"; then
   echo 'unsigned build unexpectedly used signing commands' >&2
@@ -43,7 +43,7 @@ APPTAINER_TMPDIR="$TEST_DIR/tmp" \
 APPTAINER_CACHEDIR="$TEST_DIR/cache" \
 SIF_SIGNING_KEY="$TEST_DIR/private.asc" \
   "$ROOT_DIR/scripts/build-sif.sh" \
-    --image quay.io/example/runner:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --image quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --name runner-1 \
     --sign true \
     --modules-dir "$TEST_DIR/modules"

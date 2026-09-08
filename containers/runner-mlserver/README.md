@@ -26,7 +26,7 @@ wheels, nothing to compile):
 
 > **Build context is the repo root** (the shim lives at `runners/mlserver/`, outside this
 > directory): `podman build -f containers/runner-mlserver/Containerfile -t
-sardeenz-runner-mlserver:1.6 .`
+quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.6 .`
 
 ## Pins (keep in sync; re-test on any bump)
 

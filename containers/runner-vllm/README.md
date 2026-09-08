@@ -25,7 +25,7 @@ stripped to just the runtime (no Node/app):
    contract](../../packages/contracts/specs/engine-runner.yaml) and drives vLLM.
 
 > **Build context is the repo root** (the shim lives at `runners/vllm/`, outside this directory):
-> `podman build -f containers/runner-vllm/Containerfile -t sardeenz-runner-vllm:0.21 .`
+> `podman build -f containers/runner-vllm/Containerfile -t quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21 .`
 
 ## Pins (keep in sync; re-test on any bump)
 

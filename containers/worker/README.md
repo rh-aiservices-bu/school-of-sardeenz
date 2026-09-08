@@ -53,14 +53,14 @@ The equivalent local/container-tool build is:
 ```bash
 podman build \
   -f containers/worker-base/Containerfile \
-  -t quay.io/example/sardeenz-worker-base:latest .
-podman push quay.io/example/sardeenz-worker-base:latest
+  -t quay.io/rh-aiservices-bu/sardeenz-worker-base:latest .
+podman push quay.io/rh-aiservices-bu/sardeenz-worker-base:latest
 
 podman build \
-  --build-arg WORKER_BASE_IMAGE=quay.io/example/sardeenz-worker-base@sha256:<digest> \
+  --build-arg WORKER_BASE_IMAGE=quay.io/rh-aiservices-bu/sardeenz-worker-base@sha256:<digest> \
   -f containers/worker/Containerfile \
-  -t quay.io/example/sardeenz-worker:latest .
-podman push quay.io/example/sardeenz-worker:latest
+  -t quay.io/rh-aiservices-bu/sardeenz-worker:latest .
+podman push quay.io/rh-aiservices-bu/sardeenz-worker:latest
 ```
 
 Set the resulting `sardeenz-worker` reference in the deployment overlay. The base image alone is

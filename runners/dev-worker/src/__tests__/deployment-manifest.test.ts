@@ -40,6 +40,7 @@ interface DeploymentManifest {
       spec: {
         containers: Array<{
           name: string;
+          image?: string;
           env?: Array<{ name: string; value?: string }>;
           ports?: Array<{ name?: string; containerPort: number; protocol?: string }>;
         }>;
@@ -161,6 +162,7 @@ describe('SIF runner deployment manifests (#181)', () => {
       (container) => container.name === 'worker',
     );
     expect(worker).toBeDefined();
+    expect(worker?.image).toBe('quay.io/rh-aiservices-bu/sardeenz-worker:latest');
     const configuredEnv = new Map(worker?.env?.map((entry) => [entry.name, entry.value]));
     expect(configuredEnv.get('SARDEENZ_WORKER_PORT')).toBe(String(workerPort));
     expect(configuredEnv.get('SARDEENZ_RUNNER_PORT_START')).toBe(String(runnerPortStart));

@@ -44,7 +44,7 @@ spec:
   serviceAccountName: sardeenz-control-plane
   containers:
     - name: control-plane
-      image: sardeenz-control-plane:latest
+      image: quay.io/rh-aiservices-bu/sardeenz-control-plane:latest
       env:
         - { name: SARDEENZ_SIF_IMPORTER, value: oras }
         - { name: SARDEENZ_MODULES_DIR, value: /modules }

@@ -1,6 +1,6 @@
 # containers/
 
-Container image definitions for Sardeenz. Two kinds live here:
+Container image definitions for Sardeenz. The following image and artifact roles live here:
 
 | Kind               | Directory                      | What it is                                                                                                                  |
 | ------------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
@@ -13,6 +13,27 @@ See [ADR-015](../docs/architecture/adrs/adr-015-sif-runtime-packaging.md) (SIF r
 [ADR-016](../docs/architecture/adrs/adr-016-sif-worker-security-posture.md) (worker security
 posture), and [ADR-017](../docs/architecture/adrs/adr-017-runner-image-pipeline.md) (build &
 supply chain). Implementation plan: [`docs/project/phase4.md`](../docs/project/phase4.md).
+
+## Canonical Quay repositories
+
+Tags are omitted below. Platform releases should use a release tag; build inputs and deployment
+overlays should prefer digest-pinned references once the image has been published.
+
+| Role                   | Repository                                                  | Content                      |
+| ---------------------- | ----------------------------------------------------------- | ---------------------------- |
+| Routing proxy          | `quay.io/rh-aiservices-bu/sardeenz-proxy`                   | Deployable OCI image         |
+| Control plane          | `quay.io/rh-aiservices-bu/sardeenz-control-plane`           | Deployable OCI image         |
+| Dashboard and BFF      | `quay.io/rh-aiservices-bu/sardeenz-dashboard`               | Deployable OCI image         |
+| Worker base            | `quay.io/rh-aiservices-bu/sardeenz-worker-base`             | Build/runtime base OCI image |
+| Worker                 | `quay.io/rh-aiservices-bu/sardeenz-worker`                  | Deployable OCI image         |
+| vLLM runner source     | `quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm`      | Intermediate OCI image       |
+| MLServer runner source | `quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver`  | Intermediate OCI image       |
+| vLLM runner SIFs       | `oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm`     | Versioned SIF/ORAS artifacts |
+| MLServer runner SIFs   | `oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver` | Versioned SIF/ORAS artifacts |
+
+For future engines, use `sardeenz-runner-images/<engine>` for the intermediate OCI image and
+`sardeenz-runners/<engine>` for the distributed SIF artifacts. These are nested Quay repository
+names, not filesystem directories.
 
 ## How a runner runtime is produced
 
@@ -39,7 +60,8 @@ Git ref + containers/runner-<engine>/Containerfile
 ## Distributing ready-made SIFs (ORAS + catalog)
 
 Rather than have every operator build SIFs, **official** runners are pushed to an OCI registry as
-**ORAS** artifacts (`apptainer push <engine>-<version>.sif oras://quay.io/<ns>/<repo>:<tag>`) and
+**ORAS** artifacts (`apptainer push <engine>-<version>.sif
+oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`) and
 listed in a [`runners.yaml`](../runners.yaml) catalog. Operators **Import** them from the dashboard,
 which has the control plane `apptainer pull oras://…` the SIF onto the module store (verifying the
 signature). See [`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md). The librarian

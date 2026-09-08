@@ -6,7 +6,7 @@ The runner catalog lets operators browse a curated list of engine runners and **
 ## How it works
 
 - **Official runners** are built + signed, then pushed to an OCI registry as **ORAS** artifacts
-  (`apptainer push my.sif oras://quay.io/<ns>/<repo>:<tag>`).
+  (`apptainer push my.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`).
 - A **catalog** file (`runners.yaml`) lists the available runners (title, description, engine,
   version, ORAS image, `sifName`, tags, `protocol`, `entrypoint`, …). `protocol` (required:
   `openai` | `oip`) names the proxy protocol family the runner's models are invoked under —
@@ -50,7 +50,7 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
 
 1. Build + sign the runner SIF (see [`containers/runner-vllm`](../../containers/runner-vllm) and the
    [librarian pipeline](../../deployment/librarian/), or `apptainer build` + `apptainer sign`).
-2. Push it via ORAS: `apptainer push <engine>-<version>.sif oras://quay.io/<ns>/<repo>:<tag>`.
+2. Push it via ORAS: `apptainer push <engine>-<version>.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`.
 3. Add an entry to the catalog `runners.yaml` (schema in the repo-root sample). `sifName` by
    convention follows the `<engine>-<version>` shape and must match `^[A-Za-z0-9_.-]+$` (it becomes
    the `runtimeModule` a worker execs).
@@ -68,9 +68,9 @@ skip it entirely and turn it back on later (it is a runtime toggle; nothing buil
 
    ```bash
    export APPTAINER_TMPDIR=/scratch APPTAINER_CACHEDIR=/scratch/cache
-   apptainer build vllm-0.21.sif docker://quay.io/<ns>/sardeenz-runner-vllm:0.21
+   apptainer build vllm-0.21.sif docker://quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21
    apptainer push --allow-unsigned vllm-0.21.sif \
-     oras://quay.io/<ns>/sardeenz-runners/vllm:0.21
+     oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
    ```
 
 2. Set `SARDEENZ_VERIFY_SIF=false` on **both** the control plane (skips verify after the ORAS pull)

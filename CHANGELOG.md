@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   matching the existing `sardeenz-worker` Deployment. The reusable base now uses Node.js 22 and is
   documented explicitly as insufficient on its own for a worker Pod.
 
+- **Canonical Quay repository layout.** Deployment manifests, runner build examples, librarian
+  parameters, and catalog documentation now consistently use the `quay.io/rh-aiservices-bu`
+  platform repositories plus nested `sardeenz-runner-images/<engine>` OCI and
+  `sardeenz-runners/<engine>` SIF repositories.
+
 - **Reproducible OpenShift runner-image publishing pipeline.** A parameterized librarian Job now
   accepts a Git repository/ref, Containerfile, OCI repository/tag, SIF name, and ORAS destination.
   It delegates the Containerfile build to OpenShift's native build service, converts the resulting

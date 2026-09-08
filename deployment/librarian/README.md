@@ -38,13 +38,13 @@ The parameters normally changed for every build are:
 | `GIT_REF`           | `feature/new-vllm`                                           | Branch, tag, or commit SHA to build.                              |
 | `CONTEXT_DIR`       | `.`                                                          | Repository-relative build context; `.` means the repository root. |
 | `CONTAINERFILE`     | `containers/runner-vllm/Containerfile`                       | Path relative to `CONTEXT_DIR`.                                   |
-| `OCI_REPOSITORY`    | `quay.io/example/sardeenz-runner-vllm`                       | OCI destination without a tag.                                    |
+| `OCI_REPOSITORY`    | `quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm`       | OCI destination without a tag.                                    |
 | `OCI_TAG`           | `0.21-rc1`                                                   | Explicit OCI image tag.                                           |
 | `SIF_NAME`          | `vllm-0.21-rc1`                                              | SIF filename stem.                                                |
-| `ORAS_REPOSITORY`   | `quay.io/example/sardeenz-runners/vllm`                      | SIF artifact destination without scheme/tag.                      |
+| `ORAS_REPOSITORY`   | `quay.io/rh-aiservices-bu/sardeenz-runners/vllm`             | SIF artifact destination without scheme/tag.                      |
 | `ORAS_TAG`          | `0.21-rc1`                                                   | Explicit ORAS artifact tag.                                       |
 | `SIGN_SIF`          | `false`                                                      | Sign and verify before pushing. Defaults to `false` for PoC use.  |
-| `SIF_BUILDER_IMAGE` | `quay.io/example/sardeenz-worker-base@sha256:...`            | Image containing Apptainer and FUSE helpers.                      |
+| `SIF_BUILDER_IMAGE` | `quay.io/rh-aiservices-bu/sardeenz-worker-base@sha256:...`   | Image containing Apptainer and FUSE helpers.                      |
 
 `CLI_IMAGE`, Secret names, and OCI/SIF resource budgets also have parameters. Inspect them with:
 
@@ -168,13 +168,13 @@ oc process -f deployment/librarian/job.yaml \
   -p GIT_REF=feature/new-vllm \
   -p CONTEXT_DIR=. \
   -p CONTAINERFILE=containers/runner-vllm/Containerfile \
-  -p OCI_REPOSITORY=quay.io/example/sardeenz-runner-vllm \
+  -p OCI_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm \
   -p OCI_TAG=0.21-rc1 \
   -p SIF_NAME=vllm-0.21-rc1 \
-  -p ORAS_REPOSITORY=quay.io/example/sardeenz-runners/vllm \
+  -p ORAS_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runners/vllm \
   -p ORAS_TAG=0.21-rc1 \
   -p SIGN_SIF=false \
-  -p SIF_BUILDER_IMAGE=quay.io/example/sardeenz-worker-base@sha256:<digest> \
+  -p SIF_BUILDER_IMAGE=quay.io/rh-aiservices-bu/sardeenz-worker-base@sha256:<digest> \
   | oc create -f - -n sardeenz
 ```
 
