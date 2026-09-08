@@ -7,7 +7,9 @@ in [`../README.md`](../README.md).
 
 The control plane applies its SQL migrations at startup. It uses a Kubernetes Lease in its own
 namespace, even when deployed with one replica, so `SARDEENZ_LEASE_NAMESPACE` comes from the Pod's
-namespace and the ServiceAccount has narrowly scoped Lease permissions.
+namespace and the ServiceAccount has narrowly scoped Lease permissions. `NODE_EXTRA_CA_CERTS`
+points Node.js at the mounted service-account CA so its direct Kubernetes API requests validate
+the API server certificate.
 
 ## Apply
 

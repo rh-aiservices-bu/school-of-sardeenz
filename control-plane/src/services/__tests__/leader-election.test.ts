@@ -1,18 +1,25 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { LeaderElectionService } from '../leader-election.js';
+import { LeaderElectionService, toKubernetesMicroTime } from '../leader-election.js';
 import type { LeaderElectionOptions } from '../leader-election.js';
 
+type LoggerFn = (obj: Record<string, unknown>, msg: string) => void;
+
 interface MockLogger {
-  info: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
+  info: ReturnType<typeof vi.fn<LoggerFn>>;
+  warn: ReturnType<typeof vi.fn<LoggerFn>>;
+  error: ReturnType<typeof vi.fn<LoggerFn>>;
+  debug: ReturnType<typeof vi.fn<LoggerFn>>;
 }
 
 function makeLogger(): MockLogger {
-  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  return {
+    info: vi.fn<LoggerFn>(),
+    warn: vi.fn<LoggerFn>(),
+    error: vi.fn<LoggerFn>(),
+    debug: vi.fn<LoggerFn>(),
+  };
 }
 
 function makeOptions(logger: MockLogger): LeaderElectionOptions {
@@ -86,14 +93,58 @@ describe('LeaderElectionService — leadershipMode', () => {
   });
 });
 
+describe('toKubernetesMicroTime', () => {
+  it('formats JavaScript milliseconds as Kubernetes six-digit MicroTime precision', () => {
+    expect(toKubernetesMicroTime(new Date('2026-09-08T12:34:56.789Z'))).toBe(
+      '2026-09-08T12:34:56.789000Z',
+    );
+  });
+});
+
 describe('LeaderElectionService — lease failure logging', () => {
   function jsonResponse(status: number, body: unknown): Response {
     return {
       ok: status >= 200 && status < 300,
       status,
       json: () => Promise.resolve(body),
+      text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
     } as Response;
   }
+
+  it('sends Kubernetes MicroTime values when creating a Lease', async () => {
+    process.env['KUBERNETES_SERVICE_HOST'] = '10.0.0.1';
+    const svc = new LeaderElectionService(makeOptions(makeLogger()));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(404, {}))
+      .mockResolvedValueOnce(jsonResponse(201, {}));
+    global.fetch = fetchMock;
+
+    const svcInternal = svc as unknown as { tryAcquire: () => Promise<void> };
+    await svcInternal.tryAcquire();
+
+    const createInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(typeof createInit.body).toBe('string');
+    if (typeof createInit.body !== 'string') throw new Error('expected a serialized Lease body');
+    expect(createInit.body).toMatch(/"acquireTime":"[^"]+\.\d{6}Z"/);
+    expect(createInit.body).toMatch(/"renewTime":"[^"]+\.\d{6}Z"/);
+  });
+
+  it('includes the Kubernetes API response body in lease failure logs', async () => {
+    process.env['KUBERNETES_SERVICE_HOST'] = '10.0.0.1';
+    const logger = makeLogger();
+    const svc = new LeaderElectionService(makeOptions(logger));
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(404, {}))
+      .mockResolvedValueOnce(jsonResponse(400, 'invalid MicroTime value'));
+
+    const svcInternal = svc as unknown as { tryAcquire: () => Promise<void> };
+    await svcInternal.tryAcquire();
+
+    const loggedError = logger.warn.mock.calls[0]?.[0]['error'];
+    expect(loggedError).toContain('invalid MicroTime value');
+  });
 
   it('logs the first failure and every FAILURE_LOG_INTERVAL-th failure after that', async () => {
     process.env['KUBERNETES_SERVICE_HOST'] = '10.0.0.1';

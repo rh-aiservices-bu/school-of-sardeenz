@@ -2,6 +2,21 @@ import { readFileSync } from 'node:fs';
 
 import { leaderIsLeader, leaderLeaseFailuresTotal } from '../health/metrics.js';
 
+/** Kubernetes Lease timestamps are metav1.MicroTime and require six fractional digits. */
+export function toKubernetesMicroTime(date: Date = new Date()): string {
+  const iso = date.toISOString();
+  return `${iso.slice(0, -1)}000Z`;
+}
+
+async function responseError(response: Response): Promise<string> {
+  try {
+    const detail = (await response.text()).trim();
+    return detail ? `${response.status}: ${detail.slice(0, 1024)}` : String(response.status);
+  } catch {
+    return String(response.status);
+  }
+}
+
 export interface LeaderElectionLogger {
   info(obj: Record<string, unknown>, msg: string): void;
   warn(obj: Record<string, unknown>, msg: string): void;
@@ -168,12 +183,12 @@ export class LeaderElectionService {
       },
     );
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`Lease GET failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Lease GET failed: ${await responseError(response)}`);
     return (await response.json()) as KubeLease;
   }
 
   private async acquireLease(existing: KubeLease | null): Promise<void> {
-    const now = new Date().toISOString();
+    const now = toKubernetesMicroTime();
     const hostname = process.env['HOSTNAME'] ?? 'unknown';
     const body: KubeLeaseSpec = {
       apiVersion: 'coordination.k8s.io/v1',
@@ -205,7 +220,7 @@ export class LeaderElectionService {
       signal: AbortSignal.timeout(5000),
     });
 
-    if (!response.ok) throw new Error(`Lease acquire failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Lease acquire failed: ${await responseError(response)}`);
   }
 
   private async renewLease(): Promise<void> {
@@ -218,7 +233,7 @@ export class LeaderElectionService {
     }
 
     if (lease.spec) {
-      lease.spec.renewTime = new Date().toISOString();
+      lease.spec.renewTime = toKubernetesMicroTime();
     }
 
     const response = await fetch(
@@ -232,7 +247,7 @@ export class LeaderElectionService {
     );
 
     if (response.status === 409) throw new Error('Lease conflict — another instance took over');
-    if (!response.ok) throw new Error(`Lease renew failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Lease renew failed: ${await responseError(response)}`);
   }
 
   private async releaseLease(): Promise<void> {

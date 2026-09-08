@@ -125,6 +125,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Kubernetes control-plane leader election.** Lease acquisition and renewal now serialize
+  Kubernetes `MicroTime` fields with the required six fractional digits, include API response
+  details in failures, trust the mounted cluster CA, and grant clean Lease deletion on shutdown.
+
 - **Smaller initial SIF-runner PVC allocations.** The expandable RWX module and weights claims now
   default to 50 GiB and 100 GiB respectively, avoiding oversized initial allocations while
   remaining straightforward for operators to grow as their model catalog expands.
