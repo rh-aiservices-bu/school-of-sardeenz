@@ -116,6 +116,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Modern container-runtime deployment baseline.** Removed the obsolete opt-in
+  `ContainerRuntimeConfig` manifest from the SIF runner deployment; supported OpenShift 4+
+  environments provide the required modern container runtime without a Sardeenz-managed
+  MachineConfig rollout.
+
 - **Apptainer-compatible immutable OCI references.** The Librarian now passes runner images to
   SIF conversion as `repository@digest` instead of the unsupported `repository:tag@digest` form,
   while retaining the requested tag on the published OCI image.

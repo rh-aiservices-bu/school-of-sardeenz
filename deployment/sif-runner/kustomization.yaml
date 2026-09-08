@@ -12,8 +12,6 @@ resources:
   - module-pvc-write-protection.yaml
   - networkpolicy.yaml
 
-# NOT included by default (apply deliberately, they are cluster-scoped / disruptive):
-#   - containerruntimeconfig.yaml   # only if a node pool defaults to runc; triggers a MC roll
 labels:
   - pairs:
       app.kubernetes.io/part-of: sardeenz
