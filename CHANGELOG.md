@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Manual platform-image publishing workflow.** A `workflow_dispatch` GitHub workflow builds and
+  pushes the proxy, control plane, dashboard, worker base, and worker images to their canonical
+  Quay repositories using robot-account Secrets. The worker consumes the freshly published base
+  by digest; heavy runner OCI images and SIF conversion remain on OpenShift.
+
 - **Deployable production worker image.** `containers/worker/Containerfile` now layers the
   compiled `runners/dev-worker` TypeScript agent and production dependencies onto `worker-base`,
   matching the existing `sardeenz-worker` Deployment. The reusable base now uses Node.js 22 and is

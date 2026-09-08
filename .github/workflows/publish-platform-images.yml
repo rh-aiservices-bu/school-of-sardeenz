@@ -1,0 +1,178 @@
+name: Publish platform images
+
+run-name: Publish platform images :${{ inputs.tag }} from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: OCI tag applied to all five platform images
+        required: true
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-platform-images-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: quay.io
+  QUAY_NAMESPACE: rh-aiservices-bu
+
+jobs:
+  validate:
+    name: Validate publishing parameters
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate OCI tag
+        env:
+          IMAGE_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Invalid OCI tag: $IMAGE_TAG" >&2
+            exit 2
+          fi
+
+  services:
+    name: Publish ${{ matrix.role }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role: proxy
+            context: ./proxy
+            file: ./proxy/Dockerfile
+            repository: sardeenz-proxy
+          - role: control-plane
+            context: .
+            file: ./containers/control-plane/Dockerfile
+            repository: sardeenz-control-plane
+          - role: dashboard
+            context: .
+            file: ./containers/dashboard/Dockerfile
+            repository: sardeenz-dashboard
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Quay
+        env:
+          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
+          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+        run: |
+          : "${QUAY_ROBOT_USERNAME:?QUAY_ROBOT_USERNAME secret is required}"
+          : "${QUAY_ROBOT_TOKEN:?QUAY_ROBOT_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_USERNAME" --password-stdin
+
+      - name: Build and push ${{ matrix.role }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=publish-${{ matrix.role }}
+          cache-to: type=gha,mode=max,scope=publish-${{ matrix.role }},ignore-error=true
+
+      - name: Log out of Quay
+        if: always()
+        run: docker logout "$REGISTRY" || true
+
+  worker-base:
+    name: Publish worker base
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Quay
+        env:
+          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
+          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+        run: |
+          : "${QUAY_ROBOT_USERNAME:?QUAY_ROBOT_USERNAME secret is required}"
+          : "${QUAY_ROBOT_TOKEN:?QUAY_ROBOT_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_USERNAME" --password-stdin
+
+      - name: Build and push worker base
+        id: publish
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./containers/worker-base
+          file: ./containers/worker-base/Containerfile
+          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=publish-worker-base
+          cache-to: type=gha,mode=max,scope=publish-worker-base,ignore-error=true
+
+      - name: Log out of Quay
+        if: always()
+        run: docker logout "$REGISTRY" || true
+
+  worker:
+    name: Publish worker
+    needs: [validate, worker-base]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Quay
+        env:
+          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
+          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+        run: |
+          : "${QUAY_ROBOT_USERNAME:?QUAY_ROBOT_USERNAME secret is required}"
+          : "${QUAY_ROBOT_TOKEN:?QUAY_ROBOT_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_USERNAME" --password-stdin
+
+      - name: Build and push worker
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./containers/worker/Containerfile
+          build-args: |
+            WORKER_BASE_IMAGE=${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base@${{ needs.worker-base.outputs.digest }}
+          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=publish-worker
+          cache-to: type=gha,mode=max,scope=publish-worker,ignore-error=true
+
+      - name: Log out of Quay
+        if: always()
+        run: docker logout "$REGISTRY" || true

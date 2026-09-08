@@ -35,6 +35,29 @@ For future engines, use `sardeenz-runner-images/<engine>` for the intermediate O
 `sardeenz-runners/<engine>` for the distributed SIF artifacts. These are nested Quay repository
 names, not filesystem directories.
 
+### Publishing platform images from GitHub
+
+The manually triggered `Publish platform images` workflow builds and pushes the five lightweight
+platform images: proxy, control plane, dashboard, worker base, and worker. Runner engine images and
+SIFs are deliberately excluded because they use the OpenShift librarian pipeline.
+
+Configure these GitHub Actions repository secrets:
+
+- `QUAY_ROBOT_USERNAME`: full Quay robot username, for example
+  `rh-aiservices-bu+sardeenz-publisher`;
+- `QUAY_ROBOT_TOKEN`: that robot account's token.
+
+The robot needs write permission on the five platform repositories in the table above. From the
+Actions UI, select **Publish platform images**, choose the Git ref under **Run workflow**, and enter
+the common OCI tag. The equivalent GitHub CLI command is:
+
+```bash
+gh workflow run publish-platform-images.yml --ref dev -f tag=latest
+```
+
+The workflow publishes `linux/amd64` images. It builds the three services in parallel, publishes
+`worker-base`, and then builds `worker` from the exact base digest produced by that run.
+
 ## How a runner runtime is produced
 
 Runner runtimes are **not** baked into the worker image and **not** Lmod modules (the superseded
