@@ -229,7 +229,7 @@ export class MockControlPlane {
             engine: 'vLLM',
             runnerType: 'vllm',
             version: '0.21',
-            image: 'oras://quay.io/sardeenz/runner-vllm:0.21',
+            image: 'oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21',
             sifName: 'vllm-0.21',
             protocol: 'openai',
           },

@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Manual platform-image publishing workflow.** A `workflow_dispatch` GitHub workflow builds and
+  pushes the proxy, control plane, dashboard, worker base, and worker images to their canonical
+  Quay repositories using the `QUAY_ROBOT_SARDEENZ_USERNAME` and
+  `QUAY_ROBOT_SARDEENZ_TOKEN` Secrets. The worker consumes the freshly published base by digest;
+  heavy runner OCI images and SIF conversion remain on OpenShift.
+
+- **Deployable production worker image.** `containers/worker/Containerfile` now layers the
+  compiled `runners/dev-worker` TypeScript agent and production dependencies onto `worker-base`,
+  matching the existing `sardeenz-worker` Deployment. The reusable base now uses Node.js 22 and is
+  documented explicitly as insufficient on its own for a worker Pod.
+
+- **Canonical Quay repository layout.** Deployment manifests, runner build examples, librarian
+  parameters, and catalog documentation now consistently use the `quay.io/rh-aiservices-bu`
+  platform repositories plus nested `sardeenz-runner-images/<engine>` OCI and
+  `sardeenz-runners/<engine>` SIF repositories.
+
+- **Reproducible OpenShift runner-image publishing pipeline.** A parameterized librarian Job now
+  accepts a Git repository/ref, Containerfile, OCI repository/tag, SIF name, and ORAS destination.
+  It delegates the Containerfile build to OpenShift's native build service, converts the resulting
+  immutable digest to SIF and publishes it through ORAS using a cluster-held registry Secret. SIF
+  signing is an explicit option (off by default for PoC work) backed by a separate signing Secret.
+
 - **Service container build and smoke-test CI (#187).** A required matrix job now builds the
   proxy, control plane, and dashboard images on every pull request with per-service BuildKit
   caching, starts each image without pushing it, and waits for its `/healthz` endpoint. Packaging
@@ -93,6 +115,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `control-plane.yaml` bumped to v0.1.1; Rust proxy untouched (ADR-005 flow).
 
 ### Fixed
+
+- **Portable deployment shell tests.** The SIF publishing tests now use ubiquitous `grep`
+  instead of assuming GitHub runners provide the optional `rg` executable.
 
 - **Dashboard notification drawer accessibility coverage (#179).** The empty-state bell now uses
   the semantic subtle text token, and the Playwright axe suite seeds notification history through

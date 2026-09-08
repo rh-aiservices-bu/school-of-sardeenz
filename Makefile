@@ -4,7 +4,7 @@ COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podm
 # `make` with no target shows the help.
 .DEFAULT_GOAL := help
 
-.PHONY: help all lint lint-specs format format-check typecheck test test-integration \
+.PHONY: help all lint lint-specs format format-check typecheck test test-deployment test-integration \
         test-coverage test-python test-python-deps codegen clean services services-stop \
         dev dev-full dev-full-logged dev-cp dev-bff dev-dashboard dev-proxy \
         dev-worker dev-worker-2 dev-worker-stop
@@ -101,11 +101,15 @@ ifdef CARGO
 	cd proxy && cargo check
 endif
 
-test: ## Run all test suites (Vitest + cargo test)
+test: test-deployment ## Run all test suites (Vitest + cargo test)
 	npm test
 ifdef CARGO
 	cd proxy && cargo test
 endif
+
+test-deployment: ## Test deployment/publishing shell orchestration (no cluster required)
+	./tests/deployment/test-build-sif.sh
+	./tests/deployment/test-build-runner-sif.sh
 
 test-integration: ## Integration tests (requires compose services)
 	npm run test:integration -w @sardeenz/control-plane

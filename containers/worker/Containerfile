@@ -1,0 +1,53 @@
+# Production Sardeenz worker: rootless Apptainer host plus the compiled TypeScript worker agent.
+# Build from the repository root and pass a registry-resolvable, preferably digest-pinned,
+# worker-base image through WORKER_BASE_IMAGE.
+ARG WORKER_BASE_IMAGE=quay.io/rh-aiservices-bu/sardeenz-worker-base:latest
+
+FROM ${WORKER_BASE_IMAGE} AS build
+
+WORKDIR /build
+
+COPY package.json package-lock.json ./
+COPY packages/types/package.json packages/types/
+COPY runners/dev-worker/package.json runners/dev-worker/
+
+# The worker's NVML binding uses koffi's install script to select its native prebuilt binary.
+RUN npm ci
+
+COPY tsconfig.base.json tsconfig.json ./
+COPY packages/types/ packages/types/
+COPY runners/dev-worker/ runners/dev-worker/
+
+RUN npx tsc --build runners/dev-worker/tsconfig.json && \
+    rm -rf runners/dev-worker/dist/__tests__
+
+FROM ${WORKER_BASE_IMAGE} AS production-dependencies
+
+WORKDIR /build
+
+COPY package.json package-lock.json ./
+COPY packages/types/package.json packages/types/
+COPY runners/dev-worker/package.json runners/dev-worker/
+
+RUN npm ci --omit=dev --workspace=@sardeenz/dev-worker --include-workspace-root=false
+
+FROM ${WORKER_BASE_IMAGE}
+
+ENV NODE_ENV=production
+
+WORKDIR /opt/sardeenz
+
+# Preserve the npm workspace layout so its @sardeenz/* links resolve normally.
+COPY --from=production-dependencies /build/node_modules ./node_modules
+COPY --from=production-dependencies /build/runners/dev-worker/node_modules ./runners/dev-worker/node_modules
+COPY --from=build /build/packages/types/dist ./packages/types/dist
+COPY --from=build /build/packages/types/package.runtime.json ./packages/types/package.json
+COPY --from=build /build/runners/dev-worker/dist ./runners/dev-worker/dist
+COPY --from=build /build/runners/dev-worker/package.json ./runners/dev-worker/package.json
+
+# Keep the path already used by deployment/sif-runner/worker-deployment.yaml.
+RUN ln -s runners/dev-worker worker-agent
+
+WORKDIR /opt/sardeenz/worker-agent
+
+CMD ["node", "dist/index.js", "--mode=apptainer"]

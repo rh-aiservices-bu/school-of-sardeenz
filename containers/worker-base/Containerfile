@@ -1,4 +1,4 @@
-# Sardeenz worker-base — the slim image a worker Pod runs.
+# Sardeenz worker-base — reusable base for the production worker and SIF builder.
 #
 # It provides Apptainer (rootless) + FUSE helpers so the worker agent can `apptainer exec`
 # engine SIFs from the shared module volume. No engine is baked in.
@@ -12,7 +12,7 @@ FROM registry.access.redhat.com/ubi9/ubi:latest
 # Node.js for the TypeScript worker agent (Phase 4 Task 4 decision: reuse the Phase 3.6 agent via
 # a RunnerLauncher; ApptainerLauncher runs in prod). The agent build output is layered on top of
 # this base (see deployment/sif-runner and containers/worker-base/README.md).
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=22
 
 # EPEL provides apptainer + fuse helpers on UBI9.
 RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \

@@ -242,5 +242,6 @@ jobs:
 #     is not in `make all`, so excluding it does not weaken this pipeline.
 #   - `make test-integration`: remains a separate application integration suite.
 #   - index-completeness check (#81).
-# Container image builds and `/healthz` smoke tests run above; runner/SIF images,
-# image publishing, scanning, multi-architecture builds, and branch protection remain out of scope.
+# Container image builds and `/healthz` smoke tests run above. Platform publishing is manual in
+# publish-platform-images.yml; runner/SIF images, scanning, multi-architecture builds, automatic
+# release publishing, and branch protection remain out of scope.

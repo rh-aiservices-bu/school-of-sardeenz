@@ -1,7 +1,8 @@
 # runner-mlserver
 
 The **Seldon MLServer (KServe V2)** runner image. It is not run as a container in production — it
-is built + signed in CI, converted to a **SIF** by the librarian job, and `apptainer exec`'d by a
+is built by the OpenShift librarian pipeline, converted to a **SIF** (optionally signed), and
+`apptainer exec`'d by a
 worker off the shared module volume. See
 [ADR-015](../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md),
 [ADR-017](../../docs/architecture/adrs/adr-017-runner-image-pipeline.md), and
@@ -25,7 +26,7 @@ wheels, nothing to compile):
 
 > **Build context is the repo root** (the shim lives at `runners/mlserver/`, outside this
 > directory): `podman build -f containers/runner-mlserver/Containerfile -t
-sardeenz-runner-mlserver:1.6 .`
+quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.6 .`
 
 ## Pins (keep in sync; re-test on any bump)
 
@@ -55,18 +56,8 @@ sardeenz_mlserver_runner --model /weights/<model> --port <PORT> -- --served-mode
 <served-name>` — same launch shape as `runner-vllm`, sharing the worker's argv-construction path
   (`ApptainerLauncher`).
 
-## Convert to a SIF
+## Build and publish
 
-Reuses the runner-agnostic librarian pipeline — no pipeline code change needed for this runner
-(`build-sif.sh` takes `--image`/`--name`; `mlserver-1.6` is a valid `--name` and matches the
-catalog's `sifName`):
-
-```bash
-export APPTAINER_TMPDIR=/scratch APPTAINER_CACHEDIR=/scratch/cache
-apptainer pull /modules/mlserver-1.6.sif docker://<registry>/sardeenz-runner-mlserver:1.6
-apptainer sign /modules/mlserver-1.6.sif
-```
-
-Or via the librarian job manifest: set `IMAGE_REF=<mlserver image @sha256>`,
-`SIF_NAME=mlserver-1.6` in `deployment/librarian/job.yaml` and apply; or
-`scripts/build-sif.sh --image <ref> --name mlserver-1.6`.
+Use the parameterized [`deployment/librarian`](../../deployment/librarian/) OpenShift Job. Set
+`GIT_REF`, `CONTAINERFILE=containers/runner-mlserver/Containerfile`, the OCI/ORAS repositories and
+tags, and `SIGN_SIF=false` for PoC output or `true` after provisioning the signing key.

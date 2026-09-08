@@ -6,7 +6,7 @@ The runner catalog lets operators browse a curated list of engine runners and **
 ## How it works
 
 - **Official runners** are built + signed, then pushed to an OCI registry as **ORAS** artifacts
-  (`apptainer push my.sif oras://quay.io/<ns>/<repo>:<tag>`).
+  (`apptainer push my.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`).
 - A **catalog** file (`runners.yaml`) lists the available runners (title, description, engine,
   version, ORAS image, `sifName`, tags, `protocol`, `entrypoint`, …). `protocol` (required:
   `openai` | `oip`) names the proxy protocol family the runner's models are invoked under —
@@ -50,7 +50,7 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
 
 1. Build + sign the runner SIF (see [`containers/runner-vllm`](../../containers/runner-vllm) and the
    [librarian pipeline](../../deployment/librarian/), or `apptainer build` + `apptainer sign`).
-2. Push it via ORAS: `apptainer push <engine>-<version>.sif oras://quay.io/<ns>/<repo>:<tag>`.
+2. Push it via ORAS: `apptainer push <engine>-<version>.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`.
 3. Add an entry to the catalog `runners.yaml` (schema in the repo-root sample). `sifName` by
    convention follows the `<engine>-<version>` shape and must match `^[A-Za-z0-9_.-]+$` (it becomes
    the `runtimeModule` a worker execs).
@@ -63,13 +63,14 @@ Signing/verification is defense-in-depth for a shared cluster, not a prerequisit
 runners working. During early experimentation — no CI, no librarian, no signing key yet — you can
 skip it entirely and turn it back on later (it is a runtime toggle; nothing built now is wasted).
 
-1. Build and push **without** `apptainer sign`, and **do not** use `scripts/build-sif.sh` (it
-   refuses to publish unsigned):
+1. Use the parameterized librarian pipeline with `SIGN_SIF=false`, or build and push manually
+   without `apptainer sign`:
 
    ```bash
    export APPTAINER_TMPDIR=/scratch APPTAINER_CACHEDIR=/scratch/cache
-   apptainer build vllm-0.21.sif docker://quay.io/<ns>/sardeenz-runner-vllm:0.21
-   apptainer push  vllm-0.21.sif oras://quay.io/<ns>/sardeenz-runners/vllm:0.21
+   apptainer build vllm-0.21.sif docker://quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21
+   apptainer push --allow-unsigned vllm-0.21.sif \
+     oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
    ```
 
 2. Set `SARDEENZ_VERIFY_SIF=false` on **both** the control plane (skips verify after the ORAS pull)
@@ -94,7 +95,7 @@ Anyone with registry/store write access can then build and publish — no keys, 
   description: Seldon MLServer 1.6 — KServe V2 Open Inference Protocol, sklearn/HF-backed.
   engine: MLServer
   runnerType: mlserver
-  version: "1.6"
+  version: '1.6'
   image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6@sha256:<digest>
   sifName: mlserver-1.6
   protocol: oip
