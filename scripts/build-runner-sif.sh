@@ -132,7 +132,10 @@ EOF
     echo "OpenShift build completed but did not report a sha256 output digest" >&2
     exit 1
   fi
-  source_ref="${OCI_REPOSITORY}:${OCI_TAG}@${digest}"
+  # Apptainer does not accept Docker references containing both a tag and a digest. Keep the
+  # human-friendly tag on the published OCI output, but hand SIF conversion the immutable,
+  # digest-only reference.
+  source_ref="${OCI_REPOSITORY}@${digest}"
   printf '%s\n' "$source_ref" >"${RESULTS_DIR}/oci-image-ref"
   printf '%s\n' "$(oc get "build/${PIPELINE_NAME}-oci" -o jsonpath='{.status.revision.git.commit}')" \
     >"${RESULTS_DIR}/git-commit"

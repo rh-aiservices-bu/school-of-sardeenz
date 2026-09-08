@@ -43,7 +43,9 @@ grep -Fq 'ref: feature/vllm-rc1' "$FAKE_OC_MANIFEST"
 grep -Fq 'name: quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21-rc1' \
   "$FAKE_OC_MANIFEST"
 grep -Fq 'dockerfilePath: containers/runner-vllm/Containerfile' "$FAKE_OC_MANIFEST"
-grep -Eq '@sha256:a{64}' "$TEST_DIR/results/oci-image-ref"
+grep -Fxq \
+  'quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  "$TEST_DIR/results/oci-image-ref"
 
 # shellcheck disable=SC2016 # The single-quoted string is the generated fake executable.
 printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$@" >"$FAKE_BUILD_SIF_ARGS"' \
