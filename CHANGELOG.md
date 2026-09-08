@@ -116,6 +116,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Smaller initial SIF-runner PVC allocations.** The expandable RWX module and weights claims now
+  default to 50 GiB and 100 GiB respectively, avoiding oversized initial allocations while
+  remaining straightforward for operators to grow as their model catalog expands.
+
 - **Modern container-runtime deployment baseline.** Removed the obsolete opt-in
   `ContainerRuntimeConfig` manifest from the SIF runner deployment; supported OpenShift 4+
   environments provide the required modern container runtime without a Sardeenz-managed

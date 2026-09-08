@@ -1,4 +1,5 @@
 # Shared RWX claims. StorageClass is cluster-specific (CephFS/ODF is the target; EFS is proven).
+# Defaults keep initial allocations modest; expand the claims to suit the installed model catalog.
 # The module store is written ONLY by the librarian job (Task 7) and mounted readOnly by workers.
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -10,7 +11,7 @@ spec:
   accessModes: ['ReadWriteMany']
   resources:
     requests:
-      storage: 200Gi
+      storage: 50Gi
   # storageClassName: ocs-storagecluster-cephfs   # set per cluster
 ---
 apiVersion: v1
@@ -23,5 +24,5 @@ spec:
   accessModes: ['ReadWriteMany']
   resources:
     requests:
-      storage: 500Gi
+      storage: 100Gi
   # storageClassName: ocs-storagecluster-cephfs   # set per cluster
