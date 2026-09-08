@@ -43,9 +43,9 @@ SIFs are deliberately excluded because they use the OpenShift librarian pipeline
 
 Configure these GitHub Actions repository secrets:
 
-- `QUAY_ROBOT_USERNAME`: full Quay robot username, for example
+- `QUAY_ROBOT_SARDEENZ_USERNAME`: full Quay robot username, for example
   `rh-aiservices-bu+sardeenz-publisher`;
-- `QUAY_ROBOT_TOKEN`: that robot account's token.
+- `QUAY_ROBOT_SARDEENZ_TOKEN`: that robot account's token.
 
 The robot needs write permission on the five platform repositories in the table above. From the
 Actions UI, select **Publish platform images**, choose the Git ref under **Run workflow**, and enter

@@ -66,13 +66,13 @@ jobs:
 
       - name: Log in to Quay
         env:
-          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
-          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+          QUAY_ROBOT_SARDEENZ_USERNAME: ${{ secrets.QUAY_ROBOT_SARDEENZ_USERNAME }}
+          QUAY_ROBOT_SARDEENZ_TOKEN: ${{ secrets.QUAY_ROBOT_SARDEENZ_TOKEN }}
         run: |
-          : "${QUAY_ROBOT_USERNAME:?QUAY_ROBOT_USERNAME secret is required}"
-          : "${QUAY_ROBOT_TOKEN:?QUAY_ROBOT_TOKEN secret is required}"
-          printf '%s' "$QUAY_ROBOT_TOKEN" \
-            | docker login "$REGISTRY" --username "$QUAY_ROBOT_USERNAME" --password-stdin
+          : "${QUAY_ROBOT_SARDEENZ_USERNAME:?QUAY_ROBOT_SARDEENZ_USERNAME secret is required}"
+          : "${QUAY_ROBOT_SARDEENZ_TOKEN:?QUAY_ROBOT_SARDEENZ_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_SARDEENZ_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
 
       - name: Build and push ${{ matrix.role }}
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -108,13 +108,13 @@ jobs:
 
       - name: Log in to Quay
         env:
-          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
-          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+          QUAY_ROBOT_SARDEENZ_USERNAME: ${{ secrets.QUAY_ROBOT_SARDEENZ_USERNAME }}
+          QUAY_ROBOT_SARDEENZ_TOKEN: ${{ secrets.QUAY_ROBOT_SARDEENZ_TOKEN }}
         run: |
-          : "${QUAY_ROBOT_USERNAME:?QUAY_ROBOT_USERNAME secret is required}"
-          : "${QUAY_ROBOT_TOKEN:?QUAY_ROBOT_TOKEN secret is required}"
-          printf '%s' "$QUAY_ROBOT_TOKEN" \
-            | docker login "$REGISTRY" --username "$QUAY_ROBOT_USERNAME" --password-stdin
+          : "${QUAY_ROBOT_SARDEENZ_USERNAME:?QUAY_ROBOT_SARDEENZ_USERNAME secret is required}"
+          : "${QUAY_ROBOT_SARDEENZ_TOKEN:?QUAY_ROBOT_SARDEENZ_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_SARDEENZ_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
 
       - name: Build and push worker base
         id: publish
@@ -149,13 +149,13 @@ jobs:
 
       - name: Log in to Quay
         env:
-          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
-          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+          QUAY_ROBOT_SARDEENZ_USERNAME: ${{ secrets.QUAY_ROBOT_SARDEENZ_USERNAME }}
+          QUAY_ROBOT_SARDEENZ_TOKEN: ${{ secrets.QUAY_ROBOT_SARDEENZ_TOKEN }}
         run: |
-          : "${QUAY_ROBOT_USERNAME:?QUAY_ROBOT_USERNAME secret is required}"
-          : "${QUAY_ROBOT_TOKEN:?QUAY_ROBOT_TOKEN secret is required}"
-          printf '%s' "$QUAY_ROBOT_TOKEN" \
-            | docker login "$REGISTRY" --username "$QUAY_ROBOT_USERNAME" --password-stdin
+          : "${QUAY_ROBOT_SARDEENZ_USERNAME:?QUAY_ROBOT_SARDEENZ_USERNAME secret is required}"
+          : "${QUAY_ROBOT_SARDEENZ_TOKEN:?QUAY_ROBOT_SARDEENZ_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_SARDEENZ_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
 
       - name: Build and push worker
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
