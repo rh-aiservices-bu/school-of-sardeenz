@@ -1,6 +1,7 @@
 {
   "title": "Runner Catalog",
   "source": "Source: {{source}}",
+  "fetchedAt": "Fetched at: {{timestamp}}",
   "actions": {
     "import": "Import",
     "reimport": "Re-import",
@@ -11,10 +12,12 @@
     "imported": "Imported",
     "importing": "Importing",
     "notImported": "Not imported",
-    "failed": "Failed"
+    "failed": "Failed",
+    "updateAvailable": "Update available"
   },
   "card": {
-    "minVram": "{{gib}} GiB VRAM"
+    "minVram": "{{gib}} GiB VRAM",
+    "imageDigest": "Image digest: {{digest}}"
   },
   "empty": {
     "title": "No runners in the catalog",

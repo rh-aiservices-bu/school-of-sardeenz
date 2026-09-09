@@ -85,9 +85,10 @@ Git ref + containers/runner-<engine>/Containerfile
 Rather than have every operator build SIFs, **official** runners are pushed to an OCI registry as
 **ORAS** artifacts (`apptainer push <engine>-<version>.sif
 oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`) and
-listed in a [`runners.yaml`](../runners.yaml) catalog. Operators **Import** them from the dashboard,
-which has the control plane `apptainer pull oras://…` the SIF onto the module store (verifying the
-signature). See [`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md). The librarian
+listed in a [`runners.yaml`](../runners.yaml) catalog. Operators **Import** them from the dashboard;
+the control plane streams the digest-checked SIF layer onto the module store with byte-level
+progress, then verifies its signature. See
+[`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md). The librarian
 build/sign flow below remains for building your own SIFs.
 
 Maintainers can launch the complete Git-ref → OCI image → signed ORAS SIF operation from the

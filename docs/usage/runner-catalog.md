@@ -20,12 +20,17 @@ The runner catalog lets operators browse a curated list of engine runners and **
   [`runners.yaml`](../../runners.yaml) is the dev source and the schema reference.
 - The **control plane** loads the catalog, cross-references the module store, and serves a merged
   view (which entries are imported, whether an update is available, and any module-store SIFs not
-  in the catalog). The dashboard refreshes on page entry, on a manual **Refresh**, and live via the
-  event stream during imports.
-- **Import** runs `apptainer pull <sifName>.sif oras://<image>` onto the module store, verifies the
-  signature, and publishes it atomically. **Uninstall** deletes the SIF (blocked while a runner
-  started from it is running). The [librarian build pipeline](../../deployment/librarian/) remains
-  for building your own SIFs.
+  in the catalog). Manual **Refresh** bypasses HTTP and intermediary caches so a mutable catalog URL
+  is re-read from its origin. The dashboard shows when that fetch completed and also refreshes live
+  via the event stream during imports.
+- **Import** resolves the digest-pinned OCI manifest, streams its single SIF layer directly onto
+  the module store with byte-level progress, verifies the layer digest and SIF signature, and
+  publishes it atomically. The imported image digest is recorded in a
+  `<sifName>.sif.metadata.json` sidecar. If the catalog later advertises a different digest for the
+  same engine version, the dashboard marks an update available; **Re-import** installs it. Legacy
+  SIFs without sidecar metadata are conservatively marked as having an update until re-imported
+  once. **Uninstall** deletes both files (blocked while a runner started from the SIF is running).
+  The [librarian build pipeline](../../deployment/librarian/) remains for building your own SIFs.
 
 ## Configuration
 
@@ -34,8 +39,9 @@ The runner catalog lets operators browse a curated list of engine runners and **
 | `SARDEENZ_RUNNER_CATALOG_URL`     | Catalog source — http(s) URL, local path, or `file://`                                                                                                                                | official `school-of-sardeenz` raw URL |
 | `SARDEENZ_ALLOW_INSECURE_CATALOG` | Allow an `http://` (plaintext) catalog source. Off by default — a plaintext catalog can be rewritten in transit. Prefer `https://` or a local path/`file://` instead of enabling this | `false`                               |
 | `SARDEENZ_MODULES_DIR`            | Shared module store path                                                                                                                                                              | `/modules`                            |
-| `SARDEENZ_SIF_IMPORTER`           | `oras` (real `apptainer pull`) or `stub` (dev placeholder)                                                                                                                            | `stub`                                |
+| `SARDEENZ_SIF_IMPORTER`           | `oras` (real OCI SIF stream + verification) or `stub` (explicit dev/test placeholder that cannot execute)                                                                             | `oras`                                |
 | `SARDEENZ_VERIFY_SIF`             | `apptainer verify` SIFs — at catalog import (control plane) and at exec (worker). Set `false` for unsigned experimentation only (see below)                                           | `true`                                |
+| `APPTAINER_AUTH_FILE`             | Docker-format registry credential file used by OCI imports; credentials are sent only after an HTTPS registry authentication challenge                                                | unset (public registries only)        |
 
 ORAS image references (`image: oras://...`) in the catalog must be digest-pinned
 (`oras://<registry>/<repo>:<tag>@sha256:<digest>`). A mutable tag can be repointed after a catalog
@@ -73,7 +79,7 @@ skip it entirely and turn it back on later (it is a runtime toggle; nothing buil
      oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21
    ```
 
-2. Set `SARDEENZ_VERIFY_SIF=false` on **both** the control plane (skips verify after the ORAS pull)
+2. Set `SARDEENZ_VERIFY_SIF=false` on **both** the control plane (skips verify after the OCI download)
    and the workers (skips verify before exec). Locally that is one line in `.env`, which drives both;
    on a cluster set the env var on the control-plane and worker Deployments.
 

@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bodyless API mutations no longer surface JSON errors.** The dashboard BFF and browser client
+  now accept successful `204 No Content` and `205 Reset Content` responses without attempting to
+  parse an absent JSON body, fixing the false uninstall failure shown after a runner was deleted.
+
+- **Runner imports no longer silently create stub SIFs.** The control plane now defaults to the
+  real ORAS importer, requires an explicit `SARDEENZ_SIF_IMPORTER=stub` for non-runnable dev/test
+  placeholders, and rejects misspelled importer values at startup.
+
 ### Added
+
+- **Byte-accurate runner-catalog imports.** The control plane now resolves digest-pinned OCI
+  manifests, streams each single-layer SIF directly to the module store with live progress,
+  validates manifest and layer SHA-256 digests and sizes, and retains optional Apptainer signature
+  verification before atomic publication.
 
 - **PoC cluster backing services.** A new `deployment/prereq/` Kustomize base provides persistent,
   single-replica PostgreSQL 16 and Valkey 8 Services for evaluation clusters, with out-of-band
@@ -124,6 +139,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `control-plane.yaml` bumped to v0.1.1; Rust proxy untouched (ADR-005 flow).
 
 ### Fixed
+
+- **Runner catalog refresh and digest tracking.** Catalog refreshes now bypass upstream HTTP/CDN
+  caches, imported SIFs retain digest provenance in sidecar metadata, and digest drift is surfaced
+  as an available update. The dashboard shows the catalog fetch time and abbreviated image digest.
 
 - **Kubernetes control-plane leader election.** Lease acquisition and renewal now serialize
   Kubernetes `MicroTime` fields with the required six fractional digits, include API response

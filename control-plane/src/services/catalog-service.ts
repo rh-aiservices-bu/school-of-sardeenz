@@ -106,7 +106,20 @@ export class CatalogService {
         );
       }
       const fetchImpl = this.deps.fetch ?? fetch;
-      const res = await fetchImpl(this.source, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      // A refresh must reach the origin even when the catalog is hosted behind a CDN (the
+      // official raw GitHub URL is one such source). The unique query parameter defeats shared
+      // intermediary caches; the request directives also prevent a conforming cache from
+      // satisfying the request with a stored response.
+      const url = new URL(this.source);
+      url.searchParams.set('_sardeenz_refresh', `${Date.now()}`);
+      const res = await fetchImpl(url, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store',
+          Pragma: 'no-cache',
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
       if (!res.ok) {
         throw new Error(`Catalog fetch failed: ${res.status} ${res.statusText}`);
       }

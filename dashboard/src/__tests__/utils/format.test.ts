@@ -4,6 +4,7 @@ import {
   formatRelativeTime,
   formatPercentage,
   formatDateTime,
+  shortImageDigest,
 } from '../../utils/format';
 
 describe('formatBytes', () => {
@@ -126,5 +127,17 @@ describe('formatDateTime', () => {
     const result = formatDateTime('2025-01-15T10:30:00Z');
     expect(result).toBeTruthy();
     expect(result).not.toBe('—');
+  });
+});
+
+describe('shortImageDigest', () => {
+  it('returns the first six lowercase digest characters', () => {
+    expect(shortImageDigest(`oras://registry/module@sha256:${'ABCDEF'.repeat(10)}ABCD`)).toBe(
+      'abcdef',
+    );
+  });
+
+  it('returns undefined when the image is not digest-pinned', () => {
+    expect(shortImageDigest('oras://registry/module:latest')).toBeUndefined();
   });
 });

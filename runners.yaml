@@ -2,8 +2,8 @@
 #
 # Sardeenz's control plane loads this file (from SARDEENZ_RUNNER_CATALOG_URL, default the official
 # school-of-sardeenz catalog; this in-repo copy is the dev/reference source) and presents it in the
-# dashboard. Each entry is a signed SIF published to an OCI registry via ORAS; "Import" runs
-# `apptainer pull <sifName>.sif oras://<image>` onto the shared module store.
+# dashboard. Each entry is a signed SIF published to an OCI registry via ORAS; "Import" streams
+# the digest-checked SIF layer onto the shared module store and reports byte-level progress.
 #
 # Schema:
 #   apiVersion: sardeenz.io/v1

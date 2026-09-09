@@ -44,6 +44,11 @@ export class ControlPlaneClient {
         cause: cause instanceof Error ? cause.message : String(cause),
       });
     }
+    // 204 and 205 responses are intentionally bodyless. Trying to decode them as JSON turns a
+    // successful mutation into a spurious 502 at the BFF boundary.
+    if (res.status === 204 || res.status === 205) {
+      return { status: res.status, data: undefined };
+    }
     let data: unknown;
     try {
       data = await res.json();

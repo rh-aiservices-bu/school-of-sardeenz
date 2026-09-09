@@ -33,11 +33,10 @@ FROM base AS runtime
 
 ENV NODE_ENV=production
 
-# Apptainer CLI for the runner-catalog import path (SARDEENZ_SIF_IMPORTER=oras runs
-# `apptainer pull oras://…` + `apptainer verify`). Pull/verify are download-only and need no
-# setuid/fuse/userns, so the unprivileged package suffices. Skip this layer if you only ever run
-# the 'stub' importer. Pinned; bump deliberately, and update APPTAINER_DEB_SHA256 to match (sha256
-# of the .deb asset on the GitHub release page for the new version).
+# Apptainer CLI for runner-catalog signature verification. The control plane streams the ORAS SIF
+# layer itself, then runs `apptainer verify`; verification needs no setuid/fuse/userns, so the
+# unprivileged package suffices. Skip this layer if you only ever run the 'stub' importer. Pinned;
+# bump deliberately, and update APPTAINER_DEB_SHA256 to match (sha256 of the .deb release asset).
 ARG APPTAINER_VERSION=1.3.6
 ARG APPTAINER_DEB_SHA256=2723b2928cfc30edf687723c49556ec4e013f0bf7cdb43a5a76bca7bd3c70792
 RUN apt-get update && \

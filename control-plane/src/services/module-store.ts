@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, unlink, chmod } from 'node:fs/promises';
+import { mkdir, readdir, rename, unlink, chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ClusterEventType, CatalogItemState, type ControlPlaneComponents } from '@sardeenz/types';
 import type { CatalogEntry } from './catalog-service.js';
@@ -6,6 +6,19 @@ import type { SifImporter } from './sif-importer.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 type CatalogItemStatus = ControlPlaneComponents['schemas']['CatalogItemStatus'];
+
+interface ImportedModuleMetadata {
+  schemaVersion: 1;
+  image: string;
+  imageDigest: string;
+  importedAt: string;
+}
+
+export type ImportedModules = Map<string, string | undefined>;
+
+function imageDigest(image: string): string | undefined {
+  return image.match(/@sha256:([a-fA-F0-9]{64})$/)?.[1]?.toLowerCase();
+}
 
 export interface ModuleStoreLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -57,13 +70,41 @@ export class ModuleStoreService {
     }
   }
 
+  // Return every imported SIF and the digest recorded when it was imported. Existing SIFs from
+  // before digest tracking have an undefined digest, which is deliberately treated as needing a
+  // re-import: without provenance metadata we cannot prove that the installed bytes are current.
+  async listImportedModules(): Promise<ImportedModules> {
+    const stems = await this.listImportedStems();
+    const modules: ImportedModules = new Map();
+    await Promise.all(
+      [...stems].map(async (stem) => {
+        try {
+          const raw = await readFile(join(this.modulesDir, `${stem}.sif.metadata.json`), 'utf8');
+          const metadata = JSON.parse(raw) as Partial<ImportedModuleMetadata>;
+          const digest =
+            metadata.schemaVersion === 1 && typeof metadata.imageDigest === 'string'
+              ? metadata.imageDigest.toLowerCase()
+              : undefined;
+          modules.set(stem, /^[a-f0-9]{64}$/.test(digest ?? '') ? digest : undefined);
+        } catch {
+          modules.set(stem, undefined);
+        }
+      }),
+    );
+    return modules;
+  }
+
   // Remove leftover import temp files (e.g. from a crash mid-import). Best-effort; call at startup.
   async sweepTempFiles(): Promise<void> {
     try {
       const files = await readdir(this.modulesDir);
       await Promise.all(
         files
-          .filter((f) => f.startsWith('.') && f.includes('.sif.tmp.'))
+          .filter(
+            (f) =>
+              f.startsWith('.') &&
+              (f.includes('.sif.tmp.') || f.includes('.sif.metadata.json.tmp.')),
+          )
           .map((f) => unlink(join(this.modulesDir, f)).catch(() => {})),
       );
     } catch {
@@ -114,7 +155,14 @@ export class ModuleStoreService {
     await mkdir(this.modulesDir, { recursive: true }).catch(() => {});
     const destPath = join(this.modulesDir, `${entry.sifName}.sif`);
     const tmpPath = join(this.modulesDir, `.${entry.sifName}.sif.tmp.${process.pid}.${Date.now()}`);
+    const metadataPath = join(this.modulesDir, `${entry.sifName}.sif.metadata.json`);
+    const metadataTmpPath = join(
+      this.modulesDir,
+      `.${entry.sifName}.sif.metadata.json.tmp.${process.pid}.${Date.now()}`,
+    );
     try {
+      const digest = imageDigest(entry.image);
+      if (!digest) throw new Error(`Catalog image has no digest: ${entry.image}`);
       await this.importer.import(entry, {
         tmpPath,
         onProgress: (percentComplete) => {
@@ -127,9 +175,17 @@ export class ModuleStoreService {
           this.publish(ClusterEventType.CATALOG_IMPORT_PROGRESS, entry, s);
         },
       });
+      const metadata: ImportedModuleMetadata = {
+        schemaVersion: 1,
+        image: entry.image,
+        imageDigest: digest,
+        importedAt: new Date().toISOString(),
+      };
+      await writeFile(metadataTmpPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o644 });
       // World-readable (workers read under an arbitrary UID), then atomic publish.
       await chmod(tmpPath, 0o644).catch(() => {});
       await rename(tmpPath, destPath);
+      await rename(metadataTmpPath, metadataPath);
       this.transient.delete(entry.id); // now IMPORTED (fs-derived)
       this.publish(
         ClusterEventType.CATALOG_IMPORT_COMPLETED,
@@ -147,6 +203,7 @@ export class ModuleStoreService {
         .catch(() => {});
     } catch (err) {
       await unlink(tmpPath).catch(() => {});
+      await unlink(metadataTmpPath).catch(() => {});
       const message = err instanceof Error ? err.message : String(err);
       const s: CatalogItemStatus = { id: entry.id, state: CatalogItemState.FAILED, error: message };
       this.transient.set(entry.id, s);
@@ -171,12 +228,14 @@ export class ModuleStoreService {
   // Delete an imported SIF. Returns false if it wasn't present. In-use guarding is the caller's job.
   async uninstall(entry: CatalogEntry): Promise<boolean> {
     const destPath = join(this.modulesDir, `${entry.sifName}.sif`);
+    const metadataPath = join(this.modulesDir, `${entry.sifName}.sif.metadata.json`);
     try {
       await unlink(destPath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
       throw err;
     }
+    await unlink(metadataPath).catch(() => {});
     this.transient.delete(entry.id);
     this.publish(
       ClusterEventType.CATALOG_MODULE_REMOVED,

@@ -45,8 +45,6 @@ spec:
               value: oras
             - name: HOME
               value: /tmp/sardeenz
-            - name: APPTAINER_CACHEDIR
-              value: /tmp/apptainer-cache
             - name: APPTAINER_AUTH_FILE
               value: /etc/sardeenz/registry/auth.json
             - name: SARDEENZ_VERIFY_SIF

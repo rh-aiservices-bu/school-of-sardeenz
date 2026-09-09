@@ -229,7 +229,8 @@ export class MockControlPlane {
             engine: 'vLLM',
             runnerType: 'vllm',
             version: '0.21',
-            image: 'oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21',
+            image:
+              'oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
             sifName: 'vllm-0.21',
             protocol: 'openai',
           },
@@ -464,6 +465,17 @@ export class MockControlPlane {
     // Runner catalog (#155) — merged catalog + import state the deploy form reads.
     app.get('/api/v1/catalog', async (_req, reply) => {
       return reply.send(this.state.catalog);
+    });
+    app.post('/api/v1/catalog/refresh', async (_req, reply) => {
+      this.state.catalog.fetchedAt = new Date().toISOString();
+      return reply.send(this.state.catalog);
+    });
+    app.delete<{ Params: { id: string } }>('/api/v1/catalog/:id', async (req, reply) => {
+      const runner = this.state.catalog.runners.find((item) => item.entry.id === req.params.id);
+      if (!runner) return reply.code(404).send({ error: 'not found' });
+      runner.status = { id: runner.entry.id, state: 'NOT_IMPORTED' };
+      runner.updateAvailable = false;
+      return reply.code(204).send();
     });
 
     // Notifications

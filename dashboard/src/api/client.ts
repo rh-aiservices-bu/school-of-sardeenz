@@ -103,6 +103,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new ApiError(res.status, errorMessage, code, details);
   }
 
+  // Successful 204/205 responses have no representation to decode. This is the normal response
+  // for deletes and notification mutations, so resolve void callers without invoking json().
+  if (res.status === 204 || res.status === 205) return undefined as T;
+
   return res.json() as T;
 }
 

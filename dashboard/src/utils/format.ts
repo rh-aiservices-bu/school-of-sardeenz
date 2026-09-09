@@ -46,6 +46,13 @@ export function formatDateTime(dateStr: string | undefined | null): string {
   });
 }
 
+export function shortImageDigest(image: string): string | undefined {
+  return image
+    .match(/@sha256:([a-fA-F0-9]{64})$/)?.[1]
+    ?.slice(0, 6)
+    .toLowerCase();
+}
+
 export function formatPercentage(used: number, total: number): string {
   if (total === 0) return '0%';
   return `${((used / total) * 100).toFixed(1)}%`;
