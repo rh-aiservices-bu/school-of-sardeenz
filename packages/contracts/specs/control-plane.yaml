@@ -1168,9 +1168,9 @@ paths:
       summary: Import a catalog runner (pull its SIF onto the module store)
       description: |
         Starts an asynchronous import of the catalog entry `id`: the control
-        plane pulls the entry's SIF (`apptainer pull <sifName>.sif oras://…`)
+        plane streams the entry's digest-checked SIF layer from its OCI registry
         onto the shared module store, verifies its signature, and publishes it
-        atomically. Progress is reported on the SSE event stream
+        atomically. Byte-based progress is reported on the SSE event stream
         (`CATALOG_IMPORT_*` events). Returns immediately with the item's
         current status.
 

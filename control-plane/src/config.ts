@@ -108,7 +108,7 @@ export function loadConfig(): Config {
     modulesDir: optionalEnv('SARDEENZ_MODULES_DIR', '/modules'),
     // Same var the worker reads; the control plane must have the weights volume mounted to browse it.
     weightsDir: optionalEnv('SARDEENZ_WEIGHTS_DIR', '/weights'),
-    // 'stub' (dev, no apptainer) writes a placeholder SIF; 'oras' runs `apptainer pull oras://…`.
+    // 'stub' writes a placeholder; 'oras' streams the OCI SIF layer and optionally verifies it.
     sifImporter: optionalEnv('SARDEENZ_SIF_IMPORTER', 'stub') === 'oras' ? 'oras' : 'stub',
     apptainerBin: optionalEnv('SARDEENZ_APPTAINER_BIN', 'apptainer'),
     verifySif: boolEnv('SARDEENZ_VERIFY_SIF', true),

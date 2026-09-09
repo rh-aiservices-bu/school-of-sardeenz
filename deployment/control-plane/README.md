@@ -36,10 +36,14 @@ store itself (no Kubernetes Job — so it works identically under Podman/VM). Th
    ValidatingAdmissionPolicy ([`../sif-runner/module-pvc-write-protection.yaml`](../sif-runner/module-pvc-write-protection.yaml))
    exempts exactly two writers — `sardeenz-librarian` and `sardeenz-control-plane`. Run the
    control-plane Pod under that SA or the rw mount will be denied.
-3. **Apptainer in the image** (for `SARDEENZ_SIF_IMPORTER=oras`). `containers/control-plane/Dockerfile`
-   installs the unprivileged apptainer CLI; `apptainer pull oras://…` + `apptainer verify` are
-   download-only (no setuid/fuse/userns), so no special SCC is needed for the control plane.
-4. **The SIF signing public key** (when `SARDEENZ_VERIFY_SIF=true`, the default) so
+3. **Apptainer in the image** (when signature verification is enabled).
+   `containers/control-plane/Dockerfile` installs the unprivileged CLI. The control plane streams
+   the OCI layer itself and uses Apptainer only to verify the completed SIF, so no special SCC is
+   needed.
+4. **Registry credentials for private artifacts.** Mount a Docker-format auth file and set
+   `APPTAINER_AUTH_FILE` to its path. The checked-in Deployment mounts
+   `sardeenz-librarian-registry` read-only for this purpose.
+5. **The SIF signing public key** (when `SARDEENZ_VERIFY_SIF=true`, the default) so
    `apptainer verify` trusts pulled SIFs — same `sardeenz-sif-signing-pubkey` ConfigMap the workers
    use ([`../librarian/`](../librarian/)).
 
@@ -49,9 +53,10 @@ store itself (no Kubernetes Job — so it works identically under Podman/VM). Th
 | ----------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
 | `SARDEENZ_RUNNER_CATALOG_URL` | Catalog source (http(s) URL or local file / `file://`)            | the official `school-of-sardeenz` raw URL |
 | `SARDEENZ_MODULES_DIR`        | Module store mount path                                           | `/modules`                                |
-| `SARDEENZ_SIF_IMPORTER`       | `oras` (real: `apptainer pull`) or `stub` (dev: placeholder file) | `stub`                                    |
+| `SARDEENZ_SIF_IMPORTER`       | `oras` (OCI SIF stream) or `stub` (dev placeholder)               | `stub`                                    |
 | `SARDEENZ_APPTAINER_BIN`      | apptainer binary                                                  | `apptainer`                               |
 | `SARDEENZ_VERIFY_SIF`         | `apptainer verify` pulled SIFs before publishing                  | `true`                                    |
+| `APPTAINER_AUTH_FILE`         | Docker-format credentials for private OCI registries              | unset (public registries only)            |
 
 Set `SARDEENZ_SIF_IMPORTER=oras` in production; leave it unset (`stub`) for local dev / CI where
 apptainer isn't installed. For local dev, point `SARDEENZ_RUNNER_CATALOG_URL` at the repo's

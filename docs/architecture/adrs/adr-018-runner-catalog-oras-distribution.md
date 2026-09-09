@@ -18,7 +18,7 @@ platform meant to be adopted, "clone the repo and rebuild every SIF" is too high
 Two facts make a lighter path possible:
 
 - **A finished SIF is a single squashfs file** — it can be stored as an **OCI artifact** and pulled
-  with `apptainer pull oras://…`. Unlike an OCI _image_ → SIF _conversion_ (hardlink-heavy unpack,
+  through the registry's OCI Distribution API. Unlike an OCI _image_ → SIF _conversion_ (hardlink-heavy unpack,
   node-local scratch, GBs of RAM — ADR-017), an ORAS **pull is a plain download** of the already-
   built file: no unpack, no scratch, no privilege.
 - **Sardeenz must not assume Kubernetes.** It can run as independent containers on VMs via Podman.
@@ -32,18 +32,19 @@ in-app catalog; operators import them on demand. The librarian build pipeline (A
 building your own.**
 
 1. **Publish via ORAS.** Maintainers `apptainer push <engine>-<version>.sif oras://<registry>/<repo>:<tag>`.
-   SIFs are signed at build (ADR-017) and verified at pull/exec.
+   SIFs are signed at build (ADR-017) and verified at import/exec.
 2. **A catalog file (`runners.yaml`)** lists available runners (id, title, description, engine,
    runnerType, version, ORAS image, `sifName`, tags, `minVRAMGiB`, license, icon). The dev source /
    schema reference is the repo-root `runners.yaml`; the source is configurable via
    `SARDEENZ_RUNNER_CATALOG_URL` (http(s) URL or local file), defaulting to the official catalog.
 3. **The control plane loads + serves the catalog**, merged against the module store (import state,
    `unmanagedModules`), and **performs the import itself** — no Kubernetes Job. On import it
-   `apptainer pull oras://…`s the SIF onto the module store, `apptainer verify`s it, and publishes
-   it atomically (temp file → `chmod 0644` → rename). Progress is reported on the SSE stream
-   (`CATALOG_*` events). Uninstall deletes the SIF, guarded against in-use modules.
-4. **The importer is pluggable** (`SifImporter`): `OrasImporter` (real; `apptainer pull` + verify)
-   and `StubImporter` (dev/CI; writes a placeholder, no apptainer). This keeps the control plane
+   fetches and digest-validates the manifest, streams its single SIF layer directly onto the module
+   store, verifies the layer digest and SIF signature, and publishes it atomically (temp file →
+   `chmod 0644` → rename). Byte-based progress is reported on the SSE stream (`CATALOG_*` events).
+   Uninstall deletes the SIF, guarded against in-use modules.
+4. **The importer is pluggable** (`SifImporter`): `OrasImporter` (real; OCI stream + verify)
+   and `StubImporter` (dev/CI; writes a placeholder, no registry access). This keeps the control plane
    runtime-agnostic (Kubernetes PVC _or_ Podman/VM bind mount) and locally testable.
 
 ## Consequences
@@ -53,9 +54,9 @@ building your own.**
   module-PVC ValidatingAdmissionPolicy) now exempts **two** ServiceAccounts — `sardeenz-librarian`
   and `sardeenz-control-plane` — and both are legitimate writers. The signed-at-build /
   verify-at-exec supply chain is unchanged; the control plane also verifies at import.
-- **The control-plane image needs the apptainer CLI** (unprivileged — pull/verify are download-only,
-  no setuid/fuse/userns). The control plane mounts the module store **read-write**; workers still
-  mount it read-only.
+- **The control-plane image needs the apptainer CLI when SIF signature verification is enabled**
+  (unprivileged; no setuid/fuse/userns). OCI download and layer-digest verification are performed
+  by the control plane. It mounts the module store **read-write**; workers still mount it read-only.
 - **Distribution is decoupled from building.** Most operators never run the librarian; they import
   pre-built, signed SIFs. Building your own remains fully supported (ADR-017).
 - **No Kubernetes dependency on the import path** — the same code path works under Podman/VM with a

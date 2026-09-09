@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Byte-accurate runner-catalog imports.** The control plane now resolves digest-pinned OCI
+  manifests, streams each single-layer SIF directly to the module store with live progress,
+  validates manifest and layer SHA-256 digests and sizes, and retains optional Apptainer signature
+  verification before atomic publication.
+
 - **PoC cluster backing services.** A new `deployment/prereq/` Kustomize base provides persistent,
   single-replica PostgreSQL 16 and Valkey 8 Services for evaluation clusters, with out-of-band
   PostgreSQL credentials and explicit production limitations.

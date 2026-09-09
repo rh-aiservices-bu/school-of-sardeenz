@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ClusterEventType, CatalogItemState, type ControlPlaneComponents } from '@sardeenz/types';
 import { ModuleStoreService } from '../module-store.js';
-import { StubImporter, OrasImporter, type RunResult } from '../sif-importer.js';
+import { StubImporter } from '../sif-importer.js';
 import type { CatalogEntry } from '../catalog-service.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
@@ -150,65 +150,5 @@ describe('ModuleStoreService with StubImporter', () => {
     await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
     const content = await readFile(join(dir, 'vllm-0.21.sif'), 'utf8');
     expect(content).toContain('SARDEENZ-DEV-STUB-SIF');
-  });
-});
-
-describe('OrasImporter command construction', () => {
-  it('runs apptainer pull then verify with the ORAS ref', async () => {
-    const calls: string[][] = [];
-    const run = vi.fn((cmd: string, args: string[]): Promise<RunResult> => {
-      calls.push([cmd, ...args]);
-      return Promise.resolve({ code: 0, stderr: '' });
-    });
-    const importer = new OrasImporter({ apptainerBin: 'apptainer', verifySif: true }, run);
-    await importer.import(entry(), { tmpPath: '/modules/.tmp.sif', onProgress: () => {} });
-
-    expect(calls[0]).toEqual([
-      'apptainer',
-      'pull',
-      '--force',
-      '/modules/.tmp.sif',
-      `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
-    ]);
-    expect(calls[1]).toEqual(['apptainer', 'verify', '/modules/.tmp.sif']);
-  });
-
-  it('skips verify when verifySif is false', async () => {
-    const run = vi.fn(() => Promise.resolve({ code: 0, stderr: '' }));
-    const importer = new OrasImporter({ apptainerBin: 'apptainer', verifySif: false }, run);
-    await importer.import(entry(), { tmpPath: '/t.sif', onProgress: () => {} });
-    expect(run).toHaveBeenCalledTimes(1);
-  });
-
-  it('throws when apptainer pull fails', async () => {
-    const run = vi.fn(() => Promise.resolve({ code: 1, stderr: 'no such artifact' }));
-    const importer = new OrasImporter({ apptainerBin: 'apptainer', verifySif: true }, run);
-    await expect(
-      importer.import(entry(), { tmpPath: '/t.sif', onProgress: () => {} }),
-    ).rejects.toThrow(/apptainer pull failed/);
-  });
-
-  it('throws when verification fails', async () => {
-    const run = vi.fn((_cmd: string, args: string[]) =>
-      Promise.resolve(
-        args[0] === 'verify' ? { code: 2, stderr: 'bad sig' } : { code: 0, stderr: '' },
-      ),
-    );
-    const importer = new OrasImporter({ apptainerBin: 'apptainer', verifySif: true }, run);
-    await expect(
-      importer.import(entry(), { tmpPath: '/t.sif', onProgress: () => {} }),
-    ).rejects.toThrow(/verification failed/);
-  });
-
-  it('rejects a non-ORAS image reference', async () => {
-    const run = vi.fn(() => Promise.resolve({ code: 0, stderr: '' }));
-    const importer = new OrasImporter({ apptainerBin: 'apptainer', verifySif: true }, run);
-    await expect(
-      importer.import(entry({ image: 'docker://x/y:1' }), {
-        tmpPath: '/t.sif',
-        onProgress: () => {},
-      }),
-    ).rejects.toThrow(/not an ORAS reference/);
-    expect(run).not.toHaveBeenCalled();
   });
 });

@@ -89,8 +89,8 @@ async function main(): Promise<void> {
   const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
 
   // Runner catalog + SIF import. The importer is pluggable so the control plane stays
-  // runtime-agnostic: 'oras' runs `apptainer pull oras://…` (real), 'stub' writes a placeholder
-  // (dev/CI, no apptainer). Import progress is published on the shared cluster-events channel.
+  // runtime-agnostic: 'oras' streams a digest-checked OCI SIF layer (real), while 'stub' writes a
+  // placeholder (dev/CI, no apptainer). Progress is published on the cluster-events channel.
   const catalogService = new CatalogService(config.runnerCatalogUrl, notificationLogger, {
     allowInsecureCatalog: config.allowInsecureCatalog,
   });
