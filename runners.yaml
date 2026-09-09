@@ -45,7 +45,7 @@ runners:
     engine: vLLM
     runnerType: vllm
     version: '0.21'
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21-rc1@sha256:0e1e72a7b39b063a35f30b2fea995a1d6133b5e447e045ab8d0ac2ae01570de7
     sifName: vllm-0.21
     protocol: openai
     tags: [llm, cuda, kvcached, openai]
@@ -70,7 +70,7 @@ runners:
     engine: vLLM
     runnerType: vllm
     version: '0.20'
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20
     sifName: vllm-0.20
     protocol: openai
     tags: [llm, cuda, kvcached, openai]
@@ -96,7 +96,7 @@ runners:
     engine: MLServer
     runnerType: mlserver
     version: '1.6'
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6
     sifName: mlserver-1.6
     protocol: oip
     entrypoint: [python3, -m, sardeenz_mlserver_runner]
