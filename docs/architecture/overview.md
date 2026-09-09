@@ -449,7 +449,7 @@ containing a whole OCI image — stored on a shared RWX volume and executed in p
 ```mermaid
 graph LR
     subgraph "Build Time (CI + librarian job)"
-        CF[containers/runner-vllm/<br/>Containerfile]
+        CF[containers/runners/vllm/0.21.0/<br/>Containerfile]
         IMG[OCI image<br/>build + scan + sign]
         SIF[apptainer build/pull<br/>+ apptainer sign]
         CF -->|CI build| IMG

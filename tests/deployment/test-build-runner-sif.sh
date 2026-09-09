@@ -32,7 +32,7 @@ PIPELINE_NAME=vllm-rc1-test \
 GIT_URI=https://github.com/example/sardeenz.git \
 GIT_REF=feature/vllm-rc1 \
 CONTEXT_DIR=. \
-CONTAINERFILE=containers/runner-vllm/Containerfile \
+CONTAINERFILE=containers/runners/vllm/0.21.0/Containerfile \
 OCI_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm \
 OCI_TAG=0.21-rc1 \
 REGISTRY_SECRET=sardeenz-librarian-registry \
@@ -42,7 +42,7 @@ RESULTS_DIR="$TEST_DIR/results" \
 grep -Fq 'ref: feature/vllm-rc1' "$FAKE_OC_MANIFEST"
 grep -Fq 'name: quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21-rc1' \
   "$FAKE_OC_MANIFEST"
-grep -Fq 'dockerfilePath: containers/runner-vllm/Containerfile' "$FAKE_OC_MANIFEST"
+grep -Fq 'dockerfilePath: containers/runners/vllm/0.21.0/Containerfile' "$FAKE_OC_MANIFEST"
 grep -Fxq \
   'quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
   "$TEST_DIR/results/oci-image-ref"

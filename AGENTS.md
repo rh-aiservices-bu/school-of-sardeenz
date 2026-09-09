@@ -45,7 +45,7 @@ sardeenz/
 ├── dashboard/          # React + PatternFly 6 frontend, `server/` = BFF
 ├── packages/           # contracts/ (OpenAPI), types/ (generated TS), utils/ (type-only)
 ├── runners/            # dev-worker/ (TS worker agent + stubs), vllm/, mlserver/, conformance/
-├── containers/         # Service images, worker-base, runner-<engine> images → SIFs
+├── containers/         # Service images, worker-base, versioned runners/<engine>/<version> → SIFs
 ├── deployment/         # Kustomize manifests (control-plane, sif-runner, librarian)
 ├── docs/               # architecture/, project/, development/, usage/
 ├── scripts/, tests/    # build-sif.sh, dev-proxy.sh; tests/gates/ spike gates

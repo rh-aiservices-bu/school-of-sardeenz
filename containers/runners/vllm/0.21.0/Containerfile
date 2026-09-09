@@ -1,4 +1,4 @@
-# Sardeenz runner-vllm — the vLLM (+ kvcached) runner image that becomes a SIF.
+# Sardeenz vLLM 0.21.0 (+ kvcached) runner image that becomes a SIF.
 #
 # This image is NOT run as a container in production: CI builds+signs it, then a librarian job
 # converts it to a signed SIF on the shared module volume, and a worker `apptainer exec`s that SIF.
@@ -85,7 +85,7 @@ ENV ENABLE_KVCACHED=true \
 
 # Runner-contract shim (Task 5): serves the engine-runner contract and drives vLLM + kvcached.
 # BUILD CONTEXT is the repo root (needed to reach runners/vllm), e.g.
-#   podman build -f containers/runner-vllm/Containerfile \
+#   podman build -f containers/runners/vllm/0.21.0/Containerfile \
 #     -t quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21 .
 # The worker agent execs `python3 -m sardeenz_vllm_runner --model … --port …` inside the SIF.
 COPY runners/vllm /opt/sardeenz-vllm-runner

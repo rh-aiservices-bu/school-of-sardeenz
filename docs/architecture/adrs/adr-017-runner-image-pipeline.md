@@ -34,9 +34,10 @@ RWX volume. Three facts from the Phase 4 spike shape how those SIFs are produced
 1. **Publish a `Containerfile` per runner** in the repo under `containers/`:
    - `containers/worker-base/` — the slim worker host image (UBI + Apptainer + FUSE helpers +
      `tzdata`/`/etc/localtime`); this is what the worker Pod runs and what execs SIFs.
-   - `containers/runner-<engine>/` — the image that _becomes a SIF_ (e.g. `runner-vllm/` = base
-     vLLM + kvcached wheel + `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`). One directory per runner
-     type; versioned and reviewed.
+   - `containers/runners/<engine>/<version>/` — the image that _becomes a SIF_ (e.g.
+     `runners/vllm/0.21.0/` = base vLLM + kvcached wheel +
+     `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`). One directory per engine version; versioned and
+     reviewed.
 2. **Build the OCI images in CI** with the container toolchain (including the CUDA devel
    toolchain where a runner needs to compile a wheel), scan them, and push to a registry — the
    normal, admission-covered image pipeline.
@@ -75,8 +76,9 @@ at exec (node-local scratch), because the SIF root is read-only.
   verify. Combined with the module-PVC write-protection mechanism above (admission policy,
   two-PVC split, or documented convention), the admission-bypass concern is answered.
 - **`containers/` is the home for all runner image definitions.** Adding a runner type = adding
-  a `containers/runner-<engine>/` directory with a `Containerfile` and building it — not writing
-  an easyconfig. `easyconfigs/` is removed (see [ADR-015](adr-015-sif-runtime-packaging.md)).
+  a `containers/runners/<engine>/<version>/` directory with a `Containerfile` and building it —
+  not writing an easyconfig. `easyconfigs/` is removed (see
+  [ADR-015](adr-015-sif-runtime-packaging.md)).
 - **Reproducible, first-class artifacts.** kvcached-patched vLLM (and any future patched engine)
   becomes a reviewed, versioned image rather than a per-user chore.
 - **Build cost is amortized.** The heavy conversion happens once per engine version for the whole

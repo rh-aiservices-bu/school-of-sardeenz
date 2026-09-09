@@ -24,7 +24,7 @@ parameters:
     required: true
   - name: CONTAINERFILE
     description: Containerfile path relative to CONTEXT_DIR
-    value: containers/runner-vllm/Containerfile
+    value: containers/runners/vllm/0.21.0/Containerfile
     required: true
   - name: OCI_REPOSITORY
     description: OCI destination including registry/repository but excluding tag

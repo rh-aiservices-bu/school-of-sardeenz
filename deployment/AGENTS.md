@@ -20,7 +20,7 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | `containers/control-plane/`, `containers/dashboard/` | Service images (Dockerfile)                                             |
 | `containers/worker/`                                 | Deployable worker: worker-base + compiled TypeScript worker agent       |
 | `containers/worker-base/`                            | Reusable UBI + Apptainer + FUSE + Node base; no worker-agent code       |
-| `containers/runner-<engine>/`                        | Engine image that is converted to a SIF (`vllm`, `mlserver`)            |
+| `containers/runners/<engine>/<version>/`             | Version-specific engine image converted to a SIF (`vllm`, `mlserver`)   |
 | `deployment/control-plane/`                          | NetworkPolicy for the control plane                                     |
 | `deployment/prereq/`                                 | PoC PostgreSQL and Valkey backing services                              |
 | `deployment/proxy/`, `deployment/dashboard/`         | Deployable application workloads and Services                           |
@@ -36,9 +36,9 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 - **Security posture is a contract (ADR-016):** any change to the SCC, capabilities, seccomp,
   `/dev/fuse` annotation, or PVC write protection needs an ADR update and a note in
   `docs/usage/deployment-security.md`.
-- **Runner images become SIFs:** a new `containers/runner-<engine>/` needs the shim package in
-  `runners/<engine>/`, a `runners.yaml` entry (digest-pinned `image`, required `protocol`), and a
-  gate in `tests/gates/` if it changes the launch path.
+- **Runner images become SIFs:** a new `containers/runners/<engine>/<version>/` needs the shim
+  package in `runners/<engine>/`, a `runners.yaml` entry (digest-pinned `image`, required
+  `protocol`), and a gate in `tests/gates/` if it changes the launch path.
 - **Production images are signed (ADR-017);** unsigned publishing is only for an explicitly
   verification-disabled PoC. Catalog entries remain digest-pinned even during a PoC.
 - **NetworkPolicies allow-list ingress per flow** (control plane → worker agent port today).

@@ -30,7 +30,7 @@ units plus one review-fix round.
 - **Runners:** new `runners/mlserver/` shim (all 7 management endpoints; sleep/wake via the
   V2 repository unload/load API; served-name-enforced `model-settings.json` generation with
   model-directory containment; #116-correct memory attribution; engine bound 0.0.0.0),
-  `containers/runner-mlserver/` image (mlserver + sklearn + huggingface), dev-worker
+  `containers/runners/mlserver/1.6.1/` image (mlserver + sklearn + huggingface), dev-worker
   `mlserver` stub serving canonical V2 routes, `runners.yaml` catalog entry.
 - **Dashboard:** protocol-labeled inference base URLs (`…/openai/v1`, `…/oip`),
   protocol-aware per-model curl, mlserver fallback runner option, invalid-catalog-entry
@@ -47,14 +47,14 @@ units plus one review-fix round.
 
 All local gates pass on `milestone-M9`:
 
-| Gate | Result |
-| ---- | ------ |
-| `make typecheck` / `make lint` (incl. clippy `-D warnings`) | pass |
-| `make lint-specs` + codegen-drift check | pass / clean |
-| vitest: control-plane / dev-worker / dashboard | 438 / 194 / 522 — all pass |
-| control-plane `test:integration` (live Redis+Postgres) | 24/24 |
-| cargo test (+ `--features redis-integration`) | 48/48 (+133) |
-| pytest: vLLM / MLServer / shared conformance | 17 / 24 / 16 |
+| Gate                                                        | Result                     |
+| ----------------------------------------------------------- | -------------------------- |
+| `make typecheck` / `make lint` (incl. clippy `-D warnings`) | pass                       |
+| `make lint-specs` + codegen-drift check                     | pass / clean               |
+| vitest: control-plane / dev-worker / dashboard              | 438 / 194 / 522 — all pass |
+| control-plane `test:integration` (live Redis+Postgres)      | 24/24                      |
+| cargo test (+ `--features redis-integration`)               | 48/48 (+133)               |
+| pytest: vLLM / MLServer / shared conformance                | 17 / 24 / 16               |
 
 Review: 4 parallel reviewers (spec, quality, security, boundary) + interim boundary reviews
 per contract-touching unit → 1 medium finding (shim `parameters.uri` containment), fixed and

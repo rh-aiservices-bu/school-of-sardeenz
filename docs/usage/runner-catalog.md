@@ -54,7 +54,7 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
 
 ## Publishing an official runner (maintainers)
 
-1. Build + sign the runner SIF (see [`containers/runner-vllm`](../../containers/runner-vllm) and the
+1. Build + sign the runner SIF (see [`containers/runners/vllm/0.21.0`](../../containers/runners/vllm/0.21.0) and the
    [librarian pipeline](../../deployment/librarian/), or `apptainer build` + `apptainer sign`).
 2. Push it via ORAS: `apptainer push <engine>-<version>.sif oras://quay.io/rh-aiservices-bu/sardeenz-runners/<engine>:<tag>`.
 3. Add an entry to the catalog `runners.yaml` (schema in the repo-root sample). `sifName` by

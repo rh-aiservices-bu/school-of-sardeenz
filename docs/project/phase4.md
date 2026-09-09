@@ -121,7 +121,7 @@ Worker Pod (containers/worker-base image: UBI + Apptainer + FUSE + tzdata)
 
 Two build-time / run-time boundaries:
 
-- **Build time (librarian/CI):** `containers/runner-<engine>/Containerfile` → OCI image
+- **Build time (librarian/CI):** `containers/runners/<engine>/<version>/Containerfile` → OCI image
   (scanned, signed) → `apptainer build/pull` + `apptainer sign` → signed `.sif` on the module PVC.
 - **Run time (worker):** worker agent `apptainer exec`s the SIF; `squashfuse` mounts it read-only
   and pages it in. No pull, no `mksquashfs`, no per-host copy.
@@ -171,8 +171,8 @@ containers/
 └── dashboard/             # (existing) dashboard service image
 ```
 
-Adding a runner type = a new `containers/runner-<engine>/` directory + `Containerfile`; no
-easyconfig, no from-source stack.
+Adding a runner type or version = a new `containers/runners/<engine>/<version>/` directory +
+`Containerfile`; no easyconfig, no from-source stack.
 
 ## Implementation Plan
 
@@ -210,7 +210,7 @@ The slim worker host image (materialize the spike §4 image).
 
 **Verification:** builds in CI; `apptainer --version` runs; `/etc/localtime` present.
 
-### Task 3: `containers/runner-vllm/` image (vLLM + kvcached)
+### Task 3: `containers/runners/vllm/0.21.0/` image (vLLM + kvcached)
 
 The reference runner image that becomes the vLLM SIF. Derived from the v1
 [`docker/Containerfile`](https://github.com/rh-aiservices-bu/sardeenz/blob/main/docker/Containerfile),
@@ -218,12 +218,12 @@ stripped to just the vLLM+kvcached stages (no Node/app).
 
 **Files to create:**
 
-- `containers/runner-vllm/Containerfile` — multi-stage: `FROM quay.io/vllm/vllm-cuda:<pinned>`;
+- `containers/runners/vllm/0.21.0/Containerfile` — multi-stage: `FROM quay.io/vllm/vllm-cuda:<pinned>`;
   builder stage installs the CUDA devel toolchain + git and `pip wheel`s the pinned
   `github.com/ovg-project/kvcached` commit (`--no-build-isolation`, `LIBRARY_PATH` includes CUDA
   stubs); runtime stage `pip install`s the wheel and sets `ENV ENABLE_KVCACHED=true
 KVCACHED_AUTOPATCH=1`. Include the **runner-entrypoint shim** (Task 5) or install it here.
-- `containers/runner-vllm/README.md` — the base image tag, the pinned kvcached commit (and the
+- `containers/runners/vllm/0.21.0/README.md` — the base image tag, the pinned kvcached commit (and the
   rule: pin per vLLM version, re-run Gate 9 on bumps), the enablement env, and the cache-dir
   caveat (redirected at exec, not here).
 
@@ -266,7 +266,7 @@ The engine-specific shim that runs _inside_ the SIF, exposes the runner contract
 endpoints, `/memory-report`, `/progress`, `/capabilities` incl. kvcached). This is the
 production `runners/vllm` implementation.
 
-**Files:** `runners/vllm/` — the shim + its packaging into `containers/runner-vllm/`.
+**Files:** `runners/vllm/` — the shim + its packaging into `containers/runners/vllm/0.21.0/`.
 
 **Notes:** reuse the runner contract shape validated by the Phase 3.6 stub; the real shim maps
 those endpoints onto vLLM + kvcached. Sleep/wake uses vLLM's sleep levels.
@@ -390,24 +390,24 @@ Turn the spike's gates into a repeatable suite runnable against a real cluster (
 
 ## Task Summary
 
-| #   | Task                                                  | Layer        | Primary artifacts                                    |
-| --- | ----------------------------------------------------- | ------------ | ---------------------------------------------------- |
-| 1   | `containers/` convention doc                          | Docs         | `containers/README.md`                               |
-| 2   | `worker-base` image                                   | Containers   | `containers/worker-base/{Containerfile,README.md}`   |
-| 3   | `runner-vllm` image (vLLM+kvcached)                   | Containers   | `containers/runner-vllm/{Containerfile,README.md}`   |
-| 4   | Worker agent launcher abstraction + ApptainerLauncher | Worker       | `runners/dev-worker` refactor + prod agent           |
-| 5   | vLLM runner shim (contract in the SIF)                | Runner       | `runners/vllm/`                                      |
-| 6   | Worker-agent module selector                          | Contracts    | `packages/contracts/specs/worker-agent.yaml` + types |
-| 7   | SIF librarian build/sign/convert                      | Build/Deploy | `deployment/librarian/`, `scripts/build-sif.sh`      |
-| 8   | Worker SCC + Deployment manifests                     | Deploy       | `deployment/` (SCC, worker Deployment, RBAC)         |
-| 9   | Integration tests (spike gates)                       | Tests        | cluster gate suite                                   |
-| 10  | CephFS re-validation + docs                           | Docs/Verify  | CHANGELOG, README, CLAUDE.md, perf record            |
+| #   | Task                                                  | Layer        | Primary artifacts                                          |
+| --- | ----------------------------------------------------- | ------------ | ---------------------------------------------------------- |
+| 1   | `containers/` convention doc                          | Docs         | `containers/README.md`                                     |
+| 2   | `worker-base` image                                   | Containers   | `containers/worker-base/{Containerfile,README.md}`         |
+| 3   | `runner-vllm` image (vLLM+kvcached)                   | Containers   | `containers/runners/vllm/0.21.0/{Containerfile,README.md}` |
+| 4   | Worker agent launcher abstraction + ApptainerLauncher | Worker       | `runners/dev-worker` refactor + prod agent                 |
+| 5   | vLLM runner shim (contract in the SIF)                | Runner       | `runners/vllm/`                                            |
+| 6   | Worker-agent module selector                          | Contracts    | `packages/contracts/specs/worker-agent.yaml` + types       |
+| 7   | SIF librarian build/sign/convert                      | Build/Deploy | `deployment/librarian/`, `scripts/build-sif.sh`            |
+| 8   | Worker SCC + Deployment manifests                     | Deploy       | `deployment/` (SCC, worker Deployment, RBAC)               |
+| 9   | Integration tests (spike gates)                       | Tests        | cluster gate suite                                         |
+| 10  | CephFS re-validation + docs                           | Docs/Verify  | CHANGELOG, README, CLAUDE.md, perf record                  |
 
 ## Acceptance Criteria
 
 ### Images & pipeline
 
-- [ ] `containers/worker-base` and `containers/runner-vllm` build in CI
+- [ ] `containers/worker-base` and `containers/runners/vllm/0.21.0` build in CI
 - [ ] The librarian job converts the vLLM+kvcached image to a **signed** SIF on the module PVC,
       using node-local scratch and adequate memory (no OOM)
 - [ ] The SIF is world-readable (`chmod 644`) and workers mount the module PVC `readOnly`; worker
