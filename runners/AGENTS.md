@@ -26,7 +26,7 @@ SIFs, and the shared contract-conformance suite.
   The worker does not know engine specifics; keep the CLI byte-compatible across shims.
 - **Ports:** each runner gets a 4-port block from `SARDEENZ_RUNNER_PORT_START` (management,
   engine, gRPC, metrics). Never hard-code ports in a shim.
-- **Adding a runner type:** Containerfile in `containers/runner-<engine>/`, shim package here with
+- **Adding a runner type:** Containerfile in `containers/runners/<engine>/<version>/`, shim package here with
   a `testing.py` adapter, register it in `conformance/conftest.py` `_BUILDERS`, catalog entry in
   `runners.yaml`, then follow "Adding a New Runner Type" in the contract doc.
 - **Measured memory:** the worker reports NVML-measured bytes with per-instance attribution

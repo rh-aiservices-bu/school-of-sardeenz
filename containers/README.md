@@ -2,12 +2,12 @@
 
 Container image definitions for Sardeenz. The following image and artifact roles live here:
 
-| Kind               | Directory                      | What it is                                                                                                                  |
-| ------------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| **Service images** | `control-plane/`, `dashboard/` | The TypeScript services, deployed as normal K8s workloads.                                                                  |
-| **Worker image**   | `worker/`                      | Deployable worker: compiled TypeScript worker agent layered on `worker-base`, running in `apptainer` mode.                  |
-| **Worker base**    | `worker-base/`                 | Reusable Apptainer/FUSE/Node base for `worker/` and the librarian SIF conversion stage; it has no worker-agent code.        |
-| **Runner images**  | `runner-<engine>/`             | The image that **becomes a SIF** for an engine (e.g. `runner-vllm/` = base vLLM + kvcached). One directory per runner type. |
+| Kind               | Directory                      | What it is                                                                                                           |
+| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| **Service images** | `control-plane/`, `dashboard/` | The TypeScript services, deployed as normal K8s workloads.                                                           |
+| **Worker image**   | `worker/`                      | Deployable worker: compiled TypeScript worker agent layered on `worker-base`, running in `apptainer` mode.           |
+| **Worker base**    | `worker-base/`                 | Reusable Apptainer/FUSE/Node base for `worker/` and the librarian SIF conversion stage; it has no worker-agent code. |
+| **Runner images**  | `runners/<engine>/<version>/`  | Version-specific images that **become SIFs** (for example, `runners/vllm/0.21.0/`).                                  |
 
 See [ADR-015](../docs/architecture/adrs/adr-015-sif-runtime-packaging.md) (SIF runtime delivery),
 [ADR-016](../docs/architecture/adrs/adr-016-sif-worker-security-posture.md) (worker security
@@ -65,7 +65,7 @@ Highlander/EasyBuild plan, ADR-004). Each runtime is a `Containerfile` here → 
 ORAS-distributed **SIF** that an administrator imports onto the shared module volume:
 
 ```text
-Git ref + containers/runner-<engine>/Containerfile
+Git ref + containers/runners/<engine>/<version>/Containerfile
         │  OpenShift native Docker build
         ▼
    tagged OCI image + immutable registry digest
@@ -106,18 +106,21 @@ Key rules:
   wheel + `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`. This is required for a plain container too, so
   it's SIF-neutral; it just makes the runner image a first-class, versioned artifact.
 
-## Naming
+## Runner image layout and naming
 
 - SIF filename: `<engine>-<version>.sif` (e.g. `vllm-0.21.sif`). Versioned, never `-latest`.
-- Runner image directory: `runner-<engine>/`.
+- Runner image directory: `runners/<engine>/<version>/`, where `version` is the exact upstream
+  engine version supplied by that image (for example, `vllm/0.21.0/`).
+- Keep each version's `Containerfile`, dependency pins, and compatibility notes together. Shared
+  runner-contract shim code remains in `runners/<engine>/` at the repository root.
 - Pin external inputs (base image tag, kvcached commit) in each runner's `Containerfile` and
   `README.md`; re-run the kvcached co-tenancy gate on any bump.
 
 ## Adding a runner type
 
-1. Create `containers/runner-<engine>/Containerfile` (+ `README.md`) — base engine image, any
-   patches (as installed wheels/packages, not from-source where avoidable), runtime enablement
-   env, and the runner-contract shim entrypoint.
+1. Create `containers/runners/<engine>/<version>/Containerfile` (+ `README.md`) — base engine
+   image, any patches (as installed wheels/packages, not from-source where avoidable), runtime
+   enablement env, and the runner-contract shim entrypoint.
 2. Build and publish the OCI image + SIF via the parameterized OpenShift librarian Job.
 3. Add/adjust the runner shim under `runners/<engine>/` so the SIF serves the
    [engine runner contract](../packages/contracts/specs/engine-runner.yaml).

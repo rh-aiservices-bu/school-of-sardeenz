@@ -1,4 +1,4 @@
-# Sardeenz runner-mlserver — the Seldon MLServer (KServe V2) runner image that becomes a SIF.
+# Sardeenz MLServer 1.6.1 (KServe V2) runner image that becomes a SIF.
 #
 # This image is NOT run as a container in production: CI builds+signs it, then a librarian job
 # converts it to a signed SIF on the shared module volume, and a worker `apptainer exec`s that SIF.
@@ -44,7 +44,7 @@ RUN pip3 install --no-cache-dir \
 
 # Runner-contract shim: serves the engine-runner contract and drives MLServer over KServe V2.
 # BUILD CONTEXT is the repo root (needed to reach runners/mlserver), e.g.
-#   podman build -f containers/runner-mlserver/Containerfile \
+#   podman build -f containers/runners/mlserver/1.6.1/Containerfile \
 #     -t quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.6 .
 # The worker agent execs `python3 -m sardeenz_mlserver_runner --model … --port …` inside the SIF.
 COPY runners/mlserver /opt/sardeenz-mlserver-runner

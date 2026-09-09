@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Runner container definitions are organized by engine and exact upstream version.** vLLM
+  `0.21.0` and MLServer `1.6.1` now live under
+  `containers/runners/<engine>/<version>/`, allowing multiple engine versions to coexist with
+  independent Containerfiles, dependency pins, and compatibility notes.
+
 ### Fixed
 
 - **Bodyless API mutations no longer surface JSON errors.** The dashboard BFF and browser client

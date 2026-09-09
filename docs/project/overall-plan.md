@@ -314,20 +314,20 @@ breakdown is in [`phase4.md`](phase4.md).
 
 #### Deliverables
 
-| #   | Deliverable             | Description                                                                           |
-| --- | ----------------------- | ------------------------------------------------------------------------------------- |
-| 4.1 | Base worker image       | `containers/worker-base/` — slim UBI + Apptainer + FUSE helpers + `/etc/localtime`    |
-| 4.2 | Runner image(s)         | `containers/runner-vllm/` (base vLLM + kvcached) — the image that becomes a SIF       |
-| 4.3 | SIF librarian build job | CI/Job that builds+signs images and converts image→SIF onto the module PVC            |
-| 4.4 | Worker security profile | Custom seccomp SCC + `/dev/fuse` annotation + Deployment/Pod shape (ADR-016)          |
-| 4.5 | Worker agent SIF launch | Runner start = `apptainer exec` of the engine SIF (replaces the dev-worker stub path) |
-| 4.6 | Integration test suite  | Runner start, version switch/hot-add, GPU `--nv`, kvcached co-tenancy, clean drain    |
+| #   | Deliverable             | Description                                                                             |
+| --- | ----------------------- | --------------------------------------------------------------------------------------- |
+| 4.1 | Base worker image       | `containers/worker-base/` — slim UBI + Apptainer + FUSE helpers + `/etc/localtime`      |
+| 4.2 | Runner image(s)         | `containers/runners/vllm/0.21.0/` (base vLLM + kvcached) — the image that becomes a SIF |
+| 4.3 | SIF librarian build job | CI/Job that builds+signs images and converts image→SIF onto the module PVC              |
+| 4.4 | Worker security profile | Custom seccomp SCC + `/dev/fuse` annotation + Deployment/Pod shape (ADR-016)            |
+| 4.5 | Worker agent SIF launch | Runner start = `apptainer exec` of the engine SIF (replaces the dev-worker stub path)   |
+| 4.6 | Integration test suite  | Runner start, version switch/hot-add, GPU `--nv`, kvcached co-tenancy, clean drain      |
 
 #### Scope
 
 - **Base worker image** — minimal UBI + accelerator driver access + Apptainer (rootless) + FUSE
   helpers; no engine baked in ([ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md))
-- **Runner images** — one `containers/runner-<engine>/Containerfile` per engine; vLLM+kvcached
+- **Runner images** — one `containers/runners/<engine>/<version>/Containerfile` per engine; vLLM+kvcached
   is the reference
 - **SIF build/sign/convert pipeline** — CI builds+scans+signs the OCI image; a librarian Job
   converts it to a signed SIF (node-local scratch) and writes it to the module PVC with versioned
@@ -349,7 +349,7 @@ breakdown is in [`phase4.md`](phase4.md).
 
 #### Definition of Done
 
-- [ ] `containers/worker-base` and `containers/runner-vllm` build in CI; the vLLM+kvcached image
+- [ ] `containers/worker-base` and `containers/runners/vllm/0.21.0` build in CI; the vLLM+kvcached image
       converts to a signed SIF via the librarian job
 - [ ] A worker Pod admits under the custom SCC with `/dev/fuse` present and runs `apptainer exec`
       unprivileged (spike Gates 0–3)
@@ -373,12 +373,12 @@ breakdown is in [`phase4.md`](phase4.md).
 
 #### Risks
 
-| Risk                                                    | Impact                                  | Mitigation                                                                                       |
-| ------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Custom SCC (seccomp `Unconfined`) fails security review | Blocks the product default              | Productionize as a scoped seccomp profile via the Security Profiles Operator (ADR-016)           |
-| Perf on the target backend (CephFS) differs from EFS    | Cold-start economics weaker than spiked | Re-run the spike's Gate 10 on CephFS/ODF; the spike numbers are a conservative (NFS-grade) floor |
-| kvcached image drift (pinned commit vs. vLLM version)   | Elastic sharing breaks on upgrade       | Pin the kvcached commit per vLLM version in `containers/runner-vllm/`; test Gate 9 on every bump |
-| SIF supply-chain (RWX bypasses image admission)         | Code-injection path into workers        | Sign at build, verify at exec, RBAC-lock the module PVC to the librarian (ADR-017)               |
+| Risk                                                    | Impact                                  | Mitigation                                                                                               |
+| ------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Custom SCC (seccomp `Unconfined`) fails security review | Blocks the product default              | Productionize as a scoped seccomp profile via the Security Profiles Operator (ADR-016)                   |
+| Perf on the target backend (CephFS) differs from EFS    | Cold-start economics weaker than spiked | Re-run the spike's Gate 10 on CephFS/ODF; the spike numbers are a conservative (NFS-grade) floor         |
+| kvcached image drift (pinned commit vs. vLLM version)   | Elastic sharing breaks on upgrade       | Pin the kvcached commit per vLLM version in `containers/runners/vllm/0.21.0/`; test Gate 9 on every bump |
+| SIF supply-chain (RWX bypasses image admission)         | Code-injection path into workers        | Sign at build, verify at exec, RBAC-lock the module PVC to the librarian (ADR-017)                       |
 
 ---
 

@@ -1,12 +1,12 @@
-# runner-mlserver
+# MLServer 1.6.1 runner
 
 The **Seldon MLServer (KServe V2)** runner image. It is not run as a container in production — it
 is built by the OpenShift librarian pipeline, converted to a **SIF** (optionally signed), and
 `apptainer exec`'d by a
 worker off the shared module volume. See
-[ADR-015](../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md),
-[ADR-017](../../docs/architecture/adrs/adr-017-runner-image-pipeline.md), and
-[`docs/project/phase4.md`](../../docs/project/phase4.md) (Task 3).
+[ADR-015](../../../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md),
+[ADR-017](../../../../docs/architecture/adrs/adr-017-runner-image-pipeline.md), and
+[`docs/project/phase4.md`](../../../../docs/project/phase4.md) (Task 3).
 
 ## What's in it
 
@@ -21,11 +21,11 @@ wheels, nothing to compile):
    as a package pin + catalog entry, no code change).
 3. `pip install`s the runner-contract shim from `runners/mlserver/` (`sardeenz-mlserver-runner`),
    so the SIF serves the [engine-runner
-   contract](../../packages/contracts/specs/engine-runner.yaml) and drives MLServer.
+   contract](../../../../packages/contracts/specs/engine-runner.yaml) and drives MLServer.
 4. Drops to a non-root user (`sardeenz`, uid 1001) — the base ships no unprivileged app user.
 
 > **Build context is the repo root** (the shim lives at `runners/mlserver/`, outside this
-> directory): `podman build -f containers/runner-mlserver/Containerfile -t
+> directory): `podman build -f containers/runners/mlserver/1.6.1/Containerfile -t
 quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.6 .`
 
 ## Pins (keep in sync; re-test on any bump)
@@ -58,6 +58,6 @@ sardeenz_mlserver_runner --model /weights/<model> --port <PORT> -- --served-mode
 
 ## Build and publish
 
-Use the parameterized [`deployment/librarian`](../../deployment/librarian/) OpenShift Job. Set
-`GIT_REF`, `CONTAINERFILE=containers/runner-mlserver/Containerfile`, the OCI/ORAS repositories and
+Use the parameterized [`deployment/librarian`](../../../../deployment/librarian/) OpenShift Job. Set
+`GIT_REF`, `CONTAINERFILE=containers/runners/mlserver/1.6.1/Containerfile`, the OCI/ORAS repositories and
 tags, and `SIGN_SIF=false` for PoC output or `true` after provisioning the signing key.

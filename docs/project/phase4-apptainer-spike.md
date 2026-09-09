@@ -1512,8 +1512,9 @@ oc rollout restart deployment/spike -n ${PROJECT}
 The gates prove the _runtime_; the findings (custom image for kvcached, node-local build
 scratch, supply-chain gap) settle the _provisioning_ side. Sardeenz owns the build pipeline:
 
-1. **Publish a `Containerfile` per runner** in-repo (e.g. `containers/runner-vllm/`,
-   `containers/runner-triton/`, …) — versioned and reviewed. vLLM+kvcached is base vLLM + the
+1. **Publish a `Containerfile` per runner** in-repo (e.g. `containers/runners/vllm/0.21.0/`,
+   `containers/runners/triton/<version>/`, …) — versioned and reviewed. vLLM+kvcached is base
+   vLLM + the
    compiled kvcached wheel + `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH` (see Gate 9d finding).
 2. **Build the OCI images in CI** (with the CUDA devel toolchain where a runner needs it) and
    push to a registry — the normal, scanned, signed image pipeline.

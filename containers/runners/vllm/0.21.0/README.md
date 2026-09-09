@@ -1,11 +1,11 @@
-# runner-vllm
+# vLLM 0.21.0 runner
 
 The **vLLM (+ kvcached)** runner image. It is not run as a container in production — it is built by
 the OpenShift librarian pipeline, converted to a **SIF** (optionally signed for PoC versus
 production), and `apptainer exec`'d by a worker off
-the shared module volume. See [ADR-015](../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md),
-[ADR-017](../../docs/architecture/adrs/adr-017-runner-image-pipeline.md), and
-[`docs/project/phase4.md`](../../docs/project/phase4.md) (Task 3).
+the shared module volume. See [ADR-015](../../../../docs/architecture/adrs/adr-015-sif-runtime-packaging.md),
+[ADR-017](../../../../docs/architecture/adrs/adr-017-runner-image-pipeline.md), and
+[`docs/project/phase4.md`](../../../../docs/project/phase4.md) (Task 3).
 
 ## What's in it
 
@@ -22,10 +22,10 @@ stripped to just the runtime (no Node/app):
    `KVCACHED_AUTOPATCH=1`. kvcached autopatches vLLM at import; **vLLM itself is not statically
    patched.** Also `pip install`s the runner-contract shim from `runners/vllm/`
    (`sardeenz-vllm-runner`), so the SIF serves the [engine-runner
-   contract](../../packages/contracts/specs/engine-runner.yaml) and drives vLLM.
+   contract](../../../../packages/contracts/specs/engine-runner.yaml) and drives vLLM.
 
 > **Build context is the repo root** (the shim lives at `runners/vllm/`, outside this directory):
-> `podman build -f containers/runner-vllm/Containerfile -t quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21 .`
+> `podman build -f containers/runners/vllm/0.21.0/Containerfile -t quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm:0.21 .`
 
 ## Pins (keep in sync; re-test on any bump)
 
@@ -54,6 +54,6 @@ sardeenz_vllm_runner --model /weights/<model> --port <PORT>` (do **not** pass `-
 
 ## Build and publish
 
-Use the parameterized [`deployment/librarian`](../../deployment/librarian/) OpenShift Job. Set
-`GIT_REF`, `CONTAINERFILE=containers/runner-vllm/Containerfile`, the OCI/ORAS repositories and
+Use the parameterized [`deployment/librarian`](../../../../deployment/librarian/) OpenShift Job. Set
+`GIT_REF`, `CONTAINERFILE=containers/runners/vllm/0.21.0/Containerfile`, the OCI/ORAS repositories and
 tags, and `SIGN_SIF=false` for PoC output or `true` after provisioning the signing key.
