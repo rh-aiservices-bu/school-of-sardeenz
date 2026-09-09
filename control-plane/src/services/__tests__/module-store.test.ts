@@ -10,6 +10,8 @@ import type { CatalogEntry } from '../catalog-service.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
+const DIGEST = 'a'.repeat(64);
+
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -19,7 +21,7 @@ function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
     description: 'd',
     runnerType: 'vllm',
     version: '0.21',
-    image: 'oras://quay.io/x/vllm:0.21',
+    image: `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
     sifName: 'vllm-0.21',
     protocol: 'openai' as CatalogEntry['protocol'],
     maxTensorParallelism: 1,
@@ -65,6 +67,12 @@ describe('ModuleStoreService with StubImporter', () => {
 
     const stems = await store.listImportedStems();
     expect(stems.has('vllm-0.21')).toBe(true);
+    expect((await store.listImportedModules()).get('vllm-0.21')).toBe(DIGEST);
+    const metadata = JSON.parse(
+      await readFile(join(dir, 'vllm-0.21.sif.metadata.json'), 'utf8'),
+    ) as { imageDigest: string; image: string };
+    expect(metadata.imageDigest).toBe(DIGEST);
+    expect(metadata.image).toBe(`oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`);
     // No transient status once completed (state is fs-derived).
     expect(store.getTransientStatus('vllm-0.21')).toBeUndefined();
     // The temp file was renamed away, not left behind.
@@ -83,9 +91,13 @@ describe('ModuleStoreService with StubImporter', () => {
 
   it('uninstall deletes the SIF and emits a removed event', async () => {
     await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
+    await writeFile(join(dir, 'vllm-0.21.sif.metadata.json'), '{}');
     const removed = await store.uninstall(entry());
     expect(removed).toBe(true);
     expect((await store.listImportedStems()).has('vllm-0.21')).toBe(false);
+    await expect(readFile(join(dir, 'vllm-0.21.sif.metadata.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     expect(events.at(-1)?.type).toBe(ClusterEventType.CATALOG_MODULE_REMOVED);
   });
 
@@ -118,6 +130,21 @@ describe('ModuleStoreService with StubImporter', () => {
     expect((await missing.listImportedStems()).size).toBe(0);
   });
 
+  it('sweeps interrupted SIF and metadata temporary files', async () => {
+    const sifTmp = join(dir, '.vllm-0.21.sif.tmp.123');
+    const metadataTmp = join(dir, '.vllm-0.21.sif.metadata.json.tmp.123');
+    await writeFile(sifTmp, 'x');
+    await writeFile(metadataTmp, 'x');
+    await store.sweepTempFiles();
+    await expect(readFile(sifTmp)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(metadataTmp)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports an unknown digest for a legacy SIF without metadata', async () => {
+    await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
+    expect((await store.listImportedModules()).get('vllm-0.21')).toBeUndefined();
+  });
+
   it('imported stub SIF has the expected placeholder content', async () => {
     store.startImport(entry());
     await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
@@ -141,7 +168,7 @@ describe('OrasImporter command construction', () => {
       'pull',
       '--force',
       '/modules/.tmp.sif',
-      'oras://quay.io/x/vllm:0.21',
+      `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
     ]);
     expect(calls[1]).toEqual(['apptainer', 'verify', '/modules/.tmp.sif']);
   });

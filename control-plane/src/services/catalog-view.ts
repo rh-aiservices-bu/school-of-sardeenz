@@ -1,5 +1,6 @@
 import { CatalogItemState, type ControlPlaneComponents } from '@sardeenz/types';
 import type { CatalogSnapshot } from './catalog-service.js';
+import type { ImportedModules } from './module-store.js';
 
 type RunnerCatalogView = ControlPlaneComponents['schemas']['RunnerCatalogView'];
 type CatalogItem = ControlPlaneComponents['schemas']['CatalogItem'];
@@ -8,9 +9,10 @@ type CatalogItemStatus = ControlPlaneComponents['schemas']['CatalogItemStatus'];
 // Merge the catalog snapshot with module-store contents + transient import states into the API view.
 export function buildCatalogView(
   snapshot: CatalogSnapshot,
-  importedStems: Set<string>,
+  importedModules: ImportedModules,
   transientById: Map<string, CatalogItemStatus>,
 ): RunnerCatalogView {
+  const importedStems = new Set(importedModules.keys());
   const catalogStems = new Set(snapshot.entries.map((e) => e.sifName));
 
   const runners: CatalogItem[] = snapshot.entries.map((entry) => {
@@ -23,10 +25,12 @@ export function buildCatalogView(
           ? CatalogItemState.IMPORTED
           : CatalogItemState.NOT_IMPORTED,
       } satisfies CatalogItemStatus);
-    // updateAvailable is reserved for future registry-digest staleness detection. Versions are
-    // published as distinct, immutable SIF modules that coexist side by side (a newer version is a
-    // separate catalog entry, not an in-place update), so there is no sibling-version "update".
-    return { entry, status, updateAvailable: false };
+    const catalogDigest = entry.image.match(/@sha256:([a-fA-F0-9]{64})$/)?.[1]?.toLowerCase();
+    const importedDigest = importedModules.get(entry.sifName);
+    const updateAvailable =
+      status.state === CatalogItemState.IMPORTED &&
+      (catalogDigest === undefined || importedDigest !== catalogDigest);
+    return { entry, status, updateAvailable };
   });
 
   const unmanagedModules = [...importedStems].filter((stem) => !catalogStems.has(stem)).sort();

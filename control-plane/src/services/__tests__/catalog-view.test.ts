@@ -4,6 +4,8 @@ import { CatalogItemState } from '@sardeenz/types';
 import { buildCatalogView, isModuleInUse, type ActiveRunnerInfo } from '../catalog-view.js';
 import type { CatalogEntry, CatalogSnapshot } from '../catalog-service.js';
 
+const DIGEST = 'a'.repeat(64);
+
 function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
   return {
     id: 'vllm-0.21',
@@ -11,7 +13,7 @@ function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
     description: 'd',
     runnerType: 'vllm',
     version: '0.21',
-    image: 'oras://quay.io/x/vllm:0.21',
+    image: `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
     sifName: 'vllm-0.21',
     protocol: 'openai' as CatalogEntry['protocol'],
     maxTensorParallelism: 1,
@@ -26,13 +28,13 @@ function snapshot(entries: CatalogEntry[]): CatalogSnapshot {
 
 describe('buildCatalogView', () => {
   it('marks entries imported when the SIF stem is present', () => {
-    const view = buildCatalogView(snapshot([entry()]), new Set(['vllm-0.21']), new Map());
+    const view = buildCatalogView(snapshot([entry()]), new Map([['vllm-0.21', DIGEST]]), new Map());
     expect(view.runners[0].status.state).toBe(CatalogItemState.IMPORTED);
     expect(view.runners[0].updateAvailable).toBe(false);
   });
 
   it('marks entries not imported when absent', () => {
-    const view = buildCatalogView(snapshot([entry()]), new Set(), new Map());
+    const view = buildCatalogView(snapshot([entry()]), new Map(), new Map());
     expect(view.runners[0].status.state).toBe(CatalogItemState.NOT_IMPORTED);
   });
 
@@ -40,7 +42,7 @@ describe('buildCatalogView', () => {
     const transient = new Map([
       ['vllm-0.21', { id: 'vllm-0.21', state: CatalogItemState.IMPORTING, percentComplete: 42 }],
     ]);
-    const view = buildCatalogView(snapshot([entry()]), new Set(), transient);
+    const view = buildCatalogView(snapshot([entry()]), new Map(), transient);
     expect(view.runners[0].status.state).toBe(CatalogItemState.IMPORTING);
     expect(view.runners[0].status.percentComplete).toBe(42);
   });
@@ -50,16 +52,38 @@ describe('buildCatalogView', () => {
       entry({ id: 'vllm-0.20', version: '0.20', sifName: 'vllm-0.20' }),
       entry({ id: 'vllm-0.21', version: '0.21', sifName: 'vllm-0.21' }),
     ];
-    const view = buildCatalogView(snapshot(entries), new Set(['vllm-0.20']), new Map());
+    const view = buildCatalogView(snapshot(entries), new Map([['vllm-0.20', DIGEST]]), new Map());
     const older = view.runners.find((r) => r.entry.id === 'vllm-0.20');
     expect(older?.status.state).toBe(CatalogItemState.IMPORTED);
     expect(older?.updateAvailable).toBe(false);
   });
 
+  it('flags an update when the catalog digest differs from the imported digest', () => {
+    const view = buildCatalogView(
+      snapshot([entry()]),
+      new Map([['vllm-0.21', 'b'.repeat(64)]]),
+      new Map(),
+    );
+    expect(view.runners[0].updateAvailable).toBe(true);
+  });
+
+  it('flags a legacy imported SIF whose digest is unknown', () => {
+    const view = buildCatalogView(
+      snapshot([entry()]),
+      new Map([['vllm-0.21', undefined]]),
+      new Map(),
+    );
+    expect(view.runners[0].updateAvailable).toBe(true);
+  });
+
   it('lists module-store SIFs not in the catalog as unmanagedModules', () => {
     const view = buildCatalogView(
       snapshot([entry()]),
-      new Set(['vllm-0.21', 'triton-2.42', 'locally-built']),
+      new Map([
+        ['vllm-0.21', DIGEST],
+        ['triton-2.42', undefined],
+        ['locally-built', undefined],
+      ]),
       new Map(),
     );
     expect(view.unmanagedModules).toEqual(['locally-built', 'triton-2.42']);
@@ -70,8 +94,10 @@ describe('buildCatalogView', () => {
       ...snapshot([entry()]),
       invalidEntries: [{ id: 'bad-entry', reason: "missing/invalid 'protocol'" }],
     };
-    const view = buildCatalogView(withInvalid, new Set(), new Map());
-    expect(view.invalidEntries).toEqual([{ id: 'bad-entry', reason: "missing/invalid 'protocol'" }]);
+    const view = buildCatalogView(withInvalid, new Map(), new Map());
+    expect(view.invalidEntries).toEqual([
+      { id: 'bad-entry', reason: "missing/invalid 'protocol'" },
+    ]);
   });
 });
 

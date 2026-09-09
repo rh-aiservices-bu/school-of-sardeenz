@@ -223,9 +223,8 @@ runners:
 
 describe('CatalogService http source', () => {
   it('fetches over http and caches until refresh', async () => {
-    const fetchImpl = vi.fn(() =>
-      Promise.resolve(new Response(VALID, { status: 200 })),
-    ) as unknown as typeof fetch;
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(VALID, { status: 200 })));
+    const fetchImpl = fetchMock as unknown as typeof fetch;
     const svc = new CatalogService('https://example.com/runners.yaml', logger, {
       fetch: fetchImpl,
     });
@@ -236,6 +235,14 @@ describe('CatalogService http source', () => {
 
     await svc.refresh(); // forces a re-fetch
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
+    expect(url.origin + url.pathname).toBe('https://example.com/runners.yaml');
+    expect(url.searchParams.get('_sardeenz_refresh')).toMatch(/^\d+$/);
+    expect(init.cache).toBe('no-store');
+    expect(init.headers).toMatchObject({
+      'Cache-Control': 'no-cache, no-store',
+      Pragma: 'no-cache',
+    });
   });
 
   it('throws on a non-ok http response', async () => {

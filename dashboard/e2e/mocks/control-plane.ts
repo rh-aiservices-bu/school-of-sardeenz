@@ -229,7 +229,8 @@ export class MockControlPlane {
             engine: 'vLLM',
             runnerType: 'vllm',
             version: '0.21',
-            image: 'oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21',
+            image:
+              'oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
             sifName: 'vllm-0.21',
             protocol: 'openai',
           },
@@ -463,6 +464,10 @@ export class MockControlPlane {
 
     // Runner catalog (#155) — merged catalog + import state the deploy form reads.
     app.get('/api/v1/catalog', async (_req, reply) => {
+      return reply.send(this.state.catalog);
+    });
+    app.post('/api/v1/catalog/refresh', async (_req, reply) => {
+      this.state.catalog.fetchedAt = new Date().toISOString();
       return reply.send(this.state.catalog);
     });
 

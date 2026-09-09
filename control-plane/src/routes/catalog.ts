@@ -12,8 +12,8 @@ import type { CatalogSnapshot } from '../services/catalog-service.js';
 
 export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): void {
   async function view(snapshot: CatalogSnapshot) {
-    const importedStems = await deps.moduleStore.listImportedStems();
-    return buildCatalogView(snapshot, importedStems, deps.moduleStore.getAllTransient());
+    const importedModules = await deps.moduleStore.listImportedModules();
+    return buildCatalogView(snapshot, importedModules, deps.moduleStore.getAllTransient());
   }
 
   app.get('/api/v1/catalog', async (_request, reply) => {

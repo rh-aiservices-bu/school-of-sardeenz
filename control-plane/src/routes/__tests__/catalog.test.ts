@@ -37,6 +37,7 @@ const SNAPSHOT: CatalogSnapshot = {
 interface Overrides {
   isLeader?: boolean;
   importedStems?: Set<string>;
+  importedDigests?: Map<string, string | undefined>;
   activeStates?: { modelName: string; state: ModelLifecycleState }[];
   modelRecords?: {
     name: string;
@@ -54,7 +55,12 @@ function buildApp(over: Overrides = {}): {
   moduleStore: Record<string, ReturnType<typeof vi.fn>>;
 } {
   const moduleStore = {
-    listImportedStems: vi.fn(() => Promise.resolve(over.importedStems ?? new Set<string>())),
+    listImportedModules: vi.fn(() =>
+      Promise.resolve(
+        over.importedDigests ??
+          new Map([...(over.importedStems ?? new Set<string>())].map((stem) => [stem, undefined])),
+      ),
+    ),
     getAllTransient: vi.fn(() => new Map()),
     startImport: vi.fn(() => ({
       id: ENTRY.id,

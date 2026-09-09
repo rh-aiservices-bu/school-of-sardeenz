@@ -39,6 +39,7 @@ import { CubesIcon, DownloadIcon, SyncAltIcon, TrashIcon } from '@patternfly/rea
 import { CatalogItemState } from '@sardeenz/types';
 import type { CatalogItem } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { formatDateTime, shortImageDigest } from '../../utils/format';
 import {
   useCatalog,
   useImportRunner,
@@ -92,6 +93,7 @@ function RunnerCard({
 }) {
   const { t } = useTranslation('catalog');
   const { entry, status } = item;
+  const digest = shortImageDigest(entry.image);
   const imported = status.state === CatalogItemState.IMPORTED;
   const importing = status.state === CatalogItemState.IMPORTING;
 
@@ -106,8 +108,18 @@ function RunnerCard({
       <CardBody>
         <Stack hasGutter>
           <StackItem>{entry.description}</StackItem>
+          {digest && (
+            <StackItem>
+              <Content component="small">{t('card.imageDigest', { digest })}</Content>
+            </StackItem>
+          )}
           <StackItem>
             <LabelGroup numLabels={6}>
+              {item.updateAvailable && (
+                <Label color="orange" isCompact>
+                  {t('state.updateAvailable')}
+                </Label>
+              )}
               {entry.engine && <Label isCompact>{entry.engine}</Label>}
               <Label isCompact>v{entry.version}</Label>
               {typeof entry.minVRAMGiB === 'number' && (
@@ -240,6 +252,13 @@ export function RunnerCatalog() {
                   {data?.source ? t('source', { source: data.source }) : ''}
                 </Content>
               </ToolbarItem>
+              {data?.fetchedAt && (
+                <ToolbarItem>
+                  <Content component="small">
+                    {t('fetchedAt', { timestamp: formatDateTime(data.fetchedAt) })}
+                  </Content>
+                </ToolbarItem>
+              )}
               <ToolbarItem align={{ default: 'alignEnd' }}>
                 <Button
                   variant="secondary"

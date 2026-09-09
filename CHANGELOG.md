@@ -125,6 +125,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Runner catalog refresh and digest tracking.** Catalog refreshes now bypass upstream HTTP/CDN
+  caches, imported SIFs retain digest provenance in sidecar metadata, and digest drift is surfaced
+  as an available update. The dashboard shows the catalog fetch time and abbreviated image digest.
+
 - **Kubernetes control-plane leader election.** Lease acquisition and renewal now serialize
   Kubernetes `MicroTime` fields with the required six fractional digits, include API response
   details in failures, trust the mounted cluster CA, and grant clean Lease deletion on shutdown.
