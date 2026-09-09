@@ -13,6 +13,7 @@ describe('loadConfig', () => {
     'SARDEENZ_REDIS_KEY_PREFIX',
     'SARDEENZ_EVICTION_MAX_PER_CYCLE',
     'SARDEENZ_SLEEP_TIMEOUT_SECS',
+    'SARDEENZ_SIF_IMPORTER',
   ];
 
   beforeEach(() => {
@@ -39,6 +40,7 @@ describe('loadConfig', () => {
     expect(config.logLevel).toBe('info');
     expect(config.redisKeyPrefix).toBe('sardeenz');
     expect(config.evictionMaxPerCycle).toBe(3);
+    expect(config.sifImporter).toBe('oras');
   });
 
   it('reads SARDEENZ_CONTROL_PLANE_LISTEN_ADDR from env', () => {
@@ -71,6 +73,18 @@ describe('loadConfig', () => {
     process.env['SARDEENZ_EVICTION_MAX_PER_CYCLE'] = '10';
     const config = loadConfig();
     expect(config.evictionMaxPerCycle).toBe(10);
+  });
+
+  it('allows the placeholder importer only when explicitly requested', () => {
+    process.env['SARDEENZ_SIF_IMPORTER'] = 'stub';
+    expect(loadConfig().sifImporter).toBe('stub');
+  });
+
+  it('rejects an invalid importer instead of silently selecting the placeholder', () => {
+    process.env['SARDEENZ_SIF_IMPORTER'] = 'oraz';
+    expect(() => loadConfig()).toThrow(
+      'Environment variable SARDEENZ_SIF_IMPORTER must be "oras" or "stub", got: oraz',
+    );
   });
 });
 

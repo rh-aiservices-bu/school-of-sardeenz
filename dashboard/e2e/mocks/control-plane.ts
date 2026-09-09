@@ -470,6 +470,13 @@ export class MockControlPlane {
       this.state.catalog.fetchedAt = new Date().toISOString();
       return reply.send(this.state.catalog);
     });
+    app.delete<{ Params: { id: string } }>('/api/v1/catalog/:id', async (req, reply) => {
+      const runner = this.state.catalog.runners.find((item) => item.entry.id === req.params.id);
+      if (!runner) return reply.code(404).send({ error: 'not found' });
+      runner.status = { id: runner.entry.id, state: 'NOT_IMPORTED' };
+      runner.updateAvailable = false;
+      return reply.code(204).send();
+    });
 
     // Notifications
     app.get('/api/v1/notifications', async (req, reply) => {

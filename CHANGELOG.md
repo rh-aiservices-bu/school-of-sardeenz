@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bodyless API mutations no longer surface JSON errors.** The dashboard BFF and browser client
+  now accept successful `204 No Content` and `205 Reset Content` responses without attempting to
+  parse an absent JSON body, fixing the false uninstall failure shown after a runner was deleted.
+
+- **Runner imports no longer silently create stub SIFs.** The control plane now defaults to the
+  real ORAS importer, requires an explicit `SARDEENZ_SIF_IMPORTER=stub` for non-runnable dev/test
+  placeholders, and rejects misspelled importer values at startup.
+
 ### Added
 
 - **Byte-accurate runner-catalog imports.** The control plane now resolves digest-pinned OCI

@@ -61,6 +61,16 @@ function boolEnv(name: string, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
+function sifImporterEnv(): 'stub' | 'oras' {
+  const value = optionalEnv('SARDEENZ_SIF_IMPORTER', 'oras');
+  if (value !== 'stub' && value !== 'oras') {
+    throw new Error(
+      `Environment variable SARDEENZ_SIF_IMPORTER must be "oras" or "stub", got: ${value}`,
+    );
+  }
+  return value;
+}
+
 const DEFAULT_CATALOG_URL =
   'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml';
 
@@ -108,8 +118,9 @@ export function loadConfig(): Config {
     modulesDir: optionalEnv('SARDEENZ_MODULES_DIR', '/modules'),
     // Same var the worker reads; the control plane must have the weights volume mounted to browse it.
     weightsDir: optionalEnv('SARDEENZ_WEIGHTS_DIR', '/weights'),
-    // 'stub' writes a placeholder; 'oras' streams the OCI SIF layer and optionally verifies it.
-    sifImporter: optionalEnv('SARDEENZ_SIF_IMPORTER', 'stub') === 'oras' ? 'oras' : 'stub',
+    // Imports must produce a runnable artifact by default. The placeholder is an explicit test/dev
+    // opt-in so a missing or misspelled setting can never masquerade as a successful real import.
+    sifImporter: sifImporterEnv(),
     apptainerBin: optionalEnv('SARDEENZ_APPTAINER_BIN', 'apptainer'),
     verifySif: boolEnv('SARDEENZ_VERIFY_SIF', true),
     apiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),

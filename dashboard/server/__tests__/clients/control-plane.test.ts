@@ -198,6 +198,19 @@ describe('ControlPlaneClient', () => {
     });
   });
 
+  describe('uninstallRunner', () => {
+    it('accepts a successful 204 response without trying to parse JSON', async () => {
+      const json = vi.fn(() => Promise.reject(new SyntaxError('Unexpected end of JSON input')));
+      fetchSpy.mockResolvedValue({ ok: true, status: 204, json });
+
+      await expect(client.uninstallRunner('vllm-0.21')).resolves.toEqual({
+        status: 204,
+        data: undefined,
+      });
+      expect(json).not.toHaveBeenCalled();
+    });
+  });
+
   describe('isHealthy', () => {
     it('returns true when /healthz responds ok', async () => {
       fetchSpy.mockResolvedValue({ ok: true });

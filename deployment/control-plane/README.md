@@ -53,14 +53,16 @@ store itself (no Kubernetes Job — so it works identically under Podman/VM). Th
 | ----------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
 | `SARDEENZ_RUNNER_CATALOG_URL` | Catalog source (http(s) URL or local file / `file://`)            | the official `school-of-sardeenz` raw URL |
 | `SARDEENZ_MODULES_DIR`        | Module store mount path                                           | `/modules`                                |
-| `SARDEENZ_SIF_IMPORTER`       | `oras` (OCI SIF stream) or `stub` (dev placeholder)               | `stub`                                    |
+| `SARDEENZ_SIF_IMPORTER`       | `oras` (OCI SIF stream) or `stub` (non-runnable test placeholder) | `oras`                                    |
 | `SARDEENZ_APPTAINER_BIN`      | apptainer binary                                                  | `apptainer`                               |
 | `SARDEENZ_VERIFY_SIF`         | `apptainer verify` pulled SIFs before publishing                  | `true`                                    |
 | `APPTAINER_AUTH_FILE`         | Docker-format credentials for private OCI registries              | unset (public registries only)            |
 
-Set `SARDEENZ_SIF_IMPORTER=oras` in production; leave it unset (`stub`) for local dev / CI where
-apptainer isn't installed. For local dev, point `SARDEENZ_RUNNER_CATALOG_URL` at the repo's
-`runners.yaml` and `SARDEENZ_MODULES_DIR` at a scratch directory.
+Real OCI download is the default and does not itself require Apptainer. Set
+`SARDEENZ_SIF_IMPORTER=stub` explicitly only for dev/CI checks that need a non-runnable placeholder
+instead of a module. For local dev, point `SARDEENZ_RUNNER_CATALOG_URL` at the repo's `runners.yaml`
+and `SARDEENZ_MODULES_DIR` at a scratch directory. When Apptainer is unavailable, signature
+verification must be disabled explicitly with `SARDEENZ_VERIFY_SIF=false`.
 
 ## Pod snippet (Kubernetes)
 

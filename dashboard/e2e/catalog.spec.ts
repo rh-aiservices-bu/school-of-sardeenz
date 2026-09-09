@@ -49,4 +49,20 @@ test.describe('Runner Catalog', () => {
 
     await expect(page.getByText(/Fetched at:/)).toBeVisible();
   });
+
+  test('Uninstall accepts a 204 response without showing a false error', async ({
+    page,
+    bffPort,
+  }) => {
+    await page.goto(bffUrl(bffPort, '/catalog'));
+    await expect(page.getByText('Imported')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Uninstall' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Uninstall runner?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Uninstall' }).click();
+
+    await expect(page.getByText('Not imported')).toBeVisible();
+    await expect(page.getByText('Failed to uninstall the runner')).toHaveCount(0);
+  });
 });

@@ -42,11 +42,13 @@ describe('api.catalog', () => {
   });
 
   it('uninstall DELETEs /catalog/:id', async () => {
-    mockFetch.mockResolvedValueOnce(makeResponse(204, {}));
-    await api.catalog.uninstall('vllm-0.21');
+    const json = vi.fn(() => Promise.reject(new SyntaxError('Unexpected end of JSON input')));
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 204, json });
+    await expect(api.catalog.uninstall('vllm-0.21')).resolves.toBeUndefined();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/catalog/vllm-0.21');
     expect(init.method).toBe('DELETE');
+    expect(json).not.toHaveBeenCalled();
   });
 
   it('throws ApiError with the 409 in-use code on uninstall conflict', async () => {
