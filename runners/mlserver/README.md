@@ -63,6 +63,11 @@ advertises `supportedSleepLevels: ["L1_HOST_RAM"]` for v1 (it is the best availa
 - `MLSERVER_HOST=0.0.0.0` (matching the vLLM shim's `--engine-host` default since #159) and
   `MLSERVER_HTTP_PORT=<engine-port>` configure MLServer's bind via env, the documented
   `MLSERVER_`-prefixed override mechanism.
+- `MLSERVER_METRICS_DIR=/scratch/metrics/<runner-id>` and
+  `MLSERVER_ENVIRONMENTS_DIR=/scratch/environments/<runner-id>` keep MLServer's multiprocess
+  metric files and inference environments out of the SIF's read-only working directory. The shim
+  also uses its generated writable model repository as its working directory and fallback storage
+  when launched without a current worker.
 - MLServer also binds unauthenticated gRPC and Prometheus metrics servers even in this REST-only
   deployment. The worker reserves a contiguous four-port block (management, HTTP engine, gRPC,
   metrics) and passes `SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT` explicitly

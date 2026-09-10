@@ -18,6 +18,7 @@ from sardeenz_mlserver_runner import memory as mem
 from sardeenz_mlserver_runner import settings as cfg
 from sardeenz_mlserver_runner import state as st
 from sardeenz_mlserver_runner.cli import _extract_served_names, aux_ports, parse_args
+from sardeenz_mlserver_runner.engine import MLServerEngine
 
 
 def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) -> None:
@@ -213,6 +214,57 @@ def test_write_model_repository_writes_one_settings_file(tmp_path):
     assert entries == ["model-settings.json"]
     with open(os.path.join(repo_dir, "model-settings.json"), encoding="utf-8") as fh:
         assert json.load(fh) == settings
+
+
+def test_engine_redirects_metrics_to_writable_repository_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    args = parse_args(
+        ["--model", "/repo", "--port", "9101", "--", "--served-model-name", "served"]
+    )
+    captured: dict[str, object] = {}
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.delenv("MLSERVER_METRICS_DIR", raising=False)
+    monkeypatch.setattr("sardeenz_mlserver_runner.engine.subprocess.Popen", fake_popen)
+
+    MLServerEngine(args, str(repo_dir)).start()
+
+    assert captured["command"] == ["mlserver", "start", str(repo_dir)]
+    assert captured["env"]["MLSERVER_METRICS_DIR"] == str(repo_dir / ".metrics")
+    assert captured["env"]["MLSERVER_ENVIRONMENTS_DIR"] == str(repo_dir / ".envs")
+    assert captured["cwd"] == str(repo_dir)
+
+
+def test_engine_preserves_worker_metrics_directory_override(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    args = parse_args(
+        ["--model", "/repo", "--port", "9101", "--", "--served-model-name", "served"]
+    )
+    captured: dict[str, object] = {}
+
+    def fake_popen(_command, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setenv("MLSERVER_METRICS_DIR", "/scratch/metrics/runner-abc")
+    monkeypatch.setenv("MLSERVER_ENVIRONMENTS_DIR", "/scratch/environments/runner-abc")
+    monkeypatch.setattr("sardeenz_mlserver_runner.engine.subprocess.Popen", fake_popen)
+
+    MLServerEngine(args, str(repo_dir)).start()
+
+    assert captured["env"]["MLSERVER_METRICS_DIR"] == "/scratch/metrics/runner-abc"
+    assert (
+        captured["env"]["MLSERVER_ENVIRONMENTS_DIR"]
+        == "/scratch/environments/runner-abc"
+    )
 
 
 # --- state.py (state machine + capabilities + response shapes) -----------------------------------

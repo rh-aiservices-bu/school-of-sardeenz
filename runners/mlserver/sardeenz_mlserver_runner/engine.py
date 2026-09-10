@@ -39,10 +39,20 @@ class MLServerEngine:
         env["MLSERVER_HTTP_PORT"] = str(self._args.engine_port)
         env["MLSERVER_GRPC_PORT"] = str(self._args.grpc_port)
         env["MLSERVER_METRICS_PORT"] = str(self._args.metrics_port)
+        # MLServer defaults to `.metrics` below the process cwd. Inside a SIF that cwd may be part
+        # of the immutable image, so direct launches and older workers need a writable fallback.
+        # New workers inject a unique /scratch path and take precedence over this setdefault.
+        env.setdefault("MLSERVER_METRICS_DIR", os.path.join(self._repo_dir, ".metrics"))
+        env.setdefault("MLSERVER_ENVIRONMENTS_DIR", os.path.join(self._repo_dir, ".envs"))
         env.setdefault("HF_HUB_OFFLINE", "1")  # never phone home at runtime (parity w/ vLLM image)
-        # New process group so we can signal the whole MLServer tree on stop.
+        # New process group so we can signal the whole MLServer tree on stop. Use the generated
+        # writable repository as cwd too: MLServer settings and third-party runtimes may interpret
+        # relative paths against cwd, which must never be the immutable SIF application directory.
         self._proc = subprocess.Popen(
-            ["mlserver", "start", self._repo_dir], env=env, start_new_session=True
+            ["mlserver", "start", self._repo_dir],
+            env=env,
+            cwd=self._repo_dir,
+            start_new_session=True,
         )
 
     def is_alive(self) -> bool:

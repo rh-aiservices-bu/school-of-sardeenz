@@ -43,6 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **MLServer starts from read-only Apptainer images.** Workers now redirect MLServer's default
+  `.metrics` and `.envs` directories to isolated paths under writable scratch, including for
+  already-published SIFs; the runner shim also uses a writable working directory and supplies
+  writable fallbacks for direct or older-worker launches.
+
 - **Apptainer workers can advertise multiple runner families.** `SARDEENZ_RUNNER_TYPES` accepts a
   comma- or whitespace-separated list (while retaining `SARDEENZ_RUNNER_TYPE` compatibility), and
   the production worker advertises both vLLM and MLServer so imported MLServer modules appear in

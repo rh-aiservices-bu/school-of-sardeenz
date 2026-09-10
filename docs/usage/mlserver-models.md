@@ -126,6 +126,11 @@ operating-system page cache may keep files warm, but that is not guaranteed.
   URL, not the source directory name or the original name from `model-settings.json`.
 - **Additional engine arguments have no effect:** the current MLServer runner ignores deployment
   `engineArgs`; configure MLServer through `model-settings.json` instead.
+- **`Permission denied` for `.metrics` or `.envs`:** upgrade the worker so it redirects MLServer's
+  metrics and inference-environment directories under `/scratch`. Current runner shims also use a
+  writable working directory and provide writable fallbacks. The preceding Apptainer warning about
+  remounting `/.singularity.d/libs` read-only is non-fatal; the Python traceback identifies the
+  actual startup failure.
 
 For importing the runner SIF, see the [runner catalog guide](runner-catalog.md). For the HTTP API
 families, see the [API reference](api-reference.md). Implementation and runner-contract details

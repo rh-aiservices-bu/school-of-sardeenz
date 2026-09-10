@@ -96,6 +96,8 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args).toContain('CUDA_VISIBLE_DEVICES=2');
     expect(args).toContain('SARDEENZ_MLSERVER_GRPC_PORT=9103');
     expect(args).toContain('SARDEENZ_MLSERVER_METRICS_PORT=9104');
+    expect(args).toContain('MLSERVER_METRICS_DIR=/scratch/metrics/runner-abc');
+    expect(args).toContain('MLSERVER_ENVIRONMENTS_DIR=/scratch/environments/runner-abc');
 
     // SIF path precedes the entrypoint, which precedes the model/port flags.
     const sifIdx = args.indexOf('/modules/vllm-0.21.sif');
@@ -112,17 +114,25 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args.slice(ddIdx + 1)).toEqual(['--served-model-name', 'llama']);
   });
 
-  it('emits SARDEENZ_MLSERVER_GRPC_PORT/METRICS_PORT --env for the allocated block', async () => {
+  it('emits MLServer port and writable metrics-directory environment', async () => {
     const { launcher } = makeLauncher();
     const plan = await launcher.buildExecPlan(makeSpec());
 
     const args = plan.args;
     const grpcIdx = args.indexOf('SARDEENZ_MLSERVER_GRPC_PORT=9103');
     const metricsIdx = args.indexOf('SARDEENZ_MLSERVER_METRICS_PORT=9104');
+    const metricsDirIdx = args.indexOf('MLSERVER_METRICS_DIR=/scratch/metrics/runner-abc');
+    const environmentsDirIdx = args.indexOf(
+      'MLSERVER_ENVIRONMENTS_DIR=/scratch/environments/runner-abc',
+    );
     expect(grpcIdx).toBeGreaterThan(-1);
     expect(metricsIdx).toBeGreaterThan(-1);
+    expect(metricsDirIdx).toBeGreaterThan(-1);
+    expect(environmentsDirIdx).toBeGreaterThan(-1);
     expect(args[grpcIdx - 1]).toBe('--env');
     expect(args[metricsIdx - 1]).toBe('--env');
+    expect(args[metricsDirIdx - 1]).toBe('--env');
+    expect(args[environmentsDirIdx - 1]).toBe('--env');
   });
 
   it('vLLM argv is unaffected by the aux-port env', async () => {

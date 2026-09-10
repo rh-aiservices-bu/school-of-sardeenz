@@ -256,6 +256,13 @@ export class ApptainerLauncher implements RunnerLauncher {
       // 65535 ceiling). vLLM ignores these. (#160)
       SARDEENZ_MLSERVER_GRPC_PORT: String(spec.grpcPort),
       SARDEENZ_MLSERVER_METRICS_PORT: String(spec.metricsPort),
+      // MLServer otherwise creates `.metrics` under the worker image's inherited cwd, which is
+      // read-only inside a SIF. Keep each runner's multiprocess metrics files isolated on the
+      // writable scratch bind. This worker-side override also repairs already-published SIFs.
+      MLSERVER_METRICS_DIR: `${this.config.scratchDir}/metrics/${spec.runnerId}`,
+      // MLServer's inference-pool registry unconditionally creates `.envs` at startup because
+      // parallel_workers defaults to 1. Redirect it for the same read-only-cwd reason.
+      MLSERVER_ENVIRONMENTS_DIR: `${this.config.scratchDir}/environments/${spec.runnerId}`,
     };
     // vLLM 0.24 may select Model Runner V2 by default, but kvcached's autopatch targets Model
     // Runner V1. Pass this explicitly as well as baking it into the SIF so already-published 0.24
