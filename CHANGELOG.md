@@ -39,6 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Successful move replacements are no longer demoted to `ERROR` by an activation race.** If
+  reconciliation activates a ready replacement before its original deployment task, the second
+  activation is treated as idempotent; Redis/Valkey transition errors now use the supported Lua
+  error-reply API.
+
 - **Failed model moves no longer block deletion indefinitely.** Delete now supersedes a move that
   has entered failed-replacement cleanup, and force-delete can clear a stranded move transaction
   in any phase.

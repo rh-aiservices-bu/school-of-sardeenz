@@ -145,17 +145,25 @@ export class DeployOrchestrationService {
       await this.routingMap.addEndpoint(params.modelName, endpoint, params.protocol);
       assertStillOwner();
 
-      await this.lifecycle.transition(
-        params.modelName,
-        params.instanceId,
-        ModelLifecycleState.ACTIVE,
-        {
-          runnerHost: runnerInfo.host,
-          runnerPort: runnerInfo.port,
-          runnerEnginePort: enginePort,
-          runnerId: runnerInfo.runnerId,
-        },
-      );
+      try {
+        await this.lifecycle.transition(
+          params.modelName,
+          params.instanceId,
+          ModelLifecycleState.ACTIVE,
+          {
+            runnerHost: runnerInfo.host,
+            runnerPort: runnerInfo.port,
+            runnerEnginePort: enginePort,
+            runnerId: runnerInfo.runnerId,
+          },
+        );
+      } catch (err) {
+        // Move recovery can observe the ready worker and perform STARTING → ACTIVE while this
+        // original deployment task is between its health check and transition. That is the same
+        // successful outcome, not a deployment failure that should demote ACTIVE back to ERROR.
+        const current = await this.lifecycle.getInstance(params.modelName, params.instanceId);
+        if (current?.state !== ModelLifecycleState.ACTIVE) throw err;
+      }
       assertStillOwner();
       await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
       this.memoryBudget.releaseInstanceReservations(params.instanceId);

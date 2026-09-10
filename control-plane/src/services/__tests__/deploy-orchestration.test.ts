@@ -62,6 +62,7 @@ function makeRunnerResponse(overrides: Partial<StartRunnerResponse> = {}): Start
 interface MockDeps {
   lifecycle: {
     transition: ReturnType<typeof vi.fn>;
+    getInstance: ReturnType<typeof vi.fn>;
     getInstancesForModel: ReturnType<typeof vi.fn>;
     setRunnerEndpoint: ReturnType<typeof vi.fn>;
   };
@@ -115,6 +116,13 @@ function createMocks(): MockDeps {
           errorMessage: null,
         },
       ]),
+      getInstance: vi.fn(() =>
+        Promise.resolve({
+          instanceId: INSTANCE_ID,
+          modelName: 'test-model',
+          state: trackedInstance.state,
+        }),
+      ),
       setRunnerEndpoint: vi.fn().mockResolvedValue(undefined),
     },
     routingMap: {
@@ -252,6 +260,37 @@ describe('DeployOrchestrationService', () => {
       await service.deployModel(makeParams());
 
       expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
+    });
+
+    it('accepts ACTIVE when move recovery wins the activation race', async () => {
+      const recovered = mocks.lifecycle.getInstancesForModel() as InstanceState[];
+      mocks.lifecycle.getInstancesForModel.mockReturnValue(
+        recovered.map((instance) => ({ ...instance, state: ModelLifecycleState.ACTIVE })),
+      );
+      mocks.lifecycle.transition.mockRejectedValueOnce(
+        new Error('INVALID_TRANSITION:ACTIVE:ACTIVE'),
+      );
+      mocks.lifecycle.getInstance.mockResolvedValueOnce({
+        instanceId: INSTANCE_ID,
+        modelName: 'test-model',
+        state: ModelLifecycleState.ACTIVE,
+      });
+
+      await expect(service.deployModel(makeParams())).resolves.toBeUndefined();
+
+      expect(mocks.lifecycle.transition).toHaveBeenCalledTimes(1);
+      expect(mocks.lifecycle.transition).not.toHaveBeenCalledWith(
+        'test-model',
+        INSTANCE_ID,
+        ModelLifecycleState.ERROR,
+        expect.anything(),
+      );
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
+      expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+        'test-model',
+        ModelState.ACTIVE,
+        Protocol.openai,
+      );
     });
 
     it('routes inference to the engine port while keeping management on the runner port', async () => {

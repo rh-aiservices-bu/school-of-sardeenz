@@ -282,7 +282,7 @@ export class ModelLifecycleService {
 
       local allowed = validTransitions[currentState]
       if not allowed then
-        return redis.error('INVALID_TRANSITION:' .. currentState .. ':' .. targetState)
+        return redis.error_reply('INVALID_TRANSITION:' .. currentState .. ':' .. targetState)
       end
 
       local found = false
@@ -293,7 +293,7 @@ export class ModelLifecycleService {
         end
       end
       if not found then
-        return redis.error('INVALID_TRANSITION:' .. currentState .. ':' .. targetState)
+        return redis.error_reply('INVALID_TRANSITION:' .. currentState .. ':' .. targetState)
       end
 
       state['state'] = targetState
