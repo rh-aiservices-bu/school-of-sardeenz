@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **GPU placement model controls now use compact action menus.** Models are listed vertically in
+  each GPU card with direct Sleep/Wake, Move, and Stop actions instead of inline move links.
+
 - **Runner container definitions are organized by engine and exact upstream version.** vLLM
   `0.21.0` and MLServer `1.7.1` now live under
   `containers/runners/<engine>/<version>/`, allowing multiple engine versions to coexist with

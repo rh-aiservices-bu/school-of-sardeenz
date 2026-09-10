@@ -35,9 +35,11 @@ import {
   Content,
   Alert,
   Label,
-  Button,
+  Dropdown,
+  DropdownItem,
+  DropdownList,
 } from '@patternfly/react-core';
-import { CubesIcon, MoonIcon, ServerIcon } from '@patternfly/react-icons';
+import { CubesIcon, EllipsisVIcon, MoonIcon, ServerIcon } from '@patternfly/react-icons';
 import { ResponsiveBar } from '@nivo/bar';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -48,6 +50,7 @@ import { formatBytes } from '../utils/format';
 import { getWorkerStatusColor } from '../utils/state-colors';
 import { getNivoTooltipTheme } from '../chartTheme';
 import { useAuth } from '../contexts/AuthContext';
+import { useDeleteInstance, useSleepInstance, useWakeInstance } from '../hooks/useModels';
 import { MoveModelModal, type MoveSource } from './MoveModelModal';
 import {
   attributeModelsToDevice,
@@ -93,6 +96,11 @@ function GpuCard({
 }) {
   const { t } = useTranslation('cluster');
   const navigate = useNavigate();
+  const sleepInstance = useSleepInstance();
+  const wakeInstance = useWakeInstance();
+  const stopInstance = useDeleteInstance();
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const attributed = useMemo(
     () => attributeModelsToDevice(device, workerDeviceCount, models),
@@ -113,6 +121,15 @@ function GpuCard({
     for (const entry of bar.entries) map.set(entry.key, entry);
     return map;
   }, [bar.entries]);
+  const modelRows = useMemo(
+    () =>
+      [...attributed].sort(
+        (a, b) =>
+          a.modelName.localeCompare(b.modelName) ||
+          (a.instanceId ?? '').localeCompare(b.instanceId ?? ''),
+      ),
+    [attributed],
+  );
 
   const header = device.deviceName ?? `GPU ${device.deviceIndex} · ${device.deviceType}`;
   const hasUtilOrTemp = device.utilizationPercent != null || device.temperatureC != null;
@@ -158,45 +175,6 @@ function GpuCard({
         )}
       </Flex>
 
-      {canMove &&
-        attributed
-          .filter((model) => {
-            const source = models?.find((candidate) => candidate.instanceId === model.instanceId);
-            return (
-              model.instanceId &&
-              model.state === ModelLifecycleState.ACTIVE &&
-              Math.min(...(source?.deviceIndices ?? [])) === device.deviceIndex
-            );
-          })
-          .map((model) => {
-            const source = models?.find((candidate) => candidate.instanceId === model.instanceId);
-            return source?.instanceId ? (
-              <Button
-                key={`move-${source.instanceId}`}
-                variant="link"
-                isInline
-                aria-label={t('overview.modelsPlacement.moveInstance', {
-                  modelName: source.modelName,
-                  instanceId: source.instanceId,
-                })}
-                style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
-                onClick={() =>
-                  onMove({
-                    modelName: source.modelName,
-                    instanceId: source.instanceId!,
-                    workerId: '',
-                    deviceIndices: source.deviceIndices ?? [device.deviceIndex],
-                  })
-                }
-              >
-                {t('overview.modelsPlacement.moveInstance', {
-                  modelName: source.modelName,
-                  instanceId: source.instanceId,
-                })}
-              </Button>
-            ) : null;
-          })}
-
       {/* VRAM info */}
       <div
         style={{
@@ -241,7 +219,166 @@ function GpuCard({
         />
       </div>
 
-      {/* Model legend */}
+      {/* Models on this GPU */}
+      <div
+        style={{
+          marginTop: 'var(--pf-t--global--spacer--xs)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {modelRows.map((model, index) => {
+          const hasInstance = Boolean(model.instanceId);
+          const canSleep = model.state === ModelLifecycleState.ACTIVE;
+          const canWake = model.state === ModelLifecycleState.SLEEPING;
+          const canStop =
+            model.state === ModelLifecycleState.ACTIVE ||
+            model.state === ModelLifecycleState.SLEEPING ||
+            model.state === ModelLifecycleState.ERROR;
+          const isPending =
+            (sleepInstance.isPending && sleepInstance.variables?.instanceId === model.instanceId) ||
+            (wakeInstance.isPending && wakeInstance.variables?.instanceId === model.instanceId) ||
+            (stopInstance.isPending && stopInstance.variables?.instanceId === model.instanceId);
+
+          const mutateInstance = (action: 'sleep' | 'wake' | 'stop') => {
+            if (!model.instanceId) return;
+            setOpenMenuKey(null);
+            setActionError(null);
+            const variables = { modelName: model.modelName, instanceId: model.instanceId };
+            const mutation =
+              action === 'sleep' ? sleepInstance : action === 'wake' ? wakeInstance : stopInstance;
+            mutation.mutate(variables, {
+              onError: (error) =>
+                setActionError(
+                  error instanceof Error
+                    ? error.message
+                    : t('overview.modelsPlacement.actions.failed'),
+                ),
+            });
+          };
+
+          return (
+            <div
+              key={model.key}
+              style={{
+                minHeight: '36px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--pf-t--global--spacer--xs)',
+                borderBottom:
+                  index < modelRows.length - 1
+                    ? '1px solid var(--pf-t--global--border--color--default)'
+                    : undefined,
+              }}
+            >
+              <Link
+                to={`/models/${encodeURIComponent(model.modelName)}`}
+                aria-label={t('overview.modelsPlacement.legend.viewModel', {
+                  model: model.displayName ?? model.modelName,
+                })}
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--xs)',
+                  flex: 1,
+                  minWidth: 0,
+                  opacity: model.sleeping ? 0.7 : 1,
+                  textDecoration: 'none',
+                  color: 'var(--pf-t--global--text--color--default)',
+                }}
+              >
+                <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
+                {model.displayName ?? model.modelName}
+                {model.sleeping && (
+                  <MoonIcon
+                    style={{
+                      marginLeft: '3px',
+                      fontSize: '10px',
+                      color: 'var(--pf-t--global--text--color--subtle)',
+                    }}
+                  />
+                )}{' '}
+                ({formatBytes(model.bytes)})
+              </Link>
+              {canMove && (
+                <Dropdown
+                  isOpen={openMenuKey === model.key}
+                  onSelect={() => setOpenMenuKey(null)}
+                  onOpenChange={(isOpen) => {
+                    if (!isOpen) setOpenMenuKey(null);
+                  }}
+                  toggle={(toggleRef) => (
+                    <MenuToggle
+                      ref={toggleRef}
+                      variant="plain"
+                      isExpanded={openMenuKey === model.key}
+                      isDisabled={!hasInstance || isPending}
+                      aria-label={t('overview.modelsPlacement.actions.ariaLabel', {
+                        model: model.displayName ?? model.modelName,
+                      })}
+                      onClick={() => setOpenMenuKey(openMenuKey === model.key ? null : model.key)}
+                    >
+                      <EllipsisVIcon />
+                    </MenuToggle>
+                  )}
+                  popperProps={{ position: 'right' }}
+                >
+                  <DropdownList>
+                    <DropdownItem
+                      key={canWake ? 'wake' : 'sleep'}
+                      isDisabled={!hasInstance || (!canSleep && !canWake)}
+                      onClick={() => mutateInstance(canWake ? 'wake' : 'sleep')}
+                    >
+                      {t(
+                        canWake
+                          ? 'overview.modelsPlacement.actions.wake'
+                          : 'overview.modelsPlacement.actions.sleep',
+                      )}
+                    </DropdownItem>
+                    <DropdownItem
+                      key="move"
+                      isDisabled={!hasInstance || model.state !== ModelLifecycleState.ACTIVE}
+                      onClick={() => {
+                        if (!model.instanceId || model.state !== ModelLifecycleState.ACTIVE) return;
+                        setOpenMenuKey(null);
+                        onMove({
+                          modelName: model.modelName,
+                          instanceId: model.instanceId,
+                          workerId: '',
+                          deviceIndices: models?.find(
+                            (candidate) => candidate.instanceId === model.instanceId,
+                          )?.deviceIndices ?? [device.deviceIndex],
+                        });
+                      }}
+                    >
+                      {t('overview.modelsPlacement.actions.move')}
+                    </DropdownItem>
+                    <DropdownItem
+                      key="stop"
+                      isDanger
+                      isDisabled={!hasInstance || !canStop}
+                      onClick={() => mutateInstance('stop')}
+                    >
+                      {t('overview.modelsPlacement.actions.stop')}
+                    </DropdownItem>
+                  </DropdownList>
+                </Dropdown>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {actionError && (
+        <Alert
+          variant="danger"
+          isInline
+          isPlain
+          title={t('overview.modelsPlacement.actions.failed')}
+          style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
+        >
+          {actionError}
+        </Alert>
+      )}
+
       <Flex
         flexWrap={{ default: 'wrap' }}
         style={{
@@ -250,35 +387,6 @@ function GpuCard({
           rowGap: '2px',
         }}
       >
-        {bar.entries.map((model) => (
-          <FlexItem key={model.key}>
-            <Link
-              to={`/models/${encodeURIComponent(model.modelName)}`}
-              aria-label={t('overview.modelsPlacement.legend.viewModel', {
-                model: model.displayName ?? model.modelName,
-              })}
-              style={{
-                fontSize: 'var(--pf-t--global--font--size--xs)',
-                opacity: model.sleeping ? 0.7 : 1,
-                textDecoration: 'none',
-                color: 'var(--pf-t--global--text--color--default)',
-              }}
-            >
-              <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
-              {model.displayName ?? model.modelName}
-              {model.sleeping && (
-                <MoonIcon
-                  style={{
-                    marginLeft: '3px',
-                    fontSize: '10px',
-                    color: 'var(--pf-t--global--text--color--subtle)',
-                  }}
-                />
-              )}{' '}
-              ({formatBytes(model.bytes)})
-            </Link>
-          </FlexItem>
-        ))}
         {bar.otherBytes > 0 && (
           <FlexItem>
             <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>

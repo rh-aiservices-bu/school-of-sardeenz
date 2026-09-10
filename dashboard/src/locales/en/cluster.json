@@ -59,8 +59,14 @@
     },
     "modelsPlacement": {
       "title": "Models placement",
-      "move": "Move",
-      "moveInstance": "Move {{modelName}} ({{instanceId}})",
+      "actions": {
+        "ariaLabel": "Actions for {{model}}",
+        "sleep": "Put to Sleep",
+        "wake": "Wake up",
+        "move": "Move",
+        "stop": "Stop",
+        "failed": "Model action failed"
+      },
       "pageTitle": "GPU Memory",
       "loading": "Loading GPU memory data",
       "errors": {
