@@ -44,6 +44,7 @@ import {
   useDeleteInstance,
   useSleepInstance,
   useWakeInstance,
+  useStartupLogSessions,
 } from '../../hooks/useModels';
 import { ApiError } from '../../api/client';
 import { StateLabel } from '../../components/StateLabel';
@@ -75,6 +76,7 @@ export function ModelDetail() {
   const deleteInstance = useDeleteInstance();
   const sleepInstance = useSleepInstance();
   const wakeInstance = useWakeInstance();
+  const { data: startupLogSessions = [] } = useStartupLogSessions(modelName ?? '');
 
   const [showSleepModal, setShowSleepModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -82,7 +84,7 @@ export function ModelDetail() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [engineConfigExpanded, setEngineConfigExpanded] = useState(false);
   const [engineArgsExpanded, setEngineArgsExpanded] = useState(false);
-  const [showLogsModal, setShowLogsModal] = useState(false);
+  const [logsInstanceId, setLogsInstanceId] = useState<string | null>(null);
   const [deleteInstanceId, setDeleteInstanceId] = useState<string | null>(null);
   const [curlCopied, setCurlCopied] = useState(false);
 
@@ -289,13 +291,6 @@ export function ModelDetail() {
         <FlexItem>
           <StateLabel state={model.state} />
         </FlexItem>
-        {(isStarting || isActive || isError) && (
-          <FlexItem align={{ default: !isAdmin ? 'alignRight' : undefined }}>
-            <Button variant="secondary" onClick={() => setShowLogsModal(true)}>
-              {t('detail.viewLogs.button')}
-            </Button>
-          </FlexItem>
-        )}
         {isAdmin && (
           <FlexItem align={{ default: 'alignRight' }}>
             <Flex gap={{ default: 'gapSm' }}>
@@ -625,6 +620,7 @@ export function ModelDetail() {
                 <Th>{t('detail.instances.columns.memory')}</Th>
                 <Th>{t('detail.instances.columns.endpoint')}</Th>
                 <Th>{t('detail.instances.columns.created')}</Th>
+                <Th>{t('detail.instances.columns.startupLogs')}</Th>
                 {isAdmin && (
                   <Th aria-label={t('detail.instances.columns.actions')}>
                     <span className="pf-v6-screen-reader">
@@ -671,6 +667,15 @@ export function ModelDetail() {
                     </Td>
                     <Td dataLabel={t('detail.instances.columns.created')}>
                       {instance.createdAt ? formatDateTime(instance.createdAt) : '—'}
+                    </Td>
+                    <Td dataLabel={t('detail.instances.columns.startupLogs')}>
+                      <Button
+                        variant="link"
+                        isInline
+                        onClick={() => setLogsInstanceId(instance.instanceId)}
+                      >
+                        {t('detail.viewLogs.button')}
+                      </Button>
                     </Td>
                     {isAdmin && (
                       <Td dataLabel={t('detail.instances.columns.actions')} isActionCell>
@@ -723,6 +728,57 @@ export function ModelDetail() {
           </Table>
         )}
       </div>
+
+      {startupLogSessions.some(
+        (session) => !instances.some((instance) => instance.instanceId === session.instanceId),
+      ) && (
+        <div style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
+          <Title
+            headingLevel="h2"
+            size="md"
+            style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}
+          >
+            {t('detail.startupHistory.title')}
+          </Title>
+          <Table aria-label={t('detail.startupHistory.title')} variant="compact">
+            <Thead>
+              <Tr>
+                <Th>{t('detail.instances.columns.instanceId')}</Th>
+                <Th>{t('detail.startupHistory.outcome')}</Th>
+                <Th>{t('detail.instances.columns.worker')}</Th>
+                <Th>{t('detail.instances.columns.created')}</Th>
+                <Th>{t('detail.instances.columns.startupLogs')}</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {startupLogSessions
+                .filter(
+                  (session) =>
+                    !instances.some((instance) => instance.instanceId === session.instanceId),
+                )
+                .map((session) => (
+                  <Tr key={session.instanceId}>
+                    <Td>
+                      <code>{session.instanceId}</code>
+                    </Td>
+                    <Td>{t(`detail.startupHistory.outcomes.${session.outcome}`)}</Td>
+                    <Td>{session.workerId}</Td>
+                    <Td>{formatDateTime(session.startedAt)}</Td>
+                    <Td>
+                      <Button
+                        variant="link"
+                        isInline
+                        onClick={() => setLogsInstanceId(session.instanceId)}
+                      >
+                        {t('detail.viewLogs.button')}
+                      </Button>
+                    </Td>
+                  </Tr>
+                ))}
+            </Tbody>
+          </Table>
+        </div>
+      )}
 
       {/* Engine config expandable */}
       {engineConfigJson && (
@@ -857,11 +913,12 @@ export function ModelDetail() {
       </Modal>
 
       {/* Live logs modal */}
-      {showLogsModal && (
+      {logsInstanceId && (
         <DeployLogsModal
           modelName={model.modelName}
-          isOpen={showLogsModal}
-          onClose={() => setShowLogsModal(false)}
+          instanceId={logsInstanceId}
+          isOpen={logsInstanceId !== null}
+          onClose={() => setLogsInstanceId(null)}
         />
       )}
     </PageSection>

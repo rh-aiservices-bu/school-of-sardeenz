@@ -163,6 +163,26 @@ describe('GET /api/models/:name/logs', () => {
     expect(proxyRequestFn).toHaveBeenCalledWith('GET', '/api/v1/models/my%2Fmodel/logs');
   });
 
+  it('proxies one durable startup stream by model and instance ID', async () => {
+    proxyRequestFn.mockResolvedValue(
+      makeUpstreamResponse(['event: log\ndata: {"content":"replica b"}\n\n']),
+    );
+
+    const app = await buildApp(makeConfig());
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/models/my%2Fmodel/instances/inst%2Fb/startup-logs',
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('replica b');
+    expect(proxyRequestFn).toHaveBeenCalledWith(
+      'GET',
+      '/api/v1/models/my%2Fmodel/instances/inst%2Fb/startup-logs',
+    );
+  });
+
   it('surfaces a 404 from the control plane as JSON before hijacking', async () => {
     proxyRequestFn.mockResolvedValue(
       new Response(JSON.stringify({ error: 'Not found: unknown-model', code: 'NOT_FOUND' }), {

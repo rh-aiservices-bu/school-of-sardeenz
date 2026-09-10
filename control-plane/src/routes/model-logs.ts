@@ -6,6 +6,7 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
 import { assertValidModelName } from '../utils/model-name.js';
+import { delaySafe } from '../utils.js';
 
 const POLL_INTERVAL_MS = 500;
 const PING_INTERVAL_MS = 30_000;
@@ -26,6 +27,78 @@ function resolveMaxWaitMs(config: RouteDeps['config']): number {
 }
 
 export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  app.get<{ Params: { modelName: string } }>(
+    '/api/v1/models/:modelName/startup-logs',
+    async (request) => {
+      const { modelName } = request.params;
+      assertValidModelName(modelName);
+      const sessions = await deps.startupLogRepository?.listByModel(modelName);
+      return {
+        sessions: (sessions ?? []).map((session) => ({
+          ...session,
+          startedAt: session.startedAt.toISOString(),
+          completedAt: session.completedAt?.toISOString(),
+          errorMessage: session.errorMessage ?? undefined,
+        })),
+      };
+    },
+  );
+
+  app.get<{ Params: { modelName: string; instanceId: string } }>(
+    '/api/v1/models/:modelName/instances/:instanceId/startup-logs',
+    async (request, reply) => {
+      const { modelName, instanceId } = request.params;
+      assertValidModelName(modelName);
+      const repository = deps.startupLogRepository;
+      const initial = await repository?.find(instanceId);
+      if (!repository || !initial || initial.modelName !== modelName) {
+        throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}/startup-logs`);
+      }
+
+      await reply.hijack();
+      app.hijackedResponses.add(reply.raw);
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders();
+
+      const abortController = new AbortController();
+      const cleanup = (): void => {
+        abortController.abort();
+        app.hijackedResponses.delete(reply.raw);
+        if (!reply.raw.writableEnded) reply.raw.end();
+      };
+      request.raw.on('close', cleanup);
+      request.raw.on('error', cleanup);
+
+      let cursor = 0;
+      while (!abortController.signal.aborted) {
+        const lines = await repository.linesAfter(instanceId, cursor);
+        for (const line of lines) {
+          cursor = line.id;
+          reply.raw.write(
+            `event: log\ndata: ${JSON.stringify({
+              ts: line.ts,
+              stream: line.stream,
+              content: line.content,
+            })}\n\n`,
+          );
+        }
+        const session = await repository.find(instanceId);
+        if (session?.captureComplete) {
+          reply.raw.write('event: end\ndata: \n\n');
+          cleanup();
+          return;
+        }
+        reply.raw.write(': waiting\n\n');
+        await delaySafe(POLL_INTERVAL_MS, abortController.signal);
+      }
+    },
+  );
+
   app.get<{ Params: { modelName: string } }>(
     '/api/v1/models/:modelName/logs',
     async (request, reply) => {

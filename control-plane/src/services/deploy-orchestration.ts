@@ -14,6 +14,7 @@ import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
 import type { WorkerPoolService } from './worker-pool.js';
 import type { NotificationService } from './notification.js';
 import { refreshModelRoutingState } from './sleep-wake.js';
+import type { StartupLogCaptureService } from './startup-log-capture.js';
 
 export interface DeployModelParams {
   modelName: string;
@@ -57,6 +58,7 @@ export class DeployOrchestrationService {
     private readonly deployTimeoutMs: number,
     private readonly healthCheckIntervalMs: number,
     private readonly notifications?: NotificationService,
+    private readonly startupLogs?: StartupLogCaptureService,
   ) {}
 
   async deployModel(params: DeployModelParams): Promise<void> {
@@ -89,6 +91,7 @@ export class DeployOrchestrationService {
       }
 
       const workerClient = this.createWorkerClient(worker.managementUrl);
+      await this.startupLogs?.start(params.instanceId, params.modelName, params.workerId);
       const startRequest: StartRunnerRequest = {
         modelName: params.modelName,
         servedModelName: params.servedModelName,
@@ -156,6 +159,7 @@ export class DeployOrchestrationService {
       assertStillOwner();
       await refreshModelRoutingState(this.lifecycle, this.routingMap, params.modelName);
       this.memoryBudget.releaseInstanceReservations(params.instanceId);
+      await this.startupLogs?.markSucceeded(params.instanceId).catch(() => {});
 
       this.notifications
         ?.createNotification({
@@ -191,6 +195,9 @@ export class DeployOrchestrationService {
         err instanceof Error ? err.message : String(err),
         startReplyAmbiguous,
       );
+      await this.startupLogs
+        ?.markFailed(params.instanceId, err instanceof Error ? err.message : String(err))
+        .catch(() => {});
       if (!startReplyAmbiguous) this.releaseReservations(params);
       throw err;
     }

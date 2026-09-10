@@ -266,3 +266,83 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     );
   });
 });
+
+describe('durable instance startup logs', () => {
+  let app: FastifyInstance;
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('lists historical sessions even when the runtime instance is gone', async () => {
+    const mocks = createMocks();
+    const deps = toDeps(mocks);
+    deps.startupLogRepository = {
+      listByModel: vi.fn(() =>
+        Promise.resolve([
+          {
+            instanceId: 'inst-failed-move',
+            modelName: 'test-model',
+            workerId: 'worker-2',
+            outcome: 'FAILED',
+            captureComplete: true,
+            errorMessage: 'wrong CUDA version',
+            startedAt: new Date('2026-09-10T00:00:00Z'),
+            completedAt: new Date('2026-09-10T00:01:00Z'),
+            lineCount: 2,
+          },
+        ]),
+      ),
+    } as never;
+    app = await buildTestApp(deps);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/models/test-model/startup-logs',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sessions: [{ instanceId: 'inst-failed-move', outcome: 'FAILED', lineCount: 2 }],
+    });
+  });
+
+  it('replays persisted lines for the exact requested instance', async () => {
+    const mocks = createMocks();
+    const deps = toDeps(mocks);
+    const session = {
+      instanceId: 'inst-a',
+      modelName: 'test-model',
+      workerId: 'worker-1',
+      outcome: 'SUCCEEDED' as const,
+      captureComplete: true,
+      errorMessage: null,
+      startedAt: new Date('2026-09-10T00:00:00Z'),
+      completedAt: new Date('2026-09-10T00:01:00Z'),
+      lineCount: 1,
+    };
+    deps.startupLogRepository = {
+      find: vi.fn(() => Promise.resolve(session)),
+      linesAfter: vi.fn(() =>
+        Promise.resolve([
+          {
+            id: 41,
+            ts: '2026-09-10T00:00:30.000Z',
+            stream: 'stdout',
+            content: 'startup complete',
+          },
+        ]),
+      ),
+    } as never;
+    app = await buildTestApp(deps);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/models/test-model/instances/inst-a/startup-logs',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('startup complete');
+    expect(response.body).toContain('event: end');
+  });
+});

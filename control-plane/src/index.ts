@@ -29,6 +29,8 @@ import { MoveOrchestrationService } from './services/move-orchestration.js';
 import { StubImporter, OrasImporter, type SifImporter } from './services/sif-importer.js';
 import { WorkerClient } from './clients/worker.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
+import { StartupLogRepository } from './services/startup-log-repository.js';
+import { StartupLogCaptureService } from './services/startup-log-capture.js';
 
 async function main(): Promise<void> {
   loadRootEnv();
@@ -47,6 +49,7 @@ async function main(): Promise<void> {
 
   const modelRepository = new ModelRepository(db);
   const instanceRepository = new InstanceRepository(db);
+  const startupLogRepository = new StartupLogRepository(db);
   const lifecycle = new ModelLifecycleService(redis, config.redisKeyPrefix);
   const memoryBudget = new MemoryBudgetService(
     redis,
@@ -110,6 +113,13 @@ async function main(): Promise<void> {
     notifications,
   );
   const weightsBrowser = new WeightsBrowserService(config.weightsDir, notificationLogger);
+  const createWorkerClient = (baseUrl: string) =>
+    new WorkerClient({ baseUrl, token: config.workerToken });
+  const startupLogCapture = new StartupLogCaptureService(
+    startupLogRepository,
+    workerPool,
+    createWorkerClient,
+  );
   const deployOrchestration = new DeployOrchestrationService(
     lifecycle,
     routingMap,
@@ -128,6 +138,7 @@ async function main(): Promise<void> {
     config.deployTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
     notifications,
+    startupLogCapture,
   );
   const leaderElection = new LeaderElectionService({
     leaseName: config.leaseName,
@@ -136,8 +147,6 @@ async function main(): Promise<void> {
     leaseDurationMs: 30_000,
     logger: notificationLogger,
   });
-  const createWorkerClient = (baseUrl: string) =>
-    new WorkerClient({ baseUrl, token: config.workerToken });
   const moveOrchestration = new MoveOrchestrationService(
     lifecycle,
     routingMap,
@@ -151,6 +160,7 @@ async function main(): Promise<void> {
     config.deployTimeoutSecs * 1000,
     notificationLogger,
     notifications,
+    startupLogCapture,
   );
 
   const app = await buildServer({
@@ -178,6 +188,7 @@ async function main(): Promise<void> {
       proxyProtocols,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
       createWorkerClient,
+      startupLogRepository,
     },
   });
 
@@ -204,6 +215,7 @@ async function main(): Promise<void> {
     modelRepository,
     createWorkerClient,
     moveOrchestration,
+    startupLogCapture,
   );
 
   // Leader election runs before the one-shot startup tick below so `isLeader` already reflects

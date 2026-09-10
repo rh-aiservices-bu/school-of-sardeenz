@@ -418,6 +418,77 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/models/{modelName}/startup-logs:
+    get:
+      operationId: listModelStartupLogs
+      summary: List durable startup-log sessions for a model
+      description: >-
+        Returns every recorded startup attempt, including instances removed after a failed move.
+        Startup output is persisted independently of model and instance lifecycle records.
+      tags: [Models]
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Startup-log sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StartupLogSession"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/models/{modelName}/instances/{instanceId}/startup-logs:
+    get:
+      operationId: streamInstanceStartupLogs
+      summary: Replay or follow one instance's durable startup logs
+      description: |
+        Replays startup-only stdout/stderr persisted by the control plane. While capture is still
+        active, new persisted lines are followed; after capture completes the stream emits `end`
+        and closes. Runtime/inference logs after startup readiness are never collected.
+      tags: [Models]
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          schema: { type: string }
+        - name: instanceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Startup log SSE stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/RunnerLogLine"
+        "404":
+          description: No startup-log session exists for this model and instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/models/{modelName}/sleep:
     post:
       operationId: sleepModel
@@ -1592,6 +1663,40 @@ paths:
 
 components:
   schemas:
+    StartupLogSession:
+      type: object
+      required:
+        - instanceId
+        - modelName
+        - workerId
+        - outcome
+        - captureComplete
+        - lineCount
+        - startedAt
+      properties:
+        instanceId:
+          type: string
+        modelName:
+          type: string
+        workerId:
+          type: string
+        outcome:
+          type: string
+          enum: [IN_PROGRESS, SUCCEEDED, FAILED, UNKNOWN]
+        captureComplete:
+          type: boolean
+        lineCount:
+          type: integer
+          minimum: 0
+        errorMessage:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
     # -------------------------------------------------------------------------
     # Enums
     # -------------------------------------------------------------------------
@@ -1851,6 +1956,7 @@ components:
         in `PENDING` state.
       required:
         - modelName
+        - instanceId
         - state
       properties:
         modelName:

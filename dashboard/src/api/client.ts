@@ -9,6 +9,8 @@ type ModelConfigurationUpdateRequest =
   ControlPlaneComponents['schemas']['ModelConfigurationUpdateRequest'];
 type MoveModelInstanceRequest = ControlPlaneComponents['schemas']['MoveModelInstanceRequest'];
 type MoveModelInstanceResponse = ControlPlaneComponents['schemas']['MoveModelInstanceResponse'];
+type ModelDeploymentResponse = ControlPlaneComponents['schemas']['ModelDeploymentResponse'];
+type StartupLogSession = ControlPlaneComponents['schemas']['StartupLogSession'];
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
 type ClusterMemory = ControlPlaneComponents['schemas']['ClusterMemory'];
 type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
@@ -28,6 +30,8 @@ export {
   type ModelConfigurationUpdateRequest,
   type MoveModelInstanceRequest,
   type MoveModelInstanceResponse,
+  type ModelDeploymentResponse,
+  type StartupLogSession,
   type ClusterStatus,
   type ClusterMemory,
   type WorkerInfo,
@@ -250,7 +254,12 @@ export const api = {
     get: (name: string, signal?: AbortSignal) =>
       request<ModelDetail>(`/models/${encodeURIComponent(name)}`, { signal }),
     deploy: (body: ModelDeploymentRequest) =>
-      request<unknown>('/models', { method: 'POST', body: JSON.stringify(body) }),
+      request<ModelDeploymentResponse>('/models', { method: 'POST', body: JSON.stringify(body) }),
+    listStartupLogs: (name: string, signal?: AbortSignal) =>
+      request<{ sessions: StartupLogSession[] }>(
+        `/models/${encodeURIComponent(name)}/startup-logs`,
+        { signal },
+      ),
     update: (name: string, body: ModelConfigurationUpdateRequest) =>
       request<unknown>(`/models/${encodeURIComponent(name)}`, {
         method: 'PUT',

@@ -57,6 +57,18 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     },
   );
 
+  app.get<{ Params: { name: string } }>(
+    '/api/models/:name/startup-logs',
+    { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.request(
+        'GET',
+        `/api/v1/models/${encodeURIComponent(request.params.name)}/startup-logs`,
+      );
+      return reply.code(status).send(data);
+    },
+  );
+
   // DELETE /api/models/:name — write op: no Redis fallback
   app.delete<{ Params: { name: string }; Querystring: { force?: boolean | string } }>(
     '/api/models/:name',

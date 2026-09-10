@@ -8,18 +8,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
-type ModelLifecycleState =
-  | 'PENDING'
-  | 'STARTING'
-  | 'ACTIVE'
-  | 'SLEEPING'
-  | 'DRAINING'
-  | 'STOPPING'
-  | 'STOPPED'
-  | 'ERROR';
-
-interface ModelLike {
-  state: ModelLifecycleState;
+interface SessionLike {
+  outcome: 'IN_PROGRESS' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
   errorMessage?: string;
 }
 
@@ -27,10 +17,10 @@ interface ModelLike {
 // Derivation helpers — mirror DeployLogsModal.tsx exactly
 // ---------------------------------------------------------------------------
 
-function deriveFlags(model: ModelLike | undefined) {
-  const isActive = model?.state === 'ACTIVE';
-  const isError = model?.state === 'ERROR';
-  const isStarting = model?.state === 'STARTING' || model === undefined;
+function deriveFlags(session: SessionLike | undefined) {
+  const isActive = session?.outcome === 'SUCCEEDED';
+  const isError = session?.outcome === 'FAILED';
+  const isStarting = !session || session.outcome === 'IN_PROGRESS';
   return { isActive, isError, isStarting };
 }
 
@@ -42,8 +32,8 @@ function deriveFooterButtonVariant(isActive: boolean, isError: boolean): 'primar
   return isActive || isError ? 'primary' : 'secondary';
 }
 
-function deriveFailureBody(model: ModelLike | undefined, fallback: string): string {
-  return model?.errorMessage ?? fallback;
+function deriveFailureBody(session: SessionLike | undefined, fallback: string): string {
+  return session?.errorMessage ?? fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +42,7 @@ function deriveFailureBody(model: ModelLike | undefined, fallback: string): stri
 
 describe('DeployLogsModal — state derivation', () => {
   it('STARTING: shows the starting indicator, no alerts, secondary footer button', () => {
-    const { isActive, isError, isStarting } = deriveFlags({ state: 'STARTING' });
+    const { isActive, isError, isStarting } = deriveFlags({ outcome: 'IN_PROGRESS' });
     expect(isStarting).toBe(true);
     expect(isActive).toBe(false);
     expect(isError).toBe(false);
@@ -67,7 +57,7 @@ describe('DeployLogsModal — state derivation', () => {
   });
 
   it('ACTIVE: shows success alert, primary footer button, success icon', () => {
-    const { isActive, isError, isStarting } = deriveFlags({ state: 'ACTIVE' });
+    const { isActive, isError, isStarting } = deriveFlags({ outcome: 'SUCCEEDED' });
     expect(isActive).toBe(true);
     expect(isStarting).toBe(false);
     expect(deriveFooterButtonVariant(isActive, isError)).toBe('primary');
@@ -75,29 +65,27 @@ describe('DeployLogsModal — state derivation', () => {
   });
 
   it('ERROR: shows danger alert, primary footer button, danger icon', () => {
-    const { isActive, isError, isStarting } = deriveFlags({ state: 'ERROR' });
+    const { isActive, isError, isStarting } = deriveFlags({ outcome: 'FAILED' });
     expect(isError).toBe(true);
     expect(isStarting).toBe(false);
     expect(deriveFooterButtonVariant(isActive, isError)).toBe('primary');
     expect(deriveTitleIconVariant(isError, isActive)).toBe('danger');
   });
 
-  it('other transient states (PENDING, DRAINING, ...) are not starting/active/error', () => {
-    for (const state of ['PENDING', 'SLEEPING', 'DRAINING', 'STOPPING', 'STOPPED'] as const) {
-      const { isActive, isError, isStarting } = deriveFlags({ state });
-      expect(isStarting).toBe(false);
-      expect(isActive).toBe(false);
-      expect(isError).toBe(false);
-    }
+  it('UNKNOWN is terminal but is neither success nor failure', () => {
+    const { isActive, isError, isStarting } = deriveFlags({ outcome: 'UNKNOWN' });
+    expect(isStarting).toBe(false);
+    expect(isActive).toBe(false);
+    expect(isError).toBe(false);
   });
 });
 
 describe('DeployLogsModal — failure body', () => {
   it('uses the model error message when present', () => {
-    expect(deriveFailureBody({ state: 'ERROR', errorMessage: 'OOM' }, 'fallback')).toBe('OOM');
+    expect(deriveFailureBody({ outcome: 'FAILED', errorMessage: 'OOM' }, 'fallback')).toBe('OOM');
   });
 
   it('falls back to a generic message when errorMessage is absent', () => {
-    expect(deriveFailureBody({ state: 'ERROR' }, 'fallback')).toBe('fallback');
+    expect(deriveFailureBody({ outcome: 'FAILED' }, 'fallback')).toBe('fallback');
   });
 });

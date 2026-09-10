@@ -34,7 +34,7 @@ export class ControlPlaneClient {
     return fetch(url, init);
   }
 
-  private async request(method: string, path: string, body?: unknown): Promise<ProxyResult> {
+  async request(method: string, path: string, body?: unknown): Promise<ProxyResult> {
     let res: Response;
     try {
       res = await this.proxyRequest(method, path, body);

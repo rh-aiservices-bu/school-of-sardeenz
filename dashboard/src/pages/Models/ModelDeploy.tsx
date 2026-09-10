@@ -194,6 +194,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
   const [submitted, setSubmitted] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [logsModalModelName, setLogsModalModelName] = useState<string | null>(null);
+  const [logsModalInstanceId, setLogsModalInstanceId] = useState<string | null>(null);
   const [editInitialized, setEditInitialized] = useState(false);
 
   // Runtime modules that are both installed (IMPORTED) and built for the selected runner. The
@@ -342,8 +343,9 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
     };
 
     deployModel.mutate(body, {
-      onSuccess: () => {
+      onSuccess: (response) => {
         setLogsModalModelName(body.modelName);
+        setLogsModalInstanceId(response.instanceId);
       },
     });
   };
@@ -375,6 +377,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
   const closeLogsModal = () => {
     const deployedModelName = logsModalModelName;
     setLogsModalModelName(null);
+    setLogsModalInstanceId(null);
     if (deployedModelName) {
       void navigate(`/models/${encodeURIComponent(deployedModelName)}`);
     }
@@ -670,9 +673,10 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
         onSelect={(absolutePath) => set('modelPath', absolutePath)}
       />
 
-      {logsModalModelName && (
+      {logsModalModelName && logsModalInstanceId && (
         <DeployLogsModal
           modelName={logsModalModelName}
+          instanceId={logsModalInstanceId}
           isOpen={logsModalModelName !== null}
           onClose={closeLogsModal}
         />

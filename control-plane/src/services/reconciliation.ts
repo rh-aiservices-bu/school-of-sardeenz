@@ -10,6 +10,7 @@ import type { RoutingMapService } from './routing-map.js';
 import type { NotificationService } from './notification.js';
 import type { InstanceRepository } from './instance-repository.js';
 import type { ModelRepository } from './model-repository.js';
+import type { StartupLogCaptureService } from './startup-log-capture.js';
 import { refreshModelRoutingState } from './sleep-wake.js';
 import type { WorkerClient } from '../clients/worker.js';
 import type { MoveOrchestrationService } from './move-orchestration.js';
@@ -85,6 +86,7 @@ export class ReconciliationService {
     // unaffected — reapOrphanedInstances itself already no-ops without modelRepository.
     private readonly createWorkerClient?: (baseUrl: string) => WorkerClient,
     private readonly moveOrchestration?: MoveOrchestrationService,
+    private readonly startupLogCapture?: StartupLogCaptureService,
   ) {
     this.clusterEventsChannel = redisKey(keyPrefix, CLUSTER_EVENTS_CHANNEL);
   }
@@ -175,6 +177,10 @@ export class ReconciliationService {
       await this.safeStep(
         'resumeMoves',
         () => this.moveOrchestration?.resumeAll() ?? Promise.resolve(),
+      );
+      await this.safeStep(
+        'resumeStartupLogCapture',
+        () => this.startupLogCapture?.resumeIncomplete() ?? Promise.resolve(),
       );
       await this.safeStep('recoverStuckInstances', () => this.recoverStuckInstances());
       await this.safeStep('recoverAmbiguousStarts', () => this.recoverAmbiguousStarts());

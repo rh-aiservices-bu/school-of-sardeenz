@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { ModelLifecycleState } from '@sardeenz/types';
+import { ModelLifecycleState, StartupLogSessionOutcome } from '@sardeenz/types';
 import {
   api,
   type ModelInfo,
   type ModelDeploymentRequest,
   type ModelConfigurationUpdateRequest,
   type MoveModelInstanceRequest,
+  type ModelDeploymentResponse,
 } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
 import { useEventStream } from './useEventStream';
@@ -63,6 +64,21 @@ export function useModel(name: string) {
   return query;
 }
 
+export function useStartupLogSessions(name: string) {
+  return useQuery({
+    queryKey: ['models', name, 'startup-logs'],
+    queryFn: ({ signal }) => api.models.listStartupLogs(name, signal),
+    enabled: !!name,
+    refetchInterval: (query) =>
+      query.state.data?.sessions.some(
+        (session) => session.outcome === StartupLogSessionOutcome.IN_PROGRESS,
+      )
+        ? 2_000
+        : false,
+    select: (data) => data.sessions,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Optimistic mutation helper
 // ---------------------------------------------------------------------------
@@ -79,9 +95,9 @@ export function updateModelListData(
   return old && Array.isArray(old.models) ? { ...old, models: updater(old.models) } : old;
 }
 
-function createOptimisticMutation<TArg>(
+function createOptimisticMutation<TArg, TResult = unknown>(
   queryClient: QueryClient,
-  mutationFn: (arg: TArg) => Promise<unknown>,
+  mutationFn: (arg: TArg) => Promise<TResult>,
   updater: (models: ModelInfo[], arg: TArg) => ModelInfo[],
 ) {
   return {
@@ -111,7 +127,7 @@ function createOptimisticMutation<TArg>(
 export function useDeployModel() {
   const queryClient = useQueryClient();
   return useMutation(
-    createOptimisticMutation<ModelDeploymentRequest>(
+    createOptimisticMutation<ModelDeploymentRequest, ModelDeploymentResponse>(
       queryClient,
       (body) => api.models.deploy(body),
       (models, body) => [

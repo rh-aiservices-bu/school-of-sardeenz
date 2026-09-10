@@ -18,6 +18,7 @@ import type { ProxyProtocolsService } from '../services/proxy-protocols.js';
 import type { MoveOrchestrationService } from '../services/move-orchestration.js';
 import type { RunnerClient } from '../clients/runner.js';
 import type { WorkerClient } from '../clients/worker.js';
+import type { StartupLogRepository } from '../services/startup-log-repository.js';
 
 export interface RouteDeps {
   config: Config;
@@ -40,4 +41,5 @@ export interface RouteDeps {
   proxyProtocols: ProxyProtocolsService;
   createRunnerClient: (host: string, port: number) => RunnerClient;
   createWorkerClient: (baseUrl: string) => WorkerClient;
+  startupLogRepository?: StartupLogRepository;
 }

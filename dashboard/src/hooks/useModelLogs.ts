@@ -18,14 +18,18 @@ export interface UseModelLogsResult {
 }
 
 /**
- * Opens a transient, per-model SSE connection to `GET /api/models/:name/logs`.
+ * Opens a transient SSE connection to one instance's durable startup-log history.
  *
  * This is deliberately NOT merged into the app-scope `useEventStream` singleton — every
  * consumer (deploy modal, "View logs" action) mounts its own connection scoped to a single
  * model, and the connection is torn down whenever `enabled` goes false, the component
  * unmounts, or `modelName` changes.
  */
-export function useModelLogs(modelName: string | null, enabled: boolean): UseModelLogsResult {
+export function useModelLogs(
+  modelName: string | null,
+  instanceId: string | null,
+  enabled: boolean,
+): UseModelLogsResult {
   const [logs, setLogs] = useState<RunnerLogLine[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [ended, setEnded] = useState(false);
@@ -49,13 +53,13 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
   }, []);
 
   const connect = useCallback(() => {
-    if (!modelName) return;
+    if (!modelName || !instanceId) return;
 
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
 
-    const url = `${BASE_URL}/models/${encodeURIComponent(modelName)}/logs`;
+    const url = `${BASE_URL}/models/${encodeURIComponent(modelName)}/instances/${encodeURIComponent(instanceId)}/startup-logs`;
     const es = new EventSource(url, { withCredentials: true });
     eventSourceRef.current = es;
 
@@ -97,7 +101,7 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
       }
       reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL_NORMAL);
     };
-  }, [modelName, disconnect]);
+  }, [modelName, instanceId, disconnect]);
 
   const clear = useCallback(() => {
     setLogs([]);
@@ -112,7 +116,7 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
   }, [connect]);
 
   useEffect(() => {
-    if (!enabled || !modelName) {
+    if (!enabled || !modelName || !instanceId) {
       disconnect();
       return;
     }
@@ -127,7 +131,7 @@ export function useModelLogs(modelName: string | null, enabled: boolean): UseMod
     return () => {
       disconnect();
     };
-  }, [enabled, modelName, connect, disconnect]);
+  }, [enabled, modelName, instanceId, connect, disconnect]);
 
   return { logs, isConnected, ended, failed, reconnect, clear };
 }

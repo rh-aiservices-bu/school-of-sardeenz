@@ -12,14 +12,16 @@ import {
   Flex,
   FlexItem,
 } from '@patternfly/react-core';
-import { ModelLifecycleState } from '@sardeenz/types';
+import { StartupLogSessionOutcome } from '@sardeenz/types';
 import { useModel } from '../hooks/useModels';
 import { useModelLogs } from '../hooks/useModelLogs';
+import { useStartupLogSessions } from '../hooks/useModels';
 import { StateLabel } from './StateLabel';
 import { LogViewer } from './LogViewer';
 
 interface DeployLogsModalProps {
   modelName: string;
+  instanceId: string;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -34,20 +36,19 @@ interface DeployLogsModalProps {
  * The "model available" notification + state change come from the control plane on the real ACTIVE
  * transition, so an operator who closed the modal is still told when the model is actually up.
  */
-export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalProps) {
+export function DeployLogsModal({ modelName, instanceId, isOpen, onClose }: DeployLogsModalProps) {
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
   const { data: model } = useModel(modelName);
-  const { logs, isConnected, failed } = useModelLogs(modelName, isOpen);
+  const { data: sessions } = useStartupLogSessions(modelName);
+  const { logs, isConnected, failed } = useModelLogs(modelName, instanceId, isOpen);
+  const instance = model?.instances.find((candidate) => candidate.instanceId === instanceId);
+  const session = sessions?.find((candidate) => candidate.instanceId === instanceId);
 
-  const isActive = model?.state === ModelLifecycleState.ACTIVE;
-  const isError = model?.state === ModelLifecycleState.ERROR;
-  const isStarting = model?.state === ModelLifecycleState.STARTING || model === undefined;
-  // The aggregate model state is ERROR only when no instance is healthy — surface the errored
-  // instance's own message (see ModelDetail for the same per-instance derivation).
-  const errorMessage = model?.instances?.find(
-    (i) => i.state === ModelLifecycleState.ERROR,
-  )?.errorMessage;
+  const isActive = session?.outcome === StartupLogSessionOutcome.SUCCEEDED;
+  const isError = session?.outcome === StartupLogSessionOutcome.FAILED;
+  const isStarting = !session || session.outcome === StartupLogSessionOutcome.IN_PROGRESS;
+  const errorMessage = session?.errorMessage ?? instance?.errorMessage;
 
   return (
     <Modal
@@ -63,12 +64,12 @@ export function DeployLogsModal({ modelName, isOpen, onClose }: DeployLogsModalP
           <Flex alignItems={{ default: 'alignItemsCenter' }} gap={{ default: 'gapSm' }}>
             <FlexItem>
               <code style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>
-                {modelName}
+                {modelName} / {instanceId}
               </code>
             </FlexItem>
-            {model && (
+            {instance && (
               <FlexItem>
-                <StateLabel state={model.state} isCompact />
+                <StateLabel state={instance.state} isCompact />
               </FlexItem>
             )}
           </Flex>

@@ -125,6 +125,48 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/{modelName}/startup-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List durable startup-log sessions for a model
+         * @description Returns every recorded startup attempt, including instances removed after a failed move. Startup output is persisted independently of model and instance lifecycle records.
+         */
+        get: operations["listModelStartupLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{modelName}/instances/{instanceId}/startup-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Replay or follow one instance's durable startup logs
+         * @description Replays startup-only stdout/stderr persisted by the control plane. While capture is still
+         *     active, new persisted lines are followed; after capture completes the stream emits `end`
+         *     and closes. Runtime/inference logs after startup readiness are never collected.
+         */
+        get: operations["streamInstanceStartupLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models/{modelName}/sleep": {
         parameters: {
             query?: never;
@@ -672,6 +714,20 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        StartupLogSession: {
+            instanceId: string;
+            modelName: string;
+            workerId: string;
+            /** @enum {string} */
+            outcome: StartupLogSessionOutcome;
+            captureComplete: boolean;
+            lineCount: number;
+            errorMessage?: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            completedAt?: string;
+        };
         /**
          * @description Lifecycle state of a model as managed by the control plane. This is
          *     a superset of the proxy-facing `ModelState` — it includes states
@@ -843,7 +899,7 @@ export type components = {
             /** @description The deployed model name. */
             modelName: string;
             /** @description The identifier of the first instance created by this deployment. */
-            instanceId?: string;
+            instanceId: string;
             state: components["schemas"]["ModelLifecycleState"];
             /** @description Human-readable status message. */
             message?: string;
@@ -1970,6 +2026,80 @@ export interface operations {
             };
             /** @description Internal control plane error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listModelStartupLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Startup-log sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sessions: components["schemas"]["StartupLogSession"][];
+                    };
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    streamInstanceStartupLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelName: string;
+                instanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Startup log SSE stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["RunnerLogLine"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No startup-log session exists for this model and instance */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3280,6 +3410,12 @@ export interface operations {
             };
         };
     };
+}
+export enum StartupLogSessionOutcome {
+    IN_PROGRESS = "IN_PROGRESS",
+    SUCCEEDED = "SUCCEEDED",
+    FAILED = "FAILED",
+    UNKNOWN = "UNKNOWN"
 }
 export enum ModelLifecycleState {
     PENDING = "PENDING",

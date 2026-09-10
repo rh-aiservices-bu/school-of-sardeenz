@@ -257,10 +257,13 @@ describe('MockEventSource protocol', () => {
     expect(es.close).toHaveBeenCalledOnce();
   });
 
-  it('carries the encoded model name in the connection URL', () => {
+  it('carries the encoded model and instance IDs in the connection URL', () => {
     const modelName = 'meta-llama/Llama-3.1-8B';
-    const es = new MockEventSource(`/api/models/${encodeURIComponent(modelName)}/logs`);
-    expect(es.url).toBe('/api/models/meta-llama%2FLlama-3.1-8B/logs');
+    const instanceId = 'inst/a';
+    const es = new MockEventSource(
+      `/api/models/${encodeURIComponent(modelName)}/instances/${encodeURIComponent(instanceId)}/startup-logs`,
+    );
+    expect(es.url).toBe('/api/models/meta-llama%2FLlama-3.1-8B/instances/inst%2Fa/startup-logs');
   });
 });
 

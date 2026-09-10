@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Startup logs are durable and instance-scoped.** The control plane automatically captures only
+  the runner startup stream into PostgreSQL, retains it independently of instance cleanup, and the
+  model detail page can replay logs for current and historical startup attempts.
+
 - **Stopped model configurations can be modified in place.** Operators can update placement,
   runner, weights, naming, and engine settings without deleting and recreating the configuration;
   the immutable configuration name is preserved and changes apply on the next start.
@@ -44,8 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Failed starts can be reset without deleting their configuration.** An explicit force-stop
   clears stalled runtime bookkeeping after an operator confirms no process remains, allowing the
-  model to be modified or started again. Failed startup logs remain addressable by instance for
-  fifteen minutes while the worker stays running.
+  model to be modified or started again. Failed startup logs remain durably addressable by
+  instance.
 
 - **MLServer runner builds on the CUDA UBI base.** Python 3.12 is installed directly from the UBI
   9 AppStream repository instead of attempting to enable the unavailable `python312` DNF module;

@@ -26,6 +26,7 @@ export {
   NotificationVariant,
   NotificationSourceType,
   CatalogItemState,
+  StartupLogSessionOutcome,
 } from './generated/control-plane.js';
 
 export type {

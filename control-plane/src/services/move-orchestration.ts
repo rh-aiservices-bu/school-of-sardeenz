@@ -10,6 +10,7 @@ import type { WorkerPoolService } from './worker-pool.js';
 import type { MemoryBudgetService } from './memory-budget.js';
 import type { InstanceRepository } from './instance-repository.js';
 import type { NotificationService } from './notification.js';
+import type { StartupLogCaptureService } from './startup-log-capture.js';
 
 export interface MoveOrchestrationLogger {
   debug(obj: Record<string, unknown>, msg: string): void;
@@ -38,6 +39,7 @@ export class MoveOrchestrationService {
     private readonly ambiguousStartGraceMs: number,
     private readonly logger: MoveOrchestrationLogger,
     private readonly notifications?: NotificationService,
+    private readonly startupLogs?: StartupLogCaptureService,
   ) {}
 
   async resumeAll(): Promise<void> {
@@ -69,6 +71,7 @@ export class MoveOrchestrationService {
           if (!replacement) return;
         }
         if (replacement.state === ModelLifecycleState.ACTIVE) {
+          await this.startupLogs?.markSucceeded(replacement.instanceId).catch(() => {});
           const updated = await this.lifecycle.updateMoveOperation(
             modelName,
             operation.operationId,
@@ -77,6 +80,12 @@ export class MoveOrchestrationService {
           if (!updated) return;
           operation = updated;
         } else if (replacement.state === ModelLifecycleState.ERROR) {
+          await this.startupLogs
+            ?.markFailed(
+              replacement.instanceId,
+              replacement.errorMessage ?? 'replacement deployment failed',
+            )
+            .catch(() => {});
           const updated = await this.lifecycle.updateMoveOperation(
             modelName,
             operation.operationId,
@@ -294,6 +303,7 @@ export class MoveOrchestrationService {
     }
     await refreshModelRoutingState(this.lifecycle, this.routingMap, operation.modelName);
     this.memoryBudget.releaseInstanceReservations(replacement.instanceId);
+    await this.startupLogs?.markSucceeded(replacement.instanceId).catch(() => {});
     return replacement;
   }
 

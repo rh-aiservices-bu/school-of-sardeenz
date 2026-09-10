@@ -234,7 +234,18 @@
         "memory": "Memory",
         "endpoint": "Endpoint",
         "created": "Created",
+        "startupLogs": "Startup logs",
         "actions": "Actions"
+      }
+    },
+    "startupHistory": {
+      "title": "Previous startup attempts",
+      "outcome": "Outcome",
+      "outcomes": {
+        "IN_PROGRESS": "In progress",
+        "SUCCEEDED": "Succeeded",
+        "FAILED": "Failed",
+        "UNKNOWN": "Unknown"
       }
     },
     "move": {
