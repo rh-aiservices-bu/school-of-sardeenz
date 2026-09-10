@@ -29,6 +29,11 @@ Its image definition and build instructions are in
 [`containers/worker/`](../../containers/worker/). `worker-base` by itself is not deployable as a
 worker because it intentionally contains no agent code.
 
+`SARDEENZ_RUNNER_TYPES` is a comma- or whitespace-separated list of runner families the generic
+worker may launch. The base advertises `vllm,mlserver`; overlays can extend this list when they add
+another compatible SIF family. The older singular `SARDEENZ_RUNNER_TYPE` remains supported as a
+fallback for existing deployments.
+
 ## Runner port policy
 
 The Deployment pins `SARDEENZ_WORKER_PORT=9100`, `SARDEENZ_RUNNER_PORT_START=9101`, and

@@ -39,6 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Apptainer workers can advertise multiple runner families.** `SARDEENZ_RUNNER_TYPES` accepts a
+  comma- or whitespace-separated list (while retaining `SARDEENZ_RUNNER_TYPE` compatibility), and
+  the production worker advertises both vLLM and MLServer so imported MLServer modules appear in
+  deployment runner selection and pass placement capability filtering.
+
 - **Dashboard deployment and GPU-placement E2E flows match the current APIs.** The mock control
   plane now returns the deployed instance identifier required by the startup-logs modal, and the
   placement test opens the model action menu before selecting Move.

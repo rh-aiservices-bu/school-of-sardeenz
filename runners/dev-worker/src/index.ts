@@ -23,56 +23,62 @@ loadRootEnv();
 const config = loadConfig();
 
 // Reads the runner catalog (local file path or file:// URL — remote http(s) catalogs are the
-// control plane's concern) and extracts capability fields for this worker's configured
-// runnerType, so a dev-worker registers with the same capabilities the catalog advertises rather
-// than a hardcoded guess.
+// control plane's concern) and extracts capability fields for every runner family this generic
+// worker advertises.
 async function loadCatalogCapabilities(
   catalogUrl: string,
-  runnerType: string,
-): Promise<CatalogCapabilityOverrides | undefined> {
-  if (!catalogUrl) return undefined;
+  runnerTypes: string[],
+): Promise<Map<string, CatalogCapabilityOverrides>> {
+  const result = new Map<string, CatalogCapabilityOverrides>();
+  if (!catalogUrl) return result;
   try {
     const path = catalogUrl.startsWith('file://') ? new URL(catalogUrl).pathname : catalogUrl;
     const raw = await readFile(path, 'utf8');
     const doc = parseYaml(raw) as { runners?: Array<Record<string, unknown>> };
-    const entry = doc.runners?.find((r) => r.runnerType === runnerType);
-    if (!entry) return undefined;
-    const overrides: CatalogCapabilityOverrides = {};
-    if (Array.isArray(entry.supportedModelTypes)) {
-      overrides.supportedModelTypes = entry.supportedModelTypes.filter(
-        (v): v is string => typeof v === 'string',
-      );
+    for (const runnerType of runnerTypes) {
+      const entry = doc.runners?.find((r) => r.runnerType === runnerType);
+      if (!entry) continue;
+      const overrides: CatalogCapabilityOverrides = {};
+      if (Array.isArray(entry.supportedModelTypes)) {
+        overrides.supportedModelTypes = entry.supportedModelTypes.filter(
+          (v): v is string => typeof v === 'string',
+        );
+      }
+      if (Array.isArray(entry.supportedDeviceTypes)) {
+        overrides.supportedDeviceTypes = entry.supportedDeviceTypes.filter(
+          (v): v is string => typeof v === 'string',
+        );
+      }
+      if (Array.isArray(entry.supportedSleepLevels)) {
+        overrides.supportedSleepLevels = entry.supportedSleepLevels.filter(
+          (v): v is string => typeof v === 'string',
+        );
+      }
+      if (typeof entry.version === 'string') overrides.engineVersion = entry.version;
+      if (typeof entry.maxTensorParallelism === 'number') {
+        overrides.maxTensorParallelism = entry.maxTensorParallelism;
+      }
+      if (typeof entry.kvCacheElasticSharing === 'boolean') {
+        overrides.kvCacheElasticSharing = entry.kvCacheElasticSharing;
+      }
+      if (entry.features && typeof entry.features === 'object' && !Array.isArray(entry.features)) {
+        overrides.features = entry.features as Record<string, unknown>;
+      }
+      result.set(runnerType, overrides);
     }
-    if (Array.isArray(entry.supportedDeviceTypes)) {
-      overrides.supportedDeviceTypes = entry.supportedDeviceTypes.filter(
-        (v): v is string => typeof v === 'string',
-      );
-    }
-    if (Array.isArray(entry.supportedSleepLevels)) {
-      overrides.supportedSleepLevels = entry.supportedSleepLevels.filter(
-        (v): v is string => typeof v === 'string',
-      );
-    }
-    if (typeof entry.version === 'string') overrides.engineVersion = entry.version;
-    if (typeof entry.maxTensorParallelism === 'number') {
-      overrides.maxTensorParallelism = entry.maxTensorParallelism;
-    }
-    if (typeof entry.kvCacheElasticSharing === 'boolean') {
-      overrides.kvCacheElasticSharing = entry.kvCacheElasticSharing;
-    }
-    if (entry.features && typeof entry.features === 'object' && !Array.isArray(entry.features)) {
-      overrides.features = entry.features as Record<string, unknown>;
-    }
-    return overrides;
+    return result;
   } catch (err) {
     console.warn(
       `[dev-worker] Failed to load runner catalog from ${catalogUrl}: ${(err as Error).message}`,
     );
-    return undefined;
+    return result;
   }
 }
 
-const catalogCapabilities = await loadCatalogCapabilities(config.catalogUrl, config.runnerType);
+const catalogCapabilities = await loadCatalogCapabilities(
+  config.catalogUrl,
+  config.runnerTypes ?? [config.runnerType],
+);
 
 function createLauncher(): RunnerLauncher {
   if (config.mode === 'apptainer') {

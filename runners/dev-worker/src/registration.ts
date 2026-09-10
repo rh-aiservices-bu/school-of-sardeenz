@@ -13,6 +13,8 @@ export interface CatalogCapabilityOverrides {
   features?: Record<string, unknown>;
 }
 
+export type CatalogCapabilitiesByRunner = Map<string, CatalogCapabilityOverrides>;
+
 /**
  * One device's measured (NVML) usage, as sampled at report-build time. Doctrine: measured memory
  * IS the number everywhere downstream — there's no separate "reserved" figure. `memoryUsedBytes`
@@ -71,7 +73,9 @@ export class WorkerRegistration {
     // deployments pass GPUs resolved via resolveDevices() (NVML in apptainer mode).
     devices?: DetectedDevice[],
     private readonly fetchFn: typeof fetch = globalThis.fetch,
-    private readonly catalogCapabilities?: CatalogCapabilityOverrides,
+    // A singular override is retained for source compatibility with embedders/tests written
+    // before workers could advertise multiple runner families.
+    private readonly catalogCapabilities?: CatalogCapabilityOverrides | CatalogCapabilitiesByRunner,
     private readonly measuredProvider?: MeasuredMemoryProvider,
     private readonly ledgerInstancesProvider?: LedgerInstancesProvider,
     private readonly kvCacheDeviceProvider?: KVCacheDeviceProvider,
@@ -91,24 +95,30 @@ export class WorkerRegistration {
   }
 
   async register(): Promise<void> {
+    const runnerTypes = this.config.runnerTypes ?? [this.config.runnerType];
+    const overridesFor = (runnerType: string): CatalogCapabilityOverrides | undefined =>
+      this.catalogCapabilities instanceof Map
+        ? this.catalogCapabilities.get(runnerType)
+        : runnerType === this.config.runnerType
+          ? this.catalogCapabilities
+          : undefined;
     const info = {
-      capabilities: [
-        {
-          runnerType: this.config.runnerType,
+      capabilities: runnerTypes.map((runnerType) => {
+        const overrides = overridesFor(runnerType);
+        return {
+          runnerType,
           engineName:
-            this.config.mode === 'stub'
-              ? `Dev Stub (${this.config.runnerType})`
-              : `${this.config.runnerType} (apptainer)`,
-          supportedModelTypes: this.catalogCapabilities?.supportedModelTypes ?? ['LLM'],
+            this.config.mode === 'stub' ? `Dev Stub (${runnerType})` : `${runnerType} (apptainer)`,
+          supportedModelTypes: overrides?.supportedModelTypes ?? ['LLM'],
           // Always derived from detected devices — catalog overrides intentionally ignored
           supportedDeviceTypes: [...new Set(this.devices.map((d) => d.deviceType))],
-          supportedSleepLevels: this.catalogCapabilities?.supportedSleepLevels ?? ['L1_HOST_RAM'],
-          engineVersion: this.catalogCapabilities?.engineVersion ?? '0.0.1-dev',
-          maxTensorParallelism: this.catalogCapabilities?.maxTensorParallelism ?? 1,
-          kvCacheElasticSharing: this.catalogCapabilities?.kvCacheElasticSharing ?? false,
-          features: this.catalogCapabilities?.features ?? {},
-        },
-      ],
+          supportedSleepLevels: overrides?.supportedSleepLevels ?? ['L1_HOST_RAM'],
+          engineVersion: overrides?.engineVersion ?? '0.0.1-dev',
+          maxTensorParallelism: overrides?.maxTensorParallelism ?? 1,
+          kvCacheElasticSharing: overrides?.kvCacheElasticSharing ?? false,
+          features: overrides?.features ?? {},
+        };
+      }),
       devices: this.devices,
       managementUrl: `http://${this.config.advertiseHost}:${this.config.workerPort}`,
     };

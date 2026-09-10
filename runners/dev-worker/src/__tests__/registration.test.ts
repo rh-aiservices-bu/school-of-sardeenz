@@ -137,6 +137,23 @@ describe('WorkerRegistration', () => {
       expect(info.managementUrl).toBe('http://localhost:9100');
     });
 
+    it('advertises every configured runner family', async () => {
+      config = makeConfig({ runnerTypes: ['vllm', 'mlserver'] });
+      registration = new WorkerRegistration(mockRedis as never, config);
+
+      await registration.register();
+
+      const infoCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':info'),
+      );
+      const info = JSON.parse(infoCall!.args[1] as string) as WorkerInfo;
+
+      expect(info.capabilities.map((capability) => capability.runnerType)).toEqual([
+        'vllm',
+        'mlserver',
+      ]);
+    });
+
     it('uses advertiseHost in managementUrl', async () => {
       config = makeConfig({ advertiseHost: '10.244.1.5' });
       registration = new WorkerRegistration(mockRedis as never, config);

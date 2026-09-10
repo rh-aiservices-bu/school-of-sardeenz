@@ -93,6 +93,9 @@ spec:
             - { name: SARDEENZ_WORKER_PORT, value: '9100' }
             - { name: SARDEENZ_RUNNER_PORT_START, value: '9101' }
             - { name: SARDEENZ_MAX_RUNNERS, value: '32' }
+            # The agent is engine-agnostic in Apptainer mode. Advertise every runner family this
+            # deployment permits so placement and the dashboard do not collapse to legacy vLLM.
+            - { name: SARDEENZ_RUNNER_TYPES, value: 'vllm,mlserver' }
             # The worker agent measures VRAM in-process via NVML (ts-nvml, #163);
             # `utility` makes the driver injector mount libnvidia-ml.so.1, `compute`
             # keeps CUDA available for the engines the worker launches.

@@ -29,6 +29,8 @@ export interface DevWorkerConfig {
   deviceCount: number;
   deviceType: string;
   deviceMemoryBytes: number;
+  /** Runner families this generic worker can launch. `runnerType` remains the primary/default. */
+  runnerTypes?: string[];
   runnerType: string;
   startupDelayMs: number;
   sleepDelayMs: number;
@@ -94,6 +96,8 @@ export function loadConfig(): DevWorkerConfig {
   // unchanged. SARDEENZ_APPTAINER_BINDS / SARDEENZ_APPTAINER_HOME still override explicitly.
   const weightsDir = envStr('SARDEENZ_WEIGHTS_DIR', '/weights');
   const scratchDir = envStr('SARDEENZ_SCRATCH_DIR', '/scratch');
+  const legacyRunnerType = envStr('SARDEENZ_RUNNER_TYPE', 'vllm');
+  const runnerTypes = [...new Set(envList('SARDEENZ_RUNNER_TYPES', [legacyRunnerType]))];
   return {
     mode: resolveMode(),
     redisUrl: envStr('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
@@ -106,7 +110,11 @@ export function loadConfig(): DevWorkerConfig {
     deviceCount: envInt('SARDEENZ_DEVICE_COUNT', 2),
     deviceType: envStr('SARDEENZ_DEVICE_TYPE', 'CUDA'),
     deviceMemoryBytes: envInt('SARDEENZ_DEVICE_MEMORY_GB', 24) * GIB,
-    runnerType: envStr('SARDEENZ_RUNNER_TYPE', 'vllm'),
+    // Keep the singular field as the default used by old callers and the dev stub. In
+    // multi-runner mode the first declared family is the default; every start request still
+    // carries its actual runnerType and the Apptainer launcher uses that value.
+    runnerType: runnerTypes[0],
+    runnerTypes,
     startupDelayMs: envInt('SARDEENZ_STARTUP_DELAY_MS', 3000),
     sleepDelayMs: envInt('SARDEENZ_SLEEP_DELAY_MS', 500),
     wakeDelayMs: envInt('SARDEENZ_WAKE_DELAY_MS', 1500),
