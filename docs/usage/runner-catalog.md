@@ -3,6 +3,9 @@
 The runner catalog lets operators browse a curated list of engine runners and **import** them
 (pull their SIF onto the shared module store) from the dashboard — no need to build SIFs yourself.
 
+After importing MLServer, follow [Deploying models with MLServer](mlserver-models.md) for supported
+formats, model directory layout, and `model-settings.json` examples.
+
 ## How it works
 
 - **Official runners** are built + signed, then pushed to an OCI registry as **ORAS** artifacts
@@ -94,6 +97,9 @@ Anyone with registry/store write access can then build and publish — no keys, 
 > [`deployment/librarian/`](../../deployment/librarian/)) before exposing or sharing the deployment.
 
 ### Example: an MLServer (OIP) entry
+
+This catalog entry installs the runtime. Preparing model artifacts and selecting the correct file
+are covered in the [MLServer model deployment guide](mlserver-models.md).
 
 ```yaml
 - id: mlserver-1.7

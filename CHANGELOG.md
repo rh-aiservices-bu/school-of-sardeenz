@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A user-facing MLServer model deployment guide.** It documents model directory layouts,
+  explicit `model-settings.json` configuration, automatic format detection and its limitations,
+  the Apptainer/MLServer startup flow, OIP routing, and common deployment failures.
+
 - **Startup logs are durable and instance-scoped.** The control plane automatically captures only
   the runner startup stream into PostgreSQL, retains it independently of instance cleanup, and the
   model detail page can replay logs for current and historical startup attempts.

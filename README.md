@@ -35,7 +35,11 @@ See [`docs/development/setup.md`](docs/development/setup.md) for prerequisites, 
 
 ## Deployment
 
-See [`deployment/`](deployment/README.md) for the Kustomize manifests, [`docs/usage/deployment-security.md`](docs/usage/deployment-security.md) for the security requirements, and [`docs/usage/runner-catalog.md`](docs/usage/runner-catalog.md) for importing runner SIFs.
+See [`deployment/`](deployment/README.md) for the Kustomize manifests,
+[`docs/usage/deployment-security.md`](docs/usage/deployment-security.md) for the security
+requirements, and [`docs/usage/runner-catalog.md`](docs/usage/runner-catalog.md) for importing
+runner SIFs. To serve predictive or Hugging Face models, follow
+[`docs/usage/mlserver-models.md`](docs/usage/mlserver-models.md).
 
 ## Project Status
 

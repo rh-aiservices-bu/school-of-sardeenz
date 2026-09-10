@@ -1,5 +1,8 @@
 # runners/mlserver — MLServer runner shim
 
+For model preparation, supported formats, dashboard deployment, and troubleshooting, see the
+user-facing [Deploying models with MLServer](../../docs/usage/mlserver-models.md) guide.
+
 The production MLServer runner. It runs **inside the MLServer SIF** and serves the
 [engine-runner contract](../../packages/contracts/specs/engine-runner.yaml) while driving [Seldon
 MLServer](https://mlserver.readthedocs.io/) over the KServe V2 Open Inference Protocol. The worker
