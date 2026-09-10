@@ -39,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard deployment and GPU-placement E2E flows match the current APIs.** The mock control
+  plane now returns the deployed instance identifier required by the startup-logs modal, and the
+  placement test opens the model action menu before selecting Move.
+
 - **Completed startup-log replays are labeled as recorded output.** Reopening a finished
   instance's logs no longer shows the misleading `Reconnecting…` status.
 

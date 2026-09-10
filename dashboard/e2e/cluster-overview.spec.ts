@@ -259,7 +259,8 @@ test.describe('Cluster Overview', () => {
     });
 
     await page.goto(bffUrl(bffPort, '/'));
-    await page.getByRole('button', { name: 'Move move-model (inst-source)' }).click();
+    await page.getByRole('button', { name: 'Actions for move-model' }).click();
+    await page.getByRole('menuitem', { name: 'Move' }).click();
     await expect(page.getByRole('dialog', { name: 'Move model instance' })).toBeVisible();
     await page.getByLabel('Target worker').selectOption('worker-target');
     await page.getByLabel('GPU 1').check();

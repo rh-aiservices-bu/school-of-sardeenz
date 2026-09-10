@@ -298,8 +298,13 @@ export class MockControlPlane {
         createdAt: new Date().toISOString(),
       };
       this.state.models.push(newModel);
-      this.state.modelInstances[newModel.modelName] = [this.newInstance(newModel)];
-      return reply.code(201).send(newModel);
+      const instance = this.newInstance(newModel);
+      this.state.modelInstances[newModel.modelName] = [instance];
+      return reply.code(201).send({
+        modelName: newModel.modelName,
+        instanceId: instance.instanceId,
+        state: newModel.state,
+      });
     });
 
     app.delete<{ Params: { name: string } }>('/api/v1/models/:name', async (req, reply) => {
