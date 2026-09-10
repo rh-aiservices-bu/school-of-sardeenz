@@ -65,7 +65,7 @@ const STATE_SORT_ORDER: Record<ModelLifecycleState, number> = {
   [ModelLifecycleState.ERROR]: 7,
 };
 
-// Column order: [select?], modelName, state, runnerType, worker, instances, memory,
+// Column order: [select?], modelName, state, runner, worker, instances, memory,
 // lastInference, pinned, [actions?]. The "instances" column (#120) sits between worker and
 // memory, shifting currentMemory/lastInferenceAt by one from their pre-#120 indices.
 const SORT_COLUMN_INDEX: Record<SortField, number> = {
@@ -665,7 +665,7 @@ export function ModelList() {
                 )}
                 <Th sort={getSortParams('modelName')}>{t('list.table.modelName')}</Th>
                 <Th sort={getSortParams('state')}>{t('list.table.state')}</Th>
-                <Th>{t('list.table.runnerType')}</Th>
+                <Th>{t('list.table.runner')}</Th>
                 <Th>{t('list.table.worker')}</Th>
                 <Th>{t('list.instances.columnHeader')}</Th>
                 <Th sort={getSortParams('currentMemory')}>{t('list.table.memory')}</Th>
@@ -711,7 +711,7 @@ export function ModelList() {
                     <Td dataLabel={t('list.table.state')}>
                       <StateLabel state={model.state} />
                     </Td>
-                    <Td dataLabel={t('list.table.runnerType')}>{model.runnerType}</Td>
+                    <Td dataLabel={t('list.table.runner')}>{model.runtimeModule ?? '—'}</Td>
                     <Td dataLabel={t('list.table.worker')}>
                       {model.workerId ? (
                         <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>

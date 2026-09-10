@@ -53,3 +53,15 @@ describe('ModelList — currentMemory sort comparator', () => {
     expect(compareCurrentMemory(100, 50)).toBeGreaterThan(0);
   });
 });
+
+describe('ModelList — runner column', () => {
+  const runnerCellText = (runtimeModule: string | undefined): string => runtimeModule ?? '—';
+
+  it('shows the runtime module name instead of the runner type', () => {
+    expect(runnerCellText('vllm-0.21')).toBe('vllm-0.21');
+  });
+
+  it('shows a dash for legacy records without a runtime module', () => {
+    expect(runnerCellText(undefined)).toBe('—');
+  });
+});

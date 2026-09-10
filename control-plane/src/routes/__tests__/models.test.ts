@@ -2293,7 +2293,7 @@ describe('displayName (presentation-only label)', () => {
     expect(forwardedParams.displayName).toBeUndefined();
   });
 
-  it('GET /api/v1/models includes displayName in the list view when the record has one', async () => {
+  it('GET /api/v1/models includes displayName and runtimeModule in the list view', async () => {
     const { app } = buildDeployApp({
       findAll: vi.fn(() =>
         Promise.resolve([
@@ -2306,7 +2306,7 @@ describe('displayName (presentation-only label)', () => {
             tensorParallel: 1,
             engineConfig: null,
             engineArgs: null,
-            runtimeModule: null,
+            runtimeModule: 'vllm-0.21',
             servedModelName: null,
             displayName: 'Qwen test 1',
             pinned: false,
@@ -2320,9 +2320,15 @@ describe('displayName (presentation-only label)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/models' });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ models: Array<{ modelName: string; displayName?: string }> }>();
+    const body = res.json<{
+      models: Array<{ modelName: string; displayName?: string; runtimeModule?: string }>;
+    }>();
     expect(body.models).toEqual([
-      expect.objectContaining({ modelName: 'm1', displayName: 'Qwen test 1' }),
+      expect.objectContaining({
+        modelName: 'm1',
+        displayName: 'Qwen test 1',
+        runtimeModule: 'vllm-0.21',
+      }),
     ]);
   });
 

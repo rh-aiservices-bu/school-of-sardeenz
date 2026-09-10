@@ -1922,6 +1922,8 @@ components:
         runnerType:
           type: string
           description: Runner type serving this model.
+        runtimeModule:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/runtimeModule"
         instanceCount:
           type: integer
           minimum: 0

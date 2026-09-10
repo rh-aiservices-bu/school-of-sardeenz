@@ -1107,6 +1107,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         displayName: record?.displayName ?? undefined,
         state: currentState,
         runnerType: record?.runnerType ?? 'unknown',
+        runtimeModule: record?.runtimeModule ?? undefined,
         instanceCount: instances.length,
         // Unambiguous only with exactly one instance — with N instances, the per-instance
         // breakdown lives at GET /api/v1/models/{modelName}.

@@ -887,6 +887,7 @@ export type components = {
             state: components["schemas"]["ModelLifecycleState"];
             /** @description Runner type serving this model. */
             runnerType: string;
+            runtimeModule?: components["schemas"]["ModelDeploymentRequest"]["runtimeModule"];
             /** @description Number of instances (replicas) currently deployed for this model. */
             instanceCount: number;
             /**

@@ -114,7 +114,7 @@
     "table": {
       "modelName": "Model Name",
       "state": "State",
-      "runnerType": "Runner Type",
+      "runner": "Runner",
       "worker": "Worker",
       "memory": "Memory",
       "lastInference": "Last Inference",
