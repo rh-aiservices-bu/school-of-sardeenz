@@ -681,6 +681,7 @@ export function ModelList() {
             <Tbody>
               {paginatedModels.map((model) => {
                 const current = model.currentMemory;
+                const workerIds = model.workerIds ?? (model.workerId ? [model.workerId] : []);
 
                 return (
                   <Tr key={model.modelName}>
@@ -713,13 +714,15 @@ export function ModelList() {
                     </Td>
                     <Td dataLabel={t('list.table.runner')}>{model.runtimeModule ?? '—'}</Td>
                     <Td dataLabel={t('list.table.worker')}>
-                      {model.workerId ? (
-                        <Link to={`/workers/${encodeURIComponent(model.workerId)}`}>
-                          {model.workerId}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
+                      {workerIds.length > 0
+                        ? workerIds.map((workerId) => (
+                            <div key={workerId}>
+                              <Link to={`/workers/${encodeURIComponent(workerId)}`}>
+                                {workerId}
+                              </Link>
+                            </div>
+                          ))
+                        : '—'}
                     </Td>
                     <Td dataLabel={t('list.instances.columnHeader')}>
                       <Link to={`/models/${encodeURIComponent(model.modelName)}`}>

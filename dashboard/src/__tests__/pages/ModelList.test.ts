@@ -65,3 +65,16 @@ describe('ModelList — runner column', () => {
     expect(runnerCellText(undefined)).toBe('—');
   });
 });
+
+describe('ModelList — worker column', () => {
+  const workersForCell = (workerIds: string[] | undefined, workerId: string | undefined) =>
+    workerIds ?? (workerId ? [workerId] : []);
+
+  it('shows every distinct worker supplied by the list response', () => {
+    expect(workersForCell(['worker-1', 'worker-2'], undefined)).toEqual(['worker-1', 'worker-2']);
+  });
+
+  it('falls back to the legacy singular worker field', () => {
+    expect(workersForCell(undefined, 'worker-1')).toEqual(['worker-1']);
+  });
+});

@@ -709,6 +709,42 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       );
     }
   };
+  const clearMoveForDelete = async (modelName: string, force: boolean): Promise<void> => {
+    const operation = await deps.lifecycle.getMoveOperation(modelName);
+    if (!operation) return;
+
+    // Once replacement cleanup has begun, the move has already failed and delete may safely
+    // supersede it. Force-delete is the operator escape hatch for every other stranded phase.
+    // A move still owned by this process is not stranded: let its detached task settle first.
+    if (movingInFlight.has(modelName) || (!force && operation.phase !== 'REPLACEMENT_CLEANUP')) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'delete',
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+
+    const removed = await deps.lifecycle.removeMoveOperation(modelName, operation.operationId);
+    if (!removed && (await deps.lifecycle.getMoveOperation(modelName))) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'delete',
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+    // Close the narrow race where the initiating request created the durable operation just
+    // before delete claimed the model, but added its process-local claim during the CAS above.
+    if (movingInFlight.has(modelName)) {
+      throw ControlPlaneError.operationInProgress(
+        modelName,
+        'delete',
+        'move-in-progress',
+        'a move is already in progress',
+      );
+    }
+  };
   const hasInstanceOperation = (modelName: string): boolean =>
     [...instanceOpInFlight].some((key) => key.startsWith(`${modelName}:`));
   const assertMoveAdmission = async (modelName: string): Promise<void> => {
@@ -1088,6 +1124,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     for (const name of modelNames) {
       const instances = instancesByModel.get(name) ?? [];
       const record = recordMap.get(name);
+      const workerIds = [
+        ...new Set(instances.flatMap((instance) => (instance.workerId ? [instance.workerId] : []))),
+      ].sort();
 
       const currentState = deriveAggregateState(instances);
       if (stateFilter && currentState !== stateFilter) continue;
@@ -1112,6 +1151,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         // Unambiguous only with exactly one instance — with N instances, the per-instance
         // breakdown lives at GET /api/v1/models/{modelName}.
         workerId: instances.length === 1 ? (instances[0].workerId ?? undefined) : undefined,
+        workerIds,
         requiredMemory: record?.requiredMemory ?? undefined,
         currentMemory,
         lastInferenceAt: inferenceTs.get(name) ?? undefined,
@@ -1320,7 +1360,6 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const { modelName } = request.params;
       const force = request.query.force === true || request.query.force === 'true';
       assertValidModelName(modelName);
-      await assertNoMove(modelName, 'delete');
 
       const [instances, record] = await Promise.all([
         deps.lifecycle.getInstancesForModel(modelName),
@@ -1370,6 +1409,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
         deletingInFlight.add(modelName);
         try {
+          await clearMoveForDelete(modelName, true);
           await Promise.all(
             instances.map((instance) =>
               deps.lifecycle.removeInstance(modelName, instance.instanceId),
@@ -1397,8 +1437,21 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       if (instances.length === 0 && record) {
-        await assertNoMove(modelName, 'delete');
-        await deps.modelRepository.delete(modelName);
+        if (deletingInFlight.has(modelName)) {
+          throw ControlPlaneError.operationInProgress(
+            modelName,
+            'delete',
+            'delete-in-progress',
+            'a delete is already in progress',
+          );
+        }
+        deletingInFlight.add(modelName);
+        try {
+          await clearMoveForDelete(modelName, false);
+          await deps.modelRepository.delete(modelName);
+        } finally {
+          deletingInFlight.delete(modelName);
+        }
         return reply.code(202).send({
           modelName,
           state: ModelLifecycleState.STOPPED,
@@ -1432,16 +1485,6 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           'a delete is already in progress',
         );
       }
-      await assertNoMove(modelName, 'delete');
-      if (deletingInFlight.has(modelName)) {
-        throw ControlPlaneError.operationInProgress(
-          modelName,
-          'delete',
-          'delete-in-progress',
-          'a delete is already in progress',
-        );
-      }
-
       // #173: a Stop or an instance-scoped op (delete/sleep/wake) can be claimed but not yet past
       // its first state transition, so its instances still read as settled and slip past the
       // transient guard above. Both that op and this delete would then run teardown on the same
@@ -1468,6 +1511,12 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       deletingInFlight.add(modelName);
+      try {
+        await clearMoveForDelete(modelName, false);
+      } catch (err) {
+        deletingInFlight.delete(modelName);
+        throw err;
+      }
 
       deps.notifications
         .createNotification({

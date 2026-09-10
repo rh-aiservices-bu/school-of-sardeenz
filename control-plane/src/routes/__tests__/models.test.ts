@@ -50,6 +50,7 @@ interface Overrides {
   getWorker?: ReturnType<typeof vi.fn>;
   stopRunner?: ReturnType<typeof vi.fn>;
   getMoveOperation?: ReturnType<typeof vi.fn>;
+  removeMoveOperation?: ReturnType<typeof vi.fn>;
   removeModel?: ReturnType<typeof vi.fn>;
   releaseInstanceReservations?: ReturnType<typeof vi.fn>;
 }
@@ -91,6 +92,7 @@ function buildApp(over: Overrides = {}): {
       removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
       transition: over.transition ?? vi.fn(() => Promise.resolve()),
       getMoveOperation: over.getMoveOperation ?? vi.fn(() => Promise.resolve(null)),
+      removeMoveOperation: over.removeMoveOperation ?? vi.fn(() => Promise.resolve(true)),
     },
     sleepWake: {
       stopModel: over.stopModel ?? vi.fn(() => Promise.resolve()),
@@ -778,6 +780,49 @@ describe('durable move fence blocks ordinary lifecycle mutations after leader ha
     expect(response.json<{ details: { reason: string } }>().details.reason).toBe(
       'move-in-progress',
     );
+    await app.close();
+  });
+
+  it('allows delete to supersede a failed move awaiting replacement cleanup', async () => {
+    const failedMove = {
+      ...DURABLE_MOVE,
+      phase: 'REPLACEMENT_CLEANUP' as const,
+      errorMessage: 'runner requires a different CUDA version',
+    };
+    const removeMoveOperation = vi.fn(() => Promise.resolve(true));
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({
+      getMoveOperation: vi.fn(() => Promise.resolve(failedMove)),
+      removeMoveOperation,
+      deleteModel,
+    });
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+
+    expect(response.statusCode).toBe(202);
+    expect(removeMoveOperation).toHaveBeenCalledWith('m1', failedMove.operationId);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(deleteModel).toHaveBeenCalledWith('m1');
+    await app.close();
+  });
+
+  it('allows force-delete to clear a stranded move in any phase', async () => {
+    const removeMoveOperation = vi.fn(() => Promise.resolve(true));
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({
+      getMoveOperation: vi.fn(() => Promise.resolve(DURABLE_MOVE)),
+      removeMoveOperation,
+      deleteModel,
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/models/m1?force=true',
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(removeMoveOperation).toHaveBeenCalledWith('m1', DURABLE_MOVE.operationId);
+    expect(deleteModel).toHaveBeenCalledWith('m1');
     await app.close();
   });
 });
@@ -2378,16 +2423,18 @@ describe('currentMemory (#163 measured telemetry)', () => {
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   };
 
-  it('GET /api/v1/models sums currentMemory across a model with two instances', async () => {
+  it('GET /api/v1/models sums memory and deduplicates workers across instances', async () => {
     const instances = [
       { ...ACTIVE_STATE, instanceId: 'inst-a' },
-      { ...ACTIVE_STATE, instanceId: 'inst-b' },
+      { ...ACTIVE_STATE, instanceId: 'inst-b', workerId: 'worker-2' },
+      { ...ACTIVE_STATE, instanceId: 'inst-c' },
     ];
     const getMeasuredByInstance = vi.fn(
       () =>
         new Map([
           ['inst-a', 3e9],
           ['inst-b', 2e9],
+          ['inst-c', 1e9],
         ]),
     );
     const { app } = buildDeployApp({
@@ -2399,8 +2446,13 @@ describe('currentMemory (#163 measured telemetry)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/models' });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ models: Array<{ modelName: string; currentMemory?: number }> }>();
-    expect(body.models.find((m) => m.modelName === 'm1')?.currentMemory).toBe(5e9);
+    const body = res.json<{
+      models: Array<{ modelName: string; currentMemory?: number; workerIds?: string[] }>;
+    }>();
+    expect(body.models.find((m) => m.modelName === 'm1')).toMatchObject({
+      currentMemory: 6e9,
+      workerIds: ['worker-1', 'worker-2'],
+    });
   });
 
   it('GET /api/v1/models omits currentMemory when no instance of the model has a measurement', async () => {

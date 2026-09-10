@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The Models table lists every worker hosting a model.** Multi-instance models now show their
+  deduplicated worker links on separate lines instead of an ambiguous dash.
+
 - **The Models table identifies the deployed runner module.** Its former Runner Type column is now
   labeled Runner and displays the runtime module name used by the worker.
 
@@ -31,6 +34,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   independent Containerfiles, dependency pins, and compatibility notes.
 
 ### Fixed
+
+- **Failed model moves no longer block deletion indefinitely.** Delete now supersedes a move that
+  has entered failed-replacement cleanup, and force-delete can clear a stranded move transaction
+  in any phase.
 
 - **vLLM 0.24 uses the kvcached-compatible model runner.** The 0.24 SIF now sets
   `VLLM_USE_V2_MODEL_RUNNER=0`, forcing Model Runner V1 instead of the unsupported V2 path.

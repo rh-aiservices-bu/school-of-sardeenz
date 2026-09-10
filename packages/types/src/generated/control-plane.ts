@@ -898,6 +898,11 @@ export type components = {
              */
             workerId?: string;
             /**
+             * @description Distinct workers hosting the model's current instances, sorted by
+             *     worker ID. Empty when the model has no deployed instances.
+             */
+            workerIds?: string[];
+            /**
              * Format: int64
              * @description Configured device memory estimate in bytes. An indicator used
              *     only for initial placement — it has no meaning once the model
@@ -1856,7 +1861,7 @@ export interface operations {
     deleteModel: {
         parameters: {
             query?: {
-                /** @description Immediately remove configuration, routing, lifecycle, and capacity bookkeeping without contacting the worker. This can orphan a live runner process and must only be used after an operator has confirmed that no runner remains. */
+                /** @description Immediately remove configuration, routing, lifecycle, and capacity bookkeeping without contacting the worker. This can orphan a live runner process and must only be used after an operator has confirmed that no runner remains. Force deletion also clears a stranded move transaction; ordinary deletion clears a failed move that has already entered replacement cleanup. */
                 force?: boolean;
             };
             header?: never;
@@ -1895,7 +1900,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description An instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them. */
+            /** @description An instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them. A move in replacement cleanup is already failed and can be superseded by deletion; force deletion can supersede a stranded move in any phase. */
             409: {
                 headers: {
                     [name: string]: unknown;

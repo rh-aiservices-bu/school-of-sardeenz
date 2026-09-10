@@ -309,7 +309,9 @@ paths:
             Immediately remove configuration, routing, lifecycle, and capacity
             bookkeeping without contacting the worker. This can orphan a live
             runner process and must only be used after an operator has confirmed
-            that no runner remains.
+            that no runner remains. Force deletion also clears a stranded move
+            transaction; ordinary deletion clears a failed move that has already
+            entered replacement cleanup.
           schema:
             type: boolean
             default: false
@@ -335,6 +337,8 @@ paths:
             and its state, and the in-progress-operation body carries a
             `details.reason` (`delete-in-progress` / `stop-in-progress` /
             `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them.
+            A move in replacement cleanup is already failed and can be superseded
+            by deletion; force deletion can supersede a stranded move in any phase.
           content:
             application/json:
               schema:
@@ -1935,6 +1939,14 @@ components:
             `instanceCount == 1` (unambiguous); use
             `GET /api/v1/models/{modelName}` for the per-instance breakdown
             when there are multiple instances.
+        workerIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: |
+            Distinct workers hosting the model's current instances, sorted by
+            worker ID. Empty when the model has no deployed instances.
         requiredMemory:
           type: integer
           format: int64
