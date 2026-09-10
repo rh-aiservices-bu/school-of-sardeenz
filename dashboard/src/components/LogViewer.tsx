@@ -8,6 +8,7 @@ type RunnerLogLine = ControlPlaneComponents['schemas']['RunnerLogLine'];
 interface LogViewerProps {
   logs: RunnerLogLine[];
   isConnected: boolean;
+  ended?: boolean;
   failed?: boolean;
 }
 
@@ -20,7 +21,7 @@ const AUTO_SCROLL_THRESHOLD_PX = 24;
  * `@patternfly/react-log-viewer` is not a dependency of this project, so this is a plain
  * `<div>`-based viewer styled with PF6 semantic tokens rather than a new dependency.
  */
-export function LogViewer({ logs, isConnected, failed }: LogViewerProps) {
+export function LogViewer({ logs, isConnected, ended, failed }: LogViewerProps) {
   const { t } = useTranslation('models');
   const containerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -54,6 +55,10 @@ export function LogViewer({ logs, isConnected, failed }: LogViewerProps) {
             <Label color="red" isCompact>
               {t('logs.unavailable')}
             </Label>
+          ) : ended ? (
+            <Label color="grey" isCompact>
+              {t('logs.recorded')}
+            </Label>
           ) : (
             <Label color={isConnected ? 'green' : 'grey'} isCompact>
               {isConnected ? t('logs.connected') : t('logs.reconnecting')}
@@ -82,7 +87,7 @@ export function LogViewer({ logs, isConnected, failed }: LogViewerProps) {
       >
         {logs.length === 0 ? (
           <Content component="small" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-            {t('logs.waiting')}
+            {ended ? t('logs.noOutputRecorded') : t('logs.waiting')}
           </Content>
         ) : (
           logs.map((line, index) => (

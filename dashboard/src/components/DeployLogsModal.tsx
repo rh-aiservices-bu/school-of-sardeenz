@@ -41,7 +41,7 @@ export function DeployLogsModal({ modelName, instanceId, isOpen, onClose }: Depl
   const { t: tCommon } = useTranslation('common');
   const { data: model } = useModel(modelName);
   const { data: sessions } = useStartupLogSessions(modelName);
-  const { logs, isConnected, failed } = useModelLogs(modelName, instanceId, isOpen);
+  const { logs, isConnected, ended, failed } = useModelLogs(modelName, instanceId, isOpen);
   const instance = model?.instances.find((candidate) => candidate.instanceId === instanceId);
   const session = sessions?.find((candidate) => candidate.instanceId === instanceId);
 
@@ -111,7 +111,7 @@ export function DeployLogsModal({ modelName, instanceId, isOpen, onClose }: Depl
           </Alert>
         )}
 
-        <LogViewer logs={logs} isConnected={isConnected} failed={failed} />
+        <LogViewer logs={logs} isConnected={isConnected} ended={ended} failed={failed} />
       </ModalBody>
       <ModalFooter>
         <Button variant={isActive || isError ? 'primary' : 'secondary'} onClick={onClose}>
