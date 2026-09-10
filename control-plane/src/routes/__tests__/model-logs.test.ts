@@ -142,18 +142,18 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     expect(res.json()).toMatchObject({ code: 'MODEL_NOT_FOUND' });
   });
 
-  it('streams worker log frames through (by model) when the runner is already placed', async () => {
+  it('streams worker log frames through by instance when the runner is already placed', async () => {
     const mocks = createMocks();
     // workerId is set at STARTING; runnerId is deliberately NOT required to attach — logs are
-    // addressed by model name so they're reachable during cold-start.
+    // addressed by instance id so they're reachable during cold-start and after failure.
     mocks.lifecycle.getInstancesForModel.mockResolvedValue(
       oneInstance(makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE })),
     );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
-    const streamRunnerLogsByModel = vi
+    const streamRunnerLogsByInstance = vi
       .fn()
       .mockResolvedValue(makeUpstreamResponse(['event: log\ndata: hello world\n\n']));
-    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByInstance });
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({ method: 'GET', url: '/api/v1/models/test-model/logs' });
@@ -162,7 +162,10 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     expect(res.body).toContain('event: log\ndata: hello world');
     expect(res.body).toContain('event: end');
     expect(mocks.createWorkerClient).toHaveBeenCalledWith('http://worker-1:8080');
-    expect(streamRunnerLogsByModel).toHaveBeenCalledWith('test-model', expect.any(AbortSignal));
+    expect(streamRunnerLogsByInstance).toHaveBeenCalledWith(
+      'inst-000000000001',
+      expect.any(AbortSignal),
+    );
   });
 
   it('registers the hijacked raw response and removes it once the stream ends', async () => {
@@ -171,10 +174,10 @@ describe('GET /api/v1/models/:modelName/logs', () => {
       oneInstance(makeState({ workerId: 'worker-1', state: ModelLifecycleState.ACTIVE })),
     );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
-    const streamRunnerLogsByModel = vi
+    const streamRunnerLogsByInstance = vi
       .fn()
       .mockResolvedValue(makeUpstreamResponse(['event: log\ndata: hello world\n\n']));
-    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByInstance });
     app = await buildTestApp(toDeps(mocks));
 
     const addSpy = vi.spyOn(app.hijackedResponses, 'add');
@@ -194,20 +197,23 @@ describe('GET /api/v1/models/:modelName/logs', () => {
       oneInstance(makeState({ workerId: 'worker-1' })),
     );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
-    const streamRunnerLogsByModel = vi
+    const streamRunnerLogsByInstance = vi
       .fn()
       .mockResolvedValueOnce(make404Response())
       .mockResolvedValueOnce(make404Response())
       .mockResolvedValue(makeUpstreamResponse(['event: log\ndata: late runner\n\n']));
-    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByInstance });
     app = await buildTestApp(toDeps(mocks));
 
     const res = await app.inject({ method: 'GET', url: '/api/v1/models/test-model/logs' });
 
     expect(res.body).toContain(': waiting');
     expect(res.body).toContain('event: log\ndata: late runner');
-    expect(streamRunnerLogsByModel.mock.calls.length).toBeGreaterThanOrEqual(3);
-    expect(streamRunnerLogsByModel).toHaveBeenLastCalledWith('test-model', expect.any(AbortSignal));
+    expect(streamRunnerLogsByInstance.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(streamRunnerLogsByInstance).toHaveBeenLastCalledWith(
+      'inst-000000000001',
+      expect.any(AbortSignal),
+    );
   }, 10_000);
 
   it('times out (ending the stream) when the runner never registers', async () => {
@@ -217,8 +223,8 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     );
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
     // Worker keeps 404-ing — runner never comes up. Short deploy timeout bounds the wait.
-    const streamRunnerLogsByModel = vi.fn().mockResolvedValue(make404Response());
-    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    const streamRunnerLogsByInstance = vi.fn().mockResolvedValue(make404Response());
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByInstance });
     app = await buildTestApp(toDeps(mocks, 1));
 
     const res = await app.inject({ method: 'GET', url: '/api/v1/models/test-model/logs' });
@@ -244,15 +250,19 @@ describe('GET /api/v1/models/:modelName/logs', () => {
     });
     mocks.lifecycle.getInstancesForModel.mockResolvedValue([active, starting]);
     mocks.workerPool.getWorker.mockReturnValue(makeWorker());
-    const streamRunnerLogsByModel = vi
+    const streamRunnerLogsByInstance = vi
       .fn()
       .mockResolvedValue(makeUpstreamResponse(['event: log\ndata: cold-starting replica\n\n']));
-    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByModel });
+    mocks.createWorkerClient.mockReturnValue({ streamRunnerLogsByInstance });
     app = await buildTestApp(toDeps(mocks));
 
     await app.inject({ method: 'GET', url: '/api/v1/models/test-model/logs' });
 
     // The STARTING instance's worker (worker-1) is attached to, not the older ACTIVE one.
     expect(mocks.createWorkerClient).toHaveBeenCalledWith('http://worker-1:8080');
+    expect(streamRunnerLogsByInstance).toHaveBeenCalledWith(
+      'inst-starting',
+      expect.any(AbortSignal),
+    );
   });
 });

@@ -240,10 +240,10 @@ def test_status_lifecycle_transitions():
 
 
 def test_capabilities_mlserver():
-    caps = st.capabilities("1.6.1")
+    caps = st.capabilities("1.7.1")
     assert caps["runnerType"] == "mlserver"
     assert caps["engineName"] == "MLServer"
-    assert caps["engineVersion"] == "1.6.1"
+    assert caps["engineVersion"] == "1.7.1"
     assert caps["supportedModelTypes"] == ["PREDICTIVE", "LLM", "EMBEDDING"]
     assert caps["supportedSleepLevels"] == [st.L1_HOST_RAM]
     assert caps["kvCacheElasticSharing"] is False

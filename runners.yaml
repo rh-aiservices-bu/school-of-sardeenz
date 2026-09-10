@@ -62,16 +62,17 @@ runners:
       toolUse: true
       kvCacheOffload: false
       prefixCaching: true
-  - id: vllm-0.20
-    title: vLLM 0.20 (+ kvcached)
+  - id: vllm-0.24
+    title: vLLM 0.24 (+ kvcached)
     description: >-
-      Previous vLLM line (0.20) with kvcached, kept for models pinned to that engine version.
-      Runs side by side with newer versions — hot-add without recycling workers.
+      vLLM (0.24) with kvcached, kept for models pinned to that engine version.
+      Forces Model Runner V1 for kvcached compatibility. Runs side by side with
+      newer versions — hot-add without recycling workers.
     engine: vLLM
     runnerType: vllm
-    version: '0.20'
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.20
-    sifName: vllm-0.20
+    version: '0.24'
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.24-rc1@sha256:c9779e0d6c9b010c68ebb850c8216920e56e77b46c6e1ec4443b08ed81e6cc87
+    sifName: vllm-0.24
     protocol: openai
     tags: [llm, cuda, kvcached, openai]
     minVRAMGiB: 16
@@ -87,21 +88,21 @@ runners:
       toolUse: true
       kvCacheOffload: false
       prefixCaching: true
-  - id: mlserver-1.6
-    title: MLServer 1.6 (KServe V2)
+  - id: mlserver-1.7.1
+    title: MLServer 1.7.1 (KServe V2)
     description: >-
-      Seldon MLServer 1.6 inference server speaking the KServe V2 Open Inference Protocol
+      Seldon MLServer 1.7.1 inference server speaking the KServe V2 Open Inference Protocol
       (/oip/v2). GPU-backed runtimes (scikit-learn CPU-classical + HuggingFace/torch). Supports
       sleep/wake via model unload/load. Not OpenAI-compatible.
     engine: MLServer
     runnerType: mlserver
-    version: '1.6'
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6
-    sifName: mlserver-1.6
+    version: '1.7.1'
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.7.1-rc1@sha256:d9e0809f0c140395614ddc5d8e2eae5fb7d228542fca0ec603128783e76c1073
+    sifName: mlserver-1.7.1
     protocol: oip
     entrypoint: [python3, -m, sardeenz_mlserver_runner]
     tags: [oip, cuda, sklearn, huggingface]
-    minVRAMGiB: 8
+    minVRAMGiB: 1
     license: Apache-2.0
     supportedModelTypes: [PREDICTIVE, LLM, EMBEDDING]
     supportedDeviceTypes: [CUDA]

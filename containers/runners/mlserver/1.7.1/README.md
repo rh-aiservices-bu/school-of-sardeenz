@@ -1,4 +1,4 @@
-# MLServer 1.6.1 runner
+# MLServer 1.7.1 runner
 
 The **Seldon MLServer (KServe V2)** runner image. It is not run as a container in production — it
 is built by the OpenShift librarian pipeline, converted to a **SIF** (optionally signed), and
@@ -14,9 +14,10 @@ Single-stage build (unlike `runner-vllm`, there is no builder stage — MLServer
 wheels, nothing to compile):
 
 1. **base** — `nvidia/cuda:12.6.3-runtime-ubi9` + Python 3.12 (placeholder tag; **pin `@sha256`
-   before publishing**, same discipline as `runner-vllm`'s base).
-2. `pip install`s the pinned MLServer runtime set — `mlserver==1.6.1`,
-   `mlserver-sklearn==1.6.1` (CPU-classical baseline), `mlserver-huggingface==1.6.1` (GPU torch
+   before publishing**, same discipline as `runner-vllm`'s base). Python 3.12 is installed directly
+   from UBI AppStream; UBI does not expose a `python312` DNF module stream.
+2. `pip install`s the pinned MLServer runtime set — `mlserver==1.7.1`,
+   `mlserver-sklearn==1.7.1` (CPU-classical baseline), `mlserver-huggingface==1.7.1` (GPU torch
    runtime). No xgboost/lightgbm/mlflow runtimes yet (issue "Initial runtime set"; additive later
    as a package pin + catalog entry, no code change).
 3. `pip install`s the runner-contract shim from `runners/mlserver/` (`sardeenz-mlserver-runner`),
@@ -25,17 +26,18 @@ wheels, nothing to compile):
 4. Drops to a non-root user (`sardeenz`, uid 1001) — the base ships no unprivileged app user.
 
 > **Build context is the repo root** (the shim lives at `runners/mlserver/`, outside this
-> directory): `podman build -f containers/runners/mlserver/1.6.1/Containerfile -t
-quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.6 .`
+> directory): `podman build -f containers/runners/mlserver/1.7.1/Containerfile -t
+quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.7 .`
 
 ## Pins (keep in sync; re-test on any bump)
 
 | Input                  | Value                             | Note                                              |
 | ---------------------- | --------------------------------- | ------------------------------------------------- |
 | base image             | `nvidia/cuda:12.6.3-runtime-ubi9` | **placeholder — pin `@sha256` before publishing** |
-| `mlserver`             | `1.6.1`                           |                                                   |
-| `mlserver-sklearn`     | `1.6.1`                           | CPU-classical baseline                            |
-| `mlserver-huggingface` | `1.6.1`                           | GPU torch runtime                                 |
+| Python                 | `3.12`                            | MLServer 1.7.1 requires `>=3.9,<3.13`             |
+| `mlserver`             | `1.7.1`                           |                                                   |
+| `mlserver-sklearn`     | `1.7.1`                           | CPU-classical baseline                            |
+| `mlserver-huggingface` | `1.7.1`                           | GPU torch runtime                                 |
 
 On any bump, re-run the MLServer shim's pytest suite (`runners/mlserver`) and re-validate the
 gRPC/metrics aux-port offsets (`sardeenz_mlserver_runner/cli.py`) before publishing.
@@ -59,5 +61,5 @@ sardeenz_mlserver_runner --model /weights/<model> --port <PORT> -- --served-mode
 ## Build and publish
 
 Use the parameterized [`deployment/librarian`](../../../../deployment/librarian/) OpenShift Job. Set
-`GIT_REF`, `CONTAINERFILE=containers/runners/mlserver/1.6.1/Containerfile`, the OCI/ORAS repositories and
+`GIT_REF`, `CONTAINERFILE=containers/runners/mlserver/1.7.1/Containerfile`, the OCI/ORAS repositories and
 tags, and `SIGN_SIF=false` for PoC output or `true` after provisioning the signing key.

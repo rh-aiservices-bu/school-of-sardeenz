@@ -384,6 +384,8 @@ describe('RunnerManager', () => {
     expect(retainSpy).toHaveBeenCalledTimes(1);
     const runnerId = markEndedSpy.mock.calls[0][0];
     expect(retainSpy.mock.calls[0][0]).toBe(runnerId);
+    logBuffer.append(runnerId, 'stderr', 'startup failed\n');
+    expect(mgr.getRunnerIdForInstance('inst-fails-to-launch')).toBe(runnerId);
   });
 
   it('buffer dropped after retain TTL on failed launch', async () => {
@@ -413,8 +415,10 @@ describe('RunnerManager', () => {
       logBuffer.append(runnerId, 'stdout', 'failure log\n');
 
       expect(logBuffer.has(runnerId)).toBe(true);
+      expect(mgr.getRunnerIdForInstance('inst-fails-then-expires')).toBe(runnerId);
       vi.advanceTimersByTime(RETAIN_TTL_MS);
       expect(logBuffer.has(runnerId)).toBe(false);
+      expect(mgr.getRunnerIdForInstance('inst-fails-then-expires')).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -1095,8 +1099,7 @@ describe('getKvCacheDeviceStats', () => {
     expect(stats.get(0)).toEqual(KV); // device 1 never appears (absent, not zero)
     // Both runners' /memory-report were polled (the shared fetch path, with the 2s timeout).
     expect(fetchFn).toHaveBeenCalledTimes(2);
-    const calls = (fetchFn as unknown as { mock: { calls: Array<[unknown, unknown]> } }).mock
-      .calls;
+    const calls = (fetchFn as unknown as { mock: { calls: Array<[unknown, unknown]> } }).mock.calls;
     for (const call of calls) {
       expect(call[1]).toEqual(
         expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }),
@@ -1133,7 +1136,9 @@ describe('getKvCacheDeviceStats', () => {
   });
 
   it('a failing runner contributes nothing (never throws)', async () => {
-    const fetchFn = vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch;
+    const fetchFn = vi.fn(() =>
+      Promise.reject(new Error('ECONNREFUSED')),
+    ) as unknown as typeof fetch;
     const mgr = new RunnerManager(
       makeConfig(),
       makeRegistration(),

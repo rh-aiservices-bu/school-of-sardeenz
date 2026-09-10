@@ -172,3 +172,14 @@ describe('SIF runner deployment manifests (#181)', () => {
     ]);
   });
 });
+
+describe('vLLM 0.24 runner compatibility', () => {
+  it('forces Model Runner V1 because kvcached does not support Model Runner V2', () => {
+    const containerfile = readFileSync(
+      resolve(repoRoot, 'containers/runners/vllm/0.24.0/Containerfile'),
+      'utf8',
+    );
+
+    expect(containerfile).toMatch(/VLLM_USE_V2_MODEL_RUNNER=0/);
+  });
+});

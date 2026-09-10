@@ -94,11 +94,11 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
       // interval doesn't await it) can't open two upstream connections.
       let attaching = false;
 
-      // Try to attach to the worker's by-model log stream. Returns true once the attach is
+      // Try to attach to the worker's per-instance log stream. Returns true once the attach is
       // resolved (piping started, or a terminal error was surfaced) so the poll loop can stop;
       // returns false to signal "retry" — the worker hasn't received the start command yet (404),
       // the worker isn't reachable.
-      const tryAttach = async (workerId: string): Promise<boolean> => {
+      const tryAttach = async (workerId: string, instanceId: string): Promise<boolean> => {
         const worker = deps.workerPool.getWorker(workerId);
         if (!worker) return false;
 
@@ -106,7 +106,10 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
 
         let upstream: Response;
         try {
-          upstream = await workerClient.streamRunnerLogsByModel(modelName, abortController.signal);
+          upstream = await workerClient.streamRunnerLogsByInstance(
+            instanceId,
+            abortController.signal,
+          );
         } catch {
           // Worker unreachable (e.g. still coming up) — retry on the next tick.
           return false;
@@ -140,9 +143,10 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
       // Deploy is async: the model reaches STARTING (workerId set) before the worker has actually
       // received the start command, and the runnerId isn't known to the control plane until the
       // worker's blocking start call returns (after the runner is healthy — too late to watch
-      // startup). So we attach by *model name* as soon as workerId is known and retry until the
-      // worker's by-model endpoint is live, writing keepalive comments meanwhile and bounding the
-      // wait by maxWaitMs so a stuck deploy doesn't hold the connection forever.
+      // startup). So we attach by stable instance id as soon as workerId is known and retry until
+      // the worker endpoint is live, writing keepalive comments meanwhile and bounding the wait by
+      // maxWaitMs so a stuck deploy doesn't hold the connection forever. Instance addressing also
+      // keeps sealed failure logs reachable after the worker removes the failed runner record.
       const poll = async (): Promise<void> => {
         if (ended || attaching) return;
 
@@ -163,9 +167,7 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
 
         // With replicas, several instances may exist for this model — prefer whichever one is
         // cold-starting (the case this stream exists for); fall back to the most recently
-        // changed instance otherwise. The worker's by-model logs route (below) resolves the
-        // model name to its own most-recently-started runner, so this only needs a workerId to
-        // attach to, not a specific instance.
+        // changed instance otherwise.
         const current =
           instances.find((i) => i.state === ModelLifecycleState.STARTING) ??
           [...instances].sort((a, b) => b.stateChangedAt.localeCompare(a.stateChangedAt))[0];
@@ -173,7 +175,7 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
         if (current.workerId) {
           attaching = true;
           try {
-            const done = await tryAttach(current.workerId);
+            const done = await tryAttach(current.workerId, current.instanceId);
             if (done) {
               if (pollTimer) clearInterval(pollTimer);
               return;

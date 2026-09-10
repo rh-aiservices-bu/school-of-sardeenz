@@ -257,6 +257,12 @@ export class ApptainerLauncher implements RunnerLauncher {
       SARDEENZ_MLSERVER_GRPC_PORT: String(spec.grpcPort),
       SARDEENZ_MLSERVER_METRICS_PORT: String(spec.metricsPort),
     };
+    // vLLM 0.24 may select Model Runner V2 by default, but kvcached's autopatch targets Model
+    // Runner V1. Pass this explicitly as well as baking it into the SIF so already-published 0.24
+    // modules become usable as soon as the worker is upgraded.
+    if (sifPath.endsWith('/vllm-0.24.sif')) {
+      envFlags.VLLM_USE_V2_MODEL_RUNNER = '0';
+    }
     if (useNv) {
       envFlags.CUDA_VISIBLE_DEVICES = spec.devices.map((d) => d.deviceIndex).join(',');
       envFlags.SARDEENZ_DEVICE_INDICES = spec.devices.map((d) => d.deviceIndex).join(',');
@@ -269,7 +275,9 @@ export class ApptainerLauncher implements RunnerLauncher {
 
     args.push(
       sifPath,
-      ...(spec.entrypoint && spec.entrypoint.length ? spec.entrypoint : this.config.runnerEntrypoint),
+      ...(spec.entrypoint && spec.entrypoint.length
+        ? spec.entrypoint
+        : this.config.runnerEntrypoint),
     );
     args.push('--model', spec.modelPath, '--port', String(spec.port));
     // Pin the engine's OpenAI port explicitly to the worker-allocated engine port rather than

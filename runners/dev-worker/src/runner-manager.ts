@@ -2,7 +2,7 @@ import type { DevWorkerConfig } from './config.js';
 import type { WorkerRegistration } from './registration.js';
 import type { LaunchHandle, LogSink, RunnerLauncher } from './launcher.js';
 import { StubLauncher } from './stub-launcher.js';
-import { RunnerLogBuffer } from './runner-log-buffer.js';
+import { MAX_RETAINED, RunnerLogBuffer } from './runner-log-buffer.js';
 import { randomUUID } from 'node:crypto';
 import { createServer as netCreateServer } from 'node:net';
 
@@ -97,6 +97,9 @@ export class RunnerManager {
   // instanceId -> runnerId. The unambiguous lookup/conflict key — unlike modelName, an instanceId
   // identifies exactly one runner even with replicas.
   private readonly instanceRunners = new Map<string, string>();
+  // Failed launches are removed from instanceRunners so they do not block a retry, but their
+  // sealed startup logs remain addressable by instanceId for RunnerLogBuffer's retention window.
+  private readonly failedInstanceLogRunners = new Map<string, string>();
   private readonly launcher: RunnerLauncher;
   private readonly logBuffer: RunnerLogBuffer;
   private readonly usedPorts = new Set<number>();
@@ -213,6 +216,7 @@ export class RunnerManager {
         handle,
       };
       this.runners.set(runnerId, record);
+      this.failedInstanceLogRunners.delete(params.instanceId);
 
       for (const device of params.devices) {
         const perDeviceMemory = Math.floor(params.requiredMemory / params.devices.length);
@@ -239,6 +243,14 @@ export class RunnerManager {
       // drop() it, so without retain() the failure logs (and their listeners) would leak forever.
       this.logBuffer.markEnded(runnerId);
       this.logBuffer.retain(runnerId);
+      if (
+        !this.failedInstanceLogRunners.has(params.instanceId) &&
+        this.failedInstanceLogRunners.size >= MAX_RETAINED
+      ) {
+        const oldestInstanceId = this.failedInstanceLogRunners.keys().next().value;
+        if (oldestInstanceId) this.failedInstanceLogRunners.delete(oldestInstanceId);
+      }
+      this.failedInstanceLogRunners.set(params.instanceId, runnerId);
       throw err;
     }
   }
@@ -327,7 +339,13 @@ export class RunnerManager {
   // Resolve the runnerId for a specific instance — unambiguous even with replicas of the same
   // model on this worker. Like getRunnerIdForModel, set the instant startRunner() is entered.
   getRunnerIdForInstance(instanceId: string): string | undefined {
-    return this.instanceRunners.get(instanceId);
+    const active = this.instanceRunners.get(instanceId);
+    if (active) return active;
+    const failed = this.failedInstanceLogRunners.get(instanceId);
+    if (!failed) return undefined;
+    if (this.logBuffer.has(failed)) return failed;
+    this.failedInstanceLogRunners.delete(instanceId);
+    return undefined;
   }
 
   getAllRunners(): RunnerRecord[] {
@@ -413,7 +431,10 @@ export class RunnerManager {
         }
       }),
     );
-    return perRunner.filter((r): r is { record: RunnerRecord; body: { devices?: RunnerMemoryReportDevice[] } } => r !== null);
+    return perRunner.filter(
+      (r): r is { record: RunnerRecord; body: { devices?: RunnerMemoryReportDevice[] } } =>
+        r !== null,
+    );
   }
 
   // Allocate a contiguous block of PORTS_PER_RUNNER ports for one runner:

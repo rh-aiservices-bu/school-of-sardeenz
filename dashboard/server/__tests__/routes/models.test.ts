@@ -218,6 +218,77 @@ describe('POST /api/models', () => {
   });
 });
 
+describe('DELETE /api/models/:name', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('forwards the explicit force flag to the control plane', async () => {
+    const deps = buildDeps();
+    const deleteModel = vi.fn();
+    Object.assign(deps.controlPlane, { deleteModel });
+    deleteModel.mockResolvedValue({ status: 202, data: { modelName: 'stalled/model' } });
+    const app = await buildApp(deps);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/models/stalled%2Fmodel?force=true',
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(202);
+    expect(deleteModel).toHaveBeenCalledWith('stalled/model', true);
+  });
+});
+
+describe('PUT /api/models/:name', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('proxies a configuration replacement to the control plane', async () => {
+    const deps = buildDeps();
+    const updateModel = vi
+      .fn()
+      .mockResolvedValue({ status: 200, data: { modelName: 'org/model' } });
+    Object.assign(deps.controlPlane, { updateModel });
+    const app = await buildApp(deps);
+    const payload = {
+      runnerType: 'vllm',
+      modelPath: '/weights/m',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      pinned: false,
+    };
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/models/org%2Fmodel',
+      payload,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(updateModel).toHaveBeenCalledWith('org/model', payload);
+  });
+});
+
+describe('POST /api/models/:name/stop', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('forwards the force-reset flag to the control plane', async () => {
+    const deps = buildDeps();
+    const stopModel = vi.fn().mockResolvedValue({ status: 202, data: { state: 'STOPPED' } });
+    Object.assign(deps.controlPlane, { stopModel });
+    const app = await buildApp(deps);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/models/org%2Fmodel/stop?force=true',
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(202);
+    expect(stopModel).toHaveBeenCalledWith('org/model', true);
+  });
+});
+
 describe('POST /api/models/:name/instances/:instanceId/move', () => {
   beforeEach(() => vi.clearAllMocks());
 

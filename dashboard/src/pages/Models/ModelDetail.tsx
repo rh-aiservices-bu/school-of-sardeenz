@@ -38,6 +38,7 @@ import {
   useWakeModel,
   useDeleteModel,
   useStopModel,
+  useForceStopModel,
   useStartModel,
   useAddInstance,
   useDeleteInstance,
@@ -68,6 +69,7 @@ export function ModelDetail() {
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
   const stopModel = useStopModel();
+  const forceStopModel = useForceStopModel();
   const startModel = useStartModel();
   const addInstance = useAddInstance();
   const deleteInstance = useDeleteInstance();
@@ -104,11 +106,28 @@ export function ModelDetail() {
   const handleDeleteConfirm = () => {
     if (!modelName) return;
     setMutationError(null);
-    deleteModel.mutate(modelName, {
-      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Delete failed'),
-      onSuccess: () => void navigate('/models'),
-      onSettled: () => setShowDeleteModal(false),
-    });
+    deleteModel.mutate(
+      { name: modelName },
+      {
+        onError: (err) => setMutationError(err instanceof Error ? err.message : 'Delete failed'),
+        onSuccess: () => void navigate('/models'),
+        onSettled: () => setShowDeleteModal(false),
+      },
+    );
+  };
+
+  const handleForceDeleteConfirm = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    deleteModel.mutate(
+      { name: modelName, force: true },
+      {
+        onError: (err) =>
+          setMutationError(err instanceof Error ? err.message : 'Force delete failed'),
+        onSuccess: () => void navigate('/models'),
+        onSettled: () => setShowDeleteModal(false),
+      },
+    );
   };
 
   const handleStart = () => {
@@ -124,6 +143,15 @@ export function ModelDetail() {
     setMutationError(null);
     stopModel.mutate(modelName, {
       onError: (err) => setMutationError(err instanceof Error ? err.message : 'Stop failed'),
+      onSettled: () => setShowStopModal(false),
+    });
+  };
+
+  const handleForceStopConfirm = () => {
+    if (!modelName) return;
+    setMutationError(null);
+    forceStopModel.mutate(modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Force stop failed'),
       onSettled: () => setShowStopModal(false),
     });
   };
@@ -296,6 +324,17 @@ export function ModelDetail() {
                   </Button>
                 </FlexItem>
               )}
+              <FlexItem>
+                <Button
+                  variant="secondary"
+                  isDisabled={!isStopped}
+                  onClick={() =>
+                    void navigate(`/models/${encodeURIComponent(modelName ?? '')}/edit`)
+                  }
+                >
+                  {t('detail.edit.button')}
+                </Button>
+              </FlexItem>
               {isStopped && (
                 <FlexItem>
                   <Button variant="primary" onClick={handleStart} isLoading={startModel.isPending}>
@@ -749,6 +788,15 @@ export function ModelDetail() {
           <Button variant="primary" onClick={handleStopConfirm} isLoading={stopModel.isPending}>
             {t('detail.stop.button')}
           </Button>
+          {isError && (
+            <Button
+              variant="danger"
+              onClick={handleForceStopConfirm}
+              isLoading={forceStopModel.isPending}
+            >
+              {t('detail.stop.forceButton')}
+            </Button>
+          )}
           <Button variant="link" onClick={() => setShowStopModal(false)}>
             {tCommon('actions.cancel')}
           </Button>
@@ -768,6 +816,15 @@ export function ModelDetail() {
           <Button variant="danger" onClick={handleDeleteConfirm} isLoading={deleteModel.isPending}>
             {t('detail.delete.button')}
           </Button>
+          {model.state === ModelLifecycleState.ERROR && (
+            <Button
+              variant="danger"
+              onClick={handleForceDeleteConfirm}
+              isLoading={deleteModel.isPending}
+            >
+              {t('detail.delete.forceButton')}
+            </Button>
+          )}
           <Button variant="link" onClick={() => setShowDeleteModal(false)}>
             {tCommon('actions.cancel')}
           </Button>

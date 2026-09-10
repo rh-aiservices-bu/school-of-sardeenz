@@ -67,6 +67,15 @@
     },
     "button": "Deploy"
   },
+  "edit": {
+    "title": "Modify model configuration",
+    "button": "Save changes",
+    "errors": {
+      "failedToLoad": "Failed to load model configuration",
+      "updateFailed": "Configuration update failed",
+      "mustBeStopped": "The model must be stopped before its configuration can be modified."
+    }
+  },
   "list": {
     "heading": "Models",
     "filterByState": "Filter by state",
@@ -126,8 +135,9 @@
     },
     "delete": {
       "menuItem": "Delete",
+      "forceButton": "Force delete",
       "confirmTitle": "Delete model?",
-      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. This action cannot be undone."
+      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. Force delete skips runner teardown and can leave an unmanaged process; use it only after confirming no runner remains. This action cannot be undone."
     },
     "wake": {
       "menuItem": "Wake"
@@ -135,10 +145,14 @@
     "start": {
       "menuItem": "Start"
     },
+    "edit": {
+      "menuItem": "Modify"
+    },
     "stop": {
       "menuItem": "Stop",
+      "forceButton": "Force stop",
       "confirmTitle": "Stop model?",
-      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Its configuration is kept, so it can be started again later."
+      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Force stop skips runner teardown and clears failed runtime bookkeeping; use it only after confirming no process remains. Its configuration is kept."
     }
   },
   "detail": {
@@ -192,15 +206,20 @@
     "start": {
       "button": "Start"
     },
+    "edit": {
+      "button": "Modify"
+    },
     "stop": {
       "button": "Stop",
+      "forceButton": "Force stop",
       "confirmTitle": "Stop model?",
-      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Its configuration is kept, so it can be started again later."
+      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Force stop skips runner teardown and clears failed runtime bookkeeping; use it only after confirming no process remains. Its configuration is kept."
     },
     "delete": {
       "button": "Delete",
+      "forceButton": "Force delete",
       "confirmTitle": "Delete model?",
-      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. This action cannot be undone."
+      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. Force delete skips runner teardown and can leave an unmanaged process; use it only after confirming no runner remains. This action cannot be undone."
     },
     "addInstance": {
       "button": "Add instance"

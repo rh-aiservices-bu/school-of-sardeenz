@@ -58,11 +58,25 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   );
 
   // DELETE /api/models/:name — write op: no Redis fallback
-  app.delete<{ Params: { name: string } }>(
+  app.delete<{ Params: { name: string }; Querystring: { force?: boolean | string } }>(
     '/api/models/:name',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.deleteModel(request.params.name);
+      const force = request.query.force === true || request.query.force === 'true';
+      const { status, data } = await deps.controlPlane.deleteModel(request.params.name, force);
+      return reply.code(status).send(data);
+    },
+  );
+
+  // PUT /api/models/:name — replace a stopped model configuration
+  app.put<{ Params: { name: string } }>(
+    '/api/models/:name',
+    { preHandler: [app.authenticate, app.requireRole('admin')] },
+    async (request, reply) => {
+      const { status, data } = await deps.controlPlane.updateModel(
+        request.params.name,
+        request.body,
+      );
       return reply.code(status).send(data);
     },
   );
@@ -88,11 +102,12 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   );
 
   // POST /api/models/:name/stop — write op: no Redis fallback
-  app.post<{ Params: { name: string } }>(
+  app.post<{ Params: { name: string }; Querystring: { force?: boolean | string } }>(
     '/api/models/:name/stop',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.stopModel(request.params.name);
+      const force = request.query.force === true || request.query.force === 'true';
+      const { status, data } = await deps.controlPlane.stopModel(request.params.name, force);
       return reply.code(status).send(data);
     },
   );

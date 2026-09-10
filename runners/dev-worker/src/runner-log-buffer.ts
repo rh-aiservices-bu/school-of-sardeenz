@@ -12,7 +12,7 @@ export type RunnerLogLine = WorkerAgentComponents['schemas']['RunnerLogLine'];
 export type LogStream = 'stdout' | 'stderr';
 
 const DEFAULT_CAP = 1000;
-export const RETAIN_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export const RETAIN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const MAX_RETAINED = 20;
 
 // The control plane and the launcher poll the runner's control endpoints (health/progress/etc.)

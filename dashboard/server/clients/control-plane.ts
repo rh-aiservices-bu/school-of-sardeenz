@@ -74,8 +74,13 @@ export class ControlPlaneClient {
     return this.request('POST', '/api/v1/models', body);
   }
 
-  async deleteModel(name: string): Promise<ProxyResult> {
-    return this.request('DELETE', `/api/v1/models/${encodeURIComponent(name)}`);
+  async updateModel(name: string, body: unknown): Promise<ProxyResult> {
+    return this.request('PUT', `/api/v1/models/${encodeURIComponent(name)}`, body);
+  }
+
+  async deleteModel(name: string, force = false): Promise<ProxyResult> {
+    const query = force ? '?force=true' : '';
+    return this.request('DELETE', `/api/v1/models/${encodeURIComponent(name)}${query}`);
   }
 
   async sleepModel(name: string): Promise<ProxyResult> {
@@ -86,8 +91,9 @@ export class ControlPlaneClient {
     return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/wake`);
   }
 
-  async stopModel(name: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/stop`);
+  async stopModel(name: string, force = false): Promise<ProxyResult> {
+    const query = force ? '?force=true' : '';
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/stop${query}`);
   }
 
   async startModel(name: string): Promise<ProxyResult> {

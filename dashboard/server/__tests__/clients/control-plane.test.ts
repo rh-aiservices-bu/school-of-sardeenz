@@ -196,6 +196,40 @@ describe('ControlPlaneClient', () => {
       expect(firstCallInit().body).toBeUndefined();
       expect(firstCallInit().headers).toBeUndefined();
     });
+
+    it('adds the explicit force query without adding a request body', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      await client.deleteModel('stalled/model', true);
+
+      expect(firstCallUrl()).toContain(`${encodeURIComponent('stalled/model')}?force=true`);
+      expect(firstCallInit().method).toBe('DELETE');
+      expect(firstCallInit().body).toBeUndefined();
+    });
+  });
+
+  describe('updateModel', () => {
+    it('sends the replacement configuration with PUT', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, {}));
+      const body = { runnerType: 'vllm', modelPath: '/weights/m', requiredMemory: 1 };
+
+      await client.updateModel('org/model', body);
+
+      expect(firstCallUrl()).toContain(encodeURIComponent('org/model'));
+      expect(firstCallInit().method).toBe('PUT');
+      expect(firstCallInit().body).toBe(JSON.stringify(body));
+    });
+  });
+
+  describe('stopModel', () => {
+    it('adds the force query for a failed-runtime reset', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      await client.stopModel('org/model', true);
+
+      expect(firstCallUrl()).toContain(`${encodeURIComponent('org/model')}/stop?force=true`);
+      expect(firstCallInit().method).toBe('POST');
+    });
   });
 
   describe('uninstallRunner', () => {

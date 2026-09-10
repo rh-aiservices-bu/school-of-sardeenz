@@ -1,0 +1,65 @@
+# Sardeenz vLLM 0.24.0 rhaiv.9 (+ kvcached) runner image.
+#
+# The resulting OCI image is converted to a SIF by the librarian pipeline and launched with
+# `apptainer exec --nv` by a worker. The build context must be the repository root so the runtime
+# stage can copy runners/vllm.
+
+# This downstream build packages vLLM 0.24.0 on Python 3.12 and CUDA 13.0 Update 2. Pin the OCI index
+# digest as well as the human-readable tag; this release publishes an amd64 image (plus its
+# attestation manifest), not an arm64 runtime image.
+FROM quay.io/vllm/vllm-cuda:0.24.0_rhaiv.9@sha256:bc6496d84e810a7ef2be2ba05f68c987db2bb007399881671ac7519934be2979 AS vllm-base
+
+USER 0
+
+# Fail early if an incorrectly selected base no longer supplies the runtime and build toolchain
+# this runner was tested against. This image exposes CUDA_MAJOR/CUDA_MINOR rather than the
+# CUDA_VERSION variable used by the registry.access.redhat.com image. torch reports the CUDA
+# major/minor used to build its wheel.
+RUN test "${CUDA_MAJOR}.${CUDA_MINOR}" = "13.0" && \
+    python3.12 -c 'from importlib.metadata import version; assert version("cuda-toolkit") == "13.0.2"; assert version("vllm").split("+")[0] == "0.24.0"' && \
+    python3.12 -c 'import torch; assert torch.version.cuda and torch.version.cuda.startswith("13.0")' && \
+    command -v nvcc c++ make ninja >/dev/null && \
+    test -f /usr/include/python3.12/Python.h
+
+# The base includes the matching CUDA 13.0.2 compiler/headers, gcc/g++, make, Ninja, and Python
+# 3.12 development headers, but not the libcuda link-time stub required by kvcached's CUDAExtension.
+# Install only the matching driver-devel RPM in this throwaway builder stage; do not add a second
+# CUDA-devel stack or NCCL packages to the runtime image.
+FROM vllm-base AS kvcached-builder
+
+# Includes the vLLM 0.24/0.25 reshape and block-pool compatibility changes. Re-run the kvcached
+# co-tenancy gate whenever this pin or the base image changes.
+ARG KVCACHED_VERSION=60cad949389af6bbf1d65c4eddf325113df5a9eb
+ARG CUDA_DRIVER_DEVEL_VERSION=13.0.96-1
+
+RUN microdnf install -y \
+      git \
+      cuda-driver-devel-13-0-${CUDA_DRIVER_DEVEL_VERSION} && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum/* && \
+    test -e "${CUDA_HOME}/lib64/stubs/libcuda.so"
+
+WORKDIR /build
+RUN git init kvcached && cd kvcached && \
+    git remote add origin https://github.com/ovg-project/kvcached.git && \
+    git fetch --depth 1 origin "${KVCACHED_VERSION}" && \
+    git checkout FETCH_HEAD && \
+    python3.12 -m pip wheel . --no-build-isolation --wheel-dir /wheels
+
+FROM vllm-base AS runtime
+
+COPY --from=kvcached-builder /wheels/ /wheels/
+RUN python3.12 -m pip install --no-cache-dir --no-index --find-links=/wheels kvcached && \
+    rm -rf /wheels
+
+# kvcached patches vLLM during Python import. Runners are offline: model weights must already be
+# staged on the weights volume. The worker redirects all writable caches to /scratch at exec time.
+ENV ENABLE_KVCACHED=true \
+    KVCACHED_AUTOPATCH=1 \
+    VLLM_USE_V2_MODEL_RUNNER=0 \
+    HF_HUB_OFFLINE=1
+
+COPY runners/vllm /opt/sardeenz-vllm-runner
+RUN python3.12 -m pip install --no-cache-dir /opt/sardeenz-vllm-runner
+
+CMD ["python3.12", "-m", "sardeenz_vllm_runner", "--help"]

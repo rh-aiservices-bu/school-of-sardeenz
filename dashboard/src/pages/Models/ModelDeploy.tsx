@@ -1,8 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { CatalogItemState } from '@sardeenz/types';
+import { CatalogItemState, ModelLifecycleState } from '@sardeenz/types';
 import {
   PageSection,
   Content,
@@ -24,8 +24,9 @@ import {
   CardBody,
   HelperText,
   HelperTextItem,
+  Spinner,
 } from '@patternfly/react-core';
-import { useDeployModel } from '../../hooks/useModels';
+import { useDeployModel, useModel, useUpdateModel } from '../../hooks/useModels';
 import { useCatalog } from '../../hooks/useCatalog';
 import {
   useRunnerTypes,
@@ -36,7 +37,7 @@ import {
 } from '../../hooks/useWorkers';
 import { WeightsBrowserModal } from './WeightsBrowserModal';
 import { DeployLogsModal } from '../../components/DeployLogsModal';
-import type { ModelDeploymentRequest } from '../../api/client';
+import type { ModelConfigurationUpdateRequest, ModelDeploymentRequest } from '../../api/client';
 import { parseEngineArgs } from '../../utils/engineArgs';
 
 const GIB = 1024 ** 3;
@@ -163,11 +164,14 @@ function FieldHelper({ hint, error, showError, fieldId }: FieldHelperProps) {
   );
 }
 
-export function ModelDeploy() {
+export function ModelDeploy({ edit = false }: { edit?: boolean }) {
   const { t } = useTranslation('models');
   const { t: tCommon } = useTranslation('common');
   const navigate = useNavigate();
+  const { modelName: routeModelName } = useParams<{ modelName: string }>();
   const deployModel = useDeployModel();
+  const updateModel = useUpdateModel();
+  const storedModel = useModel(edit ? (routeModelName ?? '') : '');
   const { data: catalog } = useCatalog();
   const { options: runnerOptions, isFallback: runnerFallback } = useRunnerTypes();
   const { capabilities } = useWorkerCapabilities();
@@ -190,6 +194,7 @@ export function ModelDeploy() {
   const [submitted, setSubmitted] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [logsModalModelName, setLogsModalModelName] = useState<string | null>(null);
+  const [editInitialized, setEditInitialized] = useState(false);
 
   // Runtime modules that are both installed (IMPORTED) and built for the selected runner. The
   // catalog entry's sifName is the runtimeModule value (→ /modules/<sifName>.sif).
@@ -210,10 +215,17 @@ export function ModelDeploy() {
       computeDeviceOptions(capabilities, form.runnerType, t('deploy.fields.deviceTypeAny')).options,
     [capabilities, form.runnerType, t],
   );
+  const formRunnerOptions = useMemo(() => {
+    if (!edit || runnerOptions.some((option) => option.value === form.runnerType)) {
+      return runnerOptions;
+    }
+    return [...runnerOptions, { value: form.runnerType, label: form.runnerType }];
+  }, [edit, form.runnerType, runnerOptions]);
 
   // Reconcile the default/selected runnerType against live options so the form never
   // submits a runner no worker can serve. Guarded: leaves a still-valid choice intact.
   useEffect(() => {
+    if (edit) return;
     setForm((prev) => {
       const next = reconcileRunnerType(prev.runnerType, runnerOptions);
       if (next === prev.runnerType) return prev;
@@ -233,7 +245,26 @@ export function ModelDeploy() {
         deviceType: reconcileDeviceType(prev.deviceType, nextDeviceOptions),
       };
     });
-  }, [runnerOptions, capabilities, t]);
+  }, [edit, runnerOptions, capabilities, t]);
+
+  useEffect(() => {
+    if (!edit || editInitialized || !storedModel.data) return;
+    const model = storedModel.data;
+    setForm({
+      displayName: model.displayName ?? '',
+      modelName: model.modelName,
+      runnerType: model.runnerType,
+      modelPath: model.modelPath,
+      requiredMemoryGib: String(model.requiredMemory / GIB),
+      deviceType: model.deviceType ?? '',
+      tensorParallel: String(model.tensorParallel ?? 1),
+      runtimeModule: model.runtimeModule ?? '',
+      pinned: model.pinned ?? false,
+      engineArgs: model.engineArgs?.join('\n') ?? '',
+      servedModelName: model.servedModelName ?? '',
+    });
+    setEditInitialized(true);
+  }, [edit, editInitialized, storedModel.data]);
 
   const set = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     const updated = { ...form, [field]: value };
@@ -261,8 +292,7 @@ export function ModelDeploy() {
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
-    const body: ModelDeploymentRequest = {
-      modelName: form.modelName.trim(),
+    const configuration: ModelConfigurationUpdateRequest = {
       runnerType: form.runnerType,
       modelPath: form.modelPath.trim(),
       requiredMemory: Math.round(parseFloat(form.requiredMemoryGib) * GIB),
@@ -271,28 +301,45 @@ export function ModelDeploy() {
     };
 
     if (form.displayName.trim()) {
-      body.displayName = form.displayName.trim();
+      configuration.displayName = form.displayName.trim();
     }
 
     if (form.deviceType) {
-      body.deviceType = form.deviceType;
+      configuration.deviceType = form.deviceType;
     }
 
     if (form.runtimeModule.trim()) {
-      body.runtimeModule = form.runtimeModule.trim();
+      configuration.runtimeModule = form.runtimeModule.trim();
     }
 
     if (form.servedModelName.trim()) {
-      body.servedModelName = form.servedModelName.trim();
+      configuration.servedModelName = form.servedModelName.trim();
     }
 
     if (form.engineArgs.trim()) {
       const result = parseEngineArgs(form.engineArgs);
       // validate() already blocked submit on !result.ok; only push a non-empty parsed array.
       if (result.ok && result.args.length > 0) {
-        body.engineArgs = result.args;
+        configuration.engineArgs = result.args;
       }
     }
+
+    if (edit && storedModel.data?.engineConfig) {
+      configuration.engineConfig = storedModel.data.engineConfig;
+    }
+
+    if (edit && routeModelName) {
+      updateModel.mutate(
+        { name: routeModelName, body: configuration },
+        { onSuccess: () => void navigate(`/models/${encodeURIComponent(routeModelName)}`) },
+      );
+      return;
+    }
+
+    const body: ModelDeploymentRequest = {
+      ...configuration,
+      modelName: form.modelName.trim(),
+    };
 
     deployModel.mutate(body, {
       onSuccess: () => {
@@ -300,6 +347,30 @@ export function ModelDeploy() {
       },
     });
   };
+
+  if (edit && storedModel.isLoading) {
+    return <Spinner aria-label={tCommon('loading')} />;
+  }
+
+  if (edit && (storedModel.error || !storedModel.data)) {
+    return (
+      <PageSection>
+        <Alert variant={AlertVariant.danger} title={t('edit.errors.failedToLoad')} isInline>
+          {storedModel.error instanceof Error
+            ? storedModel.error.message
+            : tCommon('errors.unexpected')}
+        </Alert>
+      </PageSection>
+    );
+  }
+
+  if (edit && storedModel.data?.state !== ModelLifecycleState.STOPPED) {
+    return (
+      <PageSection>
+        <Alert variant={AlertVariant.warning} title={t('edit.errors.mustBeStopped')} isInline />
+      </PageSection>
+    );
+  }
 
   const closeLogsModal = () => {
     const deployedModelName = logsModalModelName;
@@ -312,21 +383,25 @@ export function ModelDeploy() {
   return (
     <PageSection>
       <Content>
-        <h1>{t('deploy.title')}</h1>
+        <h1>{edit ? t('edit.title') : t('deploy.title')}</h1>
       </Content>
 
       <Card style={{ maxWidth: '720px' }}>
         <CardBody>
-          {deployModel.isError && (
+          {(deployModel.isError || updateModel.isError) && (
             <Alert
               variant={AlertVariant.danger}
-              title={t('deploy.errors.deploymentFailed')}
+              title={edit ? t('edit.errors.updateFailed') : t('deploy.errors.deploymentFailed')}
               isInline
               style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
             >
-              {deployModel.error instanceof Error
-                ? deployModel.error.message
-                : tCommon('errors.unexpected')}
+              {edit
+                ? updateModel.error instanceof Error
+                  ? updateModel.error.message
+                  : tCommon('errors.unexpected')
+                : deployModel.error instanceof Error
+                  ? deployModel.error.message
+                  : tCommon('errors.unexpected')}
             </Alert>
           )}
 
@@ -359,6 +434,7 @@ export function ModelDeploy() {
                 aria-invalid={submitted && !!errors.modelName}
                 aria-describedby="model-name-helper"
                 placeholder="meta-llama/Llama-3.1-8B-Instruct"
+                isDisabled={edit}
               />
               <FieldHelper
                 hint={t('deploy.hints.modelName')}
@@ -456,7 +532,7 @@ export function ModelDeploy() {
                 onChange={(_ev, val) => set('runnerType', val)}
                 aria-label={t('deploy.fields.runnerType')}
               >
-                {runnerOptions.map((opt) => (
+                {formRunnerOptions.map((opt) => (
                   <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
                 ))}
               </FormSelect>
@@ -566,12 +642,21 @@ export function ModelDeploy() {
               <Button
                 variant="primary"
                 type="submit"
-                isLoading={deployModel.isPending}
-                isDisabled={deployModel.isPending}
+                isLoading={edit ? updateModel.isPending : deployModel.isPending}
+                isDisabled={edit ? updateModel.isPending : deployModel.isPending}
               >
-                {t('deploy.button')}
+                {edit ? t('edit.button') : t('deploy.button')}
               </Button>
-              <Button variant="link" onClick={() => void navigate('/models')}>
+              <Button
+                variant="link"
+                onClick={() =>
+                  void navigate(
+                    edit && routeModelName
+                      ? `/models/${encodeURIComponent(routeModelName)}`
+                      : '/models',
+                  )
+                }
+              >
                 {tCommon('actions.cancel')}
               </Button>
             </ActionGroup>

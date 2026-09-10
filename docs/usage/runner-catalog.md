@@ -96,14 +96,14 @@ Anyone with registry/store write access can then build and publish — no keys, 
 ### Example: an MLServer (OIP) entry
 
 ```yaml
-- id: mlserver-1.6
-  title: MLServer 1.6 (KServe V2)
-  description: Seldon MLServer 1.6 — KServe V2 Open Inference Protocol, sklearn/HF-backed.
+- id: mlserver-1.7
+  title: MLServer 1.7 (KServe V2)
+  description: Seldon MLServer 1.7 — KServe V2 Open Inference Protocol, sklearn/HF-backed.
   engine: MLServer
   runnerType: mlserver
-  version: '1.6'
-  image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.6@sha256:<digest>
-  sifName: mlserver-1.6
+  version: '1.7'
+  image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/mlserver:1.7@sha256:<digest>
+  sifName: mlserver-1.7
   protocol: oip
   entrypoint: [python3, -m, sardeenz_mlserver_runner]
   supportedModelTypes: [PREDICTIVE, LLM, EMBEDDING]

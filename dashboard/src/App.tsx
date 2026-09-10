@@ -139,6 +139,14 @@ export function App() {
                             </AdminRoute>
                           }
                         />
+                        <Route
+                          path="/models/:modelName/edit"
+                          element={
+                            <AdminRoute>
+                              <ModelDeploy edit />
+                            </AdminRoute>
+                          }
+                        />
                         <Route path="/models/:modelName" element={<ModelDetail />} />
                         <Route path="/workers" element={<WorkerList />} />
                         <Route path="/workers/:workerId" element={<WorkerDetail />} />

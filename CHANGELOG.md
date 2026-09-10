@@ -6,14 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Stopped model configurations can be modified in place.** Operators can update placement,
+  runner, weights, naming, and engine settings without deleting and recreating the configuration;
+  the immutable configuration name is preserved and changes apply on the next start.
+
+- **Stalled model configurations can be force-deleted.** Operators can explicitly bypass runner
+  teardown after confirming no process remains; the control plane clears retained lifecycle,
+  routing, capacity, and PostgreSQL state, and the dashboard exposes the escape hatch for models
+  in `ERROR`.
+
 ### Changed
 
 - **Runner container definitions are organized by engine and exact upstream version.** vLLM
-  `0.21.0` and MLServer `1.6.1` now live under
+  `0.21.0` and MLServer `1.7.1` now live under
   `containers/runners/<engine>/<version>/`, allowing multiple engine versions to coexist with
   independent Containerfiles, dependency pins, and compatibility notes.
 
 ### Fixed
+
+- **vLLM 0.24 uses the kvcached-compatible model runner.** The 0.24 SIF now sets
+  `VLLM_USE_V2_MODEL_RUNNER=0`, forcing Model Runner V1 instead of the unsupported V2 path.
+
+- **Failed starts can be reset without deleting their configuration.** An explicit force-stop
+  clears stalled runtime bookkeeping after an operator confirms no process remains, allowing the
+  model to be modified or started again. Failed startup logs remain addressable by instance for
+  fifteen minutes while the worker stays running.
+
+- **MLServer runner builds on the CUDA UBI base.** Python 3.12 is installed directly from the UBI
+  9 AppStream repository instead of attempting to enable the unavailable `python312` DNF module;
+  the runtime set is upgraded to MLServer 1.7.1, whose declared Python range includes 3.12.
+
+- **kvcached links against the vLLM base's CUDA line.** The vLLM 0.24 builder now installs the
+  exact CUDA 13.0.96 driver-development RPM that supplies the missing `libcuda.so` link-time stub;
+  the resulting development files remain excluded from the runtime stage.
 
 - **Bodyless API mutations no longer surface JSON errors.** The dashboard BFF and browser client
   now accept successful `204 No Content` and `205 Reset Content` responses without attempting to
@@ -24,6 +51,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   placeholders, and rejects misspelled importer values at startup.
 
 ### Added
+
+- **vLLM 0.24.0 rhaiv.9 runner image.** A new
+  `containers/runners/vllm/0.24.0/` definition packages the vLLM 0.24.0 runner shim and a
+  compatible kvcached revision on the digest-pinned CUDA 13.0.2 / Python 3.12 RHAIV image from
+  `quay.io/vllm`. The build reuses and validates the base image's CUDA development toolchain
+  instead of mixing CUDA or NCCL packages from another toolkit update.
 
 - **Byte-accurate runner-catalog imports.** The control plane now resolves digest-pinned OCI
   manifests, streams each single-layer SIF directly to the module store with live progress,

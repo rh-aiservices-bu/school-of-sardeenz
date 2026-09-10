@@ -5,6 +5,8 @@ import { parseSseBuffer, extractDelta } from '../utils/parseSse';
 type ModelInfo = ControlPlaneComponents['schemas']['ModelInfo'];
 type ModelDetail = ControlPlaneComponents['schemas']['ModelDetail'];
 type ModelDeploymentRequest = ControlPlaneComponents['schemas']['ModelDeploymentRequest'];
+type ModelConfigurationUpdateRequest =
+  ControlPlaneComponents['schemas']['ModelConfigurationUpdateRequest'];
 type MoveModelInstanceRequest = ControlPlaneComponents['schemas']['MoveModelInstanceRequest'];
 type MoveModelInstanceResponse = ControlPlaneComponents['schemas']['MoveModelInstanceResponse'];
 type ClusterStatus = ControlPlaneComponents['schemas']['ClusterStatus'];
@@ -23,6 +25,7 @@ export {
   type ModelInfo,
   type ModelDetail,
   type ModelDeploymentRequest,
+  type ModelConfigurationUpdateRequest,
   type MoveModelInstanceRequest,
   type MoveModelInstanceResponse,
   type ClusterStatus,
@@ -248,14 +251,23 @@ export const api = {
       request<ModelDetail>(`/models/${encodeURIComponent(name)}`, { signal }),
     deploy: (body: ModelDeploymentRequest) =>
       request<unknown>('/models', { method: 'POST', body: JSON.stringify(body) }),
-    delete: (name: string) =>
-      request<unknown>(`/models/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    update: (name: string, body: ModelConfigurationUpdateRequest) =>
+      request<unknown>(`/models/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    delete: (name: string, force = false) =>
+      request<unknown>(`/models/${encodeURIComponent(name)}${force ? '?force=true' : ''}`, {
+        method: 'DELETE',
+      }),
     sleep: (name: string) =>
       request<unknown>(`/models/${encodeURIComponent(name)}/sleep`, { method: 'POST' }),
     wake: (name: string) =>
       request<unknown>(`/models/${encodeURIComponent(name)}/wake`, { method: 'POST' }),
-    stop: (name: string) =>
-      request<unknown>(`/models/${encodeURIComponent(name)}/stop`, { method: 'POST' }),
+    stop: (name: string, force = false) =>
+      request<unknown>(`/models/${encodeURIComponent(name)}/stop${force ? '?force=true' : ''}`, {
+        method: 'POST',
+      }),
     start: (name: string) =>
       request<unknown>(`/models/${encodeURIComponent(name)}/start`, { method: 'POST' }),
     createInstance: (name: string) =>

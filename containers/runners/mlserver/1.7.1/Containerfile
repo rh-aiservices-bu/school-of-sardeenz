@@ -1,4 +1,4 @@
-# Sardeenz MLServer 1.6.1 (KServe V2) runner image that becomes a SIF.
+# Sardeenz MLServer 1.7.1 (KServe V2) runner image that becomes a SIF.
 #
 # This image is NOT run as a container in production: CI builds+signs it, then a librarian job
 # converts it to a signed SIF on the shared module volume, and a worker `apptainer exec`s that SIF.
@@ -20,15 +20,17 @@
 # on-cluster (see the `@sha256:0000…` placeholder in runners.yaml for this runner's own image ref).
 
 # ---------------------------------------------------------------------------------------------
-# Stage 0: base — CUDA-runtime + Python 3.1x UBI (placeholder tag; pin @sha256 before publishing)
+# Stage 0: base — CUDA-runtime + Python 3.12 UBI (placeholder tag; pin @sha256 before publishing)
 # ---------------------------------------------------------------------------------------------
 FROM nvidia/cuda:12.6.3-runtime-ubi9 AS runtime
 USER 0
-RUN dnf -y module enable python312 && \
-    dnf -y install python3.12 python3.12-pip && \
+# UBI 9 publishes Python 3.12 directly in AppStream; unlike RHEL application streams, there is no
+# python312 module to enable in the UBI repositories.
+RUN dnf -y install python3.12 python3.12-pip && \
     dnf clean all && rm -rf /var/cache/dnf/* && \
     alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
-    alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.12 1
+    alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.12 1 && \
+    python3.12 -c 'import sys; assert (3, 9) <= sys.version_info[:2] < (3, 13)'
 
 # HF_HUB_OFFLINE=1: runners never phone home at runtime; weights are pre-staged on the weights
 # volume. Set explicitly here so it's load-bearing regardless of the base image's default. The
@@ -37,18 +39,19 @@ ENV HF_HUB_OFFLINE=1
 
 # Pinned MLServer runtime set (issue "Initial runtime set" — one CPU-classical + one GPU runtime;
 # NOT xgboost/lightgbm/mlflow, additive later as a package pin + catalog entry, no code change).
-RUN pip3 install --no-cache-dir \
-      mlserver==1.6.1 \
-      mlserver-sklearn==1.6.1 \
-      mlserver-huggingface==1.6.1
+RUN python3.12 -m pip install --no-cache-dir --only-binary=:all: \
+      mlserver==1.7.1 \
+      mlserver-sklearn==1.7.1 \
+      mlserver-huggingface==1.7.1 && \
+    python3.12 -c 'from importlib.metadata import version; assert all(version(package) == "1.7.1" for package in ("mlserver", "mlserver-sklearn", "mlserver-huggingface"))'
 
 # Runner-contract shim: serves the engine-runner contract and drives MLServer over KServe V2.
 # BUILD CONTEXT is the repo root (needed to reach runners/mlserver), e.g.
-#   podman build -f containers/runners/mlserver/1.6.1/Containerfile \
-#     -t quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.6 .
+#   podman build -f containers/runners/mlserver/1.7.1/Containerfile \
+#     -t quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.7 .
 # The worker agent execs `python3 -m sardeenz_mlserver_runner --model … --port …` inside the SIF.
 COPY runners/mlserver /opt/sardeenz-mlserver-runner
-RUN pip3 install --no-cache-dir /opt/sardeenz-mlserver-runner
+RUN python3.12 -m pip install --no-cache-dir /opt/sardeenz-mlserver-runner
 
 # Non-root (issue "non-root"). The `nvidia/cuda` base ships no unprivileged app user, so create one
 # explicitly; the SIF's writable scratch/HOME redirection is handled by the worker agent at exec

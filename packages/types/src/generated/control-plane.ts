@@ -59,7 +59,14 @@ export type paths = {
          *     runner capabilities, and deployment configuration.
          */
         get: operations["getModel"];
-        put?: never;
+        /**
+         * Replace a stopped model configuration
+         * @description Replaces the mutable configuration used the next time the model is
+         *     started. The configuration name is immutable. The model must be fully
+         *     stopped, with no runtime instances, so an update cannot diverge from a
+         *     running runner.
+         */
+        put: operations["updateModel"];
         post?: never;
         /**
          * Stop and remove a model
@@ -813,6 +820,20 @@ export type components = {
              * @default false
              */
             pinned: boolean;
+        };
+        /** @description Complete replacement for a stopped model's mutable configuration. */
+        ModelConfigurationUpdateRequest: {
+            displayName?: components["schemas"]["ModelDeploymentRequest"]["displayName"];
+            servedModelName?: components["schemas"]["ModelDeploymentRequest"]["servedModelName"];
+            runnerType: components["schemas"]["ModelDeploymentRequest"]["runnerType"];
+            modelPath: components["schemas"]["ModelDeploymentRequest"]["modelPath"];
+            requiredMemory: components["schemas"]["ModelDeploymentRequest"]["requiredMemory"];
+            deviceType?: components["schemas"]["ModelDeploymentRequest"]["deviceType"];
+            tensorParallel: components["schemas"]["ModelDeploymentRequest"]["tensorParallel"];
+            engineConfig?: components["schemas"]["ModelDeploymentRequest"]["engineConfig"];
+            engineArgs?: components["schemas"]["ModelDeploymentRequest"]["engineArgs"];
+            runtimeModule?: components["schemas"]["ModelDeploymentRequest"]["runtimeModule"];
+            pinned: components["schemas"]["ModelDeploymentRequest"]["pinned"];
         };
         /**
          * @description Response after a deployment request is accepted. The model is now
@@ -1750,9 +1771,93 @@ export interface operations {
             };
         };
     };
-    deleteModel: {
+    updateModel: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                /** @description Immutable model configuration name */
+                modelName: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelConfigurationUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Model configuration updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelActionResponse"];
+                };
+            };
+            /** @description Invalid configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model is not fully stopped or another operation is in progress */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal control plane error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The control plane cannot accept the request (not leader) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteModel: {
+        parameters: {
+            query?: {
+                /** @description Immediately remove configuration, routing, lifecycle, and capacity bookkeeping without contacting the worker. This can orphan a live runner process and must only be used after an operator has confirmed that no runner remains. */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 /** @description The model name (routing key) */
@@ -1988,7 +2093,10 @@ export interface operations {
     };
     stopModel: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Remove runtime instance bookkeeping without contacting the worker, retaining the model configuration in STOPPED state. This can orphan a live process and is intended only for failed starts whose absence has been confirmed by an operator. */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 /** @description The model name (routing key) */

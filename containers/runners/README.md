@@ -5,7 +5,7 @@ Runner OCI definitions are grouped first by engine, then by the exact upstream e
 ```text
 runners/
 ├── mlserver/
-│   └── 1.6.1/
+│   └── 1.7.1/
 │       ├── Containerfile
 │       └── README.md
 └── vllm/

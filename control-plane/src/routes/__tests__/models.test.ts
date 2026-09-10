@@ -41,6 +41,7 @@ interface Overrides {
   wakeModel?: ReturnType<typeof vi.fn>;
   removeInstance?: ReturnType<typeof vi.fn>;
   deleteModel?: ReturnType<typeof vi.fn>;
+  updateModel?: ReturnType<typeof vi.fn>;
   deleteInstance?: ReturnType<typeof vi.fn>;
   findByName?: ReturnType<typeof vi.fn>;
   getInstance?: ReturnType<typeof vi.fn>;
@@ -49,6 +50,8 @@ interface Overrides {
   getWorker?: ReturnType<typeof vi.fn>;
   stopRunner?: ReturnType<typeof vi.fn>;
   getMoveOperation?: ReturnType<typeof vi.fn>;
+  removeModel?: ReturnType<typeof vi.fn>;
+  releaseInstanceReservations?: ReturnType<typeof vi.fn>;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -79,6 +82,7 @@ function buildApp(over: Overrides = {}): {
   const createWorkerClient = vi.fn(() => ({ stopRunner }));
 
   const deps = {
+    config: { weightsDir: '/weights' },
     leaderElection: { isLeader: true },
     lifecycle: {
       getInstance,
@@ -95,10 +99,11 @@ function buildApp(over: Overrides = {}): {
     },
     routingMap: {
       setModelState: vi.fn(() => Promise.resolve()),
-      removeModel: vi.fn(() => Promise.resolve()),
+      removeModel: over.removeModel ?? vi.fn(() => Promise.resolve()),
     },
     modelRepository: {
       delete: over.deleteModel ?? vi.fn(() => Promise.resolve()),
+      update: over.updateModel ?? vi.fn(() => Promise.resolve({ name: 'm1' })),
       findByName: over.findByName ?? vi.fn(() => Promise.resolve({ name: 'm1' })),
     },
     instanceRepository: {
@@ -114,6 +119,9 @@ function buildApp(over: Overrides = {}): {
     },
     createRunnerClient: vi.fn(() => ({})),
     createWorkerClient,
+    memoryBudget: {
+      releaseInstanceReservations: over.releaseInstanceReservations ?? vi.fn(() => undefined),
+    },
   } as unknown as RouteDeps;
 
   const app = Fastify({ logger: false });
@@ -949,6 +957,66 @@ describe('POST /api/v1/models/:modelName/instances', () => {
   });
 });
 
+describe('PUT /api/v1/models/:modelName configuration update', () => {
+  const payload = {
+    runnerType: 'vllm',
+    modelPath: '/weights/new-model',
+    requiredMemory: 4_294_967_296,
+    deviceType: 'CUDA',
+    tensorParallel: 1,
+    runtimeModule: 'vllm-0.21',
+    engineArgs: ['--max-model-len=4096'],
+    servedModelName: 'new-served-name',
+    displayName: '  Updated model  ',
+    pinned: true,
+  };
+
+  it('replaces a stopped configuration and trims the display name', async () => {
+    const updateModel = vi.fn(() => Promise.resolve({ name: 'm1' }));
+    const { app, logInfo } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+      updateModel,
+    });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/models/m1',
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ state: string }>().state).toBe(ModelLifecycleState.STOPPED);
+    expect(updateModel).toHaveBeenCalledWith(
+      'm1',
+      expect.objectContaining({
+        modelPath: '/weights/new-model',
+        displayName: 'Updated model',
+        engineArgs: ['--max-model-len=4096'],
+      }),
+    );
+    expect(logInfo).toHaveBeenCalledWith(
+      { modelName: 'm1' },
+      'Stopped model configuration updated',
+    );
+  });
+
+  it('rejects modification while a runtime instance exists', async () => {
+    const updateModel = vi.fn();
+    const { app } = buildApp({ updateModel });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/models/m1',
+      payload,
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+    expect(updateModel).not.toHaveBeenCalled();
+  });
+});
+
 describe('DELETE /api/v1/models/:modelName background deletion', () => {
   let app: FastifyInstance;
   let logInfo: ReturnType<typeof vi.fn>;
@@ -1055,6 +1123,43 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
 });
 
 describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
+  it('force-deletes ambiguous bookkeeping without contacting the worker', async () => {
+    const ambiguous = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.ERROR,
+      runnerId: null,
+      runnerStartAmbiguous: true,
+    };
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const removeModel = vi.fn(() => Promise.resolve());
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const releaseInstanceReservations = vi.fn();
+    const stopModel = vi.fn(() => Promise.resolve());
+    const { app, stopRunner, logWarn } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ambiguous)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ambiguous])),
+      removeInstance,
+      removeModel,
+      deleteModel,
+      releaseInstanceReservations,
+      stopModel,
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1?force=true' });
+
+    expect(res.statusCode).toBe(202);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
+    expect(removeModel).toHaveBeenCalledWith('m1');
+    expect(deleteModel).toHaveBeenCalledWith('m1');
+    expect(stopModel).not.toHaveBeenCalled();
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith(
+      { modelName: 'm1', instanceIds: [INSTANCE_ID] },
+      'Model force-deleted without runner teardown',
+    );
+  });
+
   it('returns 202 and removes DB row for evicted model (no instances)', async () => {
     const deleteModel = vi.fn(() => Promise.resolve());
     const { app } = buildApp({
@@ -1594,6 +1699,44 @@ describe('teardownInstance reaps the runner process (#157)', () => {
 });
 
 describe('POST /api/v1/models/:modelName/stop', () => {
+  it('force-stops an ambiguous ERROR instance without contacting the worker and keeps the record', async () => {
+    const ambiguous = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.ERROR,
+      runnerId: null,
+      runnerStartAmbiguous: true,
+    };
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const deleteInstance = vi.fn(() => Promise.resolve(true));
+    const deleteModel = vi.fn();
+    const releaseInstanceReservations = vi.fn();
+    const removeModel = vi.fn(() => Promise.resolve());
+    const { app, stopRunner, logWarn } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ambiguous)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ambiguous])),
+      removeInstance,
+      deleteInstance,
+      deleteModel,
+      releaseInstanceReservations,
+      removeModel,
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop?force=true' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json<{ state: string }>().state).toBe(ModelLifecycleState.STOPPED);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(deleteInstance).toHaveBeenCalledWith(INSTANCE_ID);
+    expect(releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
+    expect(removeModel).toHaveBeenCalledWith('m1');
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(deleteModel).not.toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith(
+      { modelName: 'm1', instanceIds: [INSTANCE_ID] },
+      'Model force-stopped without runner teardown',
+    );
+  });
+
   it('stop on an ACTIVE model returns 202 and keeps the record', async () => {
     const deleteModel = vi.fn(() => Promise.resolve());
     const removeInstance = vi.fn(() => Promise.resolve());

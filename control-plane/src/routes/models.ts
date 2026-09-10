@@ -30,9 +30,24 @@ interface DeployBody {
   pinned?: boolean;
 }
 
+type UpdateModelBody = Omit<DeployBody, 'modelName' | 'tensorParallel' | 'pinned'> & {
+  tensorParallel: number;
+  pinned: boolean;
+};
+
 interface MoveBody {
   targetWorkerId: string;
   targetDeviceIndices: number[];
+}
+
+interface DeleteModelRouteWithOptionalForceQueryParameter {
+  Params: { modelName: string };
+  Querystring: { force?: boolean | string };
+}
+
+interface StopModelRouteWithOptionalForceQueryParameter {
+  Params: { modelName: string };
+  Querystring: { force?: boolean | string };
 }
 
 // Mirrors the worker-agent contract's runtimeModule pattern; it becomes a SIF filename segment.
@@ -197,6 +212,7 @@ interface RouteClaims {
   /** Add/start launch is between its snapshot and dispatch; a move cannot safely enter then. */
   readonly launchingInFlight: Set<string>;
   readonly modelLifecycleInFlight: Set<string>;
+  readonly configurationUpdateInFlight: Set<string>;
 }
 
 interface DeployFromRecordOptions {
@@ -253,6 +269,14 @@ async function deployFromRecord(
         'start a new instance for',
         'move-in-progress',
         'a move is already in progress',
+      );
+    }
+    if (claims.configurationUpdateInFlight.has(record.name)) {
+      throw ControlPlaneError.operationInProgress(
+        record.name,
+        'start a new instance for',
+        'configuration-update-in-progress',
+        'a configuration update is in progress',
       );
     }
   };
@@ -659,6 +683,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
   const movingInFlight = new Set<string>();
   const launchingInFlight = new Set<string>();
   const modelLifecycleInFlight = new Set<string>();
+  const configurationUpdateInFlight = new Set<string>();
 
   // Bundle the three sets so the shared `deployFromRecord` pipeline can see `deletingInFlight`
   // (#173). The bare names above are still used directly by the route handlers in this closure.
@@ -669,6 +694,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     movingInFlight,
     launchingInFlight,
     modelLifecycleInFlight,
+    configurationUpdateInFlight,
   };
   const assertNoMove = async (modelName: string, action: string): Promise<void> => {
     const durableMove = await deps.lifecycle.getMoveOperation(modelName);
@@ -700,6 +726,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       stoppingInFlight.has(modelName) ||
       launchingInFlight.has(modelName) ||
       modelLifecycleInFlight.has(modelName) ||
+      configurationUpdateInFlight.has(modelName) ||
       hasInstanceOperation(modelName)
     ) {
       throw ControlPlaneError.operationInProgress(
@@ -1147,7 +1174,142 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     },
   );
 
-  app.delete<{ Params: { modelName: string } }>(
+  app.put<{ Params: { modelName: string }; Body: UpdateModelBody }>(
+    '/api/v1/models/:modelName',
+    async (request, reply) => {
+      if (!deps.leaderElection.isLeader) throw ControlPlaneError.notLeader();
+
+      const { modelName } = request.params;
+      const body = request.body;
+      assertValidModelName(modelName);
+      await assertNoMove(modelName, 'modify');
+
+      const [record, instances] = await Promise.all([
+        deps.modelRepository.findByName(modelName),
+        deps.lifecycle.getInstancesForModel(modelName),
+      ]);
+      if (!record) throw ControlPlaneError.modelNotFound(modelName);
+      if (instances.length > 0) {
+        throw ControlPlaneError.invalidState(modelName, deriveAggregateState(instances), 'modify');
+      }
+      if (
+        deletingInFlight.has(modelName) ||
+        stoppingInFlight.has(modelName) ||
+        launchingInFlight.has(modelName) ||
+        modelLifecycleInFlight.has(modelName) ||
+        configurationUpdateInFlight.has(modelName) ||
+        hasInstanceOperation(modelName)
+      ) {
+        throw ControlPlaneError.operationInProgress(
+          modelName,
+          'modify',
+          'operation-in-progress',
+          'another lifecycle operation is already in progress',
+        );
+      }
+
+      if (
+        !body?.runnerType ||
+        typeof body.runnerType !== 'string' ||
+        !body.modelPath ||
+        typeof body.modelPath !== 'string' ||
+        typeof body.requiredMemory !== 'number' ||
+        body.requiredMemory <= 0
+      ) {
+        throw ControlPlaneError.invalidRequest(
+          'runnerType (string), modelPath (string), and requiredMemory (positive number) are required',
+        );
+      }
+      if (!isContainedIn(body.modelPath, deps.config.weightsDir)) {
+        throw ControlPlaneError.invalidRequest(
+          'modelPath must be an absolute path inside the weights directory',
+        );
+      }
+      if (!Number.isInteger(body.tensorParallel) || body.tensorParallel < 1) {
+        throw ControlPlaneError.invalidRequest('tensorParallel must be a positive integer');
+      }
+      if (typeof body.pinned !== 'boolean') {
+        throw ControlPlaneError.invalidRequest('pinned must be a boolean');
+      }
+      if (
+        body.runtimeModule !== undefined &&
+        (typeof body.runtimeModule !== 'string' || !RUNTIME_MODULE_PATTERN.test(body.runtimeModule))
+      ) {
+        throw ControlPlaneError.invalidRequest(
+          'runtimeModule must match ^[A-Za-z0-9_.-]+$ (e.g. "vllm-0.21")',
+        );
+      }
+      if (body.engineArgs !== undefined) {
+        if (
+          !Array.isArray(body.engineArgs) ||
+          body.engineArgs.some((arg) => typeof arg !== 'string')
+        ) {
+          throw ControlPlaneError.invalidRequest('engineArgs must be an array of strings');
+        }
+        if (body.engineArgs.length > MAX_ENGINE_ARGS_COUNT) {
+          throw ControlPlaneError.invalidRequest(
+            `engineArgs must contain at most ${MAX_ENGINE_ARGS_COUNT} elements`,
+          );
+        }
+        if (body.engineArgs.some((arg) => arg.length > MAX_ENGINE_ARG_LENGTH)) {
+          throw ControlPlaneError.invalidRequest(
+            `each engineArgs element must be at most ${MAX_ENGINE_ARG_LENGTH} characters`,
+          );
+        }
+      }
+      if (
+        body.servedModelName !== undefined &&
+        (typeof body.servedModelName !== 'string' || !MODEL_NAME_PATTERN.test(body.servedModelName))
+      ) {
+        throw ControlPlaneError.invalidRequest(
+          'servedModelName must match ^[A-Za-z0-9._/-]{1,200}$',
+        );
+      }
+
+      let trimmedDisplayName: string | undefined;
+      if (body.displayName !== undefined) {
+        if (typeof body.displayName !== 'string') {
+          throw ControlPlaneError.invalidRequest('displayName must be a string');
+        }
+        trimmedDisplayName = body.displayName.trim();
+        if (trimmedDisplayName.length === 0 || trimmedDisplayName.length > 200) {
+          throw ControlPlaneError.invalidRequest(
+            'displayName must be 1–200 characters when provided',
+          );
+        }
+      }
+
+      configurationUpdateInFlight.add(modelName);
+      try {
+        const updated = await deps.modelRepository.update(modelName, {
+          runnerType: body.runnerType,
+          modelPath: body.modelPath,
+          requiredMemory: body.requiredMemory,
+          deviceType: body.deviceType,
+          tensorParallel: body.tensorParallel,
+          engineConfig: body.engineConfig,
+          engineArgs: body.engineArgs,
+          runtimeModule: body.runtimeModule,
+          servedModelName: body.servedModelName,
+          displayName: trimmedDisplayName,
+          pinned: body.pinned,
+        });
+        if (!updated) throw ControlPlaneError.modelNotFound(modelName);
+        app.log.info({ modelName }, 'Stopped model configuration updated');
+      } finally {
+        configurationUpdateInFlight.delete(modelName);
+      }
+
+      return reply.code(200).send({
+        modelName,
+        state: ModelLifecycleState.STOPPED,
+        previousState: ModelLifecycleState.STOPPED,
+        message: 'Model configuration updated',
+      });
+    },
+  );
+
+  app.delete<DeleteModelRouteWithOptionalForceQueryParameter>(
     '/api/v1/models/:modelName',
     async (request, reply) => {
       if (!deps.leaderElection.isLeader) {
@@ -1155,6 +1317,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       const { modelName } = request.params;
+      const force = request.query.force === true || request.query.force === 'true';
       assertValidModelName(modelName);
       await assertNoMove(modelName, 'delete');
 
@@ -1165,6 +1328,71 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       if (instances.length === 0 && !record) {
         throw ControlPlaneError.modelNotFound(modelName);
+      }
+      if (configurationUpdateInFlight.has(modelName)) {
+        throw ControlPlaneError.operationInProgress(
+          modelName,
+          'delete',
+          'configuration-update-in-progress',
+          'a configuration update is in progress',
+        );
+      }
+
+      if (force) {
+        if (deletingInFlight.has(modelName)) {
+          throw ControlPlaneError.operationInProgress(
+            modelName,
+            'delete',
+            'delete-in-progress',
+            'a delete is already in progress',
+          );
+        }
+        if (stoppingInFlight.has(modelName)) {
+          throw ControlPlaneError.operationInProgress(
+            modelName,
+            'delete',
+            'stop-in-progress',
+            'a stop is already in progress',
+          );
+        }
+        const busyInstance = instances.find((instance) =>
+          instanceOpInFlight.has(`${modelName}:${instance.instanceId}`),
+        );
+        if (busyInstance) {
+          throw ControlPlaneError.operationInProgress(
+            modelName,
+            'delete',
+            'instance-operation-in-progress',
+            `an operation is already in progress on instance ${busyInstance.instanceId}`,
+          );
+        }
+
+        deletingInFlight.add(modelName);
+        try {
+          await Promise.all(
+            instances.map((instance) =>
+              deps.lifecycle.removeInstance(modelName, instance.instanceId),
+            ),
+          );
+          for (const instance of instances) {
+            deps.memoryBudget.releaseInstanceReservations(instance.instanceId);
+          }
+          await deps.routingMap.removeModel(modelName);
+          await deps.modelRepository.delete(modelName);
+          app.log.warn(
+            { modelName, instanceIds: instances.map((instance) => instance.instanceId) },
+            'Model force-deleted without runner teardown',
+          );
+        } finally {
+          deletingInFlight.delete(modelName);
+        }
+
+        return reply.code(202).send({
+          modelName,
+          state: ModelLifecycleState.STOPPED,
+          previousState: deriveAggregateState(instances),
+          message: 'Model force-deleted without runner teardown',
+        });
       }
 
       if (instances.length === 0 && record) {
@@ -1597,7 +1825,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     },
   );
 
-  app.post<{ Params: { modelName: string } }>(
+  app.post<StopModelRouteWithOptionalForceQueryParameter>(
     '/api/v1/models/:modelName/stop',
     async (request, reply) => {
       if (!deps.leaderElection.isLeader) {
@@ -1605,6 +1833,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       const { modelName } = request.params;
+      const force = request.query.force === true || request.query.force === 'true';
       assertValidModelName(modelName);
       await assertNoMove(modelName, 'stop');
 
@@ -1616,6 +1845,40 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
 
       const aggregateState = deriveAggregateState(instances);
+      if (force) {
+        if (stoppingInFlight.has(modelName)) {
+          throw ControlPlaneError.operationInProgress(
+            modelName,
+            'force stop',
+            'stop-in-progress',
+            'a stop is already in progress',
+          );
+        }
+        stoppingInFlight.add(modelName);
+        try {
+          await Promise.all(
+            instances.map(async (instance) => {
+              await deps.lifecycle.removeInstance(modelName, instance.instanceId);
+              await deps.instanceRepository.delete(instance.instanceId).catch(() => {});
+              deps.memoryBudget.releaseInstanceReservations(instance.instanceId);
+            }),
+          );
+          await deps.routingMap.removeModel(modelName);
+          app.log.warn(
+            { modelName, instanceIds: instances.map((instance) => instance.instanceId) },
+            'Model force-stopped without runner teardown',
+          );
+        } finally {
+          stoppingInFlight.delete(modelName);
+        }
+        return reply.code(202).send({
+          modelName,
+          state: ModelLifecycleState.STOPPED,
+          previousState: aggregateState,
+          message: 'Model force-stopped without runner teardown',
+        });
+      }
+
       if (!instances.some((i) => STOPPABLE_STATES.has(i.state))) {
         throw ControlPlaneError.invalidState(modelName, aggregateState, 'stop');
       }

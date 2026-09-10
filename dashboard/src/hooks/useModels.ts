@@ -5,6 +5,7 @@ import {
   api,
   type ModelInfo,
   type ModelDeploymentRequest,
+  type ModelConfigurationUpdateRequest,
   type MoveModelInstanceRequest,
 } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
@@ -129,6 +130,18 @@ export function useDeployModel() {
   );
 }
 
+export function useUpdateModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, body }: { name: string; body: ModelConfigurationUpdateRequest }) =>
+      api.models.update(name, body),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+      void queryClient.invalidateQueries({ queryKey: ['models', variables.name] });
+    },
+  });
+}
+
 export function useSleepModel() {
   const queryClient = useQueryClient();
   return useMutation(
@@ -171,6 +184,18 @@ export function useStopModel() {
   );
 }
 
+export function useForceStopModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.models.stop(name, true),
+    onSettled: (_data, _error, name) => {
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+      void queryClient.invalidateQueries({ queryKey: ['models', name] });
+      void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+    },
+  });
+}
+
 export function useStartModel() {
   const queryClient = useQueryClient();
   return useMutation(
@@ -188,13 +213,15 @@ export function useStartModel() {
 export function useDeleteModel() {
   const queryClient = useQueryClient();
   return useMutation(
-    createOptimisticMutation<string>(
+    createOptimisticMutation<{ name: string; force?: boolean }>(
       queryClient,
-      (name) => api.models.delete(name),
-      (models, name) =>
-        models.map((m) =>
-          m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
-        ),
+      ({ name, force }) => api.models.delete(name, force),
+      (models, { name, force }) =>
+        force
+          ? models.filter((m) => m.modelName !== name)
+          : models.map((m) =>
+              m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
+            ),
     ),
   );
 }

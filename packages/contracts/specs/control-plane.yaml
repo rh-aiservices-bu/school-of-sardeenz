@@ -209,6 +209,73 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+    put:
+      operationId: updateModel
+      summary: Replace a stopped model configuration
+      description: |
+        Replaces the mutable configuration used the next time the model is
+        started. The configuration name is immutable. The model must be fully
+        stopped, with no runtime instances, so an update cannot diverge from a
+        running runner.
+      tags:
+        - Models
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: Immutable model configuration name
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelConfigurationUpdateRequest"
+      responses:
+        "200":
+          description: Model configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelActionResponse"
+        "400":
+          description: Invalid configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model is not fully stopped or another operation is in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal control plane error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The control plane cannot accept the request (not leader)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     delete:
       operationId: deleteModel
       summary: Stop and remove a model
@@ -235,6 +302,17 @@ paths:
           description: The model name (routing key)
           schema:
             type: string
+        - name: force
+          in: query
+          required: false
+          description: >-
+            Immediately remove configuration, routing, lifecycle, and capacity
+            bookkeeping without contacting the worker. This can orphan a live
+            runner process and must only be used after an operator has confirmed
+            that no runner remains.
+          schema:
+            type: boolean
+            default: false
       responses:
         "202":
           description: Model removal accepted
@@ -464,6 +542,17 @@ paths:
           description: The model name (routing key)
           schema:
             type: string
+        - name: force
+          in: query
+          required: false
+          description: >-
+            Remove runtime instance bookkeeping without contacting the worker,
+            retaining the model configuration in STOPPED state. This can orphan
+            a live process and is intended only for failed starts whose absence
+            has been confirmed by an operator.
+          schema:
+            type: boolean
+            default: false
       responses:
         "202":
           description: Stop request accepted
@@ -1717,6 +1806,39 @@ components:
           description: |
             If true, the model cannot be evicted by the LRU eviction
             engine. It must be explicitly stopped by an operator.
+
+    ModelConfigurationUpdateRequest:
+      type: object
+      description: Complete replacement for a stopped model's mutable configuration.
+      required:
+        - runnerType
+        - modelPath
+        - requiredMemory
+        - tensorParallel
+        - pinned
+      properties:
+        displayName:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/displayName"
+        servedModelName:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/servedModelName"
+        runnerType:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/runnerType"
+        modelPath:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/modelPath"
+        requiredMemory:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/requiredMemory"
+        deviceType:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/deviceType"
+        tensorParallel:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/tensorParallel"
+        engineConfig:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/engineConfig"
+        engineArgs:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/engineArgs"
+        runtimeModule:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/runtimeModule"
+        pinned:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/pinned"
 
     ModelDeploymentResponse:
       type: object

@@ -105,6 +105,47 @@ export class ModelRepository {
     return result.rows.map(rowToRecord);
   }
 
+  async update(
+    name: string,
+    params: {
+      runnerType: string;
+      modelPath: string;
+      requiredMemory: number;
+      deviceType?: string;
+      tensorParallel: number;
+      engineConfig?: Record<string, unknown>;
+      engineArgs?: string[];
+      runtimeModule?: string;
+      servedModelName?: string;
+      displayName?: string;
+      pinned: boolean;
+    },
+  ): Promise<ModelRecord | null> {
+    const result = await this.db.query<ModelRow>(
+      `UPDATE models
+       SET runner_type = $2, model_path = $3, required_memory = $4, device_type = $5,
+           tensor_parallel = $6, engine_config = $7, runtime_module = $8, pinned = $9,
+           engine_args = $10, served_model_name = $11, display_name = $12, updated_at = now()
+       WHERE name = $1
+       RETURNING *`,
+      [
+        name,
+        params.runnerType,
+        params.modelPath,
+        params.requiredMemory,
+        params.deviceType ?? null,
+        params.tensorParallel,
+        params.engineConfig ? JSON.stringify(params.engineConfig) : null,
+        params.runtimeModule ?? null,
+        params.pinned,
+        params.engineArgs ?? null,
+        params.servedModelName ?? null,
+        params.displayName ?? null,
+      ],
+    );
+    return result.rows[0] ? rowToRecord(result.rows[0]) : null;
+  }
+
   async delete(name: string): Promise<boolean> {
     const result = await this.db.query('DELETE FROM models WHERE name = $1', [name]);
     return (result.rowCount ?? 0) > 0;

@@ -60,6 +60,20 @@ function makeLauncher(
 }
 
 describe('ApptainerLauncher.buildExecPlan', () => {
+  it('forces Model Runner V1 for the vLLM 0.24 kvcached module', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm-0.24' }));
+
+    expect(plan.args).toContain('VLLM_USE_V2_MODEL_RUNNER=0');
+  });
+
+  it('does not impose the vLLM 0.24 model-runner pin on other modules', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ runtimeModule: 'vllm-0.21' }));
+
+    expect(plan.args).not.toContain('VLLM_USE_V2_MODEL_RUNNER=0');
+  });
+
   it('constructs the apptainer exec command with --nv, binds, cache redirects and entrypoint', async () => {
     const { launcher } = makeLauncher();
     const plan = await launcher.buildExecPlan(makeSpec());

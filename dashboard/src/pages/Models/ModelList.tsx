@@ -41,6 +41,7 @@ import {
   useWakeModel,
   useDeleteModel,
   useStopModel,
+  useForceStopModel,
   useStartModel,
   useAddInstance,
 } from '../../hooks/useModels';
@@ -109,6 +110,7 @@ export function ModelList() {
   const wakeModel = useWakeModel();
   const deleteModel = useDeleteModel();
   const stopModel = useStopModel();
+  const forceStopModel = useForceStopModel();
   const startModel = useStartModel();
   const addInstance = useAddInstance();
 
@@ -277,10 +279,26 @@ export function ModelList() {
   const handleDeleteConfirm = () => {
     if (!deleteConfirmModel) return;
     setMutationError(null);
-    deleteModel.mutate(deleteConfirmModel.modelName, {
-      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Delete failed'),
-      onSettled: () => setDeleteConfirmModel(null),
-    });
+    deleteModel.mutate(
+      { name: deleteConfirmModel.modelName },
+      {
+        onError: (err) => setMutationError(err instanceof Error ? err.message : 'Delete failed'),
+        onSettled: () => setDeleteConfirmModel(null),
+      },
+    );
+  };
+
+  const handleForceDeleteConfirm = () => {
+    if (!deleteConfirmModel) return;
+    setMutationError(null);
+    deleteModel.mutate(
+      { name: deleteConfirmModel.modelName, force: true },
+      {
+        onError: (err) =>
+          setMutationError(err instanceof Error ? err.message : 'Force delete failed'),
+        onSettled: () => setDeleteConfirmModel(null),
+      },
+    );
   };
 
   const handleStart = (model: ModelInfo) => {
@@ -295,6 +313,15 @@ export function ModelList() {
     setMutationError(null);
     stopModel.mutate(stopConfirmModel.modelName, {
       onError: (err) => setMutationError(err instanceof Error ? err.message : 'Stop failed'),
+      onSettled: () => setStopConfirmModel(null),
+    });
+  };
+
+  const handleForceStopConfirm = () => {
+    if (!stopConfirmModel) return;
+    setMutationError(null);
+    forceStopModel.mutate(stopConfirmModel.modelName, {
+      onError: (err) => setMutationError(err instanceof Error ? err.message : 'Force stop failed'),
       onSettled: () => setStopConfirmModel(null),
     });
   };
@@ -334,7 +361,7 @@ export function ModelList() {
     setMutationError(null);
     const failures: string[] = [];
     const promises = deletable.map((m) =>
-      deleteModel.mutateAsync(m.modelName).catch((err: unknown) => {
+      deleteModel.mutateAsync({ name: m.modelName }).catch((err: unknown) => {
         failures.push(`${m.modelName}: ${err instanceof Error ? err.message : 'Delete failed'}`);
       }),
     );
@@ -767,6 +794,19 @@ export function ModelList() {
                                 {t('list.wake.menuItem')}
                               </DropdownItem>
                             )}
+                            <DropdownItem
+                              key="modify"
+                              isDisabled={model.state !== ModelLifecycleState.STOPPED}
+                              onClick={() => {
+                                if (model.state !== ModelLifecycleState.STOPPED) return;
+                                setOpenMenuId(null);
+                                void navigate(
+                                  `/models/${encodeURIComponent(model.modelName)}/edit`,
+                                );
+                              }}
+                            >
+                              {t('list.edit.menuItem')}
+                            </DropdownItem>
                             {model.state === ModelLifecycleState.STOPPED && (
                               <DropdownItem
                                 key="start"
@@ -854,6 +894,15 @@ export function ModelList() {
           <Button variant="primary" onClick={handleStopConfirm} isLoading={stopModel.isPending}>
             {t('list.stop.menuItem')}
           </Button>
+          {stopConfirmModel?.state === ModelLifecycleState.ERROR && (
+            <Button
+              variant="danger"
+              onClick={handleForceStopConfirm}
+              isLoading={forceStopModel.isPending}
+            >
+              {t('list.stop.forceButton')}
+            </Button>
+          )}
           <Button variant="link" onClick={() => setStopConfirmModel(null)}>
             {tCommon('actions.cancel')}
           </Button>
@@ -875,6 +924,15 @@ export function ModelList() {
           <Button variant="danger" onClick={handleDeleteConfirm} isLoading={deleteModel.isPending}>
             {t('list.delete.menuItem')}
           </Button>
+          {deleteConfirmModel?.state === ModelLifecycleState.ERROR && (
+            <Button
+              variant="danger"
+              onClick={handleForceDeleteConfirm}
+              isLoading={deleteModel.isPending}
+            >
+              {t('list.delete.forceButton')}
+            </Button>
+          )}
           <Button variant="link" onClick={() => setDeleteConfirmModel(null)}>
             {tCommon('actions.cancel')}
           </Button>
