@@ -71,7 +71,7 @@ runners:
     engine: vLLM
     runnerType: vllm
     version: '0.24'
-    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.24-rc1@sha256:c9779e0d6c9b010c68ebb850c8216920e56e77b46c6e1ec4443b08ed81e6cc87
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.24-rc1@sha256:366256103fce523c732e6336dce75b0304e052d2bd6376d60b56bb719a36f9fa
     sifName: vllm-0.24
     protocol: openai
     tags: [llm, cuda, kvcached, openai]
