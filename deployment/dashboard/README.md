@@ -7,7 +7,8 @@ routing proxy.
 Production images refuse to start with unauthenticated access. Create `sardeenz-dashboard-auth`
 as described in [`../README.md`](../README.md); the supplied example uses simple username/password
 authentication. OAuth configuration is documented in
-[`../../docs/usage/deployment-security.md`](../../docs/usage/deployment-security.md).
+[`../../docs/usage/openshift-rbac.md`](../../docs/usage/openshift-rbac.md); the dashboard base
+also creates the ServiceAccount and namespace-scoped marker Roles used for OAuth RBAC.
 
 Apply this component alone with:
 

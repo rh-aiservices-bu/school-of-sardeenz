@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **An OpenShift OAuth RBAC operator guide.** It documents OAuth client setup, dashboard
+  deployment, Sardeenz marker-Role bindings, permission verification, and troubleshooting.
+
 - **In-progress model deployments can be cancelled.** Workers retain a stoppable launch handle
   before health checks complete; Stop or Delete can resolve it by instance ID, terminate the
   process, and clean up lifecycle and placement state instead of waiting for a startup timeout.
@@ -46,6 +49,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   independent Containerfiles, dependency pins, and compatibility notes.
 
 ### Fixed
+
+- **OpenShift OAuth now uses Sardeenz-specific RBAC roles.** The dashboard resolves the
+  authenticated user's namespace-scoped `sardeenz-admin` and `sardeenz-admin-readonly` marker
+  permissions through its ServiceAccount, matching Sardeenz v1 instead of treating Pod creation
+  permission as dashboard administration.
 
 - **OAuth SSO login no longer reloads the dashboard login page.** It now renders a dedicated SSO
   button rather than a credential form, which removes misleading username/password fields and

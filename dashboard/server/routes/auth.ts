@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { Config } from '../config.js';
 import type { JwtPayload } from '../plugins/auth.js';
+import { resolveSardeenzRoles } from '../services/kubernetes-rbac.js';
 
 const SSE_COOKIE_NAME = 'sardeenz_sse';
 
@@ -228,47 +229,41 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       });
 
       let username = 'unknown';
+      let groups: string[] = [];
       if (userInfoRes.ok) {
         const userInfo = (await userInfoRes.json()) as {
           preferred_username?: string;
           name?: string;
           sub?: string;
+          groups?: string[];
+          metadata?: { name?: string };
         };
-        username = userInfo.preferred_username ?? userInfo.name ?? userInfo.sub ?? 'unknown';
+        username =
+          userInfo.preferred_username ??
+          userInfo.name ??
+          userInfo.metadata?.name ??
+          userInfo.sub ??
+          'unknown';
+        groups = userInfo.groups ?? [];
+      } else {
+        app.log.error({ status: userInfoRes.status }, 'OAuth user-info lookup failed');
+        return reply
+          .code(502)
+          .send({ error: 'OAuth user-info lookup failed', code: 'UPSTREAM_ERROR' });
       }
 
-      // Resolve roles via Kubernetes RBAC (if configured)
-      let roles = ['admin-readonly'];
-      if (config.k8sApiUrl) {
-        try {
-          const sarUrl = `${config.k8sApiUrl}/apis/authorization.k8s.io/v1/selfsubjectaccessreviews`;
-          const sarRes = await fetch(sarUrl, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${tokenData.access_token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              apiVersion: 'authorization.k8s.io/v1',
-              kind: 'SelfSubjectAccessReview',
-              spec: {
-                resourceAttributes: {
-                  namespace: config.namespace,
-                  verb: 'create',
-                  resource: 'pods',
-                },
-              },
-            }),
-          });
-          if (sarRes.ok) {
-            const sarData = (await sarRes.json()) as { status?: { allowed?: boolean } };
-            if (sarData.status?.allowed) {
-              roles = ['admin'];
-            }
-          }
-        } catch {
-          app.log.warn('K8s RBAC check failed, defaulting to admin-readonly');
-        }
+      let roles: Array<'admin' | 'admin-readonly'>;
+      try {
+        roles = await resolveSardeenzRoles(config, username, groups);
+      } catch (error) {
+        app.log.error(error, 'Kubernetes RBAC role resolution failed');
+        return reply
+          .code(502)
+          .send({ error: 'Kubernetes RBAC role resolution failed', code: 'UPSTREAM_ERROR' });
+      }
+      if (roles.length === 0) {
+        app.log.warn({ username, groups }, 'OAuth user has no Sardeenz RBAC role');
+        return reply.code(403).send({ error: 'Access denied', code: 'FORBIDDEN' });
       }
 
       const payload: JwtPayload = { username, roles, authMode: 'oauth' };

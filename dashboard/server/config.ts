@@ -19,6 +19,10 @@ export interface Config {
   readonly oauthClientSecret: string;
   readonly oauthIssuerUrl: string;
   readonly k8sApiUrl: string;
+  /** ServiceAccount bearer token override for local development. */
+  readonly serviceAccountToken?: string;
+  /** Path to the projected ServiceAccount token in a Kubernetes Pod. */
+  readonly serviceAccountTokenPath?: string;
   readonly namespace: string;
   readonly controlPlaneApiToken: string;
   readonly publicUrl: string;
@@ -76,6 +80,11 @@ export function loadConfig(): Config {
     oauthClientSecret: optionalEnv('OAUTH_CLIENT_SECRET', ''),
     oauthIssuerUrl: optionalEnv('OAUTH_ISSUER_URL', ''),
     k8sApiUrl: optionalEnv('K8S_API_URL', ''),
+    serviceAccountToken: optionalEnv('SERVICE_ACCOUNT_TOKEN', ''),
+    serviceAccountTokenPath: optionalEnv(
+      'SERVICE_ACCOUNT_TOKEN_PATH',
+      '/var/run/secrets/kubernetes.io/serviceaccount/token',
+    ),
     namespace: optionalEnv('NAMESPACE', 'sardeenz'),
     controlPlaneApiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
     publicUrl: optionalEnv('SARDEENZ_PUBLIC_URL', ''),
@@ -125,6 +134,7 @@ export function validateAuthConfig(config: Config, logger?: AuthConfigLogger): v
     if (!config.oauthClientId) missing.push('OAUTH_CLIENT_ID');
     if (!config.oauthClientSecret) missing.push('OAUTH_CLIENT_SECRET');
     if (!config.oauthIssuerUrl) missing.push('OAUTH_ISSUER_URL');
+    if (!config.k8sApiUrl) missing.push('K8S_API_URL');
     if (!config.publicUrl) missing.push('SARDEENZ_PUBLIC_URL');
 
     if (missing.length > 0) {

@@ -253,26 +253,27 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 
 ### BFF environment variables
 
-| Variable                                                  | Default                  | Description                                                                 |
-| --------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------- |
-| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`           | BFF listen address and port                                                 |
-| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`  | Control plane base URL                                                      |
-| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379` | Redis/Valkey connection string                                              |
-| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`               | Prefix for all Redis keys                                                   |
-| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`  | Prometheus query API base URL                                               |
-| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`  | Proxy inference base URL used by the Playground                             |
-| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                      | Maximum active chat-completions responses for one identity, per BFF replica |
-| `SARDEENZ_LOG_LEVEL`                                      | `info`                   | Pino log level                                                              |
-| `AUTH_MODE`                                               | `none`                   | Authentication mode: `none`, `simple`, or `oauth`                           |
-| `ADMIN_USERNAME`                                          | `admin`                  | Admin username for `simple` auth mode                                       |
-| `ADMIN_PASSWORD`                                          | _(empty)_                | Admin password for `simple` auth mode                                       |
-| `JWT_SECRET`                                              | _(empty)_                | JWT signing secret (required when `AUTH_MODE` is not `none`)                |
-| `JWT_EXPIRATION_HOURS`                                    | `8`                      | JWT token expiration in hours                                               |
-| `OAUTH_CLIENT_ID`                                         | `sardeenz`               | OAuth client ID (for `oauth` mode)                                          |
-| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                | OAuth client secret (for `oauth` mode)                                      |
-| `OAUTH_ISSUER_URL`                                        | _(empty)_                | OAuth OIDC issuer URL (for `oauth` mode)                                    |
-| `K8S_API_URL`                                             | _(empty)_                | Kubernetes API URL for RBAC role resolution (for `oauth` mode)              |
-| `NAMESPACE`                                               | `sardeenz`               | Kubernetes namespace for RBAC scope (for `oauth` mode)                      |
+| Variable                                                  | Default                  | Description                                                                                   |
+| --------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------- |
+| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`           | BFF listen address and port                                                                   |
+| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`  | Control plane base URL                                                                        |
+| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379` | Redis/Valkey connection string                                                                |
+| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`               | Prefix for all Redis keys                                                                     |
+| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`  | Prometheus query API base URL                                                                 |
+| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`  | Proxy inference base URL used by the Playground                                               |
+| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                      | Maximum active chat-completions responses for one identity, per BFF replica                   |
+| `SARDEENZ_LOG_LEVEL`                                      | `info`                   | Pino log level                                                                                |
+| `AUTH_MODE`                                               | `none`                   | Authentication mode: `none`, `simple`, or `oauth`                                             |
+| `ADMIN_USERNAME`                                          | `admin`                  | Admin username for `simple` auth mode                                                         |
+| `ADMIN_PASSWORD`                                          | _(empty)_                | Admin password for `simple` auth mode                                                         |
+| `JWT_SECRET`                                              | _(empty)_                | JWT signing secret (required when `AUTH_MODE` is not `none`)                                  |
+| `JWT_EXPIRATION_HOURS`                                    | `8`                      | JWT token expiration in hours                                                                 |
+| `OAUTH_CLIENT_ID`                                         | `sardeenz`               | OAuth client ID (for `oauth` mode)                                                            |
+| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                | OAuth client secret (for `oauth` mode)                                                        |
+| `OAUTH_ISSUER_URL`                                        | _(empty)_                | OAuth OIDC issuer URL (for `oauth` mode)                                                      |
+| `K8S_API_URL`                                             | _(empty)_                | Kubernetes API URL for namespace-scoped OAuth RBAC role resolution (required in `oauth` mode) |
+| `SERVICE_ACCOUNT_TOKEN`                                   | _(mounted token)_        | ServiceAccount token override for OAuth RBAC checks outside Kubernetes                        |
+| `NAMESPACE`                                               | `sardeenz`               | Kubernetes namespace for RBAC scope (for `oauth` mode)                                        |
 
 ### Frontend environment variables
 
@@ -337,11 +338,11 @@ The BFF implements a lightweight auth system controlled by the `AUTH_MODE` envir
 
 ### Three modes
 
-| Mode             | Behavior                                                                                                                                              |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none` (default) | No authentication. `authenticate` and `requireRole` decorators are no-ops. All routes are open. Use for local development and air-gapped deployments. |
-| `simple`         | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT.           |
-| `oauth`          | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens via the configured OIDC issuer, then issues an internal JWT.     |
+| Mode             | Behavior                                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none` (default) | No authentication. `authenticate` and `requireRole` decorators are no-ops. All routes are open. Use for local development and air-gapped deployments.                                       |
+| `simple`         | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT.                                                 |
+| `oauth`          | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens, resolves Sardeenz marker Roles through namespace-scoped Kubernetes RBAC, then issues an internal JWT. |
 
 ### JWT flow
 

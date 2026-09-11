@@ -5,6 +5,7 @@ namespace: sardeenz
 
 resources:
   - service.yaml
+  - rbac.yaml
   - deployment.yaml
 
 labels:

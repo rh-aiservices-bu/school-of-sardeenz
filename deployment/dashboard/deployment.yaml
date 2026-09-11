@@ -12,6 +12,7 @@ spec:
       labels:
         app.kubernetes.io/name: sardeenz-dashboard
     spec:
+      serviceAccountName: sardeenz-dashboard
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -34,6 +35,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: K8S_API_URL
+              value: https://kubernetes.default.svc
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - name: SARDEENZ_API_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -154,6 +154,7 @@ describe('validateAuthConfig', () => {
       oauthClientId: 'sardeenz',
       oauthClientSecret: 'oauth-secret',
       oauthIssuerUrl: 'https://issuer.example.com',
+      k8sApiUrl: 'https://kubernetes.default.svc',
       publicUrl: 'https://dashboard.example.com',
       ...overrides,
     });
@@ -200,16 +201,23 @@ describe('validateAuthConfig', () => {
     expect(() => validateAuthConfig(config)).toThrow('SARDEENZ_PUBLIC_URL');
   });
 
+  it('throws when AUTH_MODE=oauth and K8S_API_URL is empty', () => {
+    const config = makeOauthConfig({ k8sApiUrl: '' });
+
+    expect(() => validateAuthConfig(config)).toThrow('K8S_API_URL');
+  });
+
   it('lists all missing oauth variables in a single error', () => {
     const config = makeOauthConfig({
       oauthClientId: '',
       oauthClientSecret: '',
       oauthIssuerUrl: '',
+      k8sApiUrl: '',
       publicUrl: '',
     });
 
     expect(() => validateAuthConfig(config)).toThrow(
-      /OAUTH_CLIENT_ID.*OAUTH_CLIENT_SECRET.*OAUTH_ISSUER_URL.*SARDEENZ_PUBLIC_URL/,
+      /OAUTH_CLIENT_ID.*OAUTH_CLIENT_SECRET.*OAUTH_ISSUER_URL.*K8S_API_URL.*SARDEENZ_PUBLIC_URL/,
     );
   });
 });

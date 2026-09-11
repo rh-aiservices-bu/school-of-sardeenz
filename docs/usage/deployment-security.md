@@ -16,11 +16,11 @@ This limiter is in-memory and scoped to each BFF replica. With multiple replicas
 
 ### Required environment variables by auth mode
 
-| Auth Mode | Required Variables                                                                                                               |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                                       |
-| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `SARDEENZ_PUBLIC_URL`, `JWT_SECRET=<non-empty>` |
-| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                                           |
+| Auth Mode | Required Variables                                                                                                                              |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `simple`  | `AUTH_MODE=simple`, `ADMIN_PASSWORD=<non-empty>`, `JWT_SECRET=<non-empty>`                                                                      |
+| `oauth`   | `AUTH_MODE=oauth`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `K8S_API_URL`, `SARDEENZ_PUBLIC_URL`, `JWT_SECRET=<non-empty>` |
+| `none`    | Only allowed when `NODE_ENV` is not `production` (development/testing)                                                                          |
 
 ### Example production configuration
 
@@ -31,6 +31,25 @@ ADMIN_PASSWORD=<strong-random-password>
 JWT_SECRET=<random-256-bit-hex>
 SARDEENZ_PUBLIC_URL=https://sardeenz.example.com
 ```
+
+### OpenShift OAuth RBAC
+
+In OAuth mode, Sardeenz uses the same namespace-scoped marker Roles as Sardeenz v1. The
+dashboard ServiceAccount submits `LocalSubjectAccessReview` requests for the authenticating user
+and their OpenShift groups. A user receives `admin` and/or `admin-readonly` only when they are
+bound to the corresponding marker Role; users with neither are denied login. The dashboard base
+creates the marker Roles and its review permission. Operators create user or group RoleBindings,
+for example:
+
+```bash
+oc adm policy add-role-to-group sardeenz-admin platform-admins -n sardeenz
+oc adm policy add-role-to-group sardeenz-admin-readonly viewers -n sardeenz
+```
+
+The default OpenShift deployment configures `K8S_API_URL=https://kubernetes.default.svc` and uses
+the projected dashboard ServiceAccount token. Local deployments can set `SERVICE_ACCOUNT_TOKEN`
+instead. This approach does not give Sardeenz administrators permission to create Pods.
+See [OpenShift OAuth RBAC](openshift-rbac.md) for the complete deployment and RoleBinding guide.
 
 ### Running behind a reverse proxy or ingress
 
