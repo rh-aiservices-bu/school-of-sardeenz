@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { LoginPage, LoginForm } from '@patternfly/react-core';
+import { Button, LoginPage, LoginForm } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -23,7 +23,7 @@ export function Login() {
   if (authMode === 'oauth') {
     const handleSsoLogin = () => {
       const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
-      window.location.href = `${baseUrl}/auth/login`;
+      window.location.assign(`${baseUrl}/auth/login`);
     };
 
     return (
@@ -32,10 +32,9 @@ export function Login() {
         loginSubtitle={t('login.subtitleSso')}
         textContent={t('login.textContent')}
         socialMediaLoginContent={
-          <LoginForm
-            loginButtonLabel={t('login.loginButtonSso')}
-            onLoginButtonClick={handleSsoLogin}
-          />
+          <Button variant="primary" isBlock type="button" onClick={handleSsoLogin}>
+            {t('login.loginButtonSso')}
+          </Button>
         }
       />
     );

@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **OAuth SSO login no longer reloads the dashboard login page.** It now renders a dedicated SSO
+  button rather than a credential form, which removes misleading username/password fields and
+  reliably navigates to the BFF's OAuth redirect endpoint.
+
 - **MLServer starts from read-only Apptainer images.** Workers now redirect MLServer's default
   `.metrics` and `.envs` directories to isolated paths under writable scratch, including for
   already-published SIFs; the runner shim also uses a writable working directory and supplies
