@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance } from 'fastify';
@@ -134,6 +134,48 @@ describe('GET /api/auth/config', () => {
 
     expect(res.statusCode).toBe(200);
     expect(parseJson(res)).toEqual({ authMode: 'none' });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* OAuth + OpenShift RBAC                                              */
+/* ------------------------------------------------------------------ */
+describe('OpenShift OAuth login', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('gets identity and groups from the OpenShift Kubernetes API before resolving marker roles', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'oauth-access-token' })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ metadata: { name: 'alice' }, groups: ['platform-admins'] })),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: { allowed: true } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: { allowed: false } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const config = makeConfig({
+      authMode: 'oauth',
+      oauthClientSecret: 'oauth-secret',
+      oauthIssuerUrl: 'https://oauth.example.com/oauth',
+      k8sApiUrl: 'https://kubernetes.default.svc',
+      serviceAccountToken: 'reviewer-token',
+      publicUrl: 'https://dashboard.example.com',
+    });
+    const app = await buildApp(config);
+    const login = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    const state = new URL(login.headers.location ?? '').searchParams.get('state');
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?code=authorization-code&state=${state}`,
+    });
+    await app.close();
+
+    expect(callback.statusCode).toBe(302);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://kubernetes.default.svc/apis/user.openshift.io/v1/users/~',
+    );
+    expect(fetchMock.mock.calls[2]?.[0]).toContain('/localsubjectaccessreviews');
   });
 });
 

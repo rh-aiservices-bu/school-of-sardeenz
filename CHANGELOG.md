@@ -50,6 +50,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **OpenShift OAuth retrieves user identity from the supported API.** The dashboard now reads the
+  authenticated user's OpenShift `User` resource instead of requesting the unavailable OAuth
+  `/userinfo` endpoint.
+
+- **OpenShift OAuth RBAC commands now reference namespaced marker Roles.** The operator guide
+  passes `--role-namespace` to `oc adm policy`, preventing it from treating Sardeenz marker Roles
+  as ClusterRoles.
+
 - **OpenShift OAuth now uses Sardeenz-specific RBAC roles.** The dashboard resolves the
   authenticated user's namespace-scoped `sardeenz-admin` and `sardeenz-admin-readonly` marker
   permissions through its ServiceAccount, matching Sardeenz v1 instead of treating Pod creation

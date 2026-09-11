@@ -6,7 +6,8 @@ Sardeenz roles through ordinary RoleBindings, without receiving unrelated worklo
 
 ## How authorization works
 
-After OpenShift authenticates a user, the dashboard reads their username and groups. Its
+After OpenShift authenticates a user, the dashboard reads their username and groups from the
+OpenShift Kubernetes API. Its
 `sardeenz-dashboard` ServiceAccount submits a `LocalSubjectAccessReview` in the Sardeenz
 namespace for each marker permission:
 
@@ -87,26 +88,33 @@ oc get rolebinding sardeenz-auth-reviewer -n sardeenz
 Grant full administration to a user:
 
 ```bash
-oc adm policy add-role-to-user sardeenz-admin alice@example.com -n sardeenz
+oc adm policy add-role-to-user sardeenz-admin alice@example.com \
+  --role-namespace=sardeenz -n sardeenz
 ```
 
 Grant full administration to a group:
 
 ```bash
-oc adm policy add-role-to-group sardeenz-admin platform-admins -n sardeenz
+oc adm policy add-role-to-group sardeenz-admin platform-admins \
+  --role-namespace=sardeenz -n sardeenz
 ```
 
 Grant read-only access to a group:
 
 ```bash
-oc adm policy add-role-to-group sardeenz-admin-readonly viewers -n sardeenz
+oc adm policy add-role-to-group sardeenz-admin-readonly viewers \
+  --role-namespace=sardeenz -n sardeenz
 ```
 
 To allow every OpenShift-authenticated user read-only access:
 
 ```bash
-oc adm policy add-role-to-group sardeenz-admin-readonly system:authenticated -n sardeenz
+oc adm policy add-role-to-group sardeenz-admin-readonly system:authenticated \
+  --role-namespace=sardeenz -n sardeenz
 ```
+
+`--role-namespace` is required: without it, `oc adm policy` assumes the named role is a
+ClusterRole. `-n` alone sets only the RoleBinding namespace.
 
 Cluster administrators match the `sardeenz-admin` marker permission through their wildcard RBAC
 rights, so they do not need an additional RoleBinding.

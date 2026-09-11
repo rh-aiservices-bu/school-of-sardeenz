@@ -222,8 +222,9 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
 
       const tokenData = (await tokenRes.json()) as { access_token: string };
 
-      // Fetch user info
-      const userInfoUrl = `${config.oauthIssuerUrl}/userinfo`;
+      // OpenShift exposes the user (including group membership) from its Kubernetes API, not
+      // from an OAuth /userinfo endpoint. The OAuth access token's user:info scope authorizes it.
+      const userInfoUrl = `${config.k8sApiUrl}/apis/user.openshift.io/v1/users/~`;
       const userInfoRes = await fetch(userInfoUrl, {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
       });
