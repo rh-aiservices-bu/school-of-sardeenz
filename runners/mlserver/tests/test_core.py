@@ -239,6 +239,7 @@ def test_engine_redirects_metrics_to_writable_repository_by_default(
     assert captured["command"] == ["mlserver", "start", str(repo_dir)]
     assert captured["env"]["MLSERVER_METRICS_DIR"] == str(repo_dir / ".metrics")
     assert captured["env"]["MLSERVER_ENVIRONMENTS_DIR"] == str(repo_dir / ".envs")
+    assert captured["env"]["MLSERVER_PARALLEL_WORKERS"] == "0"
     assert captured["cwd"] == str(repo_dir)
 
 
@@ -256,6 +257,7 @@ def test_engine_preserves_worker_metrics_directory_override(monkeypatch: pytest.
 
     monkeypatch.setenv("MLSERVER_METRICS_DIR", "/scratch/metrics/runner-abc")
     monkeypatch.setenv("MLSERVER_ENVIRONMENTS_DIR", "/scratch/environments/runner-abc")
+    monkeypatch.setenv("MLSERVER_PARALLEL_WORKERS", "2")
     monkeypatch.setattr("sardeenz_mlserver_runner.engine.subprocess.Popen", fake_popen)
 
     MLServerEngine(args, str(repo_dir)).start()
@@ -265,6 +267,7 @@ def test_engine_preserves_worker_metrics_directory_override(monkeypatch: pytest.
         captured["env"]["MLSERVER_ENVIRONMENTS_DIR"]
         == "/scratch/environments/runner-abc"
     )
+    assert captured["env"]["MLSERVER_PARALLEL_WORKERS"] == "2"
 
 
 # --- state.py (state machine + capabilities + response shapes) -----------------------------------

@@ -44,6 +44,10 @@ class MLServerEngine:
         # New workers inject a unique /scratch path and take precedence over this setdefault.
         env.setdefault("MLSERVER_METRICS_DIR", os.path.join(self._repo_dir, ".metrics"))
         env.setdefault("MLSERVER_ENVIRONMENTS_DIR", os.path.join(self._repo_dir, ".envs"))
+        # A Sardeenz runner already isolates one model in its own process. Disable MLServer 1.7.1's
+        # redundant child inference pool by default: under Python 3.12 + uvloop its child calls
+        # asyncio.get_event_loop() without installing a loop and enters an endless restart cycle.
+        env.setdefault("MLSERVER_PARALLEL_WORKERS", "0")
         env.setdefault("HF_HUB_OFFLINE", "1")  # never phone home at runtime (parity w/ vLLM image)
         # New process group so we can signal the whole MLServer tree on stop. Use the generated
         # writable repository as cwd too: MLServer settings and third-party runtimes may interpret

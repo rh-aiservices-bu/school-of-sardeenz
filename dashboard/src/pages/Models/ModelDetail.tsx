@@ -337,7 +337,7 @@ export function ModelDetail() {
                   </Button>
                 </FlexItem>
               )}
-              {(isActive || isSleeping || isError) && (
+              {(isActive || isStarting || isSleeping || isError) && (
                 <FlexItem>
                   <Button variant="secondary" onClick={() => setShowStopModal(true)}>
                     {t('detail.stop.button')}

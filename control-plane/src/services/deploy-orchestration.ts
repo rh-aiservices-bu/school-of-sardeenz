@@ -38,6 +38,8 @@ export interface DeployModelParams {
    * instanceId; treating leadership loss as a deployment failure could kill a healthy runner.
    */
   isStillOwner?: () => boolean;
+  /** Synchronous route-claim fence checked immediately before POST /runners dispatch. */
+  isCancelled?: () => boolean;
 }
 
 class DeployOwnershipLostError extends Error {
@@ -108,6 +110,16 @@ export class DeployOrchestrationService {
         devices: params.devices as StartRunnerRequest['devices'],
       };
       assertStillOwner();
+      // Startup-log setup awaits after placement. A Stop/Delete can claim cancellation in that
+      // window; check the process-local claim immediately before dispatch so no orphan is spawned.
+      if (params.isCancelled?.()) {
+        throw ControlPlaneError.operationInProgress(
+          params.modelName,
+          'start runner',
+          'deployment-cancelled',
+          'the deployment was cancelled before worker dispatch',
+        );
+      }
       startDispatched = true;
       const runnerInfo = await workerClient.startRunner(startRequest);
       startReplyReceived = true;

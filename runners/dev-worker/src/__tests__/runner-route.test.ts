@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import { RunnerManager } from '../runner-manager.js';
 import { registerRunnerRoutes } from '../routes/runners.js';
@@ -168,6 +168,47 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
     });
     const started = await start;
     await pendingManager.stopRunner(started.runnerId);
+    await pendingServer.close();
+  });
+
+  it('DELETE cancels a runner whose startup is still in flight', async () => {
+    let rejectLaunch!: (error: Error) => void;
+    const stop = vi.fn(() => {
+      rejectLaunch(new Error('cancelled'));
+      return Promise.resolve();
+    });
+    const pendingLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (_spec, _onLog, _onStartupComplete, _onExit, onLaunchHandle) =>
+        new Promise<LaunchHandle>((_resolve, reject) => {
+          rejectLaunch = reject;
+          onLaunchHandle?.({ host: 'localhost', port: 19600, enginePort: 19601, stop });
+        }),
+    };
+    const pendingManager = new RunnerManager(makeConfig(), makeRegistration(), pendingLauncher);
+    const pendingServer = Fastify({ logger: false });
+    registerRunnerRoutes(pendingServer, pendingManager);
+    const pendingBaseUrl = await pendingServer.listen({ port: 0, host: '127.0.0.1' });
+    const starting = pendingManager.startRunner({
+      modelName: 'cancel-me',
+      instanceId: 'inst-cancel-me',
+      runnerType: 'mlserver',
+      modelPath: '/models/cancel-me',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    const rejected = expect(starting).rejects.toThrow('cancelled');
+    const lookup = await fetch(`${pendingBaseUrl}/runners/by-instance/inst-cancel-me/status`);
+    const { runnerId } = (await lookup.json()) as { runnerId: string };
+
+    const cancelled = await fetch(`${pendingBaseUrl}/runners/${runnerId}`, { method: 'DELETE' });
+
+    expect(cancelled.status).toBe(204);
+    await rejected;
+    expect(stop).toHaveBeenCalledOnce();
+    const gone = await fetch(`${pendingBaseUrl}/runners/by-instance/inst-cancel-me/status`);
+    expect(gone.status).toBe(404);
     await pendingServer.close();
   });
 });

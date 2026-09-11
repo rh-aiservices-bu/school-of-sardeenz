@@ -822,6 +822,7 @@ export function ModelList() {
                               </DropdownItem>
                             )}
                             {(model.state === ModelLifecycleState.ACTIVE ||
+                              model.state === ModelLifecycleState.STARTING ||
                               model.state === ModelLifecycleState.SLEEPING ||
                               model.state === ModelLifecycleState.ERROR) && (
                               <DropdownItem

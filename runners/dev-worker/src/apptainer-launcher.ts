@@ -1,7 +1,13 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { realpath as nodeRealpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
-import type { LaunchHandle, LaunchSpec, LogSink, RunnerLauncher } from './launcher.js';
+import type {
+  LaunchHandle,
+  LaunchHandleSink,
+  LaunchSpec,
+  LogSink,
+  RunnerLauncher,
+} from './launcher.js';
 
 // Flags the platform owns via dedicated StartRunnerRequest fields / shim args. A user-supplied
 // copy in engineArgs would collide (last-flag-wins could move the engine to the wrong port, or
@@ -44,6 +50,8 @@ export interface ApptainerLauncherConfig {
   stopGraceMs: number;
   /** Address advertised in the launch handle's `host` (control-plane-reachable). */
   advertiseHost: string;
+  /** MLServer's internal inference-pool size; zero runs inference in the isolated runner process. */
+  mlserverParallelWorkers?: number;
 }
 
 export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
@@ -64,6 +72,7 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
   healthIntervalMs: 1_000,
   stopGraceMs: 30_000,
   advertiseHost: 'localhost',
+  mlserverParallelWorkers: 0,
 };
 
 // Minimal child-process surface the launcher relies on — lets tests inject a fake.
@@ -263,6 +272,10 @@ export class ApptainerLauncher implements RunnerLauncher {
       // MLServer's inference-pool registry unconditionally creates `.envs` at startup because
       // parallel_workers defaults to 1. Redirect it for the same read-only-cwd reason.
       MLSERVER_ENVIRONMENTS_DIR: `${this.config.scratchDir}/environments/${spec.runnerId}`,
+      // Sardeenz already provides process-level isolation and concurrency. MLServer 1.7.1's
+      // default child pool loops forever under Python 3.12 + uvloop because its child calls
+      // asyncio.get_event_loop() before installing a loop. Zero bypasses that redundant pool.
+      MLSERVER_PARALLEL_WORKERS: String(this.config.mlserverParallelWorkers ?? 0),
     };
     // vLLM 0.24 may select Model Runner V2 by default, but kvcached's autopatch targets Model
     // Runner V1. Pass this explicitly as well as baking it into the SIF so already-published 0.24
@@ -365,6 +378,7 @@ export class ApptainerLauncher implements RunnerLauncher {
     onLog?: LogSink,
     onStartupComplete?: () => void,
     onExit?: () => void,
+    onLaunchHandle?: LaunchHandleSink,
   ): Promise<LaunchHandle> {
     const plan = await this.buildExecPlan(spec);
 
@@ -413,6 +427,7 @@ export class ApptainerLauncher implements RunnerLauncher {
       pid: child.pid,
       stop: () => this.stopChild(child, () => exited),
     };
+    onLaunchHandle?.(handle);
 
     try {
       await this.waitUntilHealthy(spec.port, () => exited);

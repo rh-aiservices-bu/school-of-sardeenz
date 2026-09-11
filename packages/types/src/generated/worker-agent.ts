@@ -58,7 +58,8 @@ export type paths = {
         post?: never;
         /**
          * Stop a runner process
-         * @description Stops the runner process identified by `runnerId`. The worker sends
+         * @description Stops or cancels the runner process identified by `runnerId`, including
+         *     a process whose startup health checks are still in flight. The worker sends
          *     SIGTERM to the runner process, waits for it to exit (with a timeout
          *     followed by SIGKILL), and frees the associated resources.
          */

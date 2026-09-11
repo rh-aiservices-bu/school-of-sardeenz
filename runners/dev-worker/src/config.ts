@@ -15,6 +15,7 @@ export interface ApptainerConfig {
   healthIntervalMs: number;
   stopGraceMs: number;
   advertiseHost: string;
+  mlserverParallelWorkers?: number;
 }
 
 export interface DevWorkerConfig {
@@ -141,6 +142,9 @@ export function loadConfig(): DevWorkerConfig {
       // separate session) completes before the SIGKILL backstop — see apptainer-launcher.ts.
       stopGraceMs: envInt('SARDEENZ_STOP_GRACE_MS', 30000),
       advertiseHost: envStr('SARDEENZ_WORKER_ADVERTISE_HOST', 'localhost'),
+      // Sardeenz already isolates one model per runner process. MLServer 1.7.1's optional child
+      // inference pool also crashes under Python 3.12 + uvloop before it can load the model.
+      mlserverParallelWorkers: envInt('SARDEENZ_MLSERVER_PARALLEL_WORKERS', 0),
     },
     workerToken: envStr('SARDEENZ_WORKER_TOKEN', ''),
     catalogUrl: envStr('SARDEENZ_RUNNER_CATALOG_URL', ''),

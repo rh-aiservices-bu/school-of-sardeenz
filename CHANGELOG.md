@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **In-progress model deployments can be cancelled.** Workers retain a stoppable launch handle
+  before health checks complete; Stop or Delete can resolve it by instance ID, terminate the
+  process, and clean up lifecycle and placement state instead of waiting for a startup timeout.
+
 - **A user-facing MLServer model deployment guide.** It documents model directory layouts,
   explicit `model-settings.json` configuration, automatic format detection and its limitations,
   the Apptainer/MLServer startup flow, OIP routing, and common deployment failures.
@@ -47,6 +51,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `.metrics` and `.envs` directories to isolated paths under writable scratch, including for
   already-published SIFs; the runner shim also uses a writable working directory and supplies
   writable fallbacks for direct or older-worker launches.
+
+- **MLServer no longer loops while restarting inference workers.** Its redundant internal process
+  pool defaults off because MLServer 1.7.1 calls `asyncio.get_event_loop()` before installing a
+  loop in Python 3.12 + uvloop children; operators can opt back in after validating a compatible
+  release.
 
 - **Apptainer workers can advertise multiple runner families.** `SARDEENZ_RUNNER_TYPES` accepts a
   comma- or whitespace-separated list (while retaining `SARDEENZ_RUNNER_TYPE` compatibility), and

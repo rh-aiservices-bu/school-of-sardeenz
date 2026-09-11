@@ -13,7 +13,7 @@ import {
 import type { ModelRecord } from '../services/model-repository.js';
 import { deriveAggregateState, type InstanceState } from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
-import { WorkerHttpError } from '../clients/worker.js';
+import { WorkerHttpError, type WorkerClient } from '../clients/worker.js';
 
 interface DeployBody {
   modelName: string;
@@ -58,13 +58,12 @@ const RUNTIME_MODULE_PATTERN = /^[A-Za-z0-9_.-]+$/;
 const MAX_ENGINE_ARGS_COUNT = 128;
 const MAX_ENGINE_ARG_LENGTH = 512;
 
-// Stop is only valid from these settled states. Every other state (PENDING, STARTING, DRAINING,
-// STOPPING, and the synthetic STOPPED) is transient or already-terminal background work in
-// flight — interrupting it would race the fire-and-forget deploy/start/wake orchestration and
-// leave an orphaned runner holding VRAM the budget no longer accounts for. ERROR is included
-// deliberately: the dashboard offers Stop from it, and sleepWake.stopModel already knows how to
-// tear an ERROR-state instance down (see VALID_TRANSITIONS in model-lifecycle.ts).
+// STARTING is deliberately stoppable: teardown resolves the worker's pending runner by instanceId
+// and cancels its retained launch handle. PENDING remains excluded because placement/reclamation
+// may still be running without a worker target. ERROR is included because sleepWake.stopModel knows
+// how to settle it (see VALID_TRANSITIONS in model-lifecycle.ts).
 const STOPPABLE_STATES: ReadonlySet<ModelLifecycleState> = new Set([
+  ModelLifecycleState.STARTING,
   ModelLifecycleState.ACTIVE,
   ModelLifecycleState.SLEEPING,
   ModelLifecycleState.ERROR,
@@ -79,7 +78,6 @@ const STOPPABLE_STATES: ReadonlySet<ModelLifecycleState> = new Set([
 // via VALID_TRANSITIONS, and a STOPPED record carries no live process.
 const TRANSIENT_FOR_DELETE: ReadonlySet<ModelLifecycleState> = new Set([
   ModelLifecycleState.PENDING,
-  ModelLifecycleState.STARTING,
   ModelLifecycleState.DRAINING,
   ModelLifecycleState.STOPPING,
 ]);
@@ -120,46 +118,63 @@ async function teardownInstance(
     // clears them), but reading them here rather than after keeps the "what do we need to reap
     // the process" and "did stopModel settle" concerns visually separate.
     const state = await deps.lifecycle.getInstance(modelName, instance.instanceId);
-    if (state?.runnerStartAmbiguous) {
-      app.log.warn(
-        { modelName, instanceId: instance.instanceId },
-        `${context}: retaining runner with ambiguous start reply for reconciliation`,
-      );
-      return false;
+    let workerClient: WorkerClient | null = null;
+    let runnerId = state?.runnerId ?? null;
+    let runnerConfirmedAbsent = false;
+    // A pending start has no runnerId persisted in Redis yet. Resolve it before the lifecycle
+    // transition so Stop/Delete can cancel the worker's retained launch handle.
+    if (state?.workerId && !runnerId) {
+      const worker = deps.workerPool.getWorker(state.workerId);
+      if (!worker) {
+        app.log.warn(
+          { modelName, instanceId: instance.instanceId, workerId: state.workerId },
+          `${context}: cannot reap runner process; worker unknown`,
+        );
+        throw new Error(`worker ${state.workerId} is unknown`);
+      }
+      workerClient = deps.createWorkerClient(worker.managementUrl);
+      const lookup = await workerClient.getRunnerByInstance(instance.instanceId);
+      if (lookup.status === 'absent') runnerConfirmedAbsent = true;
+      else runnerId = lookup.runnerId;
     }
     await deps.sleepWake.stopModel(modelName, instance.instanceId, runnerClient);
 
     // #157: stopModel only updates state/routing/budget — it never terminates the runner
     // process. Reap it here so every teardown path (delete, stop, instance-delete, eviction)
     // actually frees the VRAM the process holds.
-    if (state?.workerId && state.runnerId) {
-      const worker = deps.workerPool.getWorker(state.workerId);
-      if (worker) {
-        try {
-          await deps.createWorkerClient(worker.managementUrl).stopRunner(state.runnerId);
-        } catch (stopErr: unknown) {
-          // The worker no longer tracks this runner (already exited and reaped) — not a
-          // failure, the process is already gone. Typed status check (round-3 review, Low 1):
-          // a response body that happens to contain the substring "returned 404" must not be
-          // misclassified as this tolerated case.
-          if (stopErr instanceof WorkerHttpError && stopErr.status === 404) {
-            app.log.debug(
-              { modelName, instanceId: instance.instanceId, runnerId: state.runnerId },
-              `${context}: runner already gone (404 from worker)`,
-            );
-          } else {
-            throw stopErr;
-          }
+    if (runnerId && state?.workerId) {
+      if (!workerClient) {
+        const worker = deps.workerPool.getWorker(state.workerId);
+        if (!worker) {
+          app.log.warn(
+            { modelName, instanceId: instance.instanceId, workerId: state.workerId },
+            `${context}: cannot reap runner process; worker unknown`,
+          );
+          throw new Error(`worker ${state.workerId} is unknown`);
         }
-      } else {
-        app.log.warn(
-          { modelName, instanceId: instance.instanceId, workerId: state.workerId },
-          `${context}: cannot reap runner process; worker unknown`,
-        );
-        // Do not discard lifecycle/SQL bookkeeping when we cannot establish that the runner
-        // stopped. Reconciliation can retry once the worker returns.
-        throw new Error(`worker ${state.workerId} is unknown`);
+        workerClient = deps.createWorkerClient(worker.managementUrl);
       }
+      try {
+        await workerClient.stopRunner(runnerId);
+      } catch (stopErr: unknown) {
+        // The worker no longer tracks this runner (already exited and reaped) — not a
+        // failure, the process is already gone. Typed status check (round-3 review, Low 1):
+        // a response body that happens to contain the substring "returned 404" must not be
+        // misclassified as this tolerated case.
+        if (stopErr instanceof WorkerHttpError && stopErr.status === 404) {
+          app.log.debug(
+            { modelName, instanceId: instance.instanceId, runnerId },
+            `${context}: runner already gone (404 from worker)`,
+          );
+        } else {
+          throw stopErr;
+        }
+      }
+    } else if (runnerConfirmedAbsent) {
+      app.log.debug(
+        { modelName, instanceId: instance.instanceId },
+        `${context}: worker confirms no live or in-progress runner`,
+      );
     } else {
       app.log.warn(
         { modelName, instanceId: instance.instanceId },
@@ -405,6 +420,10 @@ async function deployFromRecord(
         protocol: runnerMeta.protocol,
         entrypoint: runnerMeta.entrypoint,
         devices: result.devices,
+        isCancelled: () =>
+          claims.stoppingInFlight.has(record.name) ||
+          claims.deletingInFlight.has(record.name) ||
+          claims.instanceOpInFlight.has(`${record.name}:${instanceId}`),
         ...(options.moveOperationId ? { isStillOwner: () => deps.leaderElection.isLeader } : {}),
       });
       if (!options.awaitDeployment) {
@@ -575,6 +594,10 @@ async function deployFromRecord(
           protocol: runnerMeta.protocol,
           entrypoint: runnerMeta.entrypoint,
           devices: reclaimed.devices,
+          isCancelled: () =>
+            claims.stoppingInFlight.has(record.name) ||
+            claims.deletingInFlight.has(record.name) ||
+            claims.instanceOpInFlight.has(`${record.name}:${instanceId}`),
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -961,6 +984,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         { reason: 'invalid-move-target' },
       );
     }
+
+    // A capacity-reclamation deployment may be asynchronously starting while its model-level
+    // claim is held. Reject it before reading the source instance so an in-flight operation wins
+    // deterministically over a concurrently removed/replaced lifecycle record.
+    await assertMoveAdmission(modelName);
 
     const [record, source] = await Promise.all([
       deps.modelRepository.findByName(modelName),

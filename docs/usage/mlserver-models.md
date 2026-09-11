@@ -112,6 +112,14 @@ Sleeping an MLServer model unloads it through the KServe repository API. Waking 
 again from the generated repository. This is not the same as vLLM's explicit weight offload: the
 operating-system page cache may keep files warm, but that is not guaranteed.
 
+## Cancel a deployment
+
+While a model is `STARTING`, use **Stop** to cancel the in-progress runner launch while retaining
+the model configuration, or **Delete** to cancel the launch and remove the configuration. Sardeenz
+resolves the worker's in-progress runner by instance ID and terminates it; neither action requires
+a force operation. A `PENDING` deployment has no worker target yet and cannot be cancelled until it
+is placed.
+
 ## Troubleshooting
 
 - **Could not infer an MLServer runtime:** add an explicit `model-settings.json`, and confirm that
@@ -131,6 +139,10 @@ operating-system page cache may keep files warm, but that is not guaranteed.
   writable working directory and provide writable fallbacks. The preceding Apptainer warning about
   remounting `/.singularity.d/libs` read-only is non-fatal; the Python traceback identifies the
   actual startup failure.
+- **`Worker-N` repeatedly exits with “There is no current event loop”:** upgrade the worker. It
+  disables MLServer 1.7.1's redundant internal inference pool by default; Sardeenz already isolates
+  each model in its own runner process. Do not set `SARDEENZ_MLSERVER_PARALLEL_WORKERS` above zero
+  unless the selected MLServer release has been validated with Python 3.12 and uvloop.
 
 For importing the runner SIF, see the [runner catalog guide](runner-catalog.md). For the HTTP API
 families, see the [API reference](api-reference.md). Implementation and runner-contract details

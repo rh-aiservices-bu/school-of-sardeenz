@@ -3,7 +3,7 @@
  *
  * After #140 the control plane rejects `DELETE /api/v1/models/{modelName}` and
  * `DELETE .../instances/{instanceId}` with `409 INVALID_STATE` while an instance is in a
- * transient state (`PENDING`, `STARTING`, `DRAINING`, `STOPPING`). These pure predicates
+ * transient state (`PENDING`, `DRAINING`, `STOPPING`). STARTING is cancellable. These predicates
  * drive whether the dashboard renders each Delete affordance, so the UI matches the API and
  * the logic is unit-testable without rendering PatternFly (PF/React version conflicts in this
  * worktree — see role-visibility.test.tsx).
@@ -13,7 +13,6 @@ import { ModelLifecycleState } from '@sardeenz/types';
 /** States for which the control plane 409s a DELETE (#140). */
 export const TRANSIENT_STATES: readonly ModelLifecycleState[] = [
   ModelLifecycleState.PENDING,
-  ModelLifecycleState.STARTING,
   ModelLifecycleState.DRAINING,
   ModelLifecycleState.STOPPING,
 ];
@@ -33,9 +32,8 @@ export function canDeleteModelRow(state: ModelLifecycleState): boolean {
 }
 
 /**
- * Detail-view model Delete gate. ModelDetail exposes `instances`, so gate on "any instance
- * transient": the API rejects a mixed `ACTIVE`+`STARTING` model even though its aggregate is
- * `ACTIVE`.
+ * Detail-view model Delete gate. ModelDetail exposes `instances`, so gate on any remaining
+ * non-cancellable transient instance. STARTING instances are cancellable.
  */
 export function canDeleteModelDetail(
   instances: ReadonlyArray<{ state: ModelLifecycleState }>,

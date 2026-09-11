@@ -2,9 +2,9 @@
  * Delete-affordance gating tests (#172).
  *
  * After #140 the control plane 409s a DELETE while an instance is transient
- * (PENDING/STARTING/DRAINING/STOPPING). These tests pin that the dashboard hides the Delete
- * affordance (list row, detail header, per-instance row) for those four states and keeps it
- * for the non-transient states (ACTIVE/SLEEPING/STOPPED/ERROR).
+ * (PENDING/DRAINING/STOPPING). STARTING is deliberately cancellable. These tests pin that the
+ * dashboard hides Delete for the remaining transient states and keeps it for cancellable or
+ * settled states.
  *
  * Following the project convention (see role-visibility.test.tsx, ModelDeploy.test.tsx) we test
  * the pure predicates that drive the JSX conditionals rather than rendering PatternFly
@@ -21,12 +21,12 @@ import {
 
 const TRANSIENT: ModelLifecycleState[] = [
   ModelLifecycleState.PENDING,
-  ModelLifecycleState.STARTING,
   ModelLifecycleState.DRAINING,
   ModelLifecycleState.STOPPING,
 ];
 
 const NON_TRANSIENT: ModelLifecycleState[] = [
+  ModelLifecycleState.STARTING,
   ModelLifecycleState.ACTIVE,
   ModelLifecycleState.SLEEPING,
   ModelLifecycleState.STOPPED,
@@ -76,13 +76,13 @@ describe('canDeleteModelDetail (detail header — gates on "any instance transie
     ).toBe(true);
   });
 
-  it('hides Delete for a mixed ACTIVE+STARTING model even though its aggregate is ACTIVE', () => {
+  it('shows Delete for a mixed ACTIVE+STARTING model because startup is cancellable', () => {
     expect(
       canDeleteModelDetail([
         { state: ModelLifecycleState.ACTIVE },
         { state: ModelLifecycleState.STARTING },
       ]),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

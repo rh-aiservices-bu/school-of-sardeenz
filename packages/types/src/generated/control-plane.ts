@@ -238,6 +238,10 @@ export type paths = {
          *     to park a configured model; use Delete to remove it entirely.
          *
          *     Returns `202` immediately; the stop completes asynchronously.
+         *
+         *     A model in `STARTING` is cancellable: the control plane resolves the
+         *     worker's in-progress runner identity, terminates that launch, releases
+         *     its placement hold, and retains the model as a stopped configuration.
          */
         post: operations["stopModel"];
         delete?: never;
@@ -1956,7 +1960,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description An instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them. A move in replacement cleanup is already failed and can be superseded by deletion; force deletion can supersede a stranded move in any phase. */
+            /** @description An instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them. A move in replacement cleanup is already failed and can be superseded by deletion; force deletion can supersede a stranded move in any phase. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2493,7 +2497,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Instance is in a transient state (PENDING, STARTING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`) */
+            /** @description Instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`) */
             409: {
                 headers: {
                     [name: string]: unknown;

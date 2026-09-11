@@ -98,6 +98,7 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     expect(args).toContain('SARDEENZ_MLSERVER_METRICS_PORT=9104');
     expect(args).toContain('MLSERVER_METRICS_DIR=/scratch/metrics/runner-abc');
     expect(args).toContain('MLSERVER_ENVIRONMENTS_DIR=/scratch/environments/runner-abc');
+    expect(args).toContain('MLSERVER_PARALLEL_WORKERS=0');
 
     // SIF path precedes the entrypoint, which precedes the model/port flags.
     const sifIdx = args.indexOf('/modules/vllm-0.21.sif');
@@ -125,14 +126,24 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     const environmentsDirIdx = args.indexOf(
       'MLSERVER_ENVIRONMENTS_DIR=/scratch/environments/runner-abc',
     );
+    const parallelWorkersIdx = args.indexOf('MLSERVER_PARALLEL_WORKERS=0');
     expect(grpcIdx).toBeGreaterThan(-1);
     expect(metricsIdx).toBeGreaterThan(-1);
     expect(metricsDirIdx).toBeGreaterThan(-1);
     expect(environmentsDirIdx).toBeGreaterThan(-1);
+    expect(parallelWorkersIdx).toBeGreaterThan(-1);
     expect(args[grpcIdx - 1]).toBe('--env');
     expect(args[metricsIdx - 1]).toBe('--env');
     expect(args[metricsDirIdx - 1]).toBe('--env');
     expect(args[environmentsDirIdx - 1]).toBe('--env');
+    expect(args[parallelWorkersIdx - 1]).toBe('--env');
+  });
+
+  it('allows an operator to override the MLServer internal pool size', async () => {
+    const { launcher } = makeLauncher({ mlserverParallelWorkers: 2 });
+    const plan = await launcher.buildExecPlan(makeSpec());
+
+    expect(plan.args).toContain('MLSERVER_PARALLEL_WORKERS=2');
   });
 
   it('vLLM argv is unaffected by the aux-port env', async () => {

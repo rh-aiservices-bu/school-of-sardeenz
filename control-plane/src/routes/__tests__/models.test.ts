@@ -49,6 +49,7 @@ interface Overrides {
   transition?: ReturnType<typeof vi.fn>;
   getWorker?: ReturnType<typeof vi.fn>;
   stopRunner?: ReturnType<typeof vi.fn>;
+  getRunnerByInstance?: ReturnType<typeof vi.fn>;
   getMoveOperation?: ReturnType<typeof vi.fn>;
   removeMoveOperation?: ReturnType<typeof vi.fn>;
   removeModel?: ReturnType<typeof vi.fn>;
@@ -80,7 +81,10 @@ function buildApp(over: Overrides = {}): {
   // runnerId 'runner-1') so every pre-existing teardown test still exercises (and succeeds
   // through) the new reap step without having to opt in.
   const stopRunner = over.stopRunner ?? vi.fn(() => Promise.resolve());
-  const createWorkerClient = vi.fn(() => ({ stopRunner }));
+  const getRunnerByInstance =
+    over.getRunnerByInstance ??
+    vi.fn(() => Promise.resolve({ status: 'ready', runnerId: 'runner-1' }));
+  const createWorkerClient = vi.fn(() => ({ stopRunner, getRunnerByInstance }));
 
   const deps = {
     config: { weightsDir: '/weights' },
@@ -1252,7 +1256,6 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
 
   it.each([
     ModelLifecycleState.PENDING,
-    ModelLifecycleState.STARTING,
     ModelLifecycleState.DRAINING,
     ModelLifecycleState.STOPPING,
   ])('returns 409 when an instance is in %s (transient state, #140)', async (state) => {
@@ -1280,7 +1283,7 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     expect(res.statusCode).toBe(202);
   });
 
-  it('returns 409 when ANY instance is transient, even if the aggregate is settled (mixed ACTIVE + STARTING, #140)', async () => {
+  it('returns 202 for mixed ACTIVE + STARTING because the start is cancellable', async () => {
     const starting = {
       ...ACTIVE_STATE,
       instanceId: 'inst-000000000002',
@@ -1293,25 +1296,18 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
 
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
 
-    expect(res.statusCode).toBe(409);
-    const body = res.json<{ code: string; error: string; details?: { currentState?: string } }>();
-    expect(body.code).toBe('INVALID_STATE');
-    // #174: the body must name the offending transient instance's state (STARTING), not the
-    // settled aggregate (ACTIVE) that would misleadingly read as deletable.
-    expect(body.error).toContain('STARTING');
-    expect(body.error).not.toContain('ACTIVE');
-    expect(body.error).toContain('inst-000000000002');
+    expect(res.statusCode).toBe(202);
   });
 
   it('names the transient instance state and id in the 409 body, not the aggregate (#174)', async () => {
-    const starting = {
+    const draining = {
       ...ACTIVE_STATE,
       instanceId: 'inst-000000000002',
-      state: ModelLifecycleState.STARTING,
+      state: ModelLifecycleState.DRAINING,
     };
     const { app } = buildApp({
       getInstance: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
-      getInstancesForModel: vi.fn(() => Promise.resolve([ACTIVE_STATE, starting])),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ACTIVE_STATE, draining])),
     });
 
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
@@ -1319,7 +1315,7 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     expect(res.statusCode).toBe(409);
     const body = res.json<{ details: { instanceId: string; currentState: string } }>();
     expect(body.details.instanceId).toBe('inst-000000000002');
-    expect(body.details.currentState).toBe(ModelLifecycleState.STARTING);
+    expect(body.details.currentState).toBe(ModelLifecycleState.DRAINING);
   });
 
   it('rejects a concurrent second model DELETE while the first is still backgrounding (#140)', async () => {
@@ -1550,20 +1546,25 @@ describe('launch/stop/instance paths fenced against an in-flight model DELETE (#
 });
 
 describe('teardownInstance reaps the runner process (#157)', () => {
-  it('retains lifecycle and SQL bookkeeping when a runner start reply was ambiguous', async () => {
+  it('resolves and cancels a runner when its start reply was ambiguous', async () => {
     const ambiguous = {
       ...ACTIVE_STATE,
       state: ModelLifecycleState.ERROR,
+      runnerId: null,
       runnerStartAmbiguous: true,
     };
     const removeInstance = vi.fn(() => Promise.resolve());
     const deleteInstance = vi.fn(() => Promise.resolve(true));
     const stopModel = vi.fn(() => Promise.resolve());
-    const { app } = buildApp({
+    const getRunnerByInstance = vi.fn(() =>
+      Promise.resolve({ status: 'starting', runnerId: 'runner-pending' }),
+    );
+    const { app, stopRunner } = buildApp({
       getInstance: vi.fn(() => Promise.resolve(ambiguous)),
       removeInstance,
       deleteInstance,
       stopModel,
+      getRunnerByInstance,
     });
 
     const response = await app.inject({
@@ -1572,25 +1573,71 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     });
     expect(response.statusCode).toBe(202);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(stopModel).not.toHaveBeenCalled();
-    expect(removeInstance).not.toHaveBeenCalled();
-    expect(deleteInstance).not.toHaveBeenCalled();
+    expect(getRunnerByInstance).toHaveBeenCalledWith(INSTANCE_ID);
+    expect(stopRunner).toHaveBeenCalledWith('runner-pending');
+    expect(stopModel).toHaveBeenCalled();
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(deleteInstance).toHaveBeenCalledWith(INSTANCE_ID);
     await app.close();
   });
 
-  it('does not CASCADE a model row when one of its runner starts has an ambiguous reply', async () => {
+  it('deletes a model after cancelling its ambiguously-started runner', async () => {
     const ambiguous = {
       ...ACTIVE_STATE,
       state: ModelLifecycleState.ERROR,
+      runnerId: null,
       runnerStartAmbiguous: true,
     };
     const deleteModel = vi.fn(() => Promise.resolve());
-    const { app } = buildApp({ getInstance: vi.fn(() => Promise.resolve(ambiguous)), deleteModel });
+    let instancePresent = true;
+    const getInstance = vi.fn(() => Promise.resolve(instancePresent ? ambiguous : null));
+    const removeInstance = vi.fn(() => {
+      instancePresent = false;
+      return Promise.resolve();
+    });
+    const { app, stopRunner } = buildApp({
+      getInstance,
+      removeInstance,
+      deleteModel,
+      getRunnerByInstance: vi.fn(() =>
+        Promise.resolve({ status: 'starting', runnerId: 'runner-pending' }),
+      ),
+    });
 
     const response = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
     expect(response.statusCode).toBe(202);
+    await vi.waitFor(() => expect(stopRunner).toHaveBeenCalledWith('runner-pending'));
+    await vi.waitFor(() => expect(deleteModel).toHaveBeenCalledWith('m1'));
+    await app.close();
+  });
+
+  it('POST stop cancels a STARTING runner resolved by instance id', async () => {
+    const starting = {
+      ...ACTIVE_STATE,
+      state: ModelLifecycleState.STARTING,
+      runnerHost: null,
+      runnerPort: null,
+      runnerId: null,
+    };
+    const getRunnerByInstance = vi.fn(() =>
+      Promise.resolve({ status: 'starting', runnerId: 'runner-pending' }),
+    );
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app, stopRunner } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(starting)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([starting])),
+      getRunnerByInstance,
+      removeInstance,
+    });
+
+    const response = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop' });
+
+    expect(response.statusCode).toBe(202);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(deleteModel).not.toHaveBeenCalled();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(getRunnerByInstance).toHaveBeenCalledWith(INSTANCE_ID);
+    expect(stopRunner).toHaveBeenCalledWith('runner-pending');
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
     await app.close();
   });
 
@@ -1697,13 +1744,14 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     expect(removeInstance).not.toHaveBeenCalled();
   });
 
-  it('skips the reap step (and never constructs a worker client) when the instance state has no runnerId', async () => {
+  it('cleans up when the worker confirms an instance with no runnerId is absent', async () => {
     const noRunner = { ...ACTIVE_STATE, runnerId: null };
     const removeInstance = vi.fn(() => Promise.resolve());
-    const { app, stopRunner, createWorkerClient, logWarn } = buildApp({
+    const { app, stopRunner, createWorkerClient } = buildApp({
       getInstance: vi.fn(() => Promise.resolve(noRunner)),
       getInstancesForModel: vi.fn(() => Promise.resolve([noRunner])),
       removeInstance,
+      getRunnerByInstance: vi.fn(() => Promise.resolve({ status: 'absent' })),
     });
 
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
@@ -1713,12 +1761,8 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(stopRunner).not.toHaveBeenCalled();
-    expect(createWorkerClient).not.toHaveBeenCalled();
+    expect(createWorkerClient).toHaveBeenCalled();
     expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
-    expect(logWarn).toHaveBeenCalledWith(
-      { modelName: 'm1', instanceId: INSTANCE_ID },
-      expect.stringContaining('cannot reap runner process; no runnerId') as string,
-    );
   });
 
   it('retains bookkeeping when the worker is not found in the pool', async () => {
@@ -1818,7 +1862,6 @@ describe('POST /api/v1/models/:modelName/stop', () => {
 
   it.each([
     ModelLifecycleState.PENDING,
-    ModelLifecycleState.STARTING,
     ModelLifecycleState.DRAINING,
     ModelLifecycleState.STOPPING,
   ])('returns 409 when the (only) instance is %s (transient state)', async (state) => {
@@ -2563,7 +2606,6 @@ describe('instance-scoped op dedup (quality L4 / security L2)', () => {
 
   it.each([
     ModelLifecycleState.PENDING,
-    ModelLifecycleState.STARTING,
     ModelLifecycleState.DRAINING,
     ModelLifecycleState.STOPPING,
   ])('DELETE of an instance in %s returns 409 (transient state, #140)', async (state) => {
@@ -2578,6 +2620,25 @@ describe('instance-scoped op dedup (quality L4 / security L2)', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json<{ code: string }>().code).toBe('INVALID_STATE');
+  });
+
+  it('DELETE of a STARTING instance returns 202 and cancels its launch', async () => {
+    const starting = { ...ACTIVE_STATE, state: ModelLifecycleState.STARTING, runnerId: null };
+    const { app, stopRunner } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(starting)),
+      getRunnerByInstance: vi.fn(() =>
+        Promise.resolve({ status: 'starting', runnerId: 'runner-pending' }),
+      ),
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}`,
+    });
+
+    expect(res.statusCode).toBe(202);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stopRunner).toHaveBeenCalledWith('runner-pending');
   });
 
   it('DELETE of an ACTIVE instance returns 202 (settled state, #140)', async () => {

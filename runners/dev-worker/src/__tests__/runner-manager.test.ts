@@ -192,6 +192,50 @@ describe('RunnerManager', () => {
     ).rejects.toThrow(ConflictError);
   });
 
+  it('cancels a runner while launcher health checks are still in progress', async () => {
+    let rejectLaunch!: (error: Error) => void;
+    const stop = vi.fn(() => {
+      rejectLaunch(new Error('runner exited during cancelled startup'));
+      return Promise.resolve();
+    });
+    const launcher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (_spec, _onLog, _onStartupComplete, _onExit, onLaunchHandle) =>
+        new Promise<LaunchHandle>((_resolve, reject) => {
+          rejectLaunch = reject;
+          onLaunchHandle?.({ host: 'localhost', port: 19301, enginePort: 19302, stop });
+        }),
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+    const starting = mgr.startRunner({
+      modelName: 'cancel-me',
+      instanceId: 'inst-cancel-me',
+      runnerType: 'mlserver',
+      modelPath: '/models/cancel-me',
+      requiredMemory: 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    const outcome = starting.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() =>
+      expect(mgr.getRunnerIdForInstance('inst-cancel-me')).toMatch(/^runner-/),
+    );
+    const runnerId = mgr.getRunnerIdForInstance('inst-cancel-me');
+
+    expect(runnerId).toMatch(/^runner-/);
+    await mgr.stopRunner(runnerId!);
+    await expect(outcome).resolves.toEqual(
+      expect.objectContaining({ message: 'runner exited during cancelled startup' }),
+    );
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(mgr.getRunnerIdForInstance('inst-cancel-me')).toBeUndefined();
+    expect(mgr.getAllRunners()).toEqual([]);
+  });
+
   it('allows two replicas of the same model name on this worker with distinct instanceIds (#120)', async () => {
     const r1 = await manager.startRunner({
       modelName: 'replica-model',

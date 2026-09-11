@@ -85,6 +85,7 @@ export interface LaunchHandle {
 // to `RunnerLogBuffer.append` so live launch output reaches the `/runners/:runnerId/logs` SSE
 // route.
 export type LogSink = (stream: 'stdout' | 'stderr', content: string) => void;
+export type LaunchHandleSink = (handle: LaunchHandle) => void;
 
 export interface RunnerLauncher {
   /**
@@ -111,11 +112,15 @@ export interface RunnerLauncher {
    * `start()` has already resolved (i.e. post-startup, unsupervised termination) — not for exits
    * during startup or via a deliberate `stop()`. Lets the manager reap the record and free its
    * device memory instead of leaving a phantom reservation.
+   *
+   * `onLaunchHandle`, when provided, is called as soon as the process or stub can be stopped,
+   * before startup health checks complete. This makes an in-progress launch cancellable.
    */
   start(
     spec: LaunchSpec,
     onLog?: LogSink,
     onStartupComplete?: () => void,
     onExit?: () => void,
+    onLaunchHandle?: LaunchHandleSink,
   ): Promise<LaunchHandle>;
 }

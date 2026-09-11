@@ -68,6 +68,10 @@ advertises `supportedSleepLevels: ["L1_HOST_RAM"]` for v1 (it is the best availa
   metric files and inference environments out of the SIF's read-only working directory. The shim
   also uses its generated writable model repository as its working directory and fallback storage
   when launched without a current worker.
+- `MLSERVER_PARALLEL_WORKERS=0` disables MLServer's internal child inference pool. Sardeenz already
+  runs each model in an isolated runner process, and MLServer 1.7.1's child worker crashes and
+  restarts continuously under Python 3.12 + uvloop. Operators can explicitly restore a positive
+  value with `SARDEENZ_MLSERVER_PARALLEL_WORKERS` after validating a compatible MLServer release.
 - MLServer also binds unauthenticated gRPC and Prometheus metrics servers even in this REST-only
   deployment. The worker reserves a contiguous four-port block (management, HTTP engine, gRPC,
   metrics) and passes `SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT` explicitly

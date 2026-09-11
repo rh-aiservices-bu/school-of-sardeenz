@@ -90,6 +90,10 @@ const PORTS_PER_RUNNER = 4;
 
 export class RunnerManager {
   private readonly runners = new Map<string, RunnerRecord>();
+  private readonly pendingRunners = new Map<
+    string,
+    { instanceId: string; modelName: string; handle?: LaunchHandle; cancelRequested: boolean }
+  >();
   // modelName -> runnerIds. A Set, not a single id, because #120 allows N replicas of one model
   // on this worker; insertion order is preserved (JS Set iteration order), which
   // getRunnerIdForModel relies on to return the most-recently-started runner.
@@ -145,6 +149,13 @@ export class RunnerManager {
       this.modelRunners.set(params.modelName, modelRunnerIds);
     }
     modelRunnerIds.add(runnerId);
+    const pending: {
+      instanceId: string;
+      modelName: string;
+      handle?: LaunchHandle;
+      cancelRequested: boolean;
+    } = { instanceId: params.instanceId, modelName: params.modelName, cancelRequested: false };
+    this.pendingRunners.set(runnerId, pending);
 
     // Post-startup supervision: if the runner's process exits on its own (crash, OOM-kill, etc.)
     // rather than via a deliberate stopRunner(), reap its record and free its device memory so a
@@ -200,7 +211,16 @@ export class RunnerManager {
         // runner is stopped (drop() in stopRunner).
         () => this.logBuffer.markEnded(runnerId),
         handleUnexpectedExit,
+        (handle) => {
+          pending.handle = handle;
+          if (pending.cancelRequested) void handle.stop().catch(() => {});
+        },
       );
+
+      if (pending.cancelRequested) {
+        await handle.stop().catch(() => {});
+        throw new Error(`Runner start cancelled for instance ${params.instanceId}`);
+      }
 
       const record: RunnerRecord = {
         runnerId,
@@ -252,6 +272,8 @@ export class RunnerManager {
       }
       this.failedInstanceLogRunners.set(params.instanceId, runnerId);
       throw err;
+    } finally {
+      this.pendingRunners.delete(runnerId);
     }
   }
 
@@ -261,13 +283,18 @@ export class RunnerManager {
     onLog?: LogSink,
     onStartupComplete?: () => void,
     onExit?: () => void,
+    onLaunchHandle?: (handle: LaunchHandle) => void,
   ): Promise<LaunchHandle> {
+    const start = (): Promise<LaunchHandle> => {
+      if (this.pendingRunners.get(spec.runnerId)?.cancelRequested) {
+        return Promise.reject(new Error(`Runner start cancelled for ${spec.runnerId}`));
+      }
+      return this.launcher.start(spec, onLog, onStartupComplete, onExit, onLaunchHandle);
+    };
     if (!this.launcher.serializeColdStarts) {
-      return this.launcher.start(spec, onLog, onStartupComplete, onExit);
+      return start();
     }
-    const result = this.coldStartChain.then(() =>
-      this.launcher.start(spec, onLog, onStartupComplete, onExit),
-    );
+    const result = this.coldStartChain.then(start);
     // Keep the chain alive regardless of this start's success/failure.
     this.coldStartChain = result.then(
       () => undefined,
@@ -278,6 +305,12 @@ export class RunnerManager {
 
   async stopRunner(runnerId: string): Promise<void> {
     const record = this.runners.get(runnerId);
+    const pending = this.pendingRunners.get(runnerId);
+    if (!record && pending) {
+      pending.cancelRequested = true;
+      if (pending.handle) await pending.handle.stop();
+      return;
+    }
     if (!record) {
       throw new NotFoundError(`Runner ${runnerId} not found`);
     }
@@ -313,7 +346,7 @@ export class RunnerManager {
     // Stop concurrently: cold-start serialization is a start-time constraint, not a stop-time one,
     // and draining runners in series would let total teardown exceed the pod's grace period when a
     // worker hosts several runners. Each stopRunner touches distinct map keys, so this is safe.
-    const runnerIds = Array.from(this.runners.keys());
+    const runnerIds = [...new Set([...this.runners.keys(), ...this.pendingRunners.keys()])];
     await Promise.all(runnerIds.map((runnerId) => this.stopRunner(runnerId)));
   }
 
