@@ -42,8 +42,10 @@ creates the marker Roles and its review permission. Operators create user or gro
 for example:
 
 ```bash
-oc adm policy add-role-to-group sardeenz-admin platform-admins -n sardeenz
-oc adm policy add-role-to-group sardeenz-admin-readonly viewers -n sardeenz
+oc adm policy add-role-to-group sardeenz-admin platform-admins \
+  --role-namespace=sardeenz -n sardeenz
+oc adm policy add-role-to-group sardeenz-admin-readonly viewers \
+  --role-namespace=sardeenz -n sardeenz
 ```
 
 The default OpenShift deployment configures `K8S_API_URL=https://kubernetes.default.svc` and uses
