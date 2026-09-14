@@ -21,13 +21,14 @@ import ChatbotHeader, {
 import ChatbotWelcomePrompt from '@patternfly/chatbot/dist/dynamic/ChatbotWelcomePrompt';
 import Message from '@patternfly/chatbot/dist/dynamic/Message';
 import MessageBar from '@patternfly/chatbot/dist/dynamic/MessageBar';
-import MessageBox from '@patternfly/chatbot/dist/dynamic/MessageBox';
+import MessageBox, { type MessageBoxHandle } from '@patternfly/chatbot/dist/dynamic/MessageBox';
 import { ModelLifecycleState } from '@sardeenz/types';
 import type { ModelInfo } from '../../api/client';
 import botAvatar from '../../assets/avatars/bot-avatar.svg';
 import userAvatar from '../../assets/avatars/user-avatar.svg';
 import { modelLabel } from './modelLabel';
 import type { PlaygroundMessage } from './types';
+import { useChatScroll } from './useChatScroll';
 import { useChatSession } from './useChatSession';
 import type { SessionStatus } from './workspace-types';
 
@@ -48,6 +49,10 @@ export function ModelChatCard({ model, onStatusChange }: ModelChatCardProps) {
     setUseStreaming,
     clearHistory,
   } = useChatSession(model);
+
+  const messageBoxRef = useRef<MessageBoxHandle>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const { onScroll } = useChatScroll(messageBoxRef, spacerRef, messages, isGenerating);
 
   const [inputValue, setInputValue] = useState(() => t('chat.defaultPrompt'));
 
@@ -125,10 +130,12 @@ export function ModelChatCard({ model, onStatusChange }: ModelChatCardProps) {
                   className="sz-chat-welcome"
                 />
               ) : (
-                <MessageBox>
+                <MessageBox ref={messageBoxRef} onScroll={onScroll}>
                   {messages.map((message) => (
                     <PlaygroundMessageItem key={message.id} message={message} modelName={name} />
                   ))}
+                  {/* Sized by useChatScroll so the newest turn can scroll to the top of the box. */}
+                  <div ref={spacerRef} aria-hidden="true" style={{ flexShrink: 0 }} />
                 </MessageBox>
               )}
             </ChatbotContent>
@@ -176,7 +183,7 @@ function PlaygroundMessageItem({
   }
 
   return (
-    <div>
+    <div data-message-id={message.id}>
       <Message
         role={isUser ? 'user' : 'bot'}
         content={message.content || (message.isLoading ? '' : t('chat.noResponse'))}

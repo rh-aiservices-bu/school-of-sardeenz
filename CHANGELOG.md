@@ -16,8 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (non-streaming turns use a JSON `stream: false` request), a per-pane Clear button, and
   persistence — layout and sidebar preferences in localStorage, open sessions in sessionStorage,
   workspace state kept across page navigation via an app-level provider. Sleeping models are
-  listed with a marker and wake on first request. New Playwright spec `e2e/playground.spec.ts`
-  covers the flows against a mock OpenAI-compatible inference server.
+  listed with a marker and wake on first request. Chat panes scroll like a chatbot: a new prompt
+  jumps to the top of the pane, the reply is followed as it streams, and scrolling up pauses the
+  follow. New Playwright spec `e2e/playground.spec.ts` covers the flows against a mock
+  OpenAI-compatible inference server.
 
 - **An OpenShift OAuth RBAC operator guide.** It documents OAuth client setup, dashboard
   deployment, Sardeenz marker-Role bindings, permission verification, and troubleshooting.

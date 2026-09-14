@@ -9,6 +9,7 @@ import type { MockClusterMemory, MockModelInfo } from './mocks/control-plane.js'
 
 const REPLY_WORDS = ['The ', 'sky ', 'is ', 'blue ', 'because ', 'of ', 'Rayleigh ', 'scattering.'];
 const REPLY = REPLY_WORDS.join('');
+const LONG_REPLY_WORDS = Array.from({ length: 90 }, (_, i) => `word${i + 1} `);
 
 let inference: Server;
 /** Bodies received by the mock inference server, oldest first. */
@@ -37,13 +38,16 @@ test.beforeAll(async () => {
         return;
       }
 
+      // A prompt mentioning "long" gets a 90-word reply so a pane overflows (scroll scenarios).
+      const lastPrompt = String(
+        (body['messages'] as { content?: string }[] | undefined)?.at(-1)?.content ?? '',
+      );
+      const words = lastPrompt.includes('long') ? LONG_REPLY_WORDS : REPLY_WORDS;
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       let i = 0;
       const timer = setInterval(() => {
-        if (i < REPLY_WORDS.length) {
-          res.write(
-            `data: ${JSON.stringify({ choices: [{ delta: { content: REPLY_WORDS[i] } }] })}\n\n`,
-          );
+        if (i < words.length) {
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: words[i] } }] })}\n\n`);
           i += 1;
           return;
         }
@@ -251,5 +255,54 @@ test.describe('Chatbot Playground', () => {
 
     await page.getByRole('button', { name: 'Close all sessions' }).click();
     await expect(page.getByRole('heading', { name: 'No sessions open' })).toBeVisible();
+  });
+
+  test('a new prompt scrolls to the top of the pane, the reply is followed, scrolling up stops it', async ({
+    page,
+    bffPort,
+  }) => {
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.goto(bffUrl(bffPort, '/playground'));
+    await page.getByRole('button', { name: /Llama 3.1 8B/ }).click();
+
+    const state = () =>
+      page.evaluate(() => {
+        const box = document.querySelector('[aria-label="Scrollable message log"]') as HTMLElement;
+        const prompts = Array.from(box.querySelectorAll<HTMLElement>('[data-message-id]')).filter(
+          (el) => el.textContent?.includes('You'),
+        );
+        const last = prompts.at(-1);
+        return {
+          scrollTop: Math.round(box.scrollTop),
+          maxTop: Math.round(box.scrollHeight - box.clientHeight),
+          promptTop: last
+            ? Math.round(last.getBoundingClientRect().top - box.getBoundingClientRect().top)
+            : NaN,
+        };
+      });
+
+    for (let turn = 1; turn <= 3; turn++) {
+      await page.getByRole('textbox').first().fill(`long question ${turn}`);
+      await page.getByRole('button', { name: /send/i }).first().click();
+      await page.waitForTimeout(400);
+      const during = await state();
+      // Just below the box's top padding, never clamped by a short conversation.
+      expect(during.promptTop).toBeGreaterThanOrEqual(0);
+      expect(during.promptTop).toBeLessThan(48);
+
+      await expect(page.getByText(/tok\/s/).nth(turn - 1)).toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(200);
+      const after = await state();
+      expect(after.scrollTop).toBe(after.maxTop);
+    }
+
+    await page.getByRole('textbox').first().fill('long question 4');
+    await page.getByRole('button', { name: /send/i }).first().click();
+    await page.waitForTimeout(800);
+    await page.mouse.move(700, 400);
+    await page.mouse.wheel(0, -600);
+    await page.waitForTimeout(600);
+    const interrupted = await state();
+    expect(interrupted.scrollTop).toBeLessThan(interrupted.maxTop - 50);
   });
 });
