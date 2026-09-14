@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Chatbot Playground rebuilt to v1 look and behaviour.** The page now uses
+  `@patternfly/chatbot` (header, welcome prompt, message bubbles with avatars, message bar with
+  stop button) inside the v1 workspace: collapsible/resizable model sidebar with search and GPU
+  (or worker → GPU) grouping, session tabs with a "Generating" badge, single / split / 2x2 grid
+  layouts with per-pane session selectors, latency / TTFT / tok/s per reply, a Streaming toggle
+  (non-streaming turns use a JSON `stream: false` request), a per-pane Clear button, and
+  persistence — layout and sidebar preferences in localStorage, open sessions in sessionStorage,
+  workspace state kept across page navigation via an app-level provider. Sleeping models are
+  listed with a marker and wake on first request. Chat panes scroll like a chatbot: a new prompt
+  jumps to the top of the pane, the reply is followed as it streams, and scrolling up pauses the
+  follow. New Playwright spec `e2e/playground.spec.ts` covers the flows against a mock
+  OpenAI-compatible inference server.
+
 - **An OpenShift OAuth RBAC operator guide.** It documents OAuth client setup, dashboard
   deployment, Sardeenz marker-Role bindings, permission verification, and troubleshooting.
 
@@ -33,6 +46,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in `ERROR`.
 
 ### Changed
+
+- **Model colours on the GPU placement panel no longer collide.** The palette doubled to 14
+  PatternFly chart colours (seven hues in two shades), and colours are assigned per page from the
+  full set of displayed models with collision resolution, instead of a bare name hash into seven
+  slots. A model keeps its preferred colour across refreshes and gets the same colour on every
+  GPU card; it only moves to the next free slot when another visible model would share it.
 
 - **The Models table lists every worker hosting a model.** Multi-instance models now show their
   deduplicated worker links on separate lines instead of an ambiguous dash.

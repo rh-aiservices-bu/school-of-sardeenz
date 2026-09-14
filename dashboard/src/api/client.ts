@@ -1,5 +1,9 @@
 import { type ControlPlaneComponents } from '@sardeenz/types';
-import type { ChatCompletionBody } from '../pages/Playground/types';
+import type {
+  ChatCompletionBody,
+  ChatCompletionResponse,
+  ChatUsage,
+} from '../pages/Playground/types';
 import { parseSseBuffer, extractDelta } from '../utils/parseSse';
 
 type ModelInfo = ControlPlaneComponents['schemas']['ModelInfo'];
@@ -119,7 +123,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface ChatStreamCallbacks {
   onChunk: (delta: string) => void;
-  onDone: (fullText: string) => void;
+  /** `usage` is present only when the engine emitted a usage frame before `[DONE]`. */
+  onDone: (fullText: string, usage?: ChatUsage) => void;
   onError: (err: ApiError | Error) => void;
 }
 
@@ -195,6 +200,7 @@ export async function streamChatCompletion(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   const fullText: string[] = [];
+  let usage: ChatUsage | undefined;
   let buffer = '';
 
   try {
@@ -207,18 +213,19 @@ export async function streamChatCompletion(
       buffer = rest;
 
       for (const line of events) {
-        const { content, done: isDone } = extractDelta(line);
-        if (isDone) {
-          onDone(fullText.join(''));
+        const delta = extractDelta(line);
+        if (delta.done) {
+          onDone(fullText.join(''), usage);
           return;
         }
-        if (content) {
-          fullText.push(content);
-          onChunk(content);
+        if (delta.usage) usage = delta.usage;
+        if (delta.content) {
+          fullText.push(delta.content);
+          onChunk(delta.content);
         }
       }
     }
-    onDone(fullText.join(''));
+    onDone(fullText.join(''), usage);
   } catch (err) {
     if (isAbortError(err)) return;
     onError(err instanceof Error ? err : new Error(String(err)));
@@ -363,6 +370,13 @@ export const api = {
   inference: {
     chat: (body: ChatCompletionBody, callbacks: ChatStreamCallbacks, signal: AbortSignal) =>
       streamChatCompletion(body, callbacks, signal),
+    /** Non-streaming variant: one JSON response (the Playground's "Streaming" toggle off). */
+    chatOnce: (body: ChatCompletionBody, signal?: AbortSignal) =>
+      request<ChatCompletionResponse>('/inference/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ ...body, stream: false }),
+        signal,
+      }),
   },
   config: {
     get: (signal?: AbortSignal) => request<{ inferenceUrl: string }>('/config', { signal }),

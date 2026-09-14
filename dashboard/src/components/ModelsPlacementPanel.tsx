@@ -17,7 +17,7 @@
  *  - KVCache mini-bar: activated (#165) — renders a Prealloc/Used/Free sub-bar per GPU when the
  *    worker reports a kvcached pool for that device (DeviceInfo.kvCache), v1 parity.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardHeader,
@@ -60,6 +60,14 @@ import {
   SLEEPING_PATTERN_DEFS,
   KVCACHE_COLORS,
 } from '../utils/gpuMemoryPanel';
+import { assignModelColors, colorHexForModel, hexForColorIndex } from '../utils/memorySegments';
+
+/**
+ * Panel-wide model → color lookup. Computed once from every model in the cluster memory report
+ * so co-displayed models never share a color and the same model is the same color on every
+ * GPU card. Falls back to the plain hash outside the provider.
+ */
+const ModelColorContext = createContext<(modelName: string) => string>(colorHexForModel);
 
 type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
 type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
@@ -106,7 +114,11 @@ function GpuCard({
     () => attributeModelsToDevice(device, workerDeviceCount, models),
     [device, workerDeviceCount, models],
   );
-  const bar = useMemo(() => buildDeviceBarData(device, attributed), [device, attributed]);
+  const colorFor = useContext(ModelColorContext);
+  const bar = useMemo(
+    () => buildDeviceBarData(device, attributed, colorFor),
+    [device, attributed, colorFor],
+  );
   const kvcache = useMemo(
     () => buildKvcacheData(device, (models?.length ?? 0) > 0),
     [device, models],
@@ -636,6 +648,16 @@ export function ModelsPlacementPanel() {
     });
   };
 
+  // One collision-free color assignment for every model in the report (see ModelColorContext).
+  const colorFor = useMemo(() => {
+    const names = (memory?.workers ?? []).flatMap((w) => (w.models ?? []).map((m) => m.modelName));
+    const assignment = assignModelColors(names);
+    return (modelName: string) => {
+      const index = assignment.get(modelName);
+      return index === undefined ? colorHexForModel(modelName) : hexForColorIndex(index);
+    };
+  }, [memory]);
+
   const totals = useMemo(() => {
     const allDevices = (memory?.workers ?? []).flatMap((w) => w.devices);
     const freeBytes = allDevices.reduce(
@@ -712,7 +734,7 @@ export function ModelsPlacementPanel() {
             <EmptyStateBody>{t('overview.modelsPlacement.empty.body')}</EmptyStateBody>
           </EmptyState>
         ) : (
-          <>
+          <ModelColorContext.Provider value={colorFor}>
             {memory.workers.map((worker) => (
               <WorkerSection
                 key={worker.workerId}
@@ -744,7 +766,7 @@ export function ModelsPlacementPanel() {
                 </Content>
               </div>
             )}
-          </>
+          </ModelColorContext.Provider>
         )}
         <MoveModelModal source={moveSource} onClose={() => setMoveSource(null)} />
       </CardBody>

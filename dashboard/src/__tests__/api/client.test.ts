@@ -207,7 +207,7 @@ describe('api.inference.chat', () => {
 
     expect(onChunk).toHaveBeenNthCalledWith(1, 'Hel');
     expect(onChunk).toHaveBeenNthCalledWith(2, 'lo!');
-    expect(onDone).toHaveBeenCalledWith('Hello!');
+    expect(onDone).toHaveBeenCalledWith('Hello!', undefined);
     expect(onError).not.toHaveBeenCalled();
   });
 

@@ -9,6 +9,14 @@
 
 export interface ChatCompletionChunk {
   choices: { delta?: { content?: string }; finish_reason?: string | null }[];
+  /** Present on the final frame when the engine reports usage (`stream_options.include_usage`). */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+}
+
+export interface SseDelta {
+  content?: string;
+  done: boolean;
+  usage?: NonNullable<ChatCompletionChunk['usage']>;
 }
 
 /**
@@ -26,7 +34,7 @@ export function parseSseBuffer(buffer: string): { rest: string; events: string[]
  * keepalive comments yield `{ done: false }` with no content. `data: [DONE]` yields
  * `{ done: true }`. A malformed JSON frame is ignored (not thrown).
  */
-export function extractDelta(dataLine: string): { content?: string; done: boolean } {
+export function extractDelta(dataLine: string): SseDelta {
   if (!dataLine.trim() || dataLine.startsWith(':')) {
     return { done: false };
   }
@@ -42,8 +50,11 @@ export function extractDelta(dataLine: string): { content?: string; done: boolea
 
   try {
     const chunk = JSON.parse(data) as ChatCompletionChunk;
-    const content = chunk.choices[0]?.delta?.content;
-    return content ? { content, done: false } : { done: false };
+    const content = chunk.choices?.[0]?.delta?.content;
+    const result: SseDelta = { done: false };
+    if (content) result.content = content;
+    if (chunk.usage) result.usage = chunk.usage;
+    return result;
   } catch {
     return { done: false };
   }

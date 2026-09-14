@@ -4,6 +4,9 @@ import {
   colorHexForModel,
   MODEL_PALETTE,
   MODEL_PALETTE_HEX,
+  assignModelColors,
+  hexForColorIndex,
+  tokenForColorIndex,
 } from '../../utils/memorySegments';
 
 describe('colorTokenForModel — stability', () => {
@@ -46,5 +49,52 @@ describe('colorHexForModel — nivo-compatible concrete colors', () => {
     for (const hex of MODEL_PALETTE_HEX) {
       expect(hex).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
+  });
+});
+
+describe('assignModelColors — collision-free within a set', () => {
+  it('gives every model in a set of up to palette-size names a distinct color', () => {
+    const names = Array.from({ length: MODEL_PALETTE_HEX.length }, (_, i) => `model-${i}`);
+    const assignment = assignModelColors(names);
+    expect(assignment.size).toBe(names.length);
+    expect(new Set(assignment.values()).size).toBe(names.length);
+  });
+
+  it('separates names that collide under the plain hash', () => {
+    const names = Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const byHash = new Map<string, string[]>();
+    for (const n of names) {
+      const hex = colorHexForModel(n);
+      byHash.set(hex, [...(byHash.get(hex) ?? []), n]);
+    }
+    const colliding = Array.from(byHash.values()).find((group) => group.length >= 2);
+    expect(colliding).toBeDefined();
+    const assignment = assignModelColors(colliding!);
+    expect(assignment.get(colliding![0])).not.toBe(assignment.get(colliding![1]));
+  });
+
+  it('keeps a model on its hash slot when nothing collides', () => {
+    const assignment = assignModelColors(['solo-model']);
+    expect(hexForColorIndex(assignment.get('solo-model')!)).toBe(colorHexForModel('solo-model'));
+  });
+
+  it('is independent of input order and ignores duplicates', () => {
+    const a = assignModelColors(['x', 'y', 'z', 'y']);
+    const b = assignModelColors(['z', 'y', 'x']);
+    expect(Array.from(a.entries()).sort()).toEqual(Array.from(b.entries()).sort());
+    expect(a.size).toBe(3);
+  });
+
+  it('spreads repeats evenly once every slot is taken', () => {
+    const names = Array.from({ length: MODEL_PALETTE_HEX.length * 2 }, (_, i) => `n${i}`);
+    const uses = new Array<number>(MODEL_PALETTE_HEX.length).fill(0);
+    for (const slot of assignModelColors(names).values()) uses[slot] += 1;
+    expect(Math.max(...uses)).toBe(2);
+    expect(Math.min(...uses)).toBe(2);
+  });
+
+  it('token and hex palettes stay the same length', () => {
+    expect(MODEL_PALETTE.length).toBe(MODEL_PALETTE_HEX.length);
+    expect(tokenForColorIndex(3)).toBe(MODEL_PALETTE[3]);
   });
 });
