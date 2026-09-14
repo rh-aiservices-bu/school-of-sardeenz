@@ -17,7 +17,7 @@ Redis fallback when the control plane is down).
 | `src/pages/`        | One folder per route: `Models`, `Workers`, `ClusterOverview`, `GpuMemory`, `Catalog`, `Metrics`, `Playground`, `Login` |
 | `src/components/`   | Shared: `AppLayout`, `NotificationDrawer`, `DegradedBanner`, `LogViewer`, `StateLabel`, …                              |
 | `src/hooks/`        | Data hooks per API area (`useModels`, `useWorkers`, `useEventStream`, …)                                               |
-| `src/contexts/`     | `Auth`, `Theme`, `Notification`, `Degraded`                                                                            |
+| `src/contexts/`     | `Auth`, `Theme`, `Notification`, `Degraded`, `InferenceWorkspace` (Playground sessions, app-level)                     |
 | `src/api/client.ts` | Single typed HTTP client to the BFF                                                                                    |
 | `src/utils/`        | Pure helpers (`memorySegments`, `format`, `parseSse`, `state-colors`)                                                  |
 | `src/locales/en/`   | i18n namespaces                                                                                                        |

@@ -1,45 +1,74 @@
 {
   "page": {
-    "title": "Chatbot Playground",
-    "subtitle": "Chat directly with deployed models, routed through the proxy."
+    "title": "Chatbot Playground"
+  },
+  "workspace": {
+    "loading": "Loading models"
   },
   "sidebar": {
     "title": "Models",
-    "empty": "No active or sleeping models.",
-    "sleepingMarker": "Sleeping",
     "ariaLabel": "Model list",
-    "selectModel": "Open a chat session with {{modelName}}"
+    "available_one": "{{count}} available",
+    "available_other": "{{count}} available",
+    "searchAriaLabel": "Search models",
+    "searchPlaceholder": "Filter models...",
+    "closeAll": "Close all sessions",
+    "emptyTitle": "No models available",
+    "emptyBody": "Start a model from the Models page to begin testing.",
+    "noMatchesTitle": "No matches",
+    "noMatchesBody": "No models match your search.",
+    "selectModel": "Open a chat session with {{modelName}}",
+    "open": "Open",
+    "sleeping": "Sleeping",
+    "gpu": "GPU {{index}}",
+    "multiGpu": "Multi-GPU",
+    "unknownGpu": "Unplaced",
+    "unknownWorker": "No worker"
+  },
+  "toolbar": {
+    "showSidebar": "Show sidebar",
+    "hideSidebar": "Hide sidebar"
+  },
+  "tabs": {
+    "ariaLabel": "Open sessions",
+    "generating": "Generating",
+    "tabAriaLabel": "{{modelName}} tab",
+    "closeAriaLabel": "Close {{modelName}}"
   },
   "layout": {
-    "single": "1 pane",
-    "split": "2 panes",
-    "ariaLabel": "Workspace layout"
+    "ariaLabel": "Layout mode",
+    "single": "Single view",
+    "split": "Split view (2 models)",
+    "grid": "Grid view (4 models)"
   },
-  "pane": {
-    "emptyTitle": "No model selected",
-    "emptyBody": "Select a model from the sidebar to start a chat session in this pane.",
-    "sessionSelectorAriaLabel": "Select session",
-    "closeAriaLabel": "Close session"
+  "paneSelector": {
+    "ariaLabel": "Select session for pane {{pane}}",
+    "auto": "Auto",
+    "autoDescription": "Use default order",
+    "swapDescription": "Will swap with current"
+  },
+  "grid": {
+    "emptyTitle": "No sessions open",
+    "emptyBody": "Select a model from the sidebar to start a chat session.",
+    "emptyAction": "Click on a model in the sidebar to begin"
   },
   "chat": {
-    "inputPlaceholder": "Send a message...",
-    "inputAriaLabel": "Message input",
-    "send": "Send",
-    "stop": "Stop",
-    "stopAriaLabel": "Stop generating",
-    "waking": "Waking model...",
-    "emptyConversation": "No messages yet. Say hello!",
-    "roles": {
-      "user": "You",
-      "assistant": "Assistant"
-    },
-    "error": {
-      "title": "Something went wrong",
-      "generic": "The chat request failed. Try again."
+    "streaming": "Streaming",
+    "clear": "Clear",
+    "welcomeTitle": "Chat with {{modelName}}",
+    "welcomeDescription": "Click Send to test inference.",
+    "inputPlaceholder": "Enter your prompt...",
+    "defaultPrompt": "Why is the sky blue?",
+    "you": "You",
+    "noResponse": "No response",
+    "sleepingHint": "(sleeping)",
+    "runnerHint": "({{runner}})",
+    "errorTitle": "Error",
+    "errorWithStatus": "Error {{status}}",
+    "metrics": {
+      "latency": "{{ms}}ms",
+      "ttft": "TTFT: {{ms}}ms",
+      "tokensPerSecond": "{{tps}} tok/s"
     }
-  },
-  "params": {
-    "temperature": "Temperature",
-    "maxTokens": "Max tokens"
   }
 }

@@ -314,6 +314,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         sidebar={sidebar}
         notificationDrawer={<NotificationDrawer />}
         isNotificationDrawerExpanded={isDrawerOpen}
+        isContentFilled
       >
         {children}
       </Page>

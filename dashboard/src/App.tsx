@@ -5,6 +5,7 @@ import { useTranslation, withTranslation, type WithTranslation } from 'react-i18
 import { useAuth } from './contexts/AuthContext';
 import { DegradedProvider } from './contexts/DegradedContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { InferenceWorkspaceProvider } from './contexts/InferenceWorkspaceContext';
 import { DegradedBanner } from './components/DegradedBanner';
 import { AppLayout } from './components/AppLayout';
 import { EventStreamContext, useEventStreamConnection } from './hooks/useEventStream';
@@ -126,45 +127,47 @@ export function App() {
               <DegradedBanner />
               <EventStreamProvider>
                 <NotificationProvider>
-                  <AppLayout>
-                    <ErrorBoundary>
-                      <Routes>
-                        <Route path="/" element={<ClusterOverview />} />
-                        <Route path="/models" element={<ModelList />} />
-                        <Route
-                          path="/models/deploy"
-                          element={
-                            <AdminRoute>
-                              <ModelDeploy />
-                            </AdminRoute>
-                          }
-                        />
-                        <Route
-                          path="/models/:modelName/edit"
-                          element={
-                            <AdminRoute>
-                              <ModelDeploy edit />
-                            </AdminRoute>
-                          }
-                        />
-                        <Route path="/models/:modelName" element={<ModelDetail />} />
-                        <Route path="/workers" element={<WorkerList />} />
-                        <Route path="/workers/:workerId" element={<WorkerDetail />} />
-                        <Route path="/gpu-memory" element={<GpuMemory />} />
-                        <Route path="/catalog" element={<RunnerCatalog />} />
-                        <Route path="/metrics" element={<MetricsDashboard />} />
-                        <Route
-                          path="/playground"
-                          element={
-                            <AdminRoute>
-                              <Playground />
-                            </AdminRoute>
-                          }
-                        />
-                        <Route path="*" element={<NotFoundPage />} />
-                      </Routes>
-                    </ErrorBoundary>
-                  </AppLayout>
+                  <InferenceWorkspaceProvider>
+                    <AppLayout>
+                      <ErrorBoundary>
+                        <Routes>
+                          <Route path="/" element={<ClusterOverview />} />
+                          <Route path="/models" element={<ModelList />} />
+                          <Route
+                            path="/models/deploy"
+                            element={
+                              <AdminRoute>
+                                <ModelDeploy />
+                              </AdminRoute>
+                            }
+                          />
+                          <Route
+                            path="/models/:modelName/edit"
+                            element={
+                              <AdminRoute>
+                                <ModelDeploy edit />
+                              </AdminRoute>
+                            }
+                          />
+                          <Route path="/models/:modelName" element={<ModelDetail />} />
+                          <Route path="/workers" element={<WorkerList />} />
+                          <Route path="/workers/:workerId" element={<WorkerDetail />} />
+                          <Route path="/gpu-memory" element={<GpuMemory />} />
+                          <Route path="/catalog" element={<RunnerCatalog />} />
+                          <Route path="/metrics" element={<MetricsDashboard />} />
+                          <Route
+                            path="/playground"
+                            element={
+                              <AdminRoute>
+                                <Playground />
+                              </AdminRoute>
+                            }
+                          />
+                          <Route path="*" element={<NotFoundPage />} />
+                        </Routes>
+                      </ErrorBoundary>
+                    </AppLayout>
+                  </InferenceWorkspaceProvider>
                 </NotificationProvider>
               </EventStreamProvider>
             </DegradedProvider>
