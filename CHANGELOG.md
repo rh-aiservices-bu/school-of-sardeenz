@@ -47,6 +47,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Model colours on the GPU placement panel no longer collide.** The palette doubled to 14
+  PatternFly chart colours (seven hues in two shades), and colours are assigned per page from the
+  full set of displayed models with collision resolution, instead of a bare name hash into seven
+  slots. A model keeps its preferred colour across refreshes and gets the same colour on every
+  GPU card; it only moves to the next free slot when another visible model would share it.
+
 - **The Models table lists every worker hosting a model.** Multi-instance models now show their
   deduplicated worker links on separate lines instead of an ambiguous dash.
 

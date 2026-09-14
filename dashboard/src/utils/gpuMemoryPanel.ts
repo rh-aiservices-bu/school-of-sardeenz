@@ -46,10 +46,7 @@ export interface KvcacheBarData {
  * worker actually has models on it (a pool with nothing serving is not interesting — same
  * guard as v1). Returns null when the sub-bar should be omitted.
  */
-export function buildKvcacheData(
-  device: DeviceInfo,
-  hasModels: boolean,
-): KvcacheBarData | null {
+export function buildKvcacheData(device: DeviceInfo, hasModels: boolean): KvcacheBarData | null {
   const kvcache = device.kvCache;
   if (!kvcache || kvcache.totalBytes <= 0 || !hasModels) return null;
   return {
@@ -158,6 +155,9 @@ export interface DeviceBarData {
 export function buildDeviceBarData(
   device: DeviceInfo,
   attributed: AttributedModelBytes[],
+  /** Color per model name. Defaults to the pure hash; pass a panel-wide collision-free
+   * assignment (`assignModelColors`) so co-displayed models never share a color. */
+  colorFor: (modelName: string) => string = colorHexForModel,
 ): DeviceBarData {
   const dataObj: Record<string, number | string> = { id: 'GPU' };
   const keys: string[] = [];
@@ -175,7 +175,7 @@ export function buildDeviceBarData(
   for (const model of ordered) {
     dataObj[model.key] = model.bytes;
     keys.push(model.key);
-    colors[model.key] = colorHexForModel(model.modelName);
+    colors[model.key] = colorFor(model.modelName);
     if (model.sleeping) fill.push({ match: { id: model.key }, id: SLEEPING_PATTERN_ID });
   }
 
