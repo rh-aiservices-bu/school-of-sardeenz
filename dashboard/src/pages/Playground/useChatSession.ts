@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 import { api, ApiError, type ModelInfo } from '../../api/client';
 import type { ChatMessage, PlaygroundMessage, PlaygroundMessageError } from './types';
 import {
@@ -55,6 +54,21 @@ export function useChatSession(model: ModelInfo): UseChatSessionResult {
   const controllerRef = useRef<AbortController | null>(null);
   const currentBotIdRef = useRef<string | null>(null);
 
+  // Streamed text not yet committed to state, and the animation frame that will commit it.
+  const pendingRef = useRef('');
+  const rafRef = useRef<number | null>(null);
+
+  const flushPending = useCallback((botId: string) => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = '';
+    setState((prev) => appendDelta(prev, botId, pending));
+  }, []);
+
   const sendMessage = useCallback(
     (rawContent: string) => {
       const content = rawContent.trim();
@@ -100,10 +114,17 @@ export function useChatSession(model: ModelInfo): UseChatSessionResult {
             onChunk: (delta) => {
               firstTokenTime ??= performance.now();
               chunkCount += 1;
-              // Force a paint per chunk so React 18 batching doesn't coalesce the stream.
-              flushSync(() => setState((prev) => appendDelta(prev, botId, delta)));
+              // Coalesce deltas and commit once per animation frame. A synchronous render per
+              // chunk (v1's flushSync) saturates the main thread at high token rates, so the
+              // browser never paints until the stream ends and the reply appears in one block.
+              pendingRef.current += delta;
+              rafRef.current ??= requestAnimationFrame(() => {
+                rafRef.current = null;
+                flushPending(botId);
+              });
             },
             onDone: (fullText, usage) => {
+              flushPending(botId);
               const endTime = performance.now();
               const latencyMs = Math.round(endTime - startTime);
               const ttftMs = firstTokenTime ? Math.round(firstTokenTime - startTime) : undefined;
@@ -156,7 +177,7 @@ export function useChatSession(model: ModelInfo): UseChatSessionResult {
           onError(err);
         });
     },
-    [model.modelName],
+    [model.modelName, flushPending],
   );
 
   const stopGeneration = useCallback(() => {
@@ -164,8 +185,9 @@ export function useChatSession(model: ModelInfo): UseChatSessionResult {
     controllerRef.current = null;
     const botId = currentBotIdRef.current;
     currentBotIdRef.current = null;
+    if (botId) flushPending(botId);
     setState((prev) => abortTurn(prev, botId));
-  }, []);
+  }, [flushPending]);
 
   const setUseStreaming = useCallback((useStreaming: boolean) => {
     setState((prev) => setStreaming(prev, useStreaming));
@@ -179,6 +201,7 @@ export function useChatSession(model: ModelInfo): UseChatSessionResult {
   useEffect(() => {
     return () => {
       controllerRef.current?.abort();
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
