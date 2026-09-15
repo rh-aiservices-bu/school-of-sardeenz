@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `SARDEENZ_PROMETHEUS_CA_PATH`, `SARDEENZ_PROMETHEUS_TENANT_NAMESPACE`), so the dashboard can
   query Thanos Querier's tenancy port instead of only an unauthenticated plain Prometheus. New
   `deployment/monitoring/` ServiceMonitors, a service-CA ConfigMap, and a metrics-reader
-  Role/RoleBinding provision this on OpenShift.
+  Role/RoleBinding (`get` on `pods.metrics.k8s.io`, the tenancy port's authorisation check)
+  provision this on OpenShift.
 
 - **Chatbot Playground rebuilt to v1 look and behaviour.** The page now uses
   `@patternfly/chatbot` (header, welcome prompt, message bubbles with avatars, message bar with
