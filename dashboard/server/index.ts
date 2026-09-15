@@ -5,6 +5,7 @@ import { ControlPlaneClient } from './clients/control-plane.js';
 import { RedisReader } from './clients/redis.js';
 import { PrometheusClient } from './clients/prometheus.js';
 import { InferenceClient } from './clients/inference.js';
+import { GithubRepoStatsClient } from './clients/github.js';
 
 async function main(): Promise<void> {
   loadRootEnv();
@@ -15,10 +16,11 @@ async function main(): Promise<void> {
   const redis = new RedisReader(config);
   const prometheus = new PrometheusClient(config);
   const inference = new InferenceClient(config);
+  const githubRepoStats = new GithubRepoStatsClient({ url: config.repoStatsUrl });
 
   const app = await buildServer({
     config,
-    routes: { config, controlPlane, redis, prometheus, inference },
+    routes: { config, controlPlane, redis, prometheus, inference, githubRepoStats },
   });
 
   const shutdown = async (signal: string) => {

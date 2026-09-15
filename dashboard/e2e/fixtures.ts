@@ -88,6 +88,9 @@ async function startBff(
     SARDEENZ_LOG_LEVEL: 'error',
     NODE_ENV: 'test',
     SARDEENZ_SERVE_STATIC: '1',
+    // Keep e2e hermetic and offline-safe: disable the GitHub repo-stats lookup so the BFF never
+    // reaches out to the network. The route then always returns nulls without fetching.
+    SARDEENZ_REPO_STATS_URL: '',
     SARDEENZ_CLIENT_DIR: join(ROOT, 'dist', 'client'),
   };
 

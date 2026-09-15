@@ -205,6 +205,8 @@ broken one. `ModelDetail` additionally renders each instance's own state in its 
 
 **PrometheusClient** — Thin wrapper around the Prometheus HTTP API. Supports `query_range` (for time-series charts) and `query` (for instant gauges).
 
+**GithubRepoStatsClient** — Fetches star/fork counts for the sidebar footer server-side, since the CSP's `connect-src` is `'self'` only and blocks a browser fetch to `api.github.com`. Caches in memory per BFF process: a success is reused for an hour, a failure (network error, non-2xx, malformed body) is cached for 5 minutes so a disconnected cluster is not retried on every page load. Never throws; `GET /api/repo-stats` always returns 200 with `{ stars, forks, fetchedAt }`, nulls on any failure. Disabled (nulls only, no fetch) when `SARDEENZ_REPO_STATS_URL` is empty.
+
 ### Redis fallback behavior
 
 Read routes follow this pattern:
@@ -253,30 +255,31 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 
 ### BFF environment variables
 
-| Variable                                                  | Default                  | Description                                                                                             |
-| --------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`           | BFF listen address and port                                                                             |
-| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`  | Control plane base URL                                                                                  |
-| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379` | Redis/Valkey connection string                                                                          |
-| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`               | Prefix for all Redis keys                                                                               |
-| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`  | Prometheus (or Thanos Querier) base URL                                                                 |
-| `SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH`                   | _(empty)_                | Path to a token file sent as `Authorization: Bearer …` on every Prometheus request, re-read per request |
-| `SARDEENZ_PROMETHEUS_CA_PATH`                             | _(empty)_                | PEM CA bundle used to validate the Prometheus endpoint's TLS certificate                                |
-| `SARDEENZ_PROMETHEUS_TENANT_NAMESPACE`                    | _(empty)_                | Sent as the `namespace` query parameter on every Prometheus request (Thanos Querier tenancy)            |
-| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`  | Proxy inference base URL used by the Playground                                                         |
-| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                      | Maximum active chat-completions responses for one identity, per BFF replica                             |
-| `SARDEENZ_LOG_LEVEL`                                      | `info`                   | Pino log level                                                                                          |
-| `AUTH_MODE`                                               | `none`                   | Authentication mode: `none`, `simple`, or `oauth`                                                       |
-| `ADMIN_USERNAME`                                          | `admin`                  | Admin username for `simple` auth mode                                                                   |
-| `ADMIN_PASSWORD`                                          | _(empty)_                | Admin password for `simple` auth mode                                                                   |
-| `JWT_SECRET`                                              | _(empty)_                | JWT signing secret (required when `AUTH_MODE` is not `none`)                                            |
-| `JWT_EXPIRATION_HOURS`                                    | `8`                      | JWT token expiration in hours                                                                           |
-| `OAUTH_CLIENT_ID`                                         | `sardeenz`               | OAuth client ID (for `oauth` mode)                                                                      |
-| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                | OAuth client secret (for `oauth` mode)                                                                  |
-| `OAUTH_ISSUER_URL`                                        | _(empty)_                | OAuth OIDC issuer URL (for `oauth` mode)                                                                |
-| `K8S_API_URL`                                             | _(empty)_                | Kubernetes API URL for namespace-scoped OAuth RBAC role resolution (required in `oauth` mode)           |
-| `SERVICE_ACCOUNT_TOKEN`                                   | _(mounted token)_        | ServiceAccount token override for OAuth RBAC checks outside Kubernetes                                  |
-| `NAMESPACE`                                               | `sardeenz`               | Kubernetes namespace for RBAC scope (for `oauth` mode)                                                  |
+| Variable                                                  | Default                                                  | Description                                                                                             |
+| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`                                           | BFF listen address and port                                                                             |
+| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`                                  | Control plane base URL                                                                                  |
+| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379`                                 | Redis/Valkey connection string                                                                          |
+| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`                                               | Prefix for all Redis keys                                                                               |
+| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`                                  | Prometheus (or Thanos Querier) base URL                                                                 |
+| `SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH`                   | _(empty)_                                                | Path to a token file sent as `Authorization: Bearer …` on every Prometheus request, re-read per request |
+| `SARDEENZ_PROMETHEUS_CA_PATH`                             | _(empty)_                                                | PEM CA bundle used to validate the Prometheus endpoint's TLS certificate                                |
+| `SARDEENZ_PROMETHEUS_TENANT_NAMESPACE`                    | _(empty)_                                                | Sent as the `namespace` query parameter on every Prometheus request (Thanos Querier tenancy)            |
+| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`                                  | Proxy inference base URL used by the Playground                                                         |
+| `SARDEENZ_REPO_STATS_URL`                                 | GitHub API URL for `rh-aiservices-bu/school-of-sardeenz` | Repo API URL polled for the sidebar star/fork counts; empty string disables the lookup                  |
+| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                                                      | Maximum active chat-completions responses for one identity, per BFF replica                             |
+| `SARDEENZ_LOG_LEVEL`                                      | `info`                                                   | Pino log level                                                                                          |
+| `AUTH_MODE`                                               | `none`                                                   | Authentication mode: `none`, `simple`, or `oauth`                                                       |
+| `ADMIN_USERNAME`                                          | `admin`                                                  | Admin username for `simple` auth mode                                                                   |
+| `ADMIN_PASSWORD`                                          | _(empty)_                                                | Admin password for `simple` auth mode                                                                   |
+| `JWT_SECRET`                                              | _(empty)_                                                | JWT signing secret (required when `AUTH_MODE` is not `none`)                                            |
+| `JWT_EXPIRATION_HOURS`                                    | `8`                                                      | JWT token expiration in hours                                                                           |
+| `OAUTH_CLIENT_ID`                                         | `sardeenz`                                               | OAuth client ID (for `oauth` mode)                                                                      |
+| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                                                | OAuth client secret (for `oauth` mode)                                                                  |
+| `OAUTH_ISSUER_URL`                                        | _(empty)_                                                | OAuth OIDC issuer URL (for `oauth` mode)                                                                |
+| `K8S_API_URL`                                             | _(empty)_                                                | Kubernetes API URL for namespace-scoped OAuth RBAC role resolution (required in `oauth` mode)           |
+| `SERVICE_ACCOUNT_TOKEN`                                   | _(mounted token)_                                        | ServiceAccount token override for OAuth RBAC checks outside Kubernetes                                  |
+| `NAMESPACE`                                               | `sardeenz`                                               | Kubernetes namespace for RBAC scope (for `oauth` mode)                                                  |
 
 ### Frontend environment variables
 

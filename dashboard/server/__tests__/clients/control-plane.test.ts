@@ -29,6 +29,7 @@ const mockConfig: Config = {
   namespace: 'sardeenz',
   controlPlaneApiToken: '',
   publicUrl: '',
+  repoStatsUrl: '',
 };
 
 function makeFetchResponse(status: number, body: unknown): Response {

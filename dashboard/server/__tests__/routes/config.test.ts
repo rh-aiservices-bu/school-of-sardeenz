@@ -35,6 +35,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     namespace: 'sardeenz',
     controlPlaneApiToken: 'api-token-should-never-leak',
     publicUrl: '',
+    repoStatsUrl: '',
     ...overrides,
   };
 }
@@ -46,6 +47,10 @@ function buildDeps(config: Config): RouteDeps {
     redis: {} as unknown as RouteDeps['redis'],
     prometheus: {} as unknown as RouteDeps['prometheus'],
     inference: {} as unknown as RouteDeps['inference'],
+    githubRepoStats: {
+      getStats: () => Promise.resolve({ stars: null, forks: null, fetchedAt: null }),
+      setLogger: () => {},
+    } as unknown as RouteDeps['githubRepoStats'],
   };
 }
 

@@ -131,6 +131,7 @@ const mockConfig: Config = {
   namespace: 'sardeenz',
   controlPlaneApiToken: '',
   publicUrl: '',
+  repoStatsUrl: '',
 };
 
 // ---------------------------------------------------------------------------
