@@ -157,6 +157,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   real ORAS importer, requires an explicit `SARDEENZ_SIF_IMPORTER=stub` for non-runnable dev/test
   placeholders, and rejects misspelled importer values at startup.
 
+- **Proxy request-latency and parking-duration dashboard panels are no longer empty** (#201). The
+  Prometheus recorder now registers explicit bucket boundaries for
+  `sardeenz_proxy_request_duration_seconds` and `sardeenz_proxy_parking_duration_seconds`, so they
+  render as histograms (`_bucket` series) instead of summaries, matching the dashboard's
+  `histogram_quantile` queries.
+
 ### Added
 
 - **vLLM 0.24.0 rhaiv.9 runner image.** A new

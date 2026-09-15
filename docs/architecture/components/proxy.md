@@ -440,6 +440,13 @@ Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). Al
 | `sardeenz_proxy_circuit_breaker_state`      | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                    |
 | `sardeenz_proxy_routing_parse_errors_total` | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model |
 
+Both histograms are registered with explicit bucket boundaries (seconds) so they render as
+Prometheus histograms (`_bucket` series) rather than summaries — required for the dashboard's
+`histogram_quantile(rate(..._bucket[5m]))` queries:
+
+- `sardeenz_proxy_request_duration_seconds`: `0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120`
+- `sardeenz_proxy_parking_duration_seconds`: `0.5, 1, 2.5, 5, 10, 30, 60, 120, 300`
+
 ## Health Endpoints
 
 Both endpoints are served on the admin port (`SARDEENZ_ADMIN_ADDR`).
