@@ -6,22 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
-
-- Published documentation site (mkdocs-material, GitHub Pages) built from `docs/` by a new
-  `deploy-docs` workflow (application docs only: project planning and ADRs stay in the repo), with an interactive Architecture Flow Visualizer
-  (`docs/architecture-visualizer.html`) animating eight v2 flows: cluster bootstrap, model
-  deployment, inference hot path, park-and-wake, LRU eviction, instance move, control plane
-  failover, and runner catalog import. Links to source files outside `docs/` are rewritten to
-  GitHub URLs at build time so `mkdocs build --strict` validates in-site links.
-
-### Fixed
-
-- Flaky dashboard e2e accessibility test: the Cluster Overview readiness check now targets the
-  Workers summary card instead of an unscoped text match that also hit the sidebar nav link.
-- Sidebar GitHub star and fork counts now render in production: the lookup goes through a cached
-  BFF route instead of a browser fetch the Content Security Policy blocked.
-
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the
@@ -130,6 +114,13 @@ development (Phases 0-4 and milestones M1-M14) is preserved in the git history o
   conformance suites, and service container build and smoke tests on every pull request.
 - Architecture overview, 21 ADRs, per-component specs, and per-component `AGENTS.md` guides for
   AI-assisted development.
+- Published documentation site (mkdocs-material, GitHub Pages) built from `docs/` by a
+  `deploy-docs` workflow. Application docs only: project planning and ADRs stay in the repo, and
+  links to them or to source files are rewritten to GitHub URLs at build time so
+  `mkdocs build --strict` validates in-site links. Includes an interactive Architecture Flow
+  Visualizer (`docs/architecture-visualizer.html`) animating eight flows: cluster bootstrap, model
+  deployment, inference hot path, park-and-wake, LRU eviction, instance move, control plane
+  failover, and runner catalog import.
 
 ### Notable fixes folded into this release
 
@@ -138,4 +129,7 @@ runner processes not terminated on delete, stop, or eviction; VRAM reservations 
 prematurely or leaked; move and delete races; parked-connection and circuit-breaker leaks in the
 proxy; routing entries corrupted on sleep; integration tests wiping the dev database; MLServer
 failing on read-only images; OAuth identity and RBAC lookups on OpenShift; and proxy histograms
-rendered as summaries, which left latency panels empty.
+rendered as summaries, which left latency panels empty; sidebar GitHub star and fork counts
+blocked by the Content Security Policy in production (now proxied through a cached BFF route);
+and a flaky dashboard e2e accessibility test whose readiness check matched both the sidebar nav
+link and the Workers summary card.
