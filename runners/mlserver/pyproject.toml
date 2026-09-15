@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sardeenz-mlserver-runner"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sardeenz MLServer runner shim — serves the engine-runner contract and drives MLServer (KServe V2) inside a SIF."
 requires-python = ">=3.10"
 # mlserver, mlserver-sklearn, mlserver-huggingface, torch, fastapi, uvicorn and httpx are provided
