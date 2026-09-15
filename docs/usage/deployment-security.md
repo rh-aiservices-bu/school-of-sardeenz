@@ -113,6 +113,11 @@ Any caller with network access to the control plane can:
 
 3. **Service mesh mTLS** (optional): If running in a service mesh (Istio, Linkerd), enable strict mTLS between the control plane and its clients.
 
+`deployment/control-plane/networkpolicy.yaml` also allows ingress to port 3000 from the
+`openshift-user-workload-monitoring` namespace, so OpenShift's Prometheus can scrape the
+unauthenticated `GET /metrics` endpoint listed above. That endpoint has no bearer-token check;
+this namespace-scoped rule is its only access restriction.
+
 ## Worker Agent Network Isolation
 
 The worker agent's management API (`POST/DELETE /runners`, `GET /runners/*/logs`) on port 9100 is protected by an optional shared secret (`SARDEENZ_WORKER_TOKEN`), checked via `Authorization: Bearer <token>` on every route except `/healthz`. This token protects **only** the worker agent; it does not protect a runner shim's management endpoint at a runner block's base port or its engine listener. Those runner endpoints are unauthenticated and depend on network isolation. As with the control plane, this is a defense-in-depth measure, not a substitute for network isolation — the worker **must only be deployed within a trusted network boundary**.

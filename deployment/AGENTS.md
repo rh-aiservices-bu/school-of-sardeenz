@@ -26,6 +26,7 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | `deployment/proxy/`, `deployment/dashboard/`         | Deployable application workloads and Services                           |
 | `deployment/sif-runner/`                             | Worker SCC, RBAC, PVCs, NetworkPolicy, Deployment, PVC write-protection |
 | `deployment/librarian/`                              | Parameterized OpenShift OCI + SIF + ORAS publishing Job                 |
+| `deployment/monitoring/`                             | ServiceMonitors for OpenShift user-workload monitoring                  |
 | `scripts/build-sif.sh`                               | OCI image → optional signed SIF conversion/publish                      |
 | `runners.yaml` (repo root)                           | Official runner catalog consumed by `SARDEENZ_RUNNER_CATALOG_URL`       |
 
@@ -41,7 +42,8 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
   `protocol`), and a gate in `tests/gates/` if it changes the launch path.
 - **Production images are signed (ADR-017);** unsigned publishing is only for an explicitly
   verification-disabled PoC. Catalog entries remain digest-pinned even during a PoC.
-- **NetworkPolicies allow-list ingress per flow** (control plane → worker agent port today).
-  Add an explicit rule per new flow; the proxy → engine rule is tracked in #181.
+- **NetworkPolicies allow-list ingress per flow** (control plane → worker agent port, and the
+  openshift-user-workload-monitoring namespace → control plane `/metrics` port, today). Add an
+  explicit rule per new flow; the proxy → engine rule is tracked in #181.
 - Ports and env var names must match the code defaults (`control-plane/src/config.ts`,
   `runners/dev-worker/src/config.ts`, `proxy/src/config.rs`) — do not invent new ones here.

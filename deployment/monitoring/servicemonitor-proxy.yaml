@@ -1,0 +1,16 @@
+# Scraped by OpenShift user-workload monitoring (see deployment/dashboard/README.md). Targets the
+# proxy's admin Service, which serves /metrics on a separate port from the inference listener.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sardeenz-proxy
+  labels:
+    app.kubernetes.io/name: sardeenz-proxy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-proxy-admin
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: 15s

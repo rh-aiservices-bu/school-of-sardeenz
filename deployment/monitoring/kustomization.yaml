@@ -4,10 +4,8 @@ kind: Kustomization
 namespace: sardeenz
 
 resources:
-  - service.yaml
-  - rbac.yaml
-  - service-ca-configmap.yaml
-  - deployment.yaml
+  - servicemonitor-proxy.yaml
+  - servicemonitor-control-plane.yaml
 
 labels:
   - pairs:

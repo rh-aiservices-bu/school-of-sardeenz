@@ -16,6 +16,9 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     redisKeyPrefix: 'sardeenz',
     prometheusUrl: 'http://localhost:9090',
+    prometheusBearerTokenPath: '',
+    prometheusCaPath: '',
+    prometheusTenantNamespace: '',
     inferenceUrl: 'http://localhost:8080',
     maxConcurrentInferenceRequestsPerUser: 4,
     authMode: 'none',
@@ -235,6 +238,9 @@ describe('loadConfig auth defaults', () => {
     'SARDEENZ_PUBLIC_URL',
     'SARDEENZ_INFERENCE_URL',
     'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
+    'SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH',
+    'SARDEENZ_PROMETHEUS_CA_PATH',
+    'SARDEENZ_PROMETHEUS_TENANT_NAMESPACE',
   ];
 
   beforeEach(() => {
@@ -285,6 +291,26 @@ describe('loadConfig auth defaults', () => {
     process.env['SARDEENZ_PUBLIC_URL'] = 'https://dashboard.example.com';
     const config = loadConfig();
     expect(config.publicUrl).toBe('https://dashboard.example.com');
+  });
+
+  it('defaults the Prometheus auth/TLS/tenancy env vars to empty strings', () => {
+    const config = loadConfig();
+    expect(config.prometheusBearerTokenPath).toBe('');
+    expect(config.prometheusCaPath).toBe('');
+    expect(config.prometheusTenantNamespace).toBe('');
+  });
+
+  it('reads the Prometheus auth/TLS/tenancy env vars when set', () => {
+    process.env['SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH'] =
+      '/var/run/secrets/kubernetes.io/serviceaccount/token';
+    process.env['SARDEENZ_PROMETHEUS_CA_PATH'] = '/etc/sardeenz/service-ca/service-ca.crt';
+    process.env['SARDEENZ_PROMETHEUS_TENANT_NAMESPACE'] = 'sardeenz';
+    const config = loadConfig();
+    expect(config.prometheusBearerTokenPath).toBe(
+      '/var/run/secrets/kubernetes.io/serviceaccount/token',
+    );
+    expect(config.prometheusCaPath).toBe('/etc/sardeenz/service-ca/service-ca.crt');
+    expect(config.prometheusTenantNamespace).toBe('sardeenz');
   });
 
   it('rejects invalid AUTH_MODE values', () => {

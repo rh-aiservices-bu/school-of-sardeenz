@@ -8,6 +8,12 @@ export interface Config {
   readonly redisUrl: string;
   readonly redisKeyPrefix: string;
   readonly prometheusUrl: string;
+  /** Path to a bearer token file sent as `Authorization` on every Prometheus request (re-read per request). */
+  readonly prometheusBearerTokenPath: string;
+  /** Path to a PEM CA bundle used to validate the Prometheus TLS endpoint (e.g. an OpenShift service-CA cert). */
+  readonly prometheusCaPath: string;
+  /** Namespace sent as the `namespace` query parameter on every Prometheus request (Thanos Querier tenancy). */
+  readonly prometheusTenantNamespace: string;
   readonly inferenceUrl: string;
   readonly maxConcurrentInferenceRequestsPerUser: number;
   readonly authMode: AuthMode;
@@ -66,6 +72,9 @@ export function loadConfig(): Config {
     redisUrl: optionalEnv('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
     redisKeyPrefix: optionalEnv('SARDEENZ_REDIS_KEY_PREFIX', 'sardeenz'),
     prometheusUrl: optionalEnv('SARDEENZ_PROMETHEUS_URL', 'http://localhost:9090'),
+    prometheusBearerTokenPath: optionalEnv('SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH', ''),
+    prometheusCaPath: optionalEnv('SARDEENZ_PROMETHEUS_CA_PATH', ''),
+    prometheusTenantNamespace: optionalEnv('SARDEENZ_PROMETHEUS_TENANT_NAMESPACE', ''),
     inferenceUrl: optionalEnv('SARDEENZ_INFERENCE_URL', 'http://localhost:8080'),
     maxConcurrentInferenceRequestsPerUser: positiveSafeIntegerEnv(
       'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
