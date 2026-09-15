@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Published documentation site (mkdocs-material, GitHub Pages) built from `docs/` by a new
+  `deploy-docs` workflow (application docs only: project planning and ADRs stay in the repo), with an interactive Architecture Flow Visualizer
+  (`docs/architecture-visualizer.html`) animating eight v2 flows: cluster bootstrap, model
+  deployment, inference hot path, park-and-wake, LRU eviction, instance move, control plane
+  failover, and runner catalog import. Links to source files outside `docs/` are rewritten to
+  GitHub URLs at build time so `mkdocs build --strict` validates in-site links.
+
 ### Fixed
 
 - Sidebar GitHub star and fork counts now render in production: the lookup goes through a cached

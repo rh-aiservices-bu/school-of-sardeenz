@@ -22,6 +22,9 @@ The platform comprises four decoupled components:
 | **Engine Runners**  | Abstraction layer for different inference engines (vLLM, Triton, etc.) |
 
 For the full architecture description, diagrams, and request flows, see the [Architecture Overview](docs/architecture/overview.md).
+The documentation is published at <https://rh-aiservices-bu.github.io/school-of-sardeenz/>, including an interactive
+[Architecture Flow Visualizer](https://rh-aiservices-bu.github.io/school-of-sardeenz/architecture-visualizer.html)
+that animates cluster bootstrap, deployment, inference, park-and-wake, eviction, moves, and failover.
 
 For individual design decisions, see the [ADRs](docs/architecture/adrs/).
 
