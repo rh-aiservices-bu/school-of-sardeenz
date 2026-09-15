@@ -59,8 +59,9 @@ With that enabled, this component's manifests configure everything else:
   the cluster's internal CA bundle, mounted into the dashboard container so it can validate Thanos
   Querier's TLS certificate.
 - **`sardeenz-dashboard-metrics-reader` Role/RoleBinding** (`rbac.yaml`) grants the dashboard's
-  ServiceAccount `get`/`list` on Pods in this namespace — the Thanos Querier tenancy port
-  authorises the caller's token against that permission, not a Prometheus-specific one.
+  ServiceAccount `get` on `pods.metrics.k8s.io` in this namespace — the Thanos Querier tenancy
+  port authorises the caller's token against that pod-metrics permission (not core Pods and not
+  a Prometheus-specific one).
 - **`SARDEENZ_PROMETHEUS_URL`** points at the Thanos Querier tenancy port
   (`https://thanos-querier.openshift-monitoring.svc:9092`), which requires the bearer token, CA,
   and namespace query parameter the other three env vars below provide.
