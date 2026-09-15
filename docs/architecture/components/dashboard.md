@@ -333,20 +333,20 @@ user-workload monitoring setup that uses these three env vars.
 
 The metrics dashboard exposes ten BFF routes, each backed by Prometheus queries:
 
-| BFF route                            | Metric(s) queried                                                                | Type      | Dashboard chart                     |
-| ------------------------------------ | -------------------------------------------------------------------------------- | --------- | ----------------------------------- |
-| `GET /api/metrics/latency`           | `sardeenz_proxy_request_duration_seconds`                                        | Histogram | p50/p95/p99 latency line chart      |
-| `GET /api/metrics/throughput`        | `sardeenz_proxy_requests_total`                                                  | Counter   | Throughput (req/s) line chart       |
-| `GET /api/metrics/connections`       | `sardeenz_proxy_active_connections`, `sardeenz_proxy_parked_connections`         | Gauge     | Active and parked connection gauges |
-| `GET /api/metrics/parking-duration`  | `sardeenz_proxy_parking_duration_seconds`                                        | Histogram | p50/p95 parking wait time           |
-| `GET /api/metrics/memory`            | `sardeenz_control_plane_device_memory_bytes`                                     | Gauge     | Device memory instant query         |
-| `GET /api/metrics/memory-history`    | `sardeenz_control_plane_device_memory_bytes`                                     | Gauge     | Device memory over time (range)     |
-| `GET /api/metrics/wake-triggers`     | `sardeenz_control_plane_wake_triggers_total`                                     | Counter   | Wake trigger frequency bar chart    |
-| `GET /api/metrics/state-transitions` | `sardeenz_control_plane_state_transitions_total`                                 | Counter   | State transitions by type           |
-| `GET /api/metrics/evictions`         | `sardeenz_control_plane_evictions_total`                                         | Counter   | Evictions over time                 |
-| `GET /api/metrics/operations`        | `sardeenz_control_plane_{deploy,sleep,wake,eviction,placement}_duration_seconds` | Histogram | p95 operation duration by type      |
+| BFF route                            | Metric(s) queried                                                                                 | Type      | Dashboard chart                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------- | --------- | ------------------------------------- |
+| `GET /api/metrics/latency`           | `sardeenz_proxy_request_duration_seconds`                                                         | Histogram | p50/p95/p99 latency line chart        |
+| `GET /api/metrics/throughput`        | `sardeenz_proxy_requests_total`                                                                   | Counter   | Throughput (req/s) line chart         |
+| `GET /api/metrics/connections`       | `sardeenz_proxy_active_connections`, `sardeenz_proxy_parked_connections`                          | Gauge     | Active and parked connection gauges   |
+| `GET /api/metrics/parking-duration`  | `sardeenz_proxy_parking_duration_seconds`                                                         | Histogram | p50/p95 parking wait time             |
+| `GET /api/metrics/memory`            | `sardeenz_control_plane_device_memory_bytes`                                                      | Gauge     | Device memory instant query           |
+| `GET /api/metrics/memory-history`    | `sardeenz_control_plane_device_memory_bytes`                                                      | Gauge     | Device memory over time (range)       |
+| `GET /api/metrics/wake-triggers`     | `sardeenz_control_plane_wake_triggers_total`                                                      | Counter   | Wake trigger frequency bar chart      |
+| `GET /api/metrics/state-transitions` | `sardeenz_control_plane_state_transitions_total`                                                  | Counter   | State transitions by type             |
+| `GET /api/metrics/evictions`         | `sardeenz_control_plane_evictions_total`                                                          | Counter   | Evictions over time                   |
+| `GET /api/metrics/operations`        | `sardeenz_control_plane_{deploy,sleep,wake,eviction,placement}_duration_seconds_sum`, `..._count` | Histogram | Average duration per operation (bars) |
 
-Time ranges map to PromQL step sizes: 15m → 15s, 1h → 60s, 6h → 300s, 24h → 900s, 7d → 3600s. The BFF constructs the PromQL and handles time range parameters; the frontend receives chart-ready arrays.
+Time ranges map to PromQL step sizes: 15m → 15s, 1h → 60s, 6h → 300s, 24h → 900s, 7d → 3600s. The BFF constructs the PromQL and handles time range parameters; the frontend receives chart-ready arrays. `GET /api/metrics/operations` is the exception: it ignores `step` and instead evaluates ten instant queries (`sum`/`count` per operation) at `end`, over a window equal to `end - start` (minimum 60s), returning an average duration and count per operation rather than a time series — the sparse, one-off nature of deploy/sleep/wake/eviction/placement events made `histogram_quantile` over a rolling window mostly `NaN` between events.
 
 ## Authentication
 

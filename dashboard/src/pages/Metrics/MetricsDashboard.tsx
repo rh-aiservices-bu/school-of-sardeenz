@@ -30,6 +30,7 @@ import {
   Chart,
   ChartArea,
   ChartAxis,
+  ChartBar,
   ChartGroup,
   ChartLine,
   ChartThemeColor,
@@ -52,6 +53,7 @@ import {
 } from '../../hooks/useMetrics';
 import { useEventStream } from '../../hooks/useEventStream';
 import { formatBytes } from '../../utils/format';
+import type { OperationDurationsResponse, OperationName } from '../../api/client';
 
 // ---------------------------------------------------------------------------
 // Types for Prometheus responses
@@ -336,6 +338,98 @@ function AreaChartCard({
 }
 
 // ---------------------------------------------------------------------------
+// Bar chart card (for operation duration averages)
+// ---------------------------------------------------------------------------
+
+const OPERATION_ORDER: OperationName[] = ['deploy', 'sleep', 'wake', 'eviction', 'placement'];
+
+interface OperationBarDatum {
+  x: string;
+  y: number;
+  name: string;
+  averageSeconds: number | null;
+  count: number;
+}
+
+interface BarChartCardProps {
+  title: string;
+  isLoading: boolean;
+  hasError: boolean;
+  data: OperationDurationsResponse | undefined;
+  yLabel: string;
+}
+
+function BarChartCard({ title, isLoading, hasError, data, yLabel }: BarChartCardProps) {
+  const { t } = useTranslation('metrics');
+
+  const barData = useMemo<OperationBarDatum[]>(() => {
+    const byOperation = new Map(data?.operations.map((op) => [op.operation, op]));
+    return OPERATION_ORDER.map((operation) => {
+      const entry = byOperation.get(operation);
+      return {
+        x: t(`operations.${operation}`),
+        y: entry?.averageSeconds ?? 0,
+        name: operation,
+        averageSeconds: entry?.averageSeconds ?? null,
+        count: entry?.count ?? 0,
+      };
+    });
+  }, [data, t]);
+
+  const hasData = barData.some((d) => d.count > 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardBody>
+        {isLoading && <MetricsCardLoading />}
+        {!isLoading && (hasError || !hasData) && <MetricsEmptyState />}
+        {!isLoading && !hasError && hasData && (
+          <div style={{ height: '300px' }}>
+            <Chart
+              ariaDesc={title}
+              ariaTitle={title}
+              containerComponent={
+                <ChartVoronoiContainer
+                  labels={({ datum }: { datum: OperationBarDatum }) =>
+                    datum.averageSeconds != null
+                      ? t('operations.tooltip', {
+                          operation: datum.x,
+                          averageSeconds: datum.averageSeconds.toFixed(1),
+                          count: datum.count,
+                        })
+                      : t('empty.title')
+                  }
+                  constrainToVisibleArea
+                />
+              }
+              height={300}
+              padding={{ bottom: 50, left: 70, right: 20, top: 20 }}
+              themeColor={ChartThemeColor.blue}
+              domainPadding={{ x: [30, 30] }}
+            >
+              <ChartAxis style={{ tickLabels: { fontSize: 10 } }} />
+              <ChartAxis
+                dependentAxis
+                label={yLabel}
+                tickFormat={(v: number) => v.toFixed(1)}
+                style={{
+                  axisLabel: { fontSize: 11, padding: 55 },
+                  tickLabels: { fontSize: 10 },
+                }}
+              />
+              <ChartBar data={barData} x="x" y="y" barWidth={24} cornerRadius={{ top: 3 }} />
+            </Chart>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Memory table card
 // ---------------------------------------------------------------------------
 
@@ -569,29 +663,6 @@ export function MetricsDashboard() {
     [memoryHistory.data],
   );
 
-  // Operations — each key is a separate Prometheus range result
-  const operationsData = operations.data as
-    | {
-        deploy?: unknown;
-        sleep?: unknown;
-        wake?: unknown;
-        eviction?: unknown;
-        placement?: unknown;
-      }
-    | undefined;
-  const operationsSeries = useMemo<ChartPoint[][]>(() => {
-    const entries: Array<[string, unknown]> = [
-      ['deploy', operationsData?.deploy],
-      ['sleep', operationsData?.sleep],
-      ['wake', operationsData?.wake],
-      ['eviction', operationsData?.eviction],
-      ['placement', operationsData?.placement],
-    ];
-    return entries.flatMap(([label, raw]) =>
-      parseRangeSeries(raw).map((s) => s.map((pt) => ({ ...pt, name: label }))),
-    );
-  }, [operationsData]);
-
   const presetRanges: Exclude<TimeRange, 'custom'>[] = ['15m', '1h', '6h', '24h', '7d'];
 
   return (
@@ -804,13 +875,12 @@ export function MetricsDashboard() {
             />
           </GridItem>
           <GridItem md={4}>
-            <LineChartCard
+            <BarChartCard
               title={t('charts.operationDuration')}
               isLoading={operations.isLoading}
               hasError={!!operations.error}
-              seriesData={operationsSeries}
+              data={operations.data}
               yLabel={t('yLabels.duration')}
-              formatY={(v) => `${v.toFixed(3)} s`}
             />
           </GridItem>
           <GridItem md={4}>

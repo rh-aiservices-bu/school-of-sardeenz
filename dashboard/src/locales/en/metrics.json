@@ -12,8 +12,16 @@
     "stateTransitions": "State Transitions",
     "evictions": "Evictions",
     "memoryOverTime": "Memory Over Time",
-    "operationDuration": "Operation Duration p95",
+    "operationDuration": "Operation Duration (avg)",
     "deviceMemoryCurrent": "Device Memory (Current)"
+  },
+  "operations": {
+    "deploy": "Deploy",
+    "sleep": "Sleep",
+    "wake": "Wake",
+    "eviction": "Eviction",
+    "placement": "Placement",
+    "tooltip": "{{operation}}: avg {{averageSeconds}} s over {{count}} ops"
   },
   "yLabels": {
     "latency": "Latency (s)",
