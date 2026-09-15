@@ -81,9 +81,9 @@ body.light .detail-line.err{background:rgba(207,34,46,.08);color:#cf222e}
 .detail-empty{color:#484f58;font-style:italic;font-family:inherit;font-size:12px;padding:8px 0}
 
 /* Legend */
-.legend{position:fixed;bottom:12px;left:12px;z-index:10;display:flex;gap:14px;padding:6px 12px;border-radius:6px;background:rgba(22,27,34,.85);border:1px solid #30363d;backdrop-filter:blur(4px)}
-body.light .legend{background:rgba(246,248,250,.9);border-color:#d0d7de}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
 .legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#8b949e}
+body.light .legend-item{color:#57606a}
 .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 
 /* Mobile */
@@ -93,7 +93,7 @@ body.light .legend{background:rgba(246,248,250,.9);border-color:#d0d7de}
 .mobile-splash a{color:#58a6ff}
 @media (max-width: 900px){
   .mobile-splash{display:flex}
-  .right-panel,.legend,.title-bar,.theme-toggle,.top-links,canvas{display:none}
+  .right-panel,.title-bar,.theme-toggle,.top-links,canvas{display:none}
 }
 </style>
 </head>
@@ -121,6 +121,13 @@ body.light .legend{background:rgba(246,248,250,.9);border-color:#d0d7de}
       <button id="btn-loop" title="Loop through all flows">↻ Loop</button>
       <button id="btn-reset" title="Reset (r)">Reset</button>
     </div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background:#58a6ff"></span>Inference</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#3fb950"></span>Orchestration</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#f0883e"></span>State</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#d2a8ff"></span>Worker / Runner</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#f85149"></span>Failure</span>
+    </div>
   </div>
   <div id="flow-blurb" class="flow-blurb"></div>
   <div class="panel-section" style="flex:1 1 0;min-height:0">
@@ -133,14 +140,6 @@ body.light .legend{background:rgba(246,248,250,.9);border-color:#d0d7de}
       <div class="detail-empty">Click ▶ Start to begin the animation</div>
     </div>
   </div>
-</div>
-
-<div class="legend">
-  <span class="legend-item"><span class="legend-dot" style="background:#58a6ff"></span>Inference</span>
-  <span class="legend-item"><span class="legend-dot" style="background:#3fb950"></span>Orchestration</span>
-  <span class="legend-item"><span class="legend-dot" style="background:#f0883e"></span>State (Redis / Postgres)</span>
-  <span class="legend-item"><span class="legend-dot" style="background:#d2a8ff"></span>Worker / Runner</span>
-  <span class="legend-item"><span class="legend-dot" style="background:#f85149"></span>Failure</span>
 </div>
 
 <div class="mobile-splash">
@@ -218,8 +217,35 @@ function removeRunner(gpu, model) {
    ================================================================ */
 function C() {
   return isDark
-    ? {bg:'#0d1117',box:'#161b22',boxA:'#1a2332',bdr:'#30363d',txt:'#c9d1d9',dim:'#8b949e',brt:'#fff',gpuFree:'#21262d',gpuAct:'#0f2d1a',bar:'#30363d'}
-    : {bg:'#ffffff',box:'#f6f8fa',boxA:'#ddf4ff',bdr:'#d0d7de',txt:'#1f2328',dim:'#656d76',brt:'#000',gpuFree:'#eaeef2',gpuAct:'#dafbe1',bar:'#d0d7de'};
+    ? {bg:'#0d1117',box:'#161b22',bdr:'#3d444d',bnd:'#6e7681',txt:'#e6edf3',dim:'#9aa4af',brt:'#fff',gpu:'#0b0f14',bar:'#30363d'}
+    : {bg:'#ffffff',box:'#ffffff',bdr:'#8c959f',bnd:'#8c959f',txt:'#1f2328',dim:'#57606a',brt:'#000',gpu:'#fbfcfd',bar:'#d0d7de'};
+}
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+/* Fill/border strengths per theme: idle elements are already clearly tinted, active ones glow. */
+function tint(color, active) {
+  const fill = isDark ? (active ? 0.30 : 0.13) : (active ? 0.22 : 0.09);
+  const bdr  = isDark ? (active ? 1 : 0.75) : (active ? 1 : 0.8);
+  return { fill: rgba(color, fill), border: rgba(color, bdr) };
+}
+function darken(hex) {
+  // light theme: the category colours are pastel; pull them toward readable text colours
+  return ({ '#58a6ff':'#0969da', '#3fb950':'#1a7f37', '#f0883e':'#bc4c00', '#d2a8ff':'#6639ba', '#f85149':'#cf222e', '#8b949e':'#57606a', '#39d353':'#1a7f37' })[hex] || hex;
+}
+function pillLabel(text, x, y, color, align) {
+  const col = C();
+  ctx.font = `600 ${ts(11)}px Inter,sans-serif`;
+  const w = ctx.measureText(text).width + ts(16), h = ts(18);
+  const px = align === 'right' ? x - w : x;
+  ctx.fillStyle = color ? rgba(color, isDark ? 0.28 : 0.16) : col.box;
+  rr(px, y - h/2, w, h, ts(9)); ctx.fill();
+  ctx.strokeStyle = color ? rgba(color, 0.9) : col.bnd; ctx.lineWidth = ts(1); ctx.stroke();
+  ctx.fillStyle = color ? (isDark ? color : darken(color)) : col.txt;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, px + ts(8), y + ts(0.5));
+  ctx.textBaseline = 'alphabetic';
 }
 
 /* ================================================================
@@ -324,35 +350,28 @@ function rr(x, y, w, h, r) {
 function drawBoundary(key) {
   const n = N[key]; const col = C();
   const x = tx(n.x), y = ty(n.y), w = ts(n.w), h = ts(n.h), r = ts(12);
+  ctx.fillStyle = isDark ? 'rgba(255,255,255,0.025)' : 'rgba(36,41,47,0.035)';
+  rr(x, y, w, h, r); ctx.fill();
   ctx.setLineDash([ts(10), ts(6)]);
-  ctx.strokeStyle = activeNodes.has(key) ? COL.inf : col.bdr;
-  ctx.lineWidth = ts(1.5);
+  ctx.strokeStyle = activeNodes.has(key) ? COL.inf : col.bnd;
+  ctx.lineWidth = ts(1.8);
   rr(x, y, w, h, r); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = col.dim;
-  ctx.font = `500 ${ts(11)}px Inter,sans-serif`;
-  ctx.textAlign = 'right';
-  ctx.fillText(n.label, x + w - ts(14), y + ts(18));
+  pillLabel(n.label, x + w - ts(14), y, null, 'right');
 }
 
 function drawContainer(key) {
-  const n = N[key]; const col = C();
+  const n = N[key];
   const x = tx(n.x), y = ty(n.y), w = ts(n.w), h = ts(n.h), r = ts(10);
   const isA = activeNodes.has(key);
-  const nc = isA ? n.color : col.bdr;
-  if (isA) {
-    ctx.fillStyle = isDark ? 'rgba(88,166,255,0.04)' : 'rgba(88,166,255,0.06)';
-    rr(x, y, w, h, r); ctx.fill();
-  }
-  ctx.setLineDash([ts(8), ts(5)]);
-  ctx.strokeStyle = nc; ctx.lineWidth = ts(isA ? 2 : 1.5);
-  if (isA) { ctx.shadowColor = n.color; ctx.shadowBlur = ts(8); }
+  ctx.fillStyle = rgba(n.color, isDark ? (isA ? 0.10 : 0.05) : (isA ? 0.09 : 0.045));
+  rr(x, y, w, h, r); ctx.fill();
+  ctx.strokeStyle = rgba(n.color, isA ? 1 : 0.7); ctx.lineWidth = ts(isA ? 2.2 : 1.6);
+  if (isA) { ctx.shadowColor = n.color; ctx.shadowBlur = ts(10); }
   rr(x, y, w, h, r); ctx.stroke();
-  ctx.shadowBlur = 0; ctx.setLineDash([]);
-  ctx.fillStyle = isA ? n.color : col.dim;
-  ctx.font = `600 ${ts(12)}px Inter,sans-serif`;
-  if (n.labelAlign === 'right') { ctx.textAlign = 'right'; ctx.fillText(n.label, x + w - ts(14), y + ts(18)); }
-  else { ctx.textAlign = 'left'; ctx.fillText(n.label, x + ts(14), y + ts(18)); }
+  ctx.shadowBlur = 0;
+  if (n.labelAlign === 'right') pillLabel(n.label, x + w - ts(12), y, n.color, 'right');
+  else pillLabel(n.label, x + ts(12), y, n.color, 'left');
 }
 
 function drawBox(key) {
@@ -361,13 +380,19 @@ function drawBox(key) {
   const isA = activeNodes.has(key);
   const isErr = notes[key] && notes[key].err;
   const accent = isErr ? COL.err : n.color;
-  ctx.fillStyle = isA ? col.boxA : col.box;
-  if (isA) { ctx.shadowColor = accent; ctx.shadowBlur = ts(12); }
+  const t = tint(accent, isA);
+  ctx.fillStyle = col.box; rr(x, y, w, h, r); ctx.fill();
+  ctx.fillStyle = t.fill;
+  if (isA) { ctx.shadowColor = accent; ctx.shadowBlur = ts(14); }
   rr(x, y, w, h, r); ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = isA ? accent : col.bdr;
-  ctx.lineWidth = ts(isA ? 1.8 : 1);
+  ctx.strokeStyle = t.border;
+  ctx.lineWidth = ts(isA ? 2.2 : 1.5);
   ctx.stroke();
+  // category stripe on the left edge
+  ctx.save(); rr(x, y, w, h, r); ctx.clip();
+  ctx.fillStyle = accent; ctx.fillRect(x, y, ts(4), h);
+  ctx.restore();
 
   let label = n.label, sub = n.sublabel;
   if (n.cp) {
@@ -382,7 +407,7 @@ function drawBox(key) {
   ctx.textAlign = 'center';
   ctx.fillText(label, x + w/2, y + h/2 - (sub ? ts(4) : 0) + ts(1));
   if (sub) {
-    ctx.fillStyle = notes[key] ? (isErr ? COL.err : accent) : col.dim;
+    ctx.fillStyle = notes[key] ? (isErr ? COL.err : (isDark ? accent : darken(accent))) : col.dim;
     ctx.font = `400 ${ts(10.5)}px Inter,sans-serif`;
     ctx.fillText(sub, x + w/2, y + h/2 + ts(12));
   }
@@ -401,13 +426,14 @@ function drawGpu(key) {
   const anyActive = runners.some(r => r.status === 'active');
   const agg = runners.reduce((a, r) => r.status === 'error' ? 'error' : (a === 'error' ? a : r.status === 'loading' || r.status === 'draining' ? r.status : a), anyActive ? 'active' : (runners.length ? runners[0].status : 'free'));
 
-  ctx.fillStyle = anyActive ? col.gpuAct : col.gpuFree;
-  if (isA) { ctx.shadowColor = agg === 'free' ? COL.inf : statusColor(agg); ctx.shadowBlur = ts(12); }
+  const edge = agg === 'free' ? COL.worker : statusColor(agg);
+  ctx.fillStyle = col.gpu; rr(x, y, w, h, r); ctx.fill();
+  ctx.fillStyle = rgba(anyActive ? COL.ok : edge, isDark ? (anyActive ? 0.16 : 0.07) : (anyActive ? 0.13 : 0.05));
+  if (isA) { ctx.shadowColor = edge; ctx.shadowBlur = ts(14); }
   rr(x, y, w, h, r); ctx.fill();
   ctx.shadowBlur = 0;
-  const bc = agg === 'free' ? (isA ? COL.inf : col.bdr) : statusColor(agg);
-  ctx.strokeStyle = isA ? bc : (anyActive ? COL.ok : col.bdr);
-  ctx.lineWidth = ts(isA ? 2 : 1);
+  ctx.strokeStyle = rgba(edge, isA ? 1 : 0.8);
+  ctx.lineWidth = ts(isA ? 2.4 : 1.6);
   if (agg === 'loading' || agg === 'draining') ctx.setLineDash([ts(5), ts(4)]);
   rr(x, y, w, h, r); ctx.stroke();
   ctx.setLineDash([]);
@@ -436,7 +462,7 @@ function drawGpu(key) {
     ctx.font = `600 ${ts(12)}px Inter,sans-serif`;
     ctx.textAlign = 'left';
     ctx.fillText(rn.model, x + ts(10), ry + ts(11));
-    ctx.fillStyle = sc_;
+    ctx.fillStyle = isDark ? sc_ : darken(sc_);
     ctx.font = `600 ${ts(9)}px Inter,sans-serif`;
     ctx.textAlign = 'right';
     ctx.fillText(tag, x + w - ts(10), ry + ts(11));
@@ -460,12 +486,14 @@ function drawActor(key) {
   const n = N[key]; const col = C();
   const x = tx(n.x), y = ty(n.y), w = ts(n.w), h = ts(n.h), r = ts(8);
   const isA = activeNodes.has(key);
-  ctx.fillStyle = isA ? col.boxA : col.box;
-  if (isA) { ctx.shadowColor = n.color; ctx.shadowBlur = ts(14); }
+  const t = tint(n.color, isA);
+  ctx.fillStyle = col.box; rr(x, y, w, h, r); ctx.fill();
+  ctx.fillStyle = t.fill;
+  if (isA) { ctx.shadowColor = n.color; ctx.shadowBlur = ts(16); }
   rr(x, y, w, h, r); ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = isA ? n.color : col.bdr;
-  ctx.lineWidth = ts(isA ? 2 : 1.2);
+  ctx.strokeStyle = t.border;
+  ctx.lineWidth = ts(isA ? 2.2 : 1.6);
   ctx.stroke();
   ctx.font = `${ts(18)}px sans-serif`;
   ctx.textAlign = 'center';
@@ -492,9 +520,9 @@ function drawArrowLine(line) {
   ctx.beginPath();
   ctx.moveTo(tx(pts[0].x), ty(pts[0].y));
   for (let i = 1; i < pts.length; i++) ctx.lineTo(tx(pts[i].x), ty(pts[i].y));
-  ctx.strokeStyle = line.color;
-  ctx.globalAlpha = 0.45;
-  ctx.lineWidth = ts(2);
+  ctx.strokeStyle = isDark ? line.color : darken(line.color);
+  ctx.globalAlpha = 0.6;
+  ctx.lineWidth = ts(2.2);
   ctx.stroke();
   ctx.globalAlpha = 1;
   const last = pts[pts.length - 1], prev = pts[pts.length - 2];
@@ -505,9 +533,9 @@ function drawArrowLine(line) {
   ctx.lineTo(tx(last.x) - al * Math.cos(a - 0.45), ty(last.y) - al * Math.sin(a - 0.45));
   ctx.moveTo(tx(last.x), ty(last.y));
   ctx.lineTo(tx(last.x) - al * Math.cos(a + 0.45), ty(last.y) - al * Math.sin(a + 0.45));
-  ctx.strokeStyle = line.color;
-  ctx.globalAlpha = 0.6;
-  ctx.lineWidth = ts(2);
+  ctx.strokeStyle = isDark ? line.color : darken(line.color);
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = ts(2.2);
   ctx.stroke();
   ctx.globalAlpha = 1;
 }
@@ -520,7 +548,7 @@ function drawStaticHints() {
   // lease link between the two control planes
   const a = nodeEdge('cpLeader', 'right'), b = nodeEdge('cpStandby', 'left');
   ctx.setLineDash([ts(3), ts(3)]);
-  ctx.strokeStyle = col.dim; ctx.lineWidth = ts(1); ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = col.dim; ctx.lineWidth = ts(1.2); ctx.globalAlpha = 0.9;
   ctx.beginPath(); ctx.moveTo(tx(a.x), ty(a.y)); ctx.lineTo(tx(b.x), ty(b.y)); ctx.stroke();
   ctx.setLineDash([]); ctx.globalAlpha = 1;
   ctx.fillText('apptainer exec --nv <engine>.sif  ·  runners page the SIF in lazily, no per-host copy', tx(650), ty(648));
