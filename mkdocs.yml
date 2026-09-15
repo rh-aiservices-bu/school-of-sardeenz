@@ -1,0 +1,99 @@
+site_name: Sardeenz v2 Documentation
+site_description: High-density GPU workload orchestration — a software-defined VRAM multiplexer that sleeps, wakes, and evicts models on demand
+site_url: https://rh-aiservices-bu.github.io/school-of-sardeenz/
+repo_url: https://github.com/rh-aiservices-bu/school-of-sardeenz
+repo_name: rh-aiservices-bu/school-of-sardeenz
+edit_uri: edit/dev/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  logo: assets/sardeenz.svg
+  favicon: assets/sardeenz.svg
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.action.edit
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+hooks:
+  - scripts/mkdocs_repo_links.py
+
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - attr_list
+  - def_list
+  - md_in_html
+
+# The published site documents the application, not the project: planning, status,
+# and decision records stay in the repository only.
+exclude_docs: |
+  project/
+  architecture/adrs/
+  architecture/archive/
+  architecture/Sardeenz Architecture.html
+
+nav:
+  - Home: README.md
+  - Architecture:
+      - architecture/README.md
+      - Overview: architecture/overview.md
+      - Flow Visualizer: architecture-visualizer.html
+      - Components:
+          - architecture/components/README.md
+          - Routing Proxy: architecture/components/proxy.md
+          - Admin Dashboard: architecture/components/dashboard.md
+          - Runner Contract: architecture/components/runner-contract.md
+          - Structured Output Compatibility: architecture/components/structured-output-compatibility.md
+  - Usage:
+      - usage/README.md
+      - API Reference: usage/api-reference.md
+      - Runner Catalog: usage/runner-catalog.md
+      - MLServer Models: usage/mlserver-models.md
+      - OpenShift RBAC: usage/openshift-rbac.md
+      - Deployment Security: usage/deployment-security.md
+  - Development:
+      - development/README.md
+      - Setup: development/setup.md
+      - Coding Standards: development/coding-standards.md
+      - Contracts Workflow: development/contracts.md
+      - PatternFly 6: development/patternfly.md
+      - Internationalisation: development/i18n.md
+      - Accessibility Audit: development/accessibility-audit.md

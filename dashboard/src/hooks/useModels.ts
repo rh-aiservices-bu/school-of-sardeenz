@@ -1,0 +1,307 @@
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { ModelLifecycleState, StartupLogSessionOutcome } from '@sardeenz/types';
+import {
+  api,
+  type ModelInfo,
+  type ModelDeploymentRequest,
+  type ModelConfigurationUpdateRequest,
+  type MoveModelInstanceRequest,
+  type ModelDeploymentResponse,
+} from '../api/client';
+import { useDegraded } from '../contexts/DegradedContext';
+import { useEventStream } from './useEventStream';
+
+type ModelListData = { models: ModelInfo[] };
+
+export function useModels(state?: string) {
+  const { reportFallback } = useDegraded();
+  const { status: sseStatus } = useEventStream();
+  const raw = useQuery({
+    queryKey: ['models', { state }],
+    queryFn: ({ signal }) => api.models.list(state, signal),
+    refetchInterval: sseStatus === 'degraded' ? 2_000 : 10_000,
+  });
+
+  useEffect(() => {
+    const isFallback =
+      (raw.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
+    reportFallback('models-list', isFallback);
+    return () => {
+      reportFallback('models-list', false);
+    };
+  }, [raw.data, reportFallback]);
+
+  return { ...raw, data: raw.data?.models };
+}
+
+export function useModel(name: string) {
+  const { reportFallback } = useDegraded();
+  const { status: sseStatus } = useEventStream();
+
+  const query = useQuery({
+    queryKey: ['models', name],
+    queryFn: ({ signal }) => api.models.get(name, signal),
+    enabled: !!name,
+    // Faster polling during STARTING / PENDING to reflect loading progress quickly
+    refetchInterval: (q) => {
+      const state = (q.state.data as { state?: string } | undefined)?.state;
+      const isTransient = state === 'STARTING' || state === 'PENDING';
+      if (sseStatus === 'degraded') return 2_000;
+      return isTransient ? 2_000 : 5_000;
+    },
+  });
+
+  useEffect(() => {
+    const isFallback =
+      (query.data as Record<string, unknown> | undefined)?.['source'] === 'redis-fallback';
+    reportFallback(`model-${name}`, isFallback);
+    return () => {
+      reportFallback(`model-${name}`, false);
+    };
+  }, [query.data, name, reportFallback]);
+
+  return query;
+}
+
+export function useStartupLogSessions(name: string) {
+  return useQuery({
+    queryKey: ['models', name, 'startup-logs'],
+    queryFn: ({ signal }) => api.models.listStartupLogs(name, signal),
+    enabled: !!name,
+    refetchInterval: (query) =>
+      query.state.data?.sessions.some(
+        (session) => session.outcome === StartupLogSessionOutcome.IN_PROGRESS,
+      )
+        ? 2_000
+        : false,
+    select: (data) => data.sessions,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Optimistic mutation helper
+// ---------------------------------------------------------------------------
+
+type Snapshot = [readonly unknown[], ModelListData | undefined][];
+
+// Apply an optimistic list update to one cached ['models', …] entry. The ['models'] prefix also
+// matches the ['models', name] detail queries, whose data is a single ModelDetail with no `.models`
+// array — spreading that undefined threw "models is not iterable", so leave non-list entries as-is.
+export function updateModelListData(
+  old: ModelListData | undefined,
+  updater: (models: ModelInfo[]) => ModelInfo[],
+): ModelListData | undefined {
+  return old && Array.isArray(old.models) ? { ...old, models: updater(old.models) } : old;
+}
+
+function createOptimisticMutation<TArg, TResult = unknown>(
+  queryClient: QueryClient,
+  mutationFn: (arg: TArg) => Promise<TResult>,
+  updater: (models: ModelInfo[], arg: TArg) => ModelInfo[],
+) {
+  return {
+    mutationFn,
+    onMutate: async (arg: TArg): Promise<{ previous: Snapshot }> => {
+      await queryClient.cancelQueries({ queryKey: ['models'] });
+      const previous = queryClient.getQueriesData<ModelListData>({ queryKey: ['models'] });
+      queryClient.setQueriesData<ModelListData>({ queryKey: ['models'] }, (old) =>
+        updateModelListData(old, (models) => updater(models, arg)),
+      );
+      return { previous };
+    },
+    onError: (_err: unknown, _arg: TArg, context?: { previous: Snapshot }) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+      void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+    },
+  };
+}
+
+export function useDeployModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<ModelDeploymentRequest, ModelDeploymentResponse>(
+      queryClient,
+      (body) => api.models.deploy(body),
+      (models, body) => [
+        ...models,
+        {
+          modelName: body.modelName,
+          state: ModelLifecycleState.PENDING,
+          runnerType: body.runnerType,
+          instanceCount: 1,
+          requiredMemory: body.requiredMemory,
+          pinned: body.pinned ?? false,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    ),
+  );
+}
+
+export function useUpdateModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, body }: { name: string; body: ModelConfigurationUpdateRequest }) =>
+      api.models.update(name, body),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+      void queryClient.invalidateQueries({ queryKey: ['models', variables.name] });
+    },
+  });
+}
+
+export function useSleepModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.sleep(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.DRAINING } : m,
+        ),
+    ),
+  );
+}
+
+export function useWakeModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.wake(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STARTING } : m,
+        ),
+    ),
+  );
+}
+
+export function useStopModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.stop(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
+        ),
+    ),
+  );
+}
+
+export function useForceStopModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.models.stop(name, true),
+    onSettled: (_data, _error, name) => {
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+      void queryClient.invalidateQueries({ queryKey: ['models', name] });
+      void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+    },
+  });
+}
+
+export function useStartModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<string>(
+      queryClient,
+      (name) => api.models.start(name),
+      (models, name) =>
+        models.map((m) =>
+          m.modelName === name ? { ...m, state: ModelLifecycleState.STARTING } : m,
+        ),
+    ),
+  );
+}
+
+export function useDeleteModel() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    createOptimisticMutation<{ name: string; force?: boolean }>(
+      queryClient,
+      ({ name, force }) => api.models.delete(name, force),
+      (models, { name, force }) =>
+        force
+          ? models.filter((m) => m.modelName !== name)
+          : models.map((m) =>
+              m.modelName === name ? { ...m, state: ModelLifecycleState.STOPPING } : m,
+            ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Instance-scoped mutations (#120)
+// ---------------------------------------------------------------------------
+//
+// Unlike the model-level mutations above, these don't optimistically patch the cached list/detail
+// shape — the nested `instances[]` array on ModelDetail makes an inline optimistic update fiddly
+// for comparatively rare admin actions, so they simply invalidate on settle.
+
+function invalidateModelQueries(queryClient: QueryClient, modelName: string): void {
+  void queryClient.invalidateQueries({ queryKey: ['models'] });
+  void queryClient.invalidateQueries({ queryKey: ['models', modelName] });
+  void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+}
+
+export function useAddInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (modelName: string) => api.models.createInstance(modelName),
+    onSettled: (_data, _err, modelName) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+export function useDeleteInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
+      api.models.deleteInstance(modelName, instanceId),
+    onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+export function useSleepInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
+      api.models.sleepInstance(modelName, instanceId),
+    onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+export function useWakeInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ modelName, instanceId }: { modelName: string; instanceId: string }) =>
+      api.models.wakeInstance(modelName, instanceId),
+    onSettled: (_data, _err, { modelName }) => invalidateModelQueries(queryClient, modelName),
+  });
+}
+
+/** Move intentionally has no optimistic aggregate update: model detail is authoritative. */
+export function useMoveInstance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      modelName,
+      instanceId,
+      targetWorkerId,
+      targetDeviceIndices,
+    }: MoveModelInstanceRequest & { modelName: string; instanceId: string }) =>
+      api.models.moveInstance(modelName, instanceId, { targetWorkerId, targetDeviceIndices }),
+    onSettled: (_data, _err, variables) => invalidateModelQueries(queryClient, variables.modelName),
+  });
+}

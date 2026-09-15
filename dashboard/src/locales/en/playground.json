@@ -1,0 +1,74 @@
+{
+  "page": {
+    "title": "Chatbot Playground"
+  },
+  "workspace": {
+    "loading": "Loading models"
+  },
+  "sidebar": {
+    "title": "Models",
+    "ariaLabel": "Model list",
+    "available_one": "{{count}} available",
+    "available_other": "{{count}} available",
+    "searchAriaLabel": "Search models",
+    "searchPlaceholder": "Filter models...",
+    "closeAll": "Close all sessions",
+    "emptyTitle": "No models available",
+    "emptyBody": "Start a model from the Models page to begin testing.",
+    "noMatchesTitle": "No matches",
+    "noMatchesBody": "No models match your search.",
+    "selectModel": "Open a chat session with {{modelName}}",
+    "open": "Open",
+    "sleeping": "Sleeping",
+    "gpu": "GPU {{index}}",
+    "multiGpu": "Multi-GPU",
+    "unknownGpu": "Unplaced",
+    "unknownWorker": "No worker"
+  },
+  "toolbar": {
+    "showSidebar": "Show sidebar",
+    "hideSidebar": "Hide sidebar"
+  },
+  "tabs": {
+    "ariaLabel": "Open sessions",
+    "generating": "Generating",
+    "tabAriaLabel": "{{modelName}} tab",
+    "closeAriaLabel": "Close {{modelName}}"
+  },
+  "layout": {
+    "ariaLabel": "Layout mode",
+    "single": "Single view",
+    "split": "Split view (2 models)",
+    "grid": "Grid view (4 models)"
+  },
+  "paneSelector": {
+    "ariaLabel": "Select session for pane {{pane}}",
+    "auto": "Auto",
+    "autoDescription": "Use default order",
+    "swapDescription": "Will swap with current"
+  },
+  "grid": {
+    "emptyTitle": "No sessions open",
+    "emptyBody": "Select a model from the sidebar to start a chat session.",
+    "emptyAction": "Click on a model in the sidebar to begin"
+  },
+  "chat": {
+    "streaming": "Streaming",
+    "clear": "Clear",
+    "welcomeTitle": "Chat with {{modelName}}",
+    "welcomeDescription": "Click Send to test inference.",
+    "inputPlaceholder": "Enter your prompt...",
+    "defaultPrompt": "Why is the sky blue?",
+    "you": "You",
+    "noResponse": "No response",
+    "sleepingHint": "(sleeping)",
+    "runnerHint": "({{runner}})",
+    "errorTitle": "Error",
+    "errorWithStatus": "Error {{status}}",
+    "metrics": {
+      "latency": "{{ms}}ms",
+      "ttft": "TTFT: {{ms}}ms",
+      "tokensPerSecond": "{{tps}} tok/s"
+    }
+  }
+}

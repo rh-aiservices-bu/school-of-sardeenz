@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::TestProxy;
 use crate::common::proxy_builder::TestProxyConfig;
+use crate::common::TestProxy;
 use sardeenz_proxy::generated::proxy_control_plane::RunnerEndpoint;
 
 /// Returns a port that is not listening (connection will be refused).
@@ -38,10 +38,11 @@ async fn test_circuit_breaker_trips() {
     let model = "circuit-breaker-test/model-v1";
 
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: host.clone(),
                 port,
@@ -52,10 +53,7 @@ async fn test_circuit_breaker_trips() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy
-            .routing_cache
-            .update_entry(model.to_string(), entry)
-            .await;
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
     }
 
     let client = reqwest::Client::new();
@@ -66,7 +64,7 @@ async fn test_circuit_breaker_trips() {
 
     for i in 0..THRESHOLD {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await
@@ -80,17 +78,13 @@ async fn test_circuit_breaker_trips() {
     }
 
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
         .expect("request to proxy failed");
 
-    assert_eq!(
-        resp.status(),
-        StatusCode::SERVICE_UNAVAILABLE,
-        "open circuit should return 503"
-    );
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE, "open circuit should return 503");
 
     let body: serde_json::Value = resp.json().await.expect("response not JSON");
     assert_eq!(
@@ -129,7 +123,7 @@ async fn test_circuit_breaker_trips_on_5xx() {
     // Each 500 response from the runner should be recorded as a failure.
     for _ in 0..THRESHOLD {
         let resp = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await
@@ -141,7 +135,7 @@ async fn test_circuit_breaker_trips_on_5xx() {
 
     // Circuit should now be open — next request gets 503 without hitting runner.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -180,10 +174,11 @@ async fn test_circuit_breaker_recovers() {
     // Start with a dead endpoint to trip the circuit.
     let (dead_host, dead_port) = unreachable_endpoint();
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: dead_host.clone(),
                 port: dead_port,
@@ -194,10 +189,7 @@ async fn test_circuit_breaker_recovers() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy
-            .routing_cache
-            .update_entry(model.to_string(), entry)
-            .await;
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
     }
 
     let client = reqwest::Client::new();
@@ -209,7 +201,7 @@ async fn test_circuit_breaker_recovers() {
     // Trip the circuit.
     for _ in 0..THRESHOLD {
         let _ = client
-            .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
             .json(&payload)
             .send()
             .await;
@@ -217,10 +209,11 @@ async fn test_circuit_breaker_recovers() {
 
     // Swap to the working runner BEFORE waiting for recovery.
     {
-        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry};
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
         let entry = RoutingEntry {
             model_name: model.to_string(),
             state: ModelState::Active,
+            protocol: Protocol::Openai,
             endpoints: vec![RunnerEndpoint {
                 host: runner.addr.ip().to_string(),
                 port: runner.addr.port(),
@@ -231,10 +224,7 @@ async fn test_circuit_breaker_recovers() {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: None,
         };
-        proxy
-            .routing_cache
-            .update_entry(model.to_string(), entry)
-            .await;
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
     }
 
     // Wait for recovery_timeout → circuit goes HalfOpen.
@@ -242,7 +232,7 @@ async fn test_circuit_breaker_recovers() {
 
     // In HalfOpen state, the circuit allows one probe request through.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -256,15 +246,98 @@ async fn test_circuit_breaker_recovers() {
 
     // Circuit is now Closed — subsequent requests should also succeed.
     let resp2 = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
         .expect("request to proxy failed");
 
-    assert_eq!(
-        resp2.status(),
-        StatusCode::OK,
-        "circuit should be Closed after recovery"
-    );
+    assert_eq!(resp2.status(), StatusCode::OK, "circuit should be Closed after recovery");
+}
+
+/// Verifies traffic distribution across both replicas after an outage
+/// followed by a routing-map swap to live endpoints. This is NOT a #93
+/// probe-strand regression guard: the circuits tripped here are keyed on
+/// the two throwaway unreachable ports, and `insert_active_model_multi`
+/// replaces the routing entry with live runners on different ports, so
+/// those circuits start fresh/Closed and the tripped (HalfOpen-eligible)
+/// circuits are never exercised again. The decisive test for the #93
+/// HalfOpen-probe-leak fix is the unit test
+/// `dropped_probe_guard_releases_probe_immediately` in
+/// `src/forwarding/circuit_breaker.rs`.
+#[tokio::test]
+async fn test_both_replicas_recover_after_open() {
+    use crate::common::MockRunner;
+
+    let model = "dual-replica/model-v1";
+    const THRESHOLD: u32 = 3;
+
+    let a = MockRunner::spawn(model).await;
+    let b = MockRunner::spawn(model).await;
+
+    let proxy = TestProxy::spawn_with_config(TestProxyConfig {
+        control_plane_url: "http://127.0.0.1:1".to_string(),
+        cb_failure_threshold: THRESHOLD,
+        cb_failure_window: Duration::from_secs(30),
+        cb_recovery_timeout: Duration::from_millis(100),
+        ..Default::default()
+    })
+    .await;
+
+    // Trip both circuits with two unreachable endpoints.
+    let (dh1, dp1) = unreachable_endpoint();
+    let (dh2, dp2) = unreachable_endpoint();
+    {
+        use sardeenz_proxy::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry};
+        let entry = RoutingEntry {
+            model_name: model.to_string(),
+            state: ModelState::Active,
+            protocol: Protocol::Openai,
+            endpoints: vec![
+                RunnerEndpoint { host: dh1, port: dp1, weight: 1, healthy: true, runner_id: None },
+                RunnerEndpoint { host: dh2, port: dp2, weight: 1, healthy: true, runner_id: None },
+            ],
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            metadata: None,
+        };
+        proxy.routing_cache.update_entry(model.to_string(), entry).await;
+    }
+
+    let client = reqwest::Client::new();
+    let payload =
+        serde_json::json!({ "model": model, "messages": [{"role":"user","content":"Hi"}] });
+
+    for _ in 0..(THRESHOLD * 2 + 2) {
+        let _ = client
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
+            .json(&payload)
+            .send()
+            .await;
+    }
+
+    crate::common::insert_active_model_multi(
+        &proxy.routing_cache,
+        model,
+        vec![(a.addr, 1), (b.addr, 1)],
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    for _ in 0..10 {
+        let resp = client
+            .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
+            .json(&payload)
+            .send()
+            .await
+            .expect("request to proxy failed");
+        assert_ne!(
+            resp.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no request should 503 while both replicas are recoverable"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(a.request_count() > 0, "replica A should receive traffic after recovery");
+    assert!(b.request_count() > 0, "replica B should receive traffic after recovery");
 }

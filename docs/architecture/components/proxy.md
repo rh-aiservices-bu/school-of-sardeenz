@@ -17,13 +17,33 @@ The proxy owns the **inference request path** — from client connection to runn
 
 ## Overview
 
-The proxy exposes three inference endpoints on its primary port (default `0.0.0.0:8080`):
+The proxy exposes six inference endpoints on its primary port (default `0.0.0.0:8080`), split
+across two **protocol-family path prefixes** — `/openai` for the OpenAI-compatible surface and
+`/oip` for the KServe V2 Open Inference Protocol surface (see [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)):
 
-| Endpoint | Method | Purpose |
-| --- | --- | --- |
-| `/v1/chat/completions` | `POST` | Chat inference (forwarded to runner) |
-| `/v1/completions` | `POST` | Text completion inference (forwarded to runner) |
-| `/v1/models` | `GET` | List active and sleeping models |
+| Endpoint                       | Method | Purpose                                         |
+| ------------------------------ | ------ | ----------------------------------------------- |
+| `/openai/v1/chat/completions`  | `POST` | OpenAI chat inference (forwarded)               |
+| `/openai/v1/completions`       | `POST` | OpenAI text completion (forwarded)              |
+| `/openai/v1/models`            | `GET`  | List `openai`-protocol models                   |
+| `/oip/v2/models/{model}/infer` | `POST` | KServe V2 (OIP) inference (forwarded)           |
+| `/oip/v2/models/{model}/ready` | `GET`  | KServe V2 readiness (503 for sleeping, no wake) |
+| `/oip/v2/models`               | `GET`  | List `oip`-protocol models                      |
+
+The prefix names the **protocol family, never the engine** — it is stripped before forwarding, so
+runners always receive canonical `/v1/*` or `/v2/*` paths. Both prefixes are always mounted; a
+protocol family with no deployed models simply lists nothing.
+
+### Protocol families
+
+Each routing entry carries a required `protocol` tag (`openai` or `oip`, [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md))
+written by the control plane. The proxy compiles in both protocol adapters and always mounts every
+prefix; which models appear under which prefix is driven entirely by this per-entry tag — importing
+and deploying a runner lights up its surface live, with no proxy restart or config edit. At startup
+and on every Redis reconnect, the proxy also publishes its supported protocol set to the
+`{prefix}:proxy:protocols` Redis key, which the control plane's catalog import path checks as a
+forward-compat guard (importing a runner whose `protocol` the running proxy does not advertise
+fails fast at import time rather than at request time).
 
 A separate admin server on `0.0.0.0:9099` exposes `/healthz`, `/readyz`, and `/metrics`. The admin port is never exposed outside the cluster.
 
@@ -35,8 +55,10 @@ The proxy is designed to run as multiple stateless replicas behind a load balanc
 
 Every inference request follows the same steps:
 
-1. Read the raw request body (buffered, max 10 MiB)
-2. Extract the `model` field from the JSON payload
+1. Read the raw request body (buffered, max 1 MiB by default — `SARDEENZ_PROXY_MAX_BODY_BYTES`)
+2. Extract the `model` field — from the JSON body for `/openai/*` requests, from the `{model}` URL
+   path segment for `/oip/*` requests. The rest of the path (resolve/park/wake/forward/circuit-break)
+   is protocol-agnostic.
 3. Resolve the model's current state from the in-memory routing cache
 4. If sleeping, park the connection and fire a wake trigger; if starting (wake already in progress), park without triggering
 5. Filter endpoints through the circuit breaker
@@ -53,7 +75,7 @@ sequenceDiagram
     participant Cache as Routing Cache<br/>(in-memory)
     participant Runner
 
-    Client->>Proxy: POST /v1/chat/completions<br/>{"model": "llama-3", ...}
+    Client->>Proxy: POST /openai/v1/chat/completions<br/>{"model": "llama-3", ...}
     Proxy->>Proxy: Extract model name from body
     Proxy->>Cache: resolve("llama-3")
     Cache-->>Proxy: Resolution::Active(entry)<br/>endpoints: [{host, port, weight, healthy}]
@@ -61,7 +83,7 @@ sequenceDiagram
     Proxy->>Proxy: Filter endpoints through circuit breaker
     Proxy->>Proxy: Weighted round-robin pick
 
-    Proxy->>Runner: POST /v1/chat/completions<br/>(forwarded, host header stripped)
+    Proxy->>Runner: POST /v1/chat/completions<br/>(forwarded, host header stripped)<br/>(prefix stripped)
     Runner-->>Proxy: 200 OK (streaming body)
     Proxy->>Proxy: record_success(endpoint)
     Proxy-->>Client: 200 OK (streaming body)
@@ -80,7 +102,7 @@ sequenceDiagram
     participant Redis
     participant Runner
 
-    Client->>Proxy: POST /v1/chat/completions<br/>{"model": "llama-3", ...}
+    Client->>Proxy: POST /openai/v1/chat/completions<br/>{"model": "llama-3", ...}
     Proxy->>Cache: resolve("llama-3")
     Cache-->>Proxy: Resolution::Sleeping(entry)
 
@@ -108,7 +130,7 @@ sequenceDiagram
     Cache-->>Proxy: endpoints: [{host, port, ...}]
 
     Proxy->>Proxy: Filter + round-robin pick
-    Proxy->>Runner: POST /v1/chat/completions
+    Proxy->>Runner: POST /v1/chat/completions<br/>(prefix stripped)
     Runner-->>Proxy: Response
     Proxy-->>Client: Response
 ```
@@ -125,26 +147,26 @@ sequenceDiagram
     participant R1 as Runner A<br/>(weight 3)
     participant R2 as Runner B<br/>(weight 1)
 
-    Client->>Proxy: POST /v1/chat/completions
+    Client->>Proxy: POST /openai/v1/chat/completions
     Proxy->>Cache: resolve("llama-3")
     Cache-->>Proxy: Resolution::Active<br/>endpoints: [A(w=3), B(w=1)]
 
     Proxy->>Proxy: Filter through circuit breaker<br/>Both endpoints: Closed → both pass
 
-    Note over Proxy: Expanded list: [A, A, A, B]<br/>counter.fetch_add(1) % 4
+    Note over Proxy: Cumulative weight bands: A=[0,3), B=[3,4)<br/>counter.fetch_add(1) % 4 selects a band
 
-    Proxy->>Proxy: counter = 5 → 5 % 4 = 1 → pick A
+    Proxy->>Proxy: counter = 5 → 5 % 4 = 1 → falls in [0,3) → pick A
     Proxy->>R1: Forward request
     R1-->>Proxy: Response
     Proxy->>Proxy: record_success("A:8000")
     Proxy-->>Client: Response
 
-    Note over Client,Proxy: Next request: counter = 6 → 6 % 4 = 2 → pick A
-    Note over Client,Proxy: Next request: counter = 7 → 7 % 4 = 3 → pick A
-    Note over Client,Proxy: Next request: counter = 8 → 8 % 4 = 0 → pick B
+    Note over Client,Proxy: Next request: counter = 6 → 6 % 4 = 2 → falls in [0,3) → pick A
+    Note over Client,Proxy: Next request: counter = 7 → 7 % 4 = 3 → falls in [3,4) → pick B
+    Note over Client,Proxy: Next request: counter = 8 → 8 % 4 = 0 → falls in [0,3) → pick A
 ```
 
-The `WeightedRoundRobin` balancer builds an expanded endpoint list where each endpoint appears `weight` times, then uses a global atomic counter modulo the list length. Weight 0 effectively removes an endpoint from rotation — used for graceful drain.
+The `WeightedRoundRobin` balancer computes cumulative weight bands over the endpoint list (e.g. weights `[3, 1]` produce bands `A=[0,3)`, `B=[3,4)`) and uses a global atomic counter modulo the total weight to select a band via an O(n) scan — no expanded endpoint list is allocated. Weight 0 effectively removes an endpoint from rotation — used for graceful drain.
 
 ## Connection Parking Protocol
 
@@ -177,25 +199,28 @@ When the resolver returns `Resolution::Starting`, the model's wake is already in
 
 ### State Transitions During Parking
 
-The parking loop checks for three terminal conditions on every wake from `receiver.changed()`:
+The parking loop checks for the following terminal conditions on every wake from `receiver.changed()`:
 
-| State in cache | Action |
-| --- | --- |
-| `ACTIVE` | Remove from `pending_wakes`, return `Ok(())`, proceed to forward |
-| `ERROR` | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 |
-| Entry removed | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404 |
+| State in cache | Action                                                                                                                                                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward                                                                                                                                                                                                        |
+| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503                                                                                                                                                                                                       |
+| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404                                                                                                                                                                                                          |
+| `DRAINING`     | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (matches the resolver's up-front fail-fast for draining models)                                                                                                                                       |
+| `SLEEPING`     | If the model has already left `SLEEPING` during this wait, treat as a rollback: remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (client retry re-triggers cleanly). Still-`SLEEPING` before the wake has progressed is not a rollback — keep waiting. |
 
-Any other state (`SLEEPING`, `STARTING`, `DRAINING`) causes the loop to re-wait.
+`STARTING` — and `SLEEPING` before the model has been observed leaving it — cause the loop to keep waiting; the wake is still in progress.
 
 ### Timeout and Backpressure
 
-Two independent limits protect the proxy from runaway parking:
+Three independent limits protect the proxy from runaway parking:
 
-| Limit | Config key | Default | Scope |
-| --- | --- | --- | --- |
-| Per-model cap | `SARDEENZ_PARKING_MAX_PER_MODEL` | 1000 | Per model name |
-| Global cap | `SARDEENZ_PARKING_MAX_GLOBAL` | 10000 | Across all models |
-| Deadline | `SARDEENZ_PARKING_TIMEOUT_SECS` | 120 | Per parked request |
+| Limit         | Config key                       | Default | Scope                        |
+| ------------- | -------------------------------- | ------- | ---------------------------- |
+| Per-model cap | `SARDEENZ_PARKING_MAX_PER_MODEL` | 1000    | Per model name               |
+| Global cap    | `SARDEENZ_PARKING_MAX_GLOBAL`    | 10000   | Across all models            |
+| Byte cap      | `SARDEENZ_PARKING_MAX_BYTES`     | 1 GiB   | Sum of parked request bodies |
+| Deadline      | `SARDEENZ_PARKING_TIMEOUT_SECS`  | 120     | Per parked request           |
 
 Limits are checked before incrementing the count. Excess requests receive a 503 (`parking_limit_reached`). The deadline uses `tokio::time::sleep_until` inside a `select!` with the `receiver.changed()` future — if the deadline fires first, the task returns `Err(ParkingTimeout)` → 503 (`parking_timeout`).
 
@@ -205,10 +230,13 @@ Limits are checked before incrementing the count. Excess requests receive a 503 
 
 The control plane maintains the routing map as a Redis hash:
 
-| Key | Type | Description |
-| --- | --- | --- |
-| `sardeenz:routing-map` | Hash | One field per model. Field name = model name. Value = JSON-serialized `RoutingEntry`. |
-| `sardeenz:routing-updates` | Pub/sub channel | Receives `RoutingMapUpdate` JSON on every routing map change. |
+| Key                                         | Type            | Description                                                                                    |
+| ------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
+| `sardeenz:routing-map`                      | Hash            | One field per model. Field name = model name. Value = JSON-serialized `RoutingEntry`.          |
+| `sardeenz:routing-updates`                  | Pub/sub channel | Receives `RoutingMapUpdate` JSON on every routing map change.                                  |
+| `sardeenz:routing-barriers`                 | Pub/sub channel | Requests an applied-and-quiescent acknowledgement after a destructive routing change.          |
+| `sardeenz:routing-barrier-acks:{barrierId}` | Set             | Short-lived proxy process ids that have applied and quiesced one cutover.                      |
+| `sardeenz:proxies:{proxyId}`                | String + TTL    | Presence lease for a proxy that has loaded the current map and is admitting inference traffic. |
 
 ### RoutingEntry Format
 
@@ -218,6 +246,7 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
 {
   "modelName": "meta-llama/Llama-3.1-8B-Instruct",
   "state": "ACTIVE",
+  "protocol": "openai",
   "endpoints": [
     {
       "host": "10.244.1.5",
@@ -230,29 +259,35 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
   "updatedAt": "2026-06-12T10:30:00Z",
   "metadata": {
     "ownedBy": "platform-team",
-    "maxModelLen": 131072,
-    "engineType": "vllm"
+    "maxModelLen": 131072
   }
 }
 ```
 
-A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. The metadata block is optional and passed through to `/v1/models` responses without interpretation.
+A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. `protocol` is a required
+top-level field ([ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)) — it drives which
+listing (`/openai/v1/models` or `/oip/v2/models`) the entry appears under. The metadata block
+remains optional and is passed through to the `openai` listing response without interpretation.
+
+The `updatedAt` timestamp is written by the control plane for operator diagnostics and dashboard display. The proxy deserializes it for round-trip fidelity but does not consult it for routing or staleness decisions — cache freshness is determined entirely by Redis pub/sub notifications (see [Cache Invalidation](#cache-invalidation) below).
+
+The `port` in each endpoint is the runner's **engine (inference) port** — where the engine's `/v1/*` server listens — not the runner's management port. The control plane registers this port (a two-port engine like vLLM serves the runner contract on a separate management port it never publishes to the routing map; a single-server runner reports the same value for both). The proxy forwards to whatever `host:port` the entry names and needs no knowledge of the distinction.
 
 ### Model States
 
-| State | Proxy action |
-| --- | --- |
-| `ACTIVE` | Forward to endpoints via round-robin |
-| `SLEEPING` | Park connection, fire wake trigger |
+| State      | Proxy action                                           |
+| ---------- | ------------------------------------------------------ |
+| `ACTIVE`   | Forward to endpoints via round-robin                   |
+| `SLEEPING` | Park connection, fire wake trigger                     |
 | `STARTING` | Park connection, no wake trigger (already in progress) |
-| `DRAINING` | Reject with 503 (`model_unavailable`) |
-| `ERROR` | Reject with 503 (`model_unavailable`) |
+| `DRAINING` | Reject with 503 (`model_unavailable`)                  |
+| `ERROR`    | Reject with 503 (`model_unavailable`)                  |
 
 ### Refresh Strategy
 
 On startup, the proxy performs a full `HGETALL sardeenz:routing-map` and populates `RoutingMapCache`. It then subscribes to `sardeenz:routing-updates` for incremental updates.
 
-On any pub/sub message, the proxy re-fetches the full hash with `HGETALL` and replaces the in-memory map atomically. This avoids applying partial or out-of-order deltas — the map is small enough (one entry per deployed model) that a full re-read is safe and simpler.
+On any routing-update or barrier message, the proxy re-fetches the full hash with `HGETALL` and replaces the in-memory map atomically. This avoids applying partial or out-of-order deltas — the map is small enough (one entry per deployed model) that a full re-read is safe and simpler.
 
 ```
 pub/sub message received:
@@ -263,7 +298,19 @@ pub/sub message received:
      → notify.send(())          ← wakes all parked tasks
 ```
 
-Fields that fail JSON parsing are logged as warnings and dropped. A parse failure for one model does not block the refresh for others.
+Fields that fail JSON parsing are logged as warnings. A previous valid entry is retained when one
+exists; an invalid new entry is dropped. A parse failure for one model does not block the refresh
+for others.
+
+For a destructive change (an active model becomes unavailable, or a selectable endpoint is
+removed, made unhealthy, or assigned weight zero), requests hold a read lease on their selected
+routing generation through the complete upstream response. Cache replacement takes that
+generation's write lease, so it waits for those requests before acknowledging a propagation
+barrier. Endpoint additions and diagnostic-only changes reuse the existing lease and do not wait.
+The control plane snapshots the TTL-backed proxy presence keys at cutover and stops the old runner
+only after every pre-cutover proxy has acknowledged, disconnected long enough for its presence to
+expire, or reconnected and loaded the new map. A disconnected proxy rejects new inference rather
+than continuing to route from its stale cache.
 
 If the Redis connection drops, `start_redis_sync` returns an error. The main loop logs the error, marks the proxy as not ready (fails `/readyz`), and retries the connection after a 5-second back-off. The in-memory cache remains intact during the gap — it may become stale but does not clear.
 
@@ -271,11 +318,11 @@ If the Redis connection drops, `start_redis_sync` returns an error. The main loo
 
 The full-refresh strategy (HGETALL on every pub/sub event) is designed for the following envelope:
 
-| Dimension | Expected range | Notes |
-| --- | --- | --- |
-| Model count | 10–100 | One routing entry per deployed model |
-| Entry size | < 1 KB each | A few endpoints + metadata per model |
-| Total map size | < 100 KB | Fits comfortably in a single HGETALL |
+| Dimension         | Expected range             | Notes                                   |
+| ----------------- | -------------------------- | --------------------------------------- |
+| Model count       | 10–100                     | One routing entry per deployed model    |
+| Entry size        | < 1 KB each                | A few endpoints + metadata per model    |
+| Total map size    | < 100 KB                   | Fits comfortably in a single HGETALL    |
 | Pub/sub frequency | < 1 event/second sustained | Bursts during batch operations are fine |
 
 **When to revisit:** If the model count exceeds ~500, or if pub/sub events exceed ~10/second sustained, the full-refresh approach may become a bottleneck. At that point, consider incremental delta application (using the `RoutingMapUpdate` type already defined in the spec) or per-model key reads instead of HGETALL.
@@ -301,21 +348,23 @@ stateDiagram-v2
     Closed --> Closed : record_success() or<br/>failures < threshold
 ```
 
-| State | `is_allowed()` | Description |
-| --- | --- | --- |
-| `Closed` | `true` | Normal operation. Failures accumulate in a sliding window. |
-| `Open` | `false` | Endpoint is excluded from routing. |
-| `HalfOpen` | `true` | Probe phase — one request is allowed through to test recovery. |
+| State      | `is_allowed()` | Description                                                    |
+| ---------- | -------------- | -------------------------------------------------------------- |
+| `Closed`   | `true`         | Normal operation. Failures accumulate in a sliding window.     |
+| `Open`     | `false`        | Endpoint is excluded from routing.                             |
+| `HalfOpen` | `true`         | Probe phase — one request is allowed through to test recovery. |
 
 ### Thresholds and Recovery
 
-| Parameter | Config key | Default | Description |
-| --- | --- | --- | --- |
-| Failure threshold | `SARDEENZ_CB_FAILURE_THRESHOLD` | 5 | Failures within window that trip the breaker |
-| Failure window | `SARDEENZ_CB_FAILURE_WINDOW_SECS` | 30 | Sliding window for failure counting (seconds) |
-| Recovery timeout | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | 15 | Time in `Open` before transitioning to `HalfOpen` |
+| Parameter         | Config key                          | Default | Description                                       |
+| ----------------- | ----------------------------------- | ------- | ------------------------------------------------- |
+| Failure threshold | `SARDEENZ_CB_FAILURE_THRESHOLD`     | 5       | Failures within window that trip the breaker      |
+| Failure window    | `SARDEENZ_CB_FAILURE_WINDOW_SECS`   | 30      | Sliding window for failure counting (seconds)     |
+| Recovery timeout  | `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | 15      | Time in `Open` before transitioning to `HalfOpen` |
 
 Failures outside the window are pruned on each `record_failure()` call. The state check is lazy — `Open → HalfOpen` transition is computed when `state()` or `is_allowed()` is called, not on a timer.
+
+A claimed `HalfOpen` probe is normally released the instant its outcome is recorded (or if the request is cancelled). As a leak backstop, a probe is also treated as re-claimable after `max(recovery_timeout, upstream_timeout)` elapses — deliberately not `recovery_timeout` alone, since a legitimate in-flight probe can run as long as `upstream_timeout`, and reclaiming it earlier would admit a second probe on top of a still-recovering endpoint. This window is derived internally and has no separate env var.
 
 ### When All Endpoints Are Open
 
@@ -323,25 +372,56 @@ If every endpoint for a model has an open circuit breaker, `balancer.pick()` ret
 
 Circuit breaker state is per-replica and not shared across proxy replicas. A failing runner appears independently broken to each replica.
 
+## Forwarding Concurrency Limits
+
+The proxy applies an optional cap on concurrently **forwarded** (in-flight upstream) requests, both
+globally (`SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`) and per-model
+(`SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL`). A request over the limit is rejected immediately with
+`503 Service Unavailable` (`overloaded`). Both default to `0` (unlimited).
+
+This is a last-resort admission control backstop on the proxy itself, protecting runners from being
+driven past their real concurrency capacity when upstream traffic bursts faster than autoscaling or
+eviction can react. It is **not** a substitute for rate limiting — see
+[Deployment Requirements](#deployment-requirements) below.
+
+**Why this lives at the forwarding step, not the router.** The permit is acquired _after_ parking
+resolves (i.e. after a sleeping/starting model's request has already waited for `ACTIVE`) and
+_before_ endpoint selection. A limit checked earlier — e.g. at model resolution, before parking —
+would let a parked request hold a forwarding permit for the entire wake duration (up to
+`SARDEENZ_PARKING_TIMEOUT_SECS`). Under load, that permit would never free up fast enough, and the
+forwarding limiter would effectively cap the number of models that can wake concurrently instead of
+the number of requests actually hitting a runner — a self-inflicted deadlock. Parked requests hold no
+forwarding permit; they contend only with the parking limits (`SARDEENZ_PARKING_MAX_PER_MODEL`,
+`SARDEENZ_PARKING_MAX_GLOBAL`, `SARDEENZ_PARKING_MAX_BYTES`), which are independent from and enforced
+much earlier than the forwarding permit.
+
+Like the circuit breaker, the limiter is per-replica, in-memory state — it is not shared across proxy
+replicas.
+
 ## Configuration Reference
 
 All configuration is read from environment variables at startup via `Config::from_env()`.
 
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `SARDEENZ_LISTEN_ADDR` | `SocketAddr` | `0.0.0.0:8080` | Inference server bind address |
-| `SARDEENZ_ADMIN_ADDR` | `SocketAddr` | `0.0.0.0:9099` | Admin server bind address (health + metrics) |
-| `SARDEENZ_REDIS_URL` | `String` | `redis://127.0.0.1:6379` | Redis/Valkey connection URL |
-| `SARDEENZ_CONTROL_PLANE_URL` | `String` | `http://127.0.0.1:3000` | Control plane base URL for wake triggers |
-| `SARDEENZ_LOG_LEVEL` | `String` | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
-| `SARDEENZ_UPSTREAM_TIMEOUT_SECS` | `u64` | `300` | Timeout for forwarded requests to runners (includes streaming) |
-| `SARDEENZ_REDIS_KEY_PREFIX` | `String` | `sardeenz` | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`) |
-| `SARDEENZ_PARKING_TIMEOUT_SECS` | `u64` | `120` | Max time a request can be parked before returning 503 |
-| `SARDEENZ_PARKING_MAX_PER_MODEL` | `usize` | `1000` | Max concurrently parked requests per model |
-| `SARDEENZ_PARKING_MAX_GLOBAL` | `usize` | `10000` | Max concurrently parked requests across all models |
-| `SARDEENZ_CB_FAILURE_THRESHOLD` | `u32` | `5` | Failures within window to trip a circuit breaker |
-| `SARDEENZ_CB_FAILURE_WINDOW_SECS` | `u64` | `30` | Sliding window for circuit breaker failure counting |
-| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS` | `u64` | `15` | Time before an open circuit transitions to half-open |
+| Variable                                  | Type         | Default                  | Description                                                                                        |
+| ----------------------------------------- | ------------ | ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `SARDEENZ_PROXY_LISTEN_ADDR`              | `SocketAddr` | `0.0.0.0:8080`           | Inference server bind address (the legacy `SARDEENZ_LISTEN_ADDR` name is still read as a fallback) |
+| `SARDEENZ_ADMIN_ADDR`                     | `SocketAddr` | `0.0.0.0:9099`           | Admin server bind address (health + metrics)                                                       |
+| `SARDEENZ_REDIS_URL`                      | `String`     | `redis://127.0.0.1:6379` | Redis/Valkey connection URL                                                                        |
+| `SARDEENZ_CONTROL_PLANE_URL`              | `String`     | `http://127.0.0.1:3000`  | Control plane base URL for wake triggers                                                           |
+| `SARDEENZ_LOG_LEVEL`                      | `String`     | `info`                   | Log level (`trace`, `debug`, `info`, `warn`, `error`)                                              |
+| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`          | `u64`        | `300`                    | Timeout for forwarded requests to runners (includes streaming)                                     |
+| `SARDEENZ_REDIS_KEY_PREFIX`               | `String`     | `sardeenz`               | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`)                           |
+| `SARDEENZ_PARKING_TIMEOUT_SECS`           | `u64`        | `120`                    | Max time a request can be parked before returning 503                                              |
+| `SARDEENZ_PARKING_MAX_PER_MODEL`          | `usize`      | `1000`                   | Max concurrently parked requests per model                                                         |
+| `SARDEENZ_PARKING_MAX_GLOBAL`             | `usize`      | `10000`                  | Max concurrently parked requests across all models                                                 |
+| `SARDEENZ_PARKING_MAX_BYTES`              | `usize`      | `1073741824`             | Max total bytes of parked request bodies (1 GiB)                                                   |
+| `SARDEENZ_PROXY_MAX_BODY_BYTES`           | `usize`      | `1048576`                | Max buffered request body size (1 MiB); larger bodies are rejected                                 |
+| `SARDEENZ_API_TOKEN`                      | `String`     | unset                    | Bearer token sent on wake-trigger calls to the control plane (required when its auth is enabled)   |
+| `SARDEENZ_CB_FAILURE_THRESHOLD`           | `u32`        | `5`                      | Failures within window to trip a circuit breaker                                                   |
+| `SARDEENZ_CB_FAILURE_WINDOW_SECS`         | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                                                |
+| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS`       | `u64`        | `15`                     | Time before an open circuit transitions to half-open                                               |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`  | `usize`      | `0` (unlimited)          | Max concurrently forwarded (in-flight upstream) requests, across all models                        |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `usize`      | `0` (unlimited)          | Max concurrently forwarded requests for a single model                                             |
 
 All socket address and numeric values are validated at startup; a parse failure causes the process to exit immediately.
 
@@ -349,15 +429,23 @@ All socket address and numeric values are validated at startup; a parse failure 
 
 Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). All metric names use the `sardeenz_proxy_` prefix.
 
-| Metric | Type | Labels | Description |
-| --- | --- | --- | --- |
-| `sardeenz_proxy_requests_total` | Counter | `model`, `endpoint`, `status_code` | Total inference requests, by outcome |
-| `sardeenz_proxy_request_duration_seconds` | Histogram | — | End-to-end request latency, excluding parking wait time |
-| `sardeenz_proxy_active_connections` | Gauge | — | Currently active forwarded connections |
-| `sardeenz_proxy_parked_connections` | Gauge | `model` | Currently parked connections, per model |
-| `sardeenz_proxy_wake_triggers_total` | Counter | — | Wake triggers fired to the control plane |
-| `sardeenz_proxy_parking_duration_seconds` | Histogram | — | Time a request spent parked before forwarding |
-| `sardeenz_proxy_circuit_breaker_state` | Gauge | `endpoint` | Circuit breaker state: 0=closed, 1=open, 2=half-open |
+| Metric                                      | Type      | Labels                             | Description                                                             |
+| ------------------------------------------- | --------- | ---------------------------------- | ----------------------------------------------------------------------- |
+| `sardeenz_proxy_requests_total`             | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                                    |
+| `sardeenz_proxy_request_duration_seconds`   | Histogram | —                                  | End-to-end request latency, excluding parking wait time                 |
+| `sardeenz_proxy_active_connections`         | Gauge     | —                                  | Currently active forwarded connections                                  |
+| `sardeenz_proxy_parked_connections`         | Gauge     | `model`                            | Currently parked connections, per model                                 |
+| `sardeenz_proxy_wake_triggers_total`        | Counter   | —                                  | Wake triggers fired to the control plane                                |
+| `sardeenz_proxy_parking_duration_seconds`   | Histogram | —                                  | Time a request spent parked before forwarding                           |
+| `sardeenz_proxy_circuit_breaker_state`      | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                    |
+| `sardeenz_proxy_routing_parse_errors_total` | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model |
+
+Both histograms are registered with explicit bucket boundaries (seconds) so they render as
+Prometheus histograms (`_bucket` series) rather than summaries — required for the dashboard's
+`histogram_quantile(rate(..._bucket[5m]))` queries:
+
+- `sardeenz_proxy_request_duration_seconds`: `0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120`
+- `sardeenz_proxy_parking_duration_seconds`: `0.5, 1, 2.5, 5, 10, 30, 60, 120, 300`
 
 ## Health Endpoints
 
@@ -369,24 +457,29 @@ Always returns `200 OK` with body `ok` if the process is running. This is a live
 
 ### `GET /readyz`
 
-Returns `200 OK` with body `ready` when the proxy has an active Redis connection. Returns `503 Service Unavailable` with body `not ready` when Redis is disconnected.
+Returns `200 OK` with body `ready` when the proxy has both an active Redis connection **and** a completed initial routing-map load (`routing_map_loaded`). Returns `503 Service Unavailable` with body `not ready` if either condition is not met.
 
-The readiness signal is set by `AppState::set_redis_connected(true)` at the start of `start_redis_sync()` and cleared to `false` when the Redis connection drops. Kubernetes should use this endpoint for readiness gates — a proxy with no Redis connection has a stale routing cache and should not receive traffic.
+The readiness signal is set only after the proxy has subscribed, completed its first
+`HGETALL sardeenz:routing-map`, installed the cache, and written its presence lease. It is cleared when the
+Redis connection drops. Kubernetes should use this endpoint for readiness gates — inference
+handlers enforce the same readiness check, so a disconnected proxy cannot keep selecting an old
+endpoint while a move cutover is in progress.
 
 ## Relationship to the Control Plane
 
 The proxy and control plane communicate through two channels: Redis (shared state) and a direct HTTP call (wake trigger).
 
-### What the Proxy Reads
+### Redis Interactions
 
-| Redis key | Access pattern | Purpose |
-| --- | --- | --- |
-| `sardeenz:routing-map` (hash) | Full read at startup; full re-read on every pub/sub event | Populate and refresh routing cache |
-| `sardeenz:routing-updates` (pub/sub) | Subscription | Trigger routing cache refresh |
+| Redis key                                         | Access pattern                                            | Purpose                                        |
+| ------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------- |
+| `sardeenz:routing-map` (hash)                     | Full read at startup; full re-read on every pub/sub event | Populate and refresh routing cache             |
+| `sardeenz:routing-updates` (pub/sub)              | Subscription                                              | Trigger ordinary routing cache refresh         |
+| `sardeenz:routing-barriers` (pub/sub)             | Subscription                                              | Trigger a refresh that must be acknowledged    |
+| `sardeenz:proxies:{proxyId}` (TTL string)         | Create and heartbeat while connected                      | Advertise that this process is serving traffic |
+| `sardeenz:routing-barrier-acks:{barrierId}` (set) | Add this process id after cache quiescence                | Confirm an old route is no longer in use       |
 
-The proxy never writes to Redis.
-
-### What the Proxy Writes
+### Direct HTTP Call
 
 The proxy makes exactly one HTTP call to the control plane: `POST /api/v1/wake` when a sleeping model needs to wake. This call is:
 
@@ -413,18 +506,18 @@ The full wake trigger schema is defined in [`packages/contracts/specs/proxy-cont
 
 ### Division of Responsibility
 
-| Concern | Owner |
-| --- | --- |
-| VRAM budget accounting | Control plane |
+| Concern                                   | Owner         |
+| ----------------------------------------- | ------------- |
+| VRAM budget accounting                    | Control plane |
 | Eviction decisions (which model to sleep) | Control plane |
-| Runner health polling | Control plane |
-| Routing map writes | Control plane |
-| Wake orchestration (commands to runner) | Control plane |
-| Request routing | Proxy |
-| Connection parking | Proxy |
-| Per-endpoint circuit breaking | Proxy |
-| Client-facing streaming | Proxy |
-| Redis pub/sub subscription | Proxy |
+| Runner health polling                     | Control plane |
+| Routing map writes                        | Control plane |
+| Wake orchestration (commands to runner)   | Control plane |
+| Request routing                           | Proxy         |
+| Connection parking                        | Proxy         |
+| Per-endpoint circuit breaking             | Proxy         |
+| Client-facing streaming                   | Proxy         |
+| Redis pub/sub subscription                | Proxy         |
 
 ## Security and Trust Model
 
@@ -434,18 +527,24 @@ The proxy trusts the routing map completely. It forwards requests to whatever `h
 
 ### Trust Boundaries
 
-| Trust boundary | What it protects | Required controls |
-| --- | --- | --- |
-| Redis/Valkey access | Routing map integrity | AUTH/ACLs, network policy, TLS in transit |
-| Control plane API | Routing map writes, wake orchestration | Authentication, authorization, network isolation |
-| Proxy admin port (9099) | Health/readiness/metrics exposure | Not exposed outside the cluster |
-| Proxy ↔ runners | Inference traffic integrity | Network policy; mTLS for sensitive workloads |
+| Trust boundary          | What it protects                       | Required controls                                |
+| ----------------------- | -------------------------------------- | ------------------------------------------------ |
+| Redis/Valkey access     | Routing map integrity                  | AUTH/ACLs, network policy, TLS in transit        |
+| Control plane API       | Routing map writes, wake orchestration | Authentication, authorization, network isolation |
+| Proxy admin port (9099) | Health/readiness/metrics exposure      | Not exposed outside the cluster                  |
+| Proxy ↔ runners         | Inference traffic integrity            | Network policy; mTLS for sensitive workloads     |
 
 ### Deployment Requirements
 
 A Phase 1 deployment **must** include at minimum:
 
 - **Authenticated ingress/gateway** in front of the proxy — the proxy does not authenticate clients
+- **Ingress-level rate limiting and admission control** in front of the proxy — the proxy has no
+  concept of client identity, tenants, or API keys, so it cannot enforce per-tenant quotas or fair
+  sharing. Per-tenant/per-client rate limiting is the ingress's responsibility, not the proxy's. The
+  proxy's own `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS[_PER_MODEL]` (see
+  [Forwarding Concurrency Limits](#forwarding-concurrency-limits)) is a coarse, identity-blind
+  backstop against runner overload — it complements ingress rate limiting, it does not replace it.
 - **Network policy** isolating proxy, control plane, Redis, and runners into a trusted mesh
 - **Redis AUTH** or ACLs preventing unauthorized routing-map access
 - **Admin port isolation** — port 9099 must not be exposed to untrusted networks

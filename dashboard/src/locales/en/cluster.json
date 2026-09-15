@@ -1,0 +1,123 @@
+{
+  "overview": {
+    "title": "Cluster Overview",
+    "loading": "Loading cluster status",
+    "errors": {
+      "failedToLoad": "Failed to load cluster status"
+    },
+    "cards": {
+      "workers": {
+        "title": "Workers",
+        "allOnline": "All online",
+        "noWorkers": "No workers",
+        "offline": "{{count}} offline"
+      },
+      "models": {
+        "title": "Models",
+        "total": " total",
+        "active": "{{count}} active",
+        "sleeping": "{{count}} sleeping"
+      },
+      "gpuMemory": {
+        "title": "GPU Memory",
+        "used": " used",
+        "usedFragment": "{{value}} used",
+        "totalFragment": "{{value}} total"
+      },
+      "alerts": {
+        "title": "Alerts",
+        "issue": " issue",
+        "issues": " issues",
+        "allClear": "All clear",
+        "modelErrors": "{{count}} model error",
+        "modelErrors_plural": "{{count}} model errors",
+        "workersOffline": "{{count}} worker offline",
+        "workersOffline_plural": "{{count}} workers offline"
+      }
+    },
+    "vramUsage": {
+      "title": "VRAM Usage",
+      "ariaDesc": "GPU memory usage donut chart",
+      "used": "Used",
+      "free": "Free",
+      "total": "Total"
+    },
+    "modelStateBreakdown": {
+      "title": "Model State Breakdown",
+      "other": "Other",
+      "viewModels": "View {{count}} {{state}} models"
+    },
+    "recentEvents": {
+      "title": "Recent Events",
+      "noEvents": "No events yet. Waiting for cluster activity…",
+      "ariaLabel": "Recent cluster events",
+      "connectionStatus": {
+        "live": "Live",
+        "reconnecting": "Reconnecting…",
+        "degraded": "Degraded"
+      }
+    },
+    "modelsPlacement": {
+      "title": "Models placement",
+      "actions": {
+        "ariaLabel": "Actions for {{model}}",
+        "sleep": "Put to Sleep",
+        "wake": "Wake up",
+        "move": "Move",
+        "stop": "Stop",
+        "failed": "Model action failed"
+      },
+      "pageTitle": "GPU Memory",
+      "loading": "Loading GPU memory data",
+      "errors": {
+        "failedToLoad": "GPU memory data unavailable"
+      },
+      "empty": {
+        "title": "No GPUs reported yet",
+        "body": "GPUs will appear here once a worker registers with the control plane."
+      },
+      "refresh": {
+        "toggleLabel": "Refresh: {{label}}",
+        "ariaLabel": "Refresh interval",
+        "none": "None",
+        "5s": "5s",
+        "15s": "15s",
+        "30s": "30s",
+        "1m": "1m"
+      },
+      "worker": {
+        "gpuCount": "{{count}} GPU",
+        "gpuCount_plural": "{{count}} GPUs",
+        "modelCount": "{{count}} model",
+        "modelCount_plural": "{{count}} models",
+        "vramPercent": "VRAM {{percent}}%"
+      },
+      "gpu": {
+        "utilTemp": "{{util}}% util · {{temp}}°C",
+        "vramLine": "{{used}} / {{total}} — {{percent}}%",
+        "kvCacheLine": "KVCache: {{used}} / {{total}}"
+      },
+      "legend": {
+        "other": "Other",
+        "free": "Free ({{value}})",
+        "viewModel": "Go to {{model}}"
+      },
+      "totalFree": "Total system free GPU memory: {{value}} across {{count}} GPU",
+      "totalFree_plural": "Total system free GPU memory: {{value}} across {{count}} GPUs"
+    },
+    "inferenceUrl": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "openai": {
+        "label": "OpenAI base URL:",
+        "description": "Paste into any OpenAI-compatible client as the base_url.",
+        "copyAria": "Copy OpenAI base URL"
+      },
+      "oip": {
+        "label": "KServe V2 (OIP) base URL:",
+        "description": "For Open Inference Protocol / KServe V2 clients (e.g. MLServer models).",
+        "copyAria": "Copy KServe V2 base URL"
+      }
+    }
+  }
+}

@@ -1,0 +1,163 @@
+# Production worker Pod (ADR-016, spike §5). Runs the TypeScript worker agent in --mode=apptainer:
+# it self-registers to Redis, serves the worker-agent management API, and `apptainer exec`s engine
+# SIFs from the read-only module store. Provision manually (scale replicas); autoscaling is out of
+# scope for Phase 4.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sardeenz-worker
+  labels:
+    app.kubernetes.io/name: sardeenz-worker
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sardeenz-worker
+        app.kubernetes.io/part-of: sardeenz
+      annotations:
+        # 4.15+: exposes /dev/fuse to an unprivileged Pod, no device plugin (spike §1).
+        io.kubernetes.cri-o.Devices: '/dev/fuse'
+    spec:
+      serviceAccountName: sardeenz-worker
+      # Allow in-flight runners to drain on pod deletion (the agent SIGTERMs each runner, which
+      # drains vLLM). Must exceed the agent's per-runner stopGraceMs (30s).
+      terminationGracePeriodSeconds: 60
+      # NO hostUsers: false — it forces idmapped volume mounts the RWX FS can't provide (spike §9.3).
+      # Apptainer creates its own user namespace inside the container instead.
+      securityContext:
+        # gid 0 so the arbitrary OpenShift UID can write the /scratch emptyDir (HOME, caches).
+        fsGroup: 0
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: worker
+          # worker-base + the built TypeScript agent layered on top (see this dir's README).
+          image: quay.io/rh-aiservices-bu/sardeenz-worker:latest
+          workingDir: /opt/sardeenz/worker-agent
+          command: ['/bin/sh', '-c']
+          args:
+            - |
+              set -eu
+              if [ -f /etc/sardeenz/keys/sardeenz-sif-signing.pub ]; then
+                apptainer key import /etc/sardeenz/keys/sardeenz-sif-signing.pub
+              fi
+              if [ "${SARDEENZ_VERIFY_SIF:-true}" = "true" ]; then
+                if ! apptainer key list 2>/dev/null | grep -q '^[0-9]'; then
+                  echo "FATAL: SARDEENZ_VERIFY_SIF=true but no signing keys in keyring." >&2
+                  echo "Mount the sardeenz-sif-signing-pubkey ConfigMap or set SARDEENZ_VERIFY_SIF=false." >&2
+                  exit 1
+                fi
+              fi
+              exec node dist/index.js --mode=apptainer
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          ports:
+            - name: management
+              containerPort: 9100
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: management
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: management
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: management
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          env:
+            - { name: SARDEENZ_WORKER_MODE, value: apptainer }
+            # Keep these in lockstep with networkpolicy.yaml. It explicitly allow-lists this
+            # 32-runner, four-port-block envelope; patch both files together in an overlay.
+            - { name: SARDEENZ_WORKER_PORT, value: '9100' }
+            - { name: SARDEENZ_RUNNER_PORT_START, value: '9101' }
+            - { name: SARDEENZ_MAX_RUNNERS, value: '32' }
+            # The agent is engine-agnostic in Apptainer mode. Advertise every runner family this
+            # deployment permits so placement and the dashboard do not collapse to legacy vLLM.
+            - { name: SARDEENZ_RUNNER_TYPES, value: 'vllm,mlserver' }
+            # The worker agent measures VRAM in-process via NVML (ts-nvml, #163);
+            # `utility` makes the driver injector mount libnvidia-ml.so.1, `compute`
+            # keeps CUDA available for the engines the worker launches.
+            - { name: NVIDIA_DRIVER_CAPABILITIES, value: 'compute,utility' }
+            # HOME must be writable and node-local (module PVC is readOnly) — spike finding.
+            - { name: HOME, value: /scratch/home }
+            - { name: SARDEENZ_APPTAINER_HOME, value: /scratch/home }
+            - { name: SARDEENZ_MODULES_DIR, value: /modules }
+            - { name: SARDEENZ_WEIGHTS_DIR, value: /weights }
+            - { name: SARDEENZ_SCRATCH_DIR, value: /scratch }
+            - { name: SARDEENZ_VERIFY_SIF, value: 'true' }
+            - name: SARDEENZ_REDIS_URL
+              value: redis://sardeenz-redis:6379
+            - name: SARDEENZ_WORKER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-service-tokens
+                  key: SARDEENZ_WORKER_TOKEN
+            - name: SARDEENZ_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # Advertised in the worker's Redis registration (managementUrl) so the control plane —
+            # running in a different pod — can reach this worker's management API. localhost would
+            # only resolve inside this pod's own network namespace.
+            - name: SARDEENZ_WORKER_ADVERTISE_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            requests:
+              # Cold-starts spike host RAM (torch + CUDA init + graph capture) — spike Gate 9c.
+              memory: 16Gi
+              cpu: '2'
+            limits:
+              memory: 32Gi
+              nvidia.com/gpu: '1'
+          volumeMounts:
+            - { name: modules, mountPath: /modules, readOnly: true }
+            - { name: weights, mountPath: /weights }
+            - { name: scratch, mountPath: /scratch }
+            - { name: dshm, mountPath: /dev/shm }
+            - { name: signing-key, mountPath: /etc/sardeenz/keys, readOnly: true }
+      volumes:
+        - name: modules
+          persistentVolumeClaim:
+            claimName: sardeenz-modules
+            # Consumer workers mount the module store READ-ONLY (write protection: see
+            # module-pvc-write-protection.yaml).
+            readOnly: true
+        - name: weights
+          persistentVolumeClaim:
+            claimName: sardeenz-weights
+        - name: scratch
+          # Node-local scratch for HOME, caches, and Apptainer tmp. NOT medium: Memory (caches can
+          # be large). Sized for engine caches, not OCI unpack (that is the librarian's job).
+          emptyDir:
+            sizeLimit: 50Gi
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        - name: signing-key
+          configMap:
+            name: sardeenz-sif-signing-pubkey
+            optional: true

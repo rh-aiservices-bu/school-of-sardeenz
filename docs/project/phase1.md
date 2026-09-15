@@ -44,20 +44,20 @@ The proxy covers six functional areas for a **stateless** request routing proces
 
 ## Tasks
 
-| #    | Task                                     | Status      | Output                                                     |
-| ---- | ---------------------------------------- | ----------- | ---------------------------------------------------------- |
-| 1.1  | Study v1 proxy patterns                  | Done        | Reference notes (internal)                                 |
-| 1.2  | Write proxy ↔ control plane OpenAPI spec | Done        | `packages/contracts/specs/proxy-control-plane.yaml`        |
-| 1.3  | Set up Rust codegen from OpenAPI specs   | Done        | Hand-written Rust types in `proxy/src/generated/`          |
-| 1.4  | Scaffold proxy crate                     | Done        | Compilable binary with config + logging                    |
-| 1.5  | Implement routing core                   | Done        | Request routing with Redis integration                     |
-| 1.6  | Implement connection parking             | Done        | Parking subsystem with wake triggers                       |
-| 1.7  | Implement cluster forwarding             | Done        | Load balancing + circuit breaking                          |
-| 1.8  | Implement health and metrics             | Done        | `/metrics`, `/healthz`, `/readyz`                          |
-| 1.9  | Structured output compatibility          | Done        | `docs/architecture/components/structured-output-*.md`      |
-| 1.10 | Write proxy design document              | Done        | `docs/architecture/components/proxy.md`                    |
-| 1.11 | Build container image                    | Done        | `proxy/Dockerfile`                                         |
-| 1.12 | Integration test suite                   | Done        | `proxy/tests/integration/`                                 |
+| #    | Task                                     | Status | Output                                                |
+| ---- | ---------------------------------------- | ------ | ----------------------------------------------------- |
+| 1.1  | Study v1 proxy patterns                  | Done   | Reference notes (internal)                            |
+| 1.2  | Write proxy ↔ control plane OpenAPI spec | Done   | `packages/contracts/specs/proxy-control-plane.yaml`   |
+| 1.3  | Set up Rust codegen from OpenAPI specs   | Done   | Hand-written Rust types in `proxy/src/generated/`     |
+| 1.4  | Scaffold proxy crate                     | Done   | Compilable binary with config + logging               |
+| 1.5  | Implement routing core                   | Done   | Request routing with Redis integration                |
+| 1.6  | Implement connection parking             | Done   | Parking subsystem with wake triggers                  |
+| 1.7  | Implement cluster forwarding             | Done   | Load balancing + circuit breaking                     |
+| 1.8  | Implement health and metrics             | Done   | `/metrics`, `/healthz`, `/readyz`                     |
+| 1.9  | Structured output compatibility          | Done   | `docs/architecture/components/structured-output-*.md` |
+| 1.10 | Write proxy design document              | Done   | `docs/architecture/components/proxy.md`               |
+| 1.11 | Build container image                    | Done   | `proxy/Dockerfile`                                    |
+| 1.12 | Integration test suite                   | Done   | `proxy/tests/integration/`                            |
 
 ## Task Details
 
@@ -354,7 +354,8 @@ Multi-stage Docker build at `proxy/Dockerfile`.
 - No shell, no package manager, no unnecessary system libraries
 - Runs as a non-root user
 - Exposes the configured listen port
-- Health check instruction using `/healthz`
+- `/healthz` endpoint for deployment probes and the CI image smoke test (the distroless image
+  intentionally omits a Dockerfile `HEALTHCHECK`)
 
 **Build:** `docker build -t sardeenz-proxy ./proxy` from the repo root.
 
@@ -390,12 +391,12 @@ Integration tests that validate all four request flow scenarios from the [archit
 
 Tests that exercise the real Redis/Valkey sync path are in `proxy/tests/integration/test_redis.rs`, gated by the `redis-integration` Cargo feature flag so that `cargo test` works without a running Redis instance. Each test uses a UUID-scoped key prefix for isolation, enabling parallel execution.
 
-| #   | Scenario                | What it validates                                                               |
-| --- | ----------------------- | ------------------------------------------------------------------------------- |
-| 9   | Redis bootstrap         | Proxy loads routing map from Redis on startup and forwards requests             |
-| 10  | Pub/sub refresh         | Proxy picks up new routes published to Redis after startup                      |
-| 11  | Malformed entry         | Valid entries route correctly; malformed JSON entries are silently skipped       |
-| 12  | Readiness lifecycle     | `/readyz` transitions from 503 → 200 as Redis connects and routing map loads   |
+| #   | Scenario            | What it validates                                                            |
+| --- | ------------------- | ---------------------------------------------------------------------------- |
+| 9   | Redis bootstrap     | Proxy loads routing map from Redis on startup and forwards requests          |
+| 10  | Pub/sub refresh     | Proxy picks up new routes published to Redis after startup                   |
+| 11  | Malformed entry     | Valid entries route correctly; malformed JSON entries are silently skipped   |
+| 12  | Readiness lifecycle | `/readyz` transitions from 503 → 200 as Redis connects and routing map loads |
 
 Run with: `cargo test --features redis-integration test_redis`
 
@@ -406,17 +407,17 @@ Run with: `cargo test --features redis-integration test_redis`
 From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connection-parking):
 
 - [ ] Proxy routes requests to active models with < 1ms overhead (p99, excluding network transit)
-- [ ] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
-- [ ] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
-- [ ] Circuit breaker trips after configurable failure threshold and recovers after backoff
-- [ ] All four request flows from the architecture overview pass integration tests
-- [ ] Structured output compatibility approach documented and validated
-- [ ] Container image builds and runs in CI
-- [ ] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
-- [ ] OpenAPI spec passes `redocly lint` with zero errors
-- [ ] Generated Rust types compile cleanly (`cargo check`)
-- [ ] Generated TypeScript types compile cleanly (`make typecheck`)
-- [ ] `cargo clippy -- -D warnings` passes with zero warnings
+- [x] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
+- [x] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
+- [x] Circuit breaker trips after configurable failure threshold and recovers after backoff
+- [x] All four request flows from the architecture overview pass integration tests
+- [x] Structured output compatibility approach documented and validated
+- [x] Container image builds and runs in CI
+- [x] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
+- [x] OpenAPI spec passes `redocly lint` with zero errors
+- [x] Generated Rust types compile cleanly (`cargo check`)
+- [x] Generated TypeScript types compile cleanly (`make typecheck`)
+- [x] `cargo clippy -- -D warnings` passes with zero warnings
 
 ## Open Questions
 
@@ -430,7 +431,7 @@ From the [overall project plan](overall-plan.md#phase-1-rust-proxy-with-connecti
 
 - **Phase 0 outputs** — runner contract spec for model state definitions (`RunnerState` enum) and health check schemas
 - **Redis/Valkey instance** — required for routing map storage and pub/sub
-- **Rust toolchain** — Rust 1.82+, cargo, clippy (see [setup guide](../development/setup.md))
+- **Rust toolchain** — Rust 1.86+, cargo, clippy (see [setup guide](../development/setup.md))
 - **v1 repo access** — for studying proxy patterns in Task 1.1
 
 ## Risks

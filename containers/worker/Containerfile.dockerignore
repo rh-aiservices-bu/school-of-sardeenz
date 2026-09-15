@@ -1,0 +1,24 @@
+# This Containerfile builds from the repository root.
+**
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!tsconfig.json
+!packages/
+!packages/types/
+!packages/types/**
+!runners/
+!runners/dev-worker/
+!runners/dev-worker/**
+
+# Never send local build output, dependencies, credentials, or tests to the builder.
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+**/*.log
+**/logs/
+**/.npmrc
+**/coverage/
+**/test-results/
+**/.env
+**/.env.*

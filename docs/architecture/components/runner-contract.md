@@ -10,10 +10,30 @@ For the runner abstraction rationale, see [ADR-010](../adrs/adr-010-engine-runne
 
 The contract covers the **management sideband** — the endpoints the control plane uses to orchestrate runners. It does not cover:
 
-- **Inference traffic.** Model serving endpoints (e.g., `/v1/chat/completions`) flow through the engine's native API and the routing proxy. They are not part of this contract.
+- **Inference traffic.** Model serving endpoints flow through the engine's **native** protocol —
+  `/v1/*` (OpenAI-compatible, e.g. vLLM) or `/v2/*` (KServe V2 Open Inference Protocol, e.g.
+  MLServer) — and the routing proxy, which reaches them via its `/openai` or `/oip` protocol-family
+  path prefix (stripped before forwarding; see [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)
+  and [`components/proxy.md`](proxy.md#overview)). Inference traffic is not part of this
+  (management) contract. The shared conformance suite (`runners/conformance/`) is the executable
+  check that every runner shim honors this management contract.
 - **Process lifecycle.** Starting the runner process, capturing its stdout/stderr, detecting process exit, and stopping the runner (SIGTERM) are worker-level concerns.
 - **Drain and stop.** Draining is a routing concern — the control plane removes the runner from the routing map, and the proxy stops sending traffic. Stopping is a process concern — the worker sends SIGTERM. Neither requires an HTTP endpoint on the runner.
 - **Device memory push.** Workers periodically push device memory snapshots to Redis/Valkey for the control plane's global view. The runner contract's `/memory-report` is a pull endpoint for on-demand queries.
+
+## Management and Inference Ports
+
+A runner exposes two logically distinct HTTP surfaces, which may live on **separate ports**:
+
+- **Management port** — the runner-contract API this document describes (`/health`, `/progress`, `/memory-report`, `/sleep`, `/wake`, `/sleep-status`, `/capabilities`). The control plane uses it for lifecycle and health.
+- **Inference (engine) port** — the engine's native OpenAI-compatible API (`/v1/*`) that the routing proxy forwards client traffic to.
+
+When the worker starts a runner, its `StartRunnerResponse` reports the management port as `port` and the inference port as the optional `enginePort` (see [`worker-agent.yaml`](../../../packages/contracts/specs/worker-agent.yaml)). The worker allocates these from a **contiguous 4-port block** `(management, engine, gRPC, metrics)` per runner so a second runner's management port cannot collide with the first runner's engine port; management/engine keep the same pairing as before (`engine = management + 1`). The extra two ports back OIP (MLServer) runners' gRPC and Prometheus-metrics servers, passed explicitly via env (`SARDEENZ_MLSERVER_GRPC_PORT`/`SARDEENZ_MLSERVER_METRICS_PORT`); single-server and OpenAI runners leave them unused.
+
+- **Two-port engines (e.g. vLLM):** vLLM's OpenAI server listens on a port distinct from the runner shim's management port. The shim reports both; the control plane health-polls the management port but **registers the engine port** as the model's routing-map endpoint, so the proxy reaches the engine directly.
+- **Single-server runners (e.g. the dev-worker stub):** one server answers both the contract API and `/v1/*`, so `enginePort` equals `port`. When `enginePort` is omitted, the control plane registers `port` as the inference endpoint.
+
+The control plane persists the engine port (`runnerEnginePort`) so sleep→wake re-registers the same endpoint.
 
 ## Runner State Model
 
@@ -39,20 +59,54 @@ stateDiagram-v2
 
 ### State Definitions
 
-| State | Accepts inference? | Description |
-| --- | --- | --- |
-| `STARTING` | No | Runner is initializing — loading weights, allocating device memory, capturing CUDA graphs. Progress available via `GET /progress`. |
-| `READY` | Yes | Runner is ready and has capacity for new requests. |
-| `BUSY` | No (at capacity) | Runner is healthy but saturated. Existing requests continue; new requests should be routed elsewhere. The runner self-reports this transition. |
-| `SLEEPING` | No | Runner has offloaded device memory (weights to host RAM). Device memory is freed. Wake with `POST /wake` to return to `READY`. |
-| `ERROR` | No | Unrecoverable error. The runner should be stopped and restarted. Error details in the `message` field of `GET /health`. |
+| State      | Accepts inference? | Description                                                                                                                                    |
+| ---------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STARTING` | No                 | Runner is initializing — loading weights, allocating device memory, capturing CUDA graphs. Progress available via `GET /progress`.             |
+| `READY`    | Yes                | Runner is ready and has capacity for new requests.                                                                                             |
+| `BUSY`     | No (at capacity)   | Runner is healthy but saturated. Existing requests continue; new requests should be routed elsewhere. The runner self-reports this transition. |
+| `SLEEPING` | No                 | Runner has offloaded device memory (weights to host RAM). Device memory is freed. Wake with `POST /wake` to return to `READY`.                 |
+| `ERROR`    | No                 | Unrecoverable error. The runner should be stopped and restarted. Error details in the `message` field of `GET /health`.                        |
 
 ### Key Transitions
 
-- **READY ↔ BUSY:** Self-reported by the runner based on its own capacity assessment (e.g., request queue depth, KV cache pressure). The control plane does not command this transition — it reads it and adjusts routing accordingly.
+- **READY ↔ BUSY:** Self-reported by the runner based on its own capacity assessment (e.g., request queue depth, KV cache pressure). The control plane does not command this transition. Currently, the control plane treats `BUSY` as equivalent to `READY` and does not adjust routing (see [ADR-014](../adrs/adr-014-inference-recency-tracking.md)).
 - **READY → SLEEPING:** The control plane sends `POST /sleep` with a level. Only valid from `READY` — a `BUSY` runner must return to `READY` (no in-flight requests) before it can be slept. The call is synchronous — the response returns after the offload completes. The control plane sets an appropriate HTTP timeout based on the model size.
 - **→ [*] (stopped):** The control plane removes the runner from the routing map (stopping new traffic), monitors `activeRequests` in `GET /health` until in-flight work completes, then tells the worker to send SIGTERM. The runner does not receive an HTTP command to stop — process lifecycle is a worker concern.
 - **→ ERROR:** Self-reported by the runner. Can occur from any active state. The control plane detects it via health polling and decides whether to restart or escalate.
+
+### Runner State to Routing Map Mapping
+
+The runner contract defines per-runner states (`RunnerState`), while the proxy routing map operates on per-model states (`ModelState`) with per-endpoint fields (`healthy`, `weight`). The control plane translates between the two.
+
+#### BUSY → weight: 0
+
+> **Status — target design, not implemented.** The control plane currently treats `BUSY` the same as `READY` and does not adjust endpoint weights. Health polling is deploy/wake-scoped, not continuous (see [ADR-014](../adrs/adr-014-inference-recency-tracking.md)), so real-time BUSY detection is not available. The routing behavior described in this subsection and "All replicas BUSY" below is the intended future design.
+
+When a runner reports `BUSY`, the control plane sets `weight: 0` on that runner's endpoint in the routing map. The endpoint remains in the list with `healthy: true` and the model stays in `ACTIVE` state.
+
+This design reflects three properties of the BUSY state:
+
+1. **BUSY is per-replica, not per-model.** If one of three replicas is busy, the model is still active — the other two serve traffic. Changing the model-level state would incorrectly affect all replicas.
+2. **BUSY is healthy.** The runner is functioning correctly — it's just at capacity. Setting `healthy: false` would conflate saturation with failure and could trigger unnecessary circuit breaker or alerting logic.
+3. **weight: 0 is already designed for this.** The proxy's weighted round-robin naturally skips weight-0 endpoints without removing them from the routing entry.
+
+When the runner transitions back to `READY`, the control plane restores the endpoint's original weight.
+
+#### All replicas BUSY
+
+If all endpoints for a model reach `weight: 0`, the proxy has no routable endpoints. It returns HTTP 503 to the client — the correct behavior for a fully saturated model. The control plane may use all-replicas-BUSY as a signal to trigger scaling decisions (wake another replica, start a new one), but that is an orchestration concern independent of the routing map.
+
+#### Full mapping table
+
+| RunnerState | ModelState | Endpoint healthy      | Endpoint weight | Proxy behavior                      |
+| ----------- | ---------- | --------------------- | --------------- | ----------------------------------- |
+| `STARTING`  | `STARTING` | N/A (no endpoint yet) | N/A             | Park connections, no wake trigger   |
+| `READY`     | `ACTIVE`   | `true`                | `1`             | Forward requests (round-robin)      |
+| `BUSY`      | `ACTIVE`   | `true`                | `0`             | Target design — not implemented     |
+| `SLEEPING`  | `SLEEPING` | N/A (no endpoint)     | N/A             | Park connections, fire wake trigger |
+| `ERROR`     | `ERROR`    | N/A (no endpoint)     | N/A             | Return 503                          |
+
+The `DRAINING` model state is set explicitly by the control plane before sleep or shutdown — it is not derived from a runner state. During draining, endpoints remain with their current weight but the proxy stops routing new requests; in-flight requests complete normally.
 
 ## Interface Areas
 
@@ -62,10 +116,10 @@ stateDiagram-v2
 
 Returns a `HealthStatus` with the current `RunnerState`, an optional human-readable `message`, loading `progress` (when `STARTING`), and `activeRequests` count.
 
-The control plane polls this endpoint on a regular interval (configurable, around 2s) to:
+The control plane polls this endpoint during deploy and wake operations (`SARDEENZ_HEALTH_CHECK_INTERVAL_SECS`, default 10s) to:
 
 - Detect when a `STARTING` runner becomes `READY`
-- Monitor `BUSY` ↔ `READY` transitions for routing updates
+- Monitor `BUSY` ↔ `READY` transitions for routing updates _(target design — not implemented)_
 - Track in-flight request count before stopping a runner
 - Detect `ERROR` states
 
@@ -98,8 +152,8 @@ Sleep support is **optional** — a runner declares which sleep levels it suppor
 
 #### Sleep Levels
 
-| Level | Name | Behavior | Wake time |
-| --- | --- | --- | --- |
+| Level         | Name             | Behavior                                                                                        | Wake time                         |
+| ------------- | ---------------- | ----------------------------------------------------------------------------------------------- | --------------------------------- |
 | `L1_HOST_RAM` | Host RAM offload | Model weights copied from device memory to host RAM. Device memory freed; host memory consumed. | Fast (memory copy back to device) |
 
 Only `L1_HOST_RAM` is defined in v0.1 of the contract. Future levels (e.g., L2 for disk offload) will be added to the `SleepLevel` enum. Each runner declares which levels it supports.
@@ -122,14 +176,14 @@ Returns a `LoadingProgress` with the current loading phase, overall completion p
 
 Phases progress in order. Not all runners pass through every phase — engines with different loading pipelines skip phases that don't apply.
 
-| Phase | Typical % range | Description |
-| --- | --- | --- |
-| `INITIALIZING` | 0–10 | Process started, preparing to load |
-| `LOADING_WEIGHTS` | 10–50 | Reading model weights from storage |
-| `ALLOCATING_MEMORY` | 50–70 | Allocating KV cache, device buffers |
-| `CAPTURING_GRAPHS` | 70–85 | Capturing CUDA graphs or equivalent |
-| `WARMING_UP` | 85–99 | Running warm-up inference |
-| `READY` | 100 | Loading complete |
+| Phase               | Typical % range | Description                         |
+| ------------------- | --------------- | ----------------------------------- |
+| `INITIALIZING`      | 0–10            | Process started, preparing to load  |
+| `LOADING_WEIGHTS`   | 10–50           | Reading model weights from storage  |
+| `ALLOCATING_MEMORY` | 50–70           | Allocating KV cache, device buffers |
+| `CAPTURING_GRAPHS`  | 70–85           | Capturing CUDA graphs or equivalent |
+| `WARMING_UP`        | 85–99           | Running warm-up inference           |
+| `READY`             | 100             | Loading complete                    |
 
 The percentage ranges are approximate guidance. Runners that don't track granular progress may report only phase transitions, causing `percentComplete` to jump between phase boundaries. The `READY` phase with 100% is authoritative — loading is complete.
 
@@ -143,28 +197,28 @@ Returns a `RunnerCapabilities` object that the control plane calls **once** afte
 
 #### Fields
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `runnerType` | Yes | Machine identifier (e.g., `"vllm"`, `"triton"`, `"mlserver"`) |
-| `engineName` | Yes | Human-readable name (e.g., `"vLLM"`, `"Triton Inference Server"`) |
-| `engineVersion` | Yes | Engine version string |
-| `supportedModelTypes` | Yes | Workload types: `LLM`, `DIFFUSION`, `PREDICTIVE`, `EMBEDDING`, `OTHER` |
-| `supportedDeviceTypes` | Yes | Hardware: `CUDA`, `ROCM`, `CPU`, `OTHER` |
-| `supportedSleepLevels` | No | Sleep levels supported. Empty/absent = no sleep support |
-| `maxTensorParallelism` | No | Max devices for tensor parallelism (default: 1) |
-| `features` | No | Engine-specific feature flags (freeform key-value) |
+| Field                  | Required | Description                                                            |
+| ---------------------- | -------- | ---------------------------------------------------------------------- |
+| `runnerType`           | Yes      | Machine identifier (e.g., `"vllm"`, `"triton"`, `"mlserver"`)          |
+| `engineName`           | Yes      | Human-readable name (e.g., `"vLLM"`, `"Triton Inference Server"`)      |
+| `engineVersion`        | Yes      | Engine version string                                                  |
+| `supportedModelTypes`  | Yes      | Workload types: `LLM`, `DIFFUSION`, `PREDICTIVE`, `EMBEDDING`, `OTHER` |
+| `supportedDeviceTypes` | Yes      | Hardware: `CUDA`, `ROCM`, `CPU`, `OTHER`                               |
+| `supportedSleepLevels` | No       | Sleep levels supported. Empty/absent = no sleep support                |
+| `maxTensorParallelism` | No       | Max devices for tensor parallelism (default: 1)                        |
+| `features`             | No       | Engine-specific feature flags (freeform key-value)                     |
 
 #### Well-Known Feature Flags
 
 Runners should use these keys when applicable:
 
-| Key | Type | Meaning |
-| --- | --- | --- |
-| `kvCacheOffload` | boolean | Supports KV cache offload to host memory |
-| `prefixCaching` | boolean | Supports prefix caching |
-| `streamingInference` | boolean | Supports SSE streaming responses |
-| `chatTemplate` | boolean | Supports chat template formatting |
-| `toolUse` | boolean | Supports function/tool calling |
+| Key                  | Type    | Meaning                                  |
+| -------------------- | ------- | ---------------------------------------- |
+| `kvCacheOffload`     | boolean | Supports KV cache offload to host memory |
+| `prefixCaching`      | boolean | Supports prefix caching                  |
+| `streamingInference` | boolean | Supports SSE streaming responses         |
+| `chatTemplate`       | boolean | Supports chat template formatting        |
+| `toolUse`            | boolean | Supports function/tool calling           |
 
 The `features` map is intentionally open-ended. Engine-specific keys beyond the well-known set are allowed. The control plane may use them for fine-grained placement or to enable engine-specific optimizations.
 
@@ -195,12 +249,12 @@ All endpoints return an `ErrorResponse` on failure:
 
 HTTP status codes follow standard semantics:
 
-| Code | Meaning |
-| --- | --- |
-| 400 | Bad request (malformed payload, invalid parameters) |
-| 409 | Conflict (wrong state for the requested operation) |
-| 500 | Internal runner error |
-| 503 | Runner not yet initialized (health endpoint only) |
+| Code | Meaning                                             |
+| ---- | --------------------------------------------------- |
+| 400  | Bad request (malformed payload, invalid parameters) |
+| 409  | Conflict (wrong state for the requested operation)  |
+| 500  | Internal runner error                               |
+| 503  | Runner not yet initialized (health endpoint only)   |
 
 ## Scenario Validation
 
@@ -211,6 +265,7 @@ The contract is validated against three representative runner scenarios to ensur
 A vLLM runner serving an LLM on one or more NVIDIA GPUs. This is the reference implementation and exercises the full contract surface.
 
 **Capabilities:**
+
 ```json
 {
   "runnerType": "vllm",
@@ -243,6 +298,7 @@ A vLLM runner serving an LLM on one or more NVIDIA GPUs. This is the reference i
 A Triton Inference Server runner serving non-LLM workloads (diffusion, embedding) on GPU. Exercises partial contract support — no sleep, different model types.
 
 **Capabilities:**
+
 ```json
 {
   "runnerType": "triton",
@@ -270,6 +326,7 @@ A Triton Inference Server runner serving non-LLM workloads (diffusion, embedding
 An MLServer runner serving predictive models on CPU. Exercises the CPU-only path — no GPU, no sleep, minimal memory reporting.
 
 **Capabilities:**
+
 ```json
 {
   "runnerType": "mlserver",
@@ -292,15 +349,15 @@ An MLServer runner serving predictive models on CPU. Exercises the CPU-only path
 
 ### Validation Summary
 
-| Aspect | vLLM (GPU) | Triton (GPU) | MLServer (CPU) |
-| --- | --- | --- | --- |
-| All 5 states reachable | Yes | 4/5 (no SLEEPING) | 4/5 (no SLEEPING) |
-| Health meaningful | Yes | Yes | Yes |
-| Memory reporting useful | Full (per-device + breakdown) | Per-device only | CPU memory only |
-| Sleep/wake | L1_HOST_RAM | N/A (409) | N/A (409) |
-| Progress granular | All 6 phases | 3 phases | 2 phases |
-| Capabilities distinguish | Yes | Yes | Yes |
-| Placement pipeline works | Full | Hardware filter excludes CPU workers | Hardware filter excludes GPU workers |
+| Aspect                   | vLLM (GPU)                    | Triton (GPU)                         | MLServer (CPU)                       |
+| ------------------------ | ----------------------------- | ------------------------------------ | ------------------------------------ |
+| All 5 states reachable   | Yes                           | 4/5 (no SLEEPING)                    | 4/5 (no SLEEPING)                    |
+| Health meaningful        | Yes                           | Yes                                  | Yes                                  |
+| Memory reporting useful  | Full (per-device + breakdown) | Per-device only                      | CPU memory only                      |
+| Sleep/wake               | L1_HOST_RAM                   | N/A (409)                            | N/A (409)                            |
+| Progress granular        | All 6 phases                  | 3 phases                             | 2 phases                             |
+| Capabilities distinguish | Yes                           | Yes                                  | Yes                                  |
+| Placement pipeline works | Full                          | Hardware filter excludes CPU workers | Hardware filter excludes GPU workers |
 
 The contract accommodates all three scenarios. Optional interfaces (sleep, breakdown, feature flags) degrade cleanly — absent capabilities result in 409 responses or simpler behavior, not contract violations.
 

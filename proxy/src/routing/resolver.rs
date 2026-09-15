@@ -33,12 +33,12 @@ impl ModelResolver {
             ModelState::Active => Ok(Resolution::Active(entry)),
             ModelState::Sleeping => Ok(Resolution::Sleeping(entry)),
             ModelState::Starting => Ok(Resolution::Starting(entry)),
-            ModelState::Draining => Err(ProxyError::ModelUnavailable(format!(
-                "{model_name} is draining"
-            ))),
-            ModelState::Error => Err(ProxyError::ModelUnavailable(format!(
-                "{model_name} is in error state"
-            ))),
+            ModelState::Draining => {
+                Err(ProxyError::ModelUnavailable(format!("{model_name} is draining")))
+            }
+            ModelState::Error => {
+                Err(ProxyError::ModelUnavailable(format!("{model_name} is in error state")))
+            }
         }
     }
 }

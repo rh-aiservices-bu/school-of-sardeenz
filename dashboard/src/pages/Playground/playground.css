@@ -1,0 +1,152 @@
+/* Chatbot Playground — v1 look on PatternFly 6 semantic tokens (no hard-coded colours). */
+
+/* PF6's page main is a plain block; make it a flex column only while it hosts the playground so
+   the `isFilled` section can actually stretch to the viewport bottom (other pages untouched). */
+.pf-v6-c-page__main:has(> .sz-playground) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.sz-playground {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0;
+}
+
+/* PageSection wraps children in `__main-body`; it must be a stretched flex column too. */
+.sz-playground > .pf-v6-c-page__main-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.sz-playground-header {
+  padding: var(--pf-t--global--spacer--md) var(--pf-t--global--spacer--lg);
+  border-bottom: 1px solid var(--pf-t--global--border--color--default);
+  background: var(--pf-t--global--background--color--primary--default);
+}
+
+.sz-playground-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The Drawer has no intrinsic height; stretch it to the body so panes fill the viewport. */
+.sz-playground-body > .pf-v6-c-drawer {
+  height: 100%;
+}
+
+/* --- Toolbar ---------------------------------------------------------------------------- */
+
+.sz-playground-toolbar {
+  padding: 0 var(--pf-t--global--spacer--sm);
+  border-bottom: 1px solid var(--pf-t--global--border--color--default);
+  background-color: var(--pf-t--global--background--color--secondary--default);
+  min-height: 48px;
+}
+
+/* --- Sidebar ---------------------------------------------------------------------------- */
+
+.sz-sidebar-panel {
+  border-right: 1px solid var(--pf-t--global--border--color--default);
+}
+
+.sz-sidebar {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sz-sidebar-header,
+.sz-sidebar-search {
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+  border-bottom: 1px solid var(--pf-t--global--border--color--default);
+}
+
+.sz-sidebar-count {
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+.sz-sidebar-list {
+  flex: 1;
+  overflow: auto;
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+}
+
+.sz-sidebar-group {
+  margin-bottom: var(--pf-t--global--spacer--xs);
+}
+
+.sz-sidebar-group-label {
+  font-size: var(--pf-t--global--font--size--body--default);
+}
+
+.sz-sidebar-group-body {
+  padding-left: var(--pf-t--global--spacer--sm);
+}
+
+.sz-sidebar-item.pf-v6-c-button {
+  text-align: left;
+  padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm);
+  border-radius: var(--pf-t--global--border--radius--small);
+}
+
+.sz-sidebar-item--active.pf-v6-c-button {
+  background-color: var(--pf-t--global--background--color--primary--default);
+}
+
+/* --- Chat card -------------------------------------------------------------------------- */
+
+.sz-playground-card .pf-chatbot {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Three class selectors: outranks the library's `.pf-chatbot:not(.pf-chatbot--default) .pf-chatbot__header`. */
+.sz-playground-card .pf-chatbot .sz-chat-header.pf-chatbot__header {
+  background-color: var(--pf-t--global--color--brand--default);
+  border-top-left-radius: var(--pf-t--global--border--radius--medium);
+  border-top-right-radius: var(--pf-t--global--border--radius--medium);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm);
+  align-items: center;
+}
+
+.sz-playground-card .pf-chatbot .sz-chat-header-title {
+  color: var(--pf-t--global--text--color--on-brand--default);
+  width: 100%;
+  text-align: center;
+  padding-top: 0;
+}
+
+.sz-chat-header-hint {
+  margin-left: var(--pf-t--global--spacer--sm);
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+.sz-chat-header-hint--warning {
+  color: var(--pf-t--global--color--status--warning--default);
+}
+
+.sz-playground-card .sz-chat-header-check .pf-v6-c-check__label {
+  color: var(--pf-t--global--text--color--on-brand--default);
+}
+
+.sz-chat-welcome {
+  padding-left: var(--pf-t--global--spacer--sm);
+  padding-right: var(--pf-t--global--spacer--sm);
+}
+
+.sz-chat-error {
+  margin-left: var(--pf-t--global--spacer--2xl);
+  margin-top: var(--pf-t--global--spacer--xs);
+}

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sardeenz-redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sardeenz-redis
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: quay.io/sclorg/valkey-8-c10s:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BIND_ADDRESS
+              value: 0.0.0.0
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          startupProbe:
+            exec:
+              command: [valkey-cli, -h, 127.0.0.1, ping]
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: [valkey-cli, -h, 127.0.0.1, ping]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+            runAsNonRoot: true
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/valkey/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: sardeenz-redis

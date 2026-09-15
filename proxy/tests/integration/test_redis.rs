@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::Router;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use redis::AsyncCommands;
@@ -8,7 +8,9 @@ use reqwest::StatusCode;
 use tokio::net::TcpListener;
 
 use sardeenz_proxy::config::{CircuitBreakerConfig, Config, ParkingConfig};
-use sardeenz_proxy::generated::proxy_control_plane::{ModelState, RoutingEntry, RunnerEndpoint};
+use sardeenz_proxy::generated::proxy_control_plane::{
+    ModelState, Protocol, RoutingEntry, RunnerEndpoint,
+};
 use sardeenz_proxy::handlers;
 use sardeenz_proxy::health;
 use sardeenz_proxy::state::{start_redis_sync, AppState};
@@ -47,19 +49,11 @@ impl RedisTestHarness {
 
     async fn set_routing_entry(&mut self, model_name: &str, entry: &RoutingEntry) {
         let json = serde_json::to_string(entry).unwrap();
-        let _: () = self
-            .conn
-            .hset(self.routing_map_key(), model_name, json)
-            .await
-            .unwrap();
+        let _: () = self.conn.hset(self.routing_map_key(), model_name, json).await.unwrap();
     }
 
     async fn publish_update(&mut self, payload: &str) {
-        let _: () = self
-            .conn
-            .publish(self.routing_updates_channel(), payload)
-            .await
-            .unwrap();
+        let _: () = self.conn.publish(self.routing_updates_channel(), payload).await.unwrap();
     }
 
     async fn cleanup(&mut self) {
@@ -67,24 +61,36 @@ impl RedisTestHarness {
     }
 
     fn build_config(&self) -> Config {
+        let upstream_timeout = Duration::from_secs(30);
+        let recovery_timeout = Duration::from_secs(15);
+        // Mirror the production derivation in Config::from_env (see
+        // common/proxy_builder.rs's identical comment).
+        let probe_timeout = std::cmp::max(recovery_timeout, upstream_timeout);
+
         Config {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             admin_addr: "127.0.0.1:0".parse().unwrap(),
             redis_url: redis_url(),
             control_plane_url: "http://127.0.0.1:1".to_string(),
             log_level: "warn".to_string(),
-            upstream_timeout: Duration::from_secs(30),
+            upstream_timeout,
             redis_key_prefix: self.prefix.clone(),
             parking: ParkingConfig {
                 timeout: Duration::from_secs(10),
                 max_per_model: 1000,
                 max_global: 10000,
+                max_bytes: 1_073_741_824,
             },
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: 5,
                 failure_window: Duration::from_secs(30),
-                recovery_timeout: Duration::from_secs(15),
+                recovery_timeout,
+                probe_timeout,
             },
+            api_token: None,
+            max_body_bytes: 1_048_576,
+            max_concurrent_forwards: 0,
+            max_concurrent_forwards_per_model: 0,
         }
     }
 
@@ -107,11 +113,7 @@ impl RedisTestHarness {
             let _ = start_redis_sync(redis_state).await;
         });
 
-        let proxy_app = Router::new()
-            .route("/v1/chat/completions", post(handlers::handle_inference))
-            .route("/v1/completions", post(handlers::handle_inference))
-            .route("/v1/models", get(handlers::handle_models))
-            .with_state(state.clone());
+        let proxy_app = sardeenz_proxy::routes::build_proxy_router(state.clone());
 
         let admin_app = Router::new()
             .route("/healthz", get(health::healthz))
@@ -147,11 +149,7 @@ impl RunningProxy {
         let client = reqwest::Client::new();
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            if let Ok(resp) = client
-                .get(format!("{}/readyz", self.admin_url))
-                .send()
-                .await
-            {
+            if let Ok(resp) = client.get(format!("{}/readyz", self.admin_url)).send().await {
                 if resp.status() == StatusCode::OK {
                     return;
                 }
@@ -168,6 +166,7 @@ fn make_active_entry(model_name: &str, host: &str, port: u16) -> RoutingEntry {
     RoutingEntry {
         model_name: model_name.to_string(),
         state: ModelState::Active,
+        protocol: Protocol::Openai,
         endpoints: vec![RunnerEndpoint {
             host: host.to_string(),
             port,
@@ -186,11 +185,7 @@ async fn test_redis_bootstrap() {
     let model = "test/bootstrap-model";
     let runner = MockRunner::spawn(model).await;
 
-    let entry = make_active_entry(
-        model,
-        &runner.addr.ip().to_string(),
-        runner.addr.port(),
-    );
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
     harness.set_routing_entry(model, &entry).await;
 
     let proxy = harness.spawn_proxy().await;
@@ -198,7 +193,7 @@ async fn test_redis_bootstrap() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
         .json(&serde_json::json!({"model": model, "messages": []}))
         .send()
         .await
@@ -222,7 +217,7 @@ async fn test_redis_pubsub_refresh() {
     // Model doesn't exist yet — should get 404
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
         .json(&serde_json::json!({"model": model, "messages": []}))
         .send()
         .await
@@ -230,11 +225,7 @@ async fn test_redis_pubsub_refresh() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
     // Add the model to Redis and publish an update
-    let entry = make_active_entry(
-        model,
-        &runner.addr.ip().to_string(),
-        runner.addr.port(),
-    );
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
     harness.set_routing_entry(model, &entry).await;
     harness.publish_update("refresh").await;
 
@@ -242,7 +233,7 @@ async fn test_redis_pubsub_refresh() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
         .json(&serde_json::json!({"model": model, "messages": []}))
         .send()
         .await
@@ -261,21 +252,13 @@ async fn test_redis_malformed_entry() {
     let runner = MockRunner::spawn(good_model).await;
 
     // Seed one valid and one malformed entry
-    let entry = make_active_entry(
-        good_model,
-        &runner.addr.ip().to_string(),
-        runner.addr.port(),
-    );
+    let entry = make_active_entry(good_model, &runner.addr.ip().to_string(), runner.addr.port());
     harness.set_routing_entry(good_model, &entry).await;
 
     // Write malformed JSON directly
     let _: () = harness
         .conn
-        .hset(
-            harness.routing_map_key(),
-            "test/bad-model",
-            "not valid json {{{",
-        )
+        .hset(harness.routing_map_key(), "test/bad-model", "not valid json {{{")
         .await
         .unwrap();
 
@@ -285,7 +268,7 @@ async fn test_redis_malformed_entry() {
     // Good model should work
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
         .json(&serde_json::json!({"model": good_model, "messages": []}))
         .send()
         .await
@@ -294,13 +277,232 @@ async fn test_redis_malformed_entry() {
 
     // Bad model should be 404 (skipped during parse)
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
         .json(&serde_json::json!({"model": "test/bad-model", "messages": []}))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
+    // NOTE: the parse-error counter (sardeenz_proxy_routing_parse_errors_total)
+    // is exercised directly against parse_routing_map() in
+    // src/state/redis_sync.rs's unit tests, not here. This harness never
+    // installs a metrics recorder (see common/proxy_builder.rs), so counter!
+    // calls silently no-op and a /metrics scrape here would never see it.
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_redis_malformed_entry_survives_refresh() {
+    let mut harness = RedisTestHarness::new().await;
+    let good_model = "test/good-model-refresh";
+    let bad_model = "test/bad-model-refresh";
+    let runner = MockRunner::spawn(good_model).await;
+
+    let entry = make_active_entry(good_model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(good_model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": good_model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Write a malformed second entry directly, then trigger a refresh.
+    let _: () = harness
+        .conn
+        .hset(harness.routing_map_key(), bad_model, "not valid json {{{")
+        .await
+        .unwrap();
+    harness.publish_update("refresh").await;
+
+    // Wait for the proxy to pick up the refresh.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The unrelated good model must still be routable after the refresh.
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": good_model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_redis_malformed_entry_carried_forward() {
+    let mut harness = RedisTestHarness::new().await;
+    let model = "test/carry-forward-model";
+    let runner = MockRunner::spawn(model).await;
+
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Overwrite the SAME key with malformed JSON, then trigger a refresh.
+    let _: () =
+        harness.conn.hset(harness.routing_map_key(), model, "not valid json {{{").await.unwrap();
+    harness.publish_update("refresh").await;
+
+    // Wait for the proxy to pick up the refresh.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The previous entry is carried forward — the model stays routable
+    // despite the latest write being unparseable.
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_inference_timestamp_written_to_redis() {
+    let mut harness = RedisTestHarness::new().await;
+    let model = "test/timestamp-model";
+    let runner = MockRunner::spawn(model).await;
+
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    // Send an inference request
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Wait for the fire-and-forget write to land
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Verify the inference timestamp key exists in Redis
+    let ts_key = format!("{}:inference:last:{}", harness.prefix, model);
+    let value: Option<String> = harness.conn.get(&ts_key).await.unwrap();
+    assert!(value.is_some(), "expected inference timestamp key '{ts_key}' to exist");
+
+    // Verify the value is a valid ISO-8601 timestamp
+    let ts = value.unwrap();
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&ts).is_ok(),
+        "expected valid ISO-8601 timestamp, got: {ts}"
+    );
+
+    // Clean up the inference key too
+    let _: () = harness.conn.del(&ts_key).await.unwrap_or(());
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_inference_timestamp_debounce() {
+    let mut harness = RedisTestHarness::new().await;
+    let model = "test/debounce-model";
+    let runner = MockRunner::spawn(model).await;
+
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    let client = reqwest::Client::new();
+
+    // Send first request
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Wait for write
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let ts_key = format!("{}:inference:last:{}", harness.prefix, model);
+    let first_ts: String = harness.conn.get(&ts_key).await.unwrap();
+
+    // Send second request immediately (within debounce window)
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Timestamp should be unchanged (debounced)
+    let second_ts: String = harness.conn.get(&ts_key).await.unwrap();
+    assert_eq!(first_ts, second_ts, "timestamp should not change within debounce window");
+
+    let _: () = harness.conn.del(&ts_key).await.unwrap_or(());
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_inference_timestamp_written_on_5xx() {
+    let mut harness = RedisTestHarness::new().await;
+    let model = "test/5xx-timestamp-model";
+    // Runner that always returns 500
+    let runner = MockRunner::spawn_failing(model, 1000).await;
+
+    let entry = make_active_entry(model, &runner.addr.ip().to_string(), runner.addr.port());
+    harness.set_routing_entry(model, &entry).await;
+
+    let proxy = harness.spawn_proxy().await;
+    proxy.wait_ready(Duration::from_secs(5)).await;
+
+    // Send a request that will get a 500 from the runner
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url))
+        .json(&serde_json::json!({"model": model, "messages": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(runner.request_count(), 1);
+
+    // Wait for the fire-and-forget write
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Timestamp should still be written — model is actively receiving traffic
+    let ts_key = format!("{}:inference:last:{}", harness.prefix, model);
+    let value: Option<String> = harness.conn.get(&ts_key).await.unwrap();
+    assert!(value.is_some(), "expected inference timestamp even on 5xx response");
+
+    let _: () = harness.conn.del(&ts_key).await.unwrap_or(());
     harness.cleanup().await;
 }
 
@@ -318,11 +520,7 @@ async fn test_redis_readiness_lifecycle() {
     // Wait for it to become ready (Redis connect + HGETALL completes)
     proxy.wait_ready(Duration::from_secs(5)).await;
 
-    let resp = client
-        .get(format!("{}/readyz", proxy.admin_url))
-        .send()
-        .await
-        .unwrap();
+    let resp = client.get(format!("{}/readyz", proxy.admin_url)).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     harness.cleanup().await;

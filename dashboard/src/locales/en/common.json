@@ -1,0 +1,72 @@
+{
+  "nav": {
+    "clusterOverview": "Cluster Overview",
+    "models": "Models",
+    "workers": "Workers",
+    "gpuMemory": "GPU Memory",
+    "catalog": "Runner Catalog",
+    "metrics": "Metrics",
+    "playground": "Playground"
+  },
+  "brand": "Sardeenz",
+  "actions": {
+    "deploy": "Deploy",
+    "deployModel": "Deploy Model",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "sleep": "Sleep",
+    "wake": "Wake",
+    "retry": "Retry",
+    "clearFilters": "Clear filters",
+    "close": "Close",
+    "selectAll": "Select all"
+  },
+  "status": {
+    "active": "Active",
+    "sleeping": "Sleeping",
+    "pending": "Pending",
+    "starting": "Starting",
+    "stopping": "Stopping",
+    "stopped": "Stopped",
+    "draining": "Draining",
+    "error": "Error"
+  },
+  "loading": "Loading...",
+  "error": "Error",
+  "noData": "No data",
+  "never": "Never",
+  "errors": {
+    "unexpected": "An unexpected error occurred.",
+    "somethingWrong": "Something went wrong"
+  },
+  "pageNotFound": "Page not found",
+  "pageNotFoundBody": "The requested page does not exist. Use the sidebar to navigate to a valid page.",
+  "auth": {
+    "readOnly": "You have read-only access. Contact your administrator to request write access.",
+    "readOnlyAction": "Read-only users cannot perform this action."
+  },
+  "degraded": {
+    "controlPlaneUnreachable": "Control plane unreachable — showing cached data",
+    "sseUnavailable": "Real-time updates unavailable — polling for changes"
+  },
+  "theme": {
+    "light": "Light theme",
+    "dark": "Dark theme",
+    "toggle": "Theme toggle"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all as read",
+    "clearAll": "Clear all",
+    "noNotifications": "No notifications",
+    "noNotificationsBody": "You have no notifications at this time.",
+    "actions": "Notification actions",
+    "loadError": "Failed to load notification history. Some past notifications may be missing."
+  },
+  "userMenu": {
+    "logout": "Logout"
+  },
+  "sidebar": {
+    "sourceOnGitHub": "Source on GitHub"
+  }
+}

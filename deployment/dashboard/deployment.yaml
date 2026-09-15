@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sardeenz-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sardeenz-dashboard
+    spec:
+      serviceAccountName: sardeenz-dashboard
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dashboard
+          image: quay.io/rh-aiservices-bu/sardeenz-dashboard:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SARDEENZ_BFF_LISTEN_ADDR
+              value: 0.0.0.0:4000
+            - name: SARDEENZ_CONTROL_PLANE_URL
+              value: http://sardeenz-control-plane:3000
+            - name: SARDEENZ_REDIS_URL
+              value: redis://sardeenz-redis:6379
+            - name: SARDEENZ_INFERENCE_URL
+              value: http://sardeenz-proxy:8080
+            - name: SARDEENZ_PROMETHEUS_URL
+              value: https://thanos-querier.openshift-monitoring.svc:9092
+            - name: SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH
+              value: /var/run/secrets/kubernetes.io/serviceaccount/token
+            - name: SARDEENZ_PROMETHEUS_CA_PATH
+              value: /etc/sardeenz/service-ca/service-ca.crt
+            - name: SARDEENZ_PROMETHEUS_TENANT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_API_URL
+              value: https://kubernetes.default.svc
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - name: SARDEENZ_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-service-tokens
+                  key: SARDEENZ_API_TOKEN
+          envFrom:
+            - secretRef:
+                name: sardeenz-dashboard-auth
+          volumeMounts:
+            - name: service-ca
+              mountPath: /etc/sardeenz/service-ca
+              readOnly: true
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: '1'
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+            runAsNonRoot: true
+      volumes:
+        - name: service-ca
+          configMap:
+            name: sardeenz-dashboard-service-ca

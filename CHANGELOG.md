@@ -6,135 +6,136 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-
-- OpenAPI validation script now fails on lint errors instead of silently swallowing them (#1)
-- Readiness probe now requires both Redis connection AND successful routing map load (#4)
-- Response hop-by-hop headers now filtered symmetrically with request-side filtering (#9)
-
 ### Added
 
-- Redis integration tests behind `redis-integration` feature flag (#5):
-  `test_redis_bootstrap`, `test_redis_pubsub_refresh`, `test_redis_malformed_entry`,
-  `test_redis_readiness_lifecycle` — each uses UUID-scoped key prefix for isolation
-- Configurable Redis key prefix (`SARDEENZ_REDIS_KEY_PREFIX`, default `sardeenz`) for test isolation (#5)
-- Request-level tracing with request ID correlation (#6): generates or propagates
-  `X-Request-ID` header, structured JSON log per request (method, path, status, latency)
-- Prometheus metric recording at all proxy call sites (#3):
-  - `sardeenz_proxy_requests_total` (counter with status label)
-  - `sardeenz_proxy_request_duration_seconds` (histogram)
-  - `sardeenz_proxy_active_connections` (gauge)
-  - `sardeenz_proxy_parked_connections` (gauge with model label)
-  - `sardeenz_proxy_wake_triggers_total` (counter with result label)
-  - `sardeenz_proxy_parking_duration_seconds` (histogram)
-  - `sardeenz_proxy_circuit_breaker_state` (gauge with endpoint label)
-
-### Changed
-
-- Rust types in `proxy/src/generated/` now documented as hand-maintained (not auto-generated) (#2)
-- Updated ADR-005, architecture overview, and Phase 1 docs to reflect actual Rust type workflow
-- Extracted `ProxyError::status_code()` method for metrics and reuse (#3)
-- Added Security and Trust Model section to proxy architecture docs (#7, #18, #20)
-- Added configurable upstream request timeout (`SARDEENZ_UPSTREAM_TIMEOUT_SECS`, default 300s) (#8)
-- Updated Phase 1 docs with upstream timeout, Redis key prefix, hop-by-hop filtering, and Redis integration test details
-- Updated CLAUDE.md to clarify Rust types are hand-maintained (not generated)
-- Added `SARDEENZ_REDIS_KEY_PREFIX` to proxy configuration reference table
-- Default proxy admin port from 9090 to 9099 to avoid conflict with Cockpit on Fedora/RHEL
-- Suppress Redocly `no-unused-components` warning for `RoutingMapUpdate` schema (reserved for Phase 2 pub/sub)
-
-### Added
-
-- `/implement` skill (`.claude/skills/implement.md`): full quality development process
-  for phases and features — plan, implement, cross-model review/fix loop, verify
-- Project scaffolding: monorepo structure, architecture docs, ADRs
-- Development tooling: TypeScript, ESLint, Prettier, Vitest, Redocly
-- OpenAPI contract workflow with codegen pipeline
-- Build infrastructure: Makefile, npm workspaces, tsconfig project references
-- README index in every `docs/` directory for GitHub navigation
-- Documentation rule: every Markdown file must be linked from its parent README
-- Comprehensive project plan with deliverables, definitions of done, risks, and dependencies for all five phases
-- CLAUDE.md: project status, workflow rules (CHANGELOG, npm, commit hygiene)
-- Phase 0 planning document with task breakdown, scope, and open questions
-- Engine runner contract OpenAPI spec (`packages/contracts/specs/engine-runner.yaml`):
-  7 endpoints across 5 interface areas (health, memory, sleep/wake, progress, capabilities),
-  5-state runner model (STARTING, READY, BUSY, SLEEPING, ERROR), per-device memory reporting,
-  extensible sleep levels, structured loading progress, capability declaration for placement
-- Generated TypeScript types from runner contract (`packages/types/src/generated/engine-runner.ts`)
-- Runner contract design document (`docs/architecture/components/runner-contract.md`):
-  state model with Mermaid diagram, communication patterns, scenario validation (vLLM/Triton/MLServer)
-- Architecture components directory (`docs/architecture/components/`)
-- Phase 1 planning document with 12-task breakdown for the Rust proxy (`docs/project/phase1.md`)
-- Podman Compose dev environment (`compose.yaml`) with Valkey 8 for Redis-compatible state store
-- Makefile targets `services` and `services-stop` for dev service lifecycle
-- Proxy ↔ control plane OpenAPI spec (`packages/contracts/specs/proxy-control-plane.yaml`):
-  wake trigger API (`POST /api/v1/wake`), routing map bootstrap (`GET /api/v1/routing-map`),
-  routing map schema (Redis hash at `sardeenz:routing-map` with pub/sub on `sardeenz:routing-updates`),
-  5-state model routing model (ACTIVE, SLEEPING, STARTING, DRAINING, ERROR)
-- Generated TypeScript types from proxy-control-plane spec
-  (`packages/types/src/generated/proxy-control-plane.ts`)
-- Hand-written Rust types matching both OpenAPI specs (`proxy/src/generated/`):
-  engine runner types and proxy-control-plane types with serde derives
-- Rust routing proxy implementation (`proxy/src/`):
-  - axum-based HTTP server with separate proxy (8080) and admin (9099) ports
-  - Request routing via in-memory routing map cache refreshed by Redis pub/sub
-  - OpenAI-compatible endpoints: `/v1/chat/completions`, `/v1/completions`, `/v1/models`
-  - Connection parking with configurable timeout (default 120s) and backpressure limits
-  - Thundering herd prevention: first request fires wake trigger, subsequent requests park
-  - Weighted round-robin load balancing across runner replicas
-  - Per-endpoint circuit breaker (configurable failure threshold, window, recovery timeout)
-  - Prometheus metrics endpoint on admin port (`/metrics`)
-  - Health endpoints (`/healthz`, `/readyz`) on admin port
-  - Structured JSON logging via tracing-subscriber
-  - Graceful shutdown on SIGTERM/SIGINT
-- Structured output compatibility research document
-  (`docs/architecture/components/structured-output-compatibility.md`):
-  vLLM version compatibility matrix, proxy passthrough recommendation
-- Multi-stage Dockerfile for the routing proxy (`proxy/Dockerfile`):
-  musl static build, distroless runtime, non-root user, health check
-- `.dockerignore` for the proxy (`proxy/.dockerignore`)
-- Routing proxy design document (`docs/architecture/components/proxy.md`):
-  request flow with Mermaid sequence diagrams (active/sleeping/multi-replica), connection parking
-  protocol (thundering herd prevention, timeout/backpressure limits), routing map Redis key
-  structure and refresh strategy, circuit breaker state machine, full configuration and metrics
-  reference tables, health endpoint semantics, proxy ↔ control plane responsibility split
-- Integration test suite for the Rust proxy (`proxy/tests/integration/`):
-  26 tests across 13 scenarios exercising request forwarding, SSE streaming, sleep/wake cycle,
-  thundering herd deduplication, unknown model 404, missing/invalid model 400, parking timeout 503,
-  parking limit enforcement (per-model and global), wake trigger failure, draining/error model
-  states, circuit breaker trip/recovery/5xx, weighted round-robin, `/v1/models` aggregation,
-  and health/readyz endpoints; runs without Redis using direct RoutingMapCache injection;
-  mock axum servers for runner and control plane
-- Shared handler module (`proxy/src/handlers.rs`) — handler functions extracted from binary
-  crate for reuse by both production `main.rs` and integration tests
+- Published documentation site (mkdocs-material, GitHub Pages) built from `docs/` by a new
+  `deploy-docs` workflow (application docs only: project planning and ADRs stay in the repo), with an interactive Architecture Flow Visualizer
+  (`docs/architecture-visualizer.html`) animating eight v2 flows: cluster bootstrap, model
+  deployment, inference hot path, park-and-wake, LRU eviction, instance move, control plane
+  failover, and runner catalog import. Links to source files outside `docs/` are rewritten to
+  GitHub URLs at build time so `mkdocs build --strict` validates in-site links.
 
 ### Fixed
 
-- Proxy: missing/invalid `model` field now returns HTTP 400 (`invalid_request_error`)
-  instead of 500; invalid JSON body returns 400 instead of 500
-- Proxy: `RoutingEntryMetadata` preserves unknown fields via `serde(flatten)` to match
-  OpenAPI `additionalProperties` contract
-- Proxy: `ForwardingClient` eliminates double-buffering — accepts `Bytes` directly,
-  preserves query string via `path_and_query()`, filters hop-by-hop headers
-- Proxy: circuit breaker HalfOpen state limits to single probe request (prevents
-  stampede); `record_failure()` in HalfOpen immediately re-opens circuit;
-  `current_state()` is now read-only (no side effects)
-- Proxy: weighted round-robin balancer uses cumulative weight algorithm — O(n),
-  zero heap allocation, weight capped at 100
-- Proxy: parking manager cleans up `pending_wakes` on timeout exit path (prevents
-  permanent stuck state); `reserve_slot()` atomically checks+increments under
-  single mutex (TOCTOU fix); uses `SeqCst` ordering throughout
-- Proxy: Redis sync subscribes to pub/sub channel before initial `HGETALL` to
-  avoid missing updates during the load window
-- Proxy: `redis_connected` flag uses `Acquire`/`Release` ordering instead of `Relaxed`
-- Proxy: graceful shutdown uses `watch::channel` for coordinated signal to both
-  servers and Redis sync task; proper drain sequence (signal → join servers → await Redis)
-- Proxy: Redis URL credentials redacted in startup log output
+- Flaky dashboard e2e accessibility test: the Cluster Overview readiness check now targets the
+  Workers summary card instead of an unscoped text match that also hit the sidebar nav link.
+- Sidebar GitHub star and fork counts now render in production: the lookup goes through a cached
+  BFF route instead of a browser fetch the Content Security Policy blocked.
 
-### Changed
+## [0.2.0] - 2026-09-15
 
-- CLAUDE.md project status now links directly to phase0.md for current work
-- Aligned runner contract spec filename to `engine-runner.yaml` across all docs
-- `packages/types/src/index.ts` re-exports generated engine runner types and enums
-- `packages/types/package.json` codegen script now generates from engine-runner.yaml
-- `packages/contracts/redocly.yaml` disables rules inappropriate for internal contracts
-  (no-empty-servers, security-defined, info-license)
+First release of Sardeenz v2, the production-grade successor to the
+[v1 prototype](https://github.com/rh-aiservices-bu/sardeenz). This section summarizes what the
+platform delivers as of this release; the per-change history that accumulated during
+development (Phases 0-4 and milestones M1-M14) is preserved in the git history of this file.
+
+### Platform
+
+- **Four decoupled components talking only through OpenAPI contracts** (ADR-002, ADR-005):
+  a Rust routing proxy, a TypeScript control plane (Fastify, PostgreSQL, Redis/Valkey), a React +
+  PatternFly 6 admin dashboard with a Fastify BFF, and engine runners. TypeScript types are
+  generated from the specs in `packages/contracts/`; Rust types are hand-maintained.
+- **Application-layer VRAM multiplexing.** Models are logical configurations with one or more
+  instances (ADR-019); the control plane places them on workers and GPUs, sleeps idle models,
+  wakes them on demand, and evicts to make room. Configuration name, served model name, and
+  display name are distinct (ADR-020).
+- **Measured-only GPU memory doctrine.** Every memory figure shown to users comes from NVML
+  telemetry; `requiredMemory` is a placement input, never a user-facing "reserved" figure.
+  kvcached pool statistics (prealloc / used / free) are reported end to end.
+
+### Routing proxy
+
+- OpenAI-compatible and Open Inference Protocol traffic on separate path families (`/openai`,
+  `/oip`, ADR-021), weighted round-robin across instances with per-endpoint circuit breakers.
+- **Wake-on-request parking.** Requests for a sleeping model are parked, a wake is triggered, and
+  the request is forwarded once the model is ready; parked herds fail fast on wake rollback and
+  never suppress the next wake trigger.
+- Live routing map from Redis pub/sub with reconnect and backoff; request-ID tracing; hop-by-hop
+  header filtering; configurable body cap, parking byte budget, forwarding concurrency limits, and
+  upstream timeout.
+- Prometheus metrics on a separate admin port: request counts and latency histograms, active and
+  parked connections, parking duration, wake triggers, circuit-breaker state.
+
+### Control plane
+
+- Model lifecycle API: deploy, sleep, wake, stop, start, delete, and force-delete for stalled
+  configurations; in-progress deployments can be cancelled; stopped configurations can be
+  modified in place.
+- **Resumable move-model operation** across workers and GPUs with weight-zero cutover, resumed
+  after leader changes.
+- Placement pipeline with capability filtering, VRAM budgeting with in-flight reservations, LRU
+  eviction wired into deploy and wake, and a reconciliation loop that repairs ghost instances after
+  worker restarts.
+- Kubernetes Lease-based leader election; atomic Redis state transitions via Lua scripts;
+  PostgreSQL migrations at startup.
+- Durable, instance-scoped startup logs replayable from the dashboard.
+- Runner catalog: digest-pinned ORAS imports of official runner SIFs with byte-accurate
+  verification, digest-drift detection, and optional Apptainer signature checks.
+- Server-sent events for model, worker, and memory changes; Prometheus metrics for models,
+  workers, device memory, state transitions, evictions, and operation durations.
+
+### Admin dashboard
+
+- Cluster overview with a GPU placement board, per-GPU stacked per-model VRAM bars, and the
+  cluster inference URL; model list with sorting, multi-instance worker links, and runner
+  identification; model detail with startup-log replay; worker pages.
+- Deploy form driven by live worker capabilities, with runtime-module (SIF) selection and a
+  weights folder picker; compact per-model action menus (sleep, wake, move, stop) on GPU cards.
+- **Chatbot Playground** built on `@patternfly/chatbot`: model sidebar grouped by GPU, session
+  tabs, single / split / 2x2 layouts, streaming and non-streaming turns, latency / TTFT / tok/s
+  per reply, persisted layout and sessions, and a per-user inference concurrency cap.
+- **Metrics page** backed by Prometheus: request latency and throughput, active and parked
+  connections, parking duration, wake triggers, state transitions, evictions, memory over time,
+  and average operation durations, with preset and custom time ranges and auto-refresh. Works
+  against OpenShift user-workload monitoring out of the box (Thanos Querier tenancy port with
+  ServiceAccount token, service CA, and namespace tenancy).
+- Notification drawer fed by SSE with degraded polling fallback; Redis fallback for all read
+  routes when the control plane is unavailable.
+- Authentication modes `none`, `simple`, and OpenShift OAuth with namespace-scoped
+  `sardeenz-admin` / `sardeenz-admin-readonly` marker Roles; read-only users get a read-only UI.
+- Accessibility audit fixes, i18n infrastructure, and a Playwright e2e suite against mock
+  services, enforced in CI.
+
+### Engine runners
+
+- **Apptainer SIF runtime** (ADR-015 to ADR-018): engine images are converted to SIF files on a
+  shared volume and executed by a slim worker image; official SIFs are distributed via ORAS from
+  the `runners.yaml` catalog.
+- Worker agent with NVML GPU detection, per-runner port blocks, runner lifecycle management with
+  log streaming, multiple runner families per worker, and heartbeat memory reports.
+- **vLLM runner shim** (vLLM 0.21 and 0.24 images, kvcached-enabled) and **MLServer runner
+  shim** (MLServer 1.7.1) implementing the engine-runner contract: health, memory report, sleep
+  and wake, and engine-parameter passthrough. A shared conformance suite runs against both.
+- Runner container definitions organized by engine and exact upstream version under
+  `containers/runners/<engine>/<version>/`.
+
+### Deployment and operations
+
+- Kustomize bases for the control plane, proxy, dashboard, worker (SCC, RBAC, PVCs, NetworkPolicy,
+  PVC write protection), PoC PostgreSQL and Valkey backing services, OpenShift monitoring
+  (ServiceMonitors, service-CA ConfigMap, metrics-reader Role), and a parameterized Librarian Job
+  that builds, converts, and publishes runner SIFs on OpenShift.
+- Canonical Quay repository layout and a manual GitHub workflow that builds and pushes all
+  platform images.
+- Defense in depth: bearer-token authentication on the control plane and worker agent, allow-list
+  NetworkPolicies per flow, restrictive BFF security headers, proxy-aware rate limiting, SIF
+  supply-chain checks, and secrets sourced from environment variables (ADR-013). Operator guides
+  cover deployment security, OpenShift OAuth RBAC, MLServer model layouts, and the runner catalog.
+
+### Development
+
+- npm workspaces monorepo with a Makefile front door; `make lint typecheck test` gate; Podman
+  Compose dev services; logged dev servers; integration tests on a dedicated `_test` database.
+- CI: quality (lint, typecheck, unit and integration tests), dashboard e2e, Python runner and
+  conformance suites, and service container build and smoke tests on every pull request.
+- Architecture overview, 21 ADRs, per-component specs, and per-component `AGENTS.md` guides for
+  AI-assisted development.
+
+### Notable fixes folded into this release
+
+Development surfaced and fixed a long tail of correctness issues before release, including:
+runner processes not terminated on delete, stop, or eviction; VRAM reservations cleared
+prematurely or leaked; move and delete races; parked-connection and circuit-breaker leaks in the
+proxy; routing entries corrupted on sleep; integration tests wiping the dev database; MLServer
+failing on read-only images; OAuth identity and RBAC lookups on OpenShift; and proxy histograms
+rendered as summaries, which left latency panels empty.

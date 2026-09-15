@@ -13,15 +13,16 @@
 
 use std::time::Duration;
 
-use axum::Router;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
+use axum::Router;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
 
 use sardeenz_proxy::config::{CircuitBreakerConfig, Config, ParkingConfig};
 use sardeenz_proxy::handlers;
+use sardeenz_proxy::parking::ParkingManager;
 use sardeenz_proxy::routing::RoutingMapCache;
 use sardeenz_proxy::state::AppState;
 
@@ -30,6 +31,7 @@ pub struct TestProxy {
     pub proxy_addr: std::net::SocketAddr,
     pub admin_addr: std::net::SocketAddr,
     pub routing_cache: RoutingMapCache,
+    pub parking: ParkingManager,
 }
 
 /// Configuration knobs for the test proxy.
@@ -38,9 +40,13 @@ pub struct TestProxyConfig {
     pub parking_timeout: Duration,
     pub parking_max_per_model: usize,
     pub parking_max_global: usize,
+    pub parking_max_bytes: usize,
     pub cb_failure_threshold: u32,
     pub cb_failure_window: Duration,
     pub cb_recovery_timeout: Duration,
+    pub max_body_bytes: usize,
+    pub max_concurrent_forwards: usize,
+    pub max_concurrent_forwards_per_model: usize,
 }
 
 impl Default for TestProxyConfig {
@@ -50,9 +56,13 @@ impl Default for TestProxyConfig {
             parking_timeout: Duration::from_secs(10),
             parking_max_per_model: 1000,
             parking_max_global: 10000,
+            parking_max_bytes: 1_073_741_824,
             cb_failure_threshold: 5,
             cb_failure_window: Duration::from_secs(30),
             cb_recovery_timeout: Duration::from_secs(15),
+            max_body_bytes: 1_048_576,
+            max_concurrent_forwards: 0,
+            max_concurrent_forwards_per_model: 0,
         }
     }
 }
@@ -70,10 +80,7 @@ impl TestProxy {
     /// Spawn with a pre-existing RoutingMapCache (shared with mock control
     /// plane so that wake triggers update the same in-memory map the proxy
     /// reads).
-    pub async fn spawn_with_shared_cache(
-        control_plane_url: &str,
-        cache: RoutingMapCache,
-    ) -> Self {
+    pub async fn spawn_with_shared_cache(control_plane_url: &str, cache: RoutingMapCache) -> Self {
         Self::spawn_inner(
             TestProxyConfig {
                 control_plane_url: control_plane_url.to_string(),
@@ -105,18 +112,37 @@ impl TestProxy {
             },
             None,
             false, // redis_connected = false
+            true,  // routing map was loaded before the simulated disconnect
+        )
+        .await
+    }
+
+    /// Spawn the one deliberately not-ready state used by the readiness probe test.
+    pub async fn spawn_before_routing_map_loaded(control_plane_url: &str) -> Self {
+        Self::spawn_inner_full(
+            TestProxyConfig {
+                control_plane_url: control_plane_url.to_string(),
+                ..Default::default()
+            },
+            None,
+            true,
+            false,
         )
         .await
     }
 
     async fn spawn_inner(cfg: TestProxyConfig, existing_cache: Option<RoutingMapCache>) -> Self {
-        Self::spawn_inner_full(cfg, existing_cache, true).await
+        // Most integration tests inject entries after spawning instead of providing an existing
+        // cache. They model a completed empty HGETALL followed by later updates, so mark the
+        // initial routing load complete even when the injected map starts empty.
+        Self::spawn_inner_full(cfg, existing_cache, true, true).await
     }
 
     async fn spawn_inner_full(
         cfg: TestProxyConfig,
         existing_cache: Option<RoutingMapCache>,
         redis_connected: bool,
+        routing_map_loaded: bool,
     ) -> Self {
         // build_recorder() does NOT install a global recorder, so multiple
         // tests in the same binary can each call this without panicking.
@@ -125,6 +151,12 @@ impl TestProxy {
         // The recorder itself is not installed globally; the handle is sufficient
         // for render(). Metrics macros in the proxy code will silently no-op.
         drop(recorder);
+
+        let upstream_timeout = Duration::from_secs(30);
+        // Mirror the production derivation in Config::from_env: a claimed
+        // probe is only "leaked" after the longer of recovery_timeout and
+        // upstream_timeout, so a slow-but-live probe is never reclaimed early.
+        let probe_timeout = std::cmp::max(cfg.cb_recovery_timeout, upstream_timeout);
 
         let config = Config {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
@@ -137,13 +169,19 @@ impl TestProxy {
                 timeout: cfg.parking_timeout,
                 max_per_model: cfg.parking_max_per_model,
                 max_global: cfg.parking_max_global,
+                max_bytes: cfg.parking_max_bytes,
             },
-            upstream_timeout: Duration::from_secs(30),
+            upstream_timeout,
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: cfg.cb_failure_threshold,
                 failure_window: cfg.cb_failure_window,
                 recovery_timeout: cfg.cb_recovery_timeout,
+                probe_timeout,
             },
+            api_token: None,
+            max_body_bytes: cfg.max_body_bytes,
+            max_concurrent_forwards: cfg.max_concurrent_forwards,
+            max_concurrent_forwards_per_model: cfg.max_concurrent_forwards_per_model,
         };
 
         // Use AppState directly — the production state type.
@@ -154,8 +192,10 @@ impl TestProxy {
             existing_cache.clone(),
             redis_connected,
         );
+        state.set_routing_map_loaded(routing_map_loaded);
 
         let routing_cache = state.routing_cache.clone();
+        let parking = state.parking.clone();
 
         let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_addr = proxy_listener.local_addr().unwrap();
@@ -163,11 +203,7 @@ impl TestProxy {
         let admin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let admin_addr = admin_listener.local_addr().unwrap();
 
-        let proxy_app = Router::new()
-            .route("/v1/chat/completions", post(handlers::handle_inference))
-            .route("/v1/completions", post(handlers::handle_inference))
-            .route("/v1/models", get(handlers::handle_models))
-            .with_state(state.clone());
+        let proxy_app = sardeenz_proxy::routes::build_proxy_router(state.clone());
 
         let admin_app = Router::new()
             .route("/healthz", get(handle_healthz))
@@ -182,11 +218,7 @@ impl TestProxy {
             axum::serve(admin_listener, admin_app).await.unwrap();
         });
 
-        TestProxy {
-            proxy_addr,
-            admin_addr,
-            routing_cache,
-        }
+        TestProxy { proxy_addr, admin_addr, routing_cache, parking }
     }
 
     pub fn proxy_url(&self) -> String {

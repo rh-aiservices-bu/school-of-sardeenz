@@ -34,13 +34,13 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 ## Tasks
 
-| #   | Task                                   | Status   | Output                                                       |
-| --- | -------------------------------------- | -------- | ------------------------------------------------------------ |
-| 0.1 | Study v1 vLLM integration             | Complete | Reference notes (internal)                                   |
-| 0.2 | Write runner contract OpenAPI spec     | Complete | `packages/contracts/specs/engine-runner.yaml`                |
-| 0.3 | Set up codegen and generate types      | Complete | `packages/types/src/generated/engine-runner.ts`              |
-| 0.4 | Write runner contract design document  | Complete | `docs/architecture/components/runner-contract.md`            |
-| 0.5 | Scenario validation                    | Complete | Confirmed coverage of vLLM, Triton, CPU-only                |
+| #   | Task                                  | Status   | Output                                            |
+| --- | ------------------------------------- | -------- | ------------------------------------------------- |
+| 0.1 | Study v1 vLLM integration             | Complete | Reference notes (internal)                        |
+| 0.2 | Write runner contract OpenAPI spec    | Complete | `packages/contracts/specs/engine-runner.yaml`     |
+| 0.3 | Set up codegen and generate types     | Complete | `packages/types/src/generated/engine-runner.ts`   |
+| 0.4 | Write runner contract design document | Complete | `docs/architecture/components/runner-contract.md` |
+| 0.5 | Scenario validation                   | Complete | Confirmed coverage of vLLM, Triton, CPU-only      |
 
 ## Task Details
 
@@ -93,7 +93,7 @@ Generated files are committed to the repo (not gitignored). Never edit them by h
 
 **Depends on:** Task 0.2
 
-Narrative companion to the OpenAPI spec at `docs/architecture/components/runner-contract.md`. This is not a repeat of the spec — it explains the *why* and *how* for implementers.
+Narrative companion to the OpenAPI spec at `docs/architecture/components/runner-contract.md`. This is not a repeat of the spec — it explains the _why_ and _how_ for implementers.
 
 Covers:
 

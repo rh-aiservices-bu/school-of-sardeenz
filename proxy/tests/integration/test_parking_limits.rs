@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use crate::common::{TestProxy, insert_sleeping_model, MockControlPlaneBuilder};
 use crate::common::proxy_builder::TestProxyConfig;
+use crate::common::{insert_sleeping_model, MockControlPlaneBuilder, TestProxy};
 
 #[tokio::test]
 async fn test_per_model_parking_limit() {
@@ -43,11 +43,9 @@ async fn test_per_model_parking_limit() {
     let mut handles = Vec::new();
     for _ in 0..2 {
         let c = client.clone();
-        let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
         let p = payload.clone();
-        handles.push(tokio::spawn(async move {
-            c.post(url).json(&p).send().await
-        }));
+        handles.push(tokio::spawn(async move { c.post(url).json(&p).send().await }));
     }
 
     // Give the parked requests a moment to register.
@@ -55,7 +53,7 @@ async fn test_per_model_parking_limit() {
 
     // The 3rd request should be rejected immediately.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&payload)
         .send()
         .await
@@ -74,6 +72,69 @@ async fn test_per_model_parking_limit() {
     for h in handles {
         h.abort();
     }
+}
+
+#[tokio::test]
+async fn test_parking_byte_budget() {
+    let cache = sardeenz_proxy::routing::RoutingMapCache::new();
+    let model = "byte-budget-model/v1";
+    insert_sleeping_model(&cache, model).await;
+
+    let cp = MockControlPlaneBuilder::new().spawn().await;
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "x".repeat(32)}]
+    });
+    let body_len = serde_json::to_vec(&payload).unwrap().len();
+    // Room for exactly one parked body, not two.
+    let budget = body_len + body_len / 2;
+
+    let proxy = TestProxy::spawn_with_shared_cache_and_config(
+        TestProxyConfig {
+            control_plane_url: format!("http://{}", cp.addr),
+            parking_timeout: Duration::from_secs(30),
+            parking_max_per_model: 1000,
+            parking_max_global: 1000,
+            parking_max_bytes: budget,
+            ..Default::default()
+        },
+        cache,
+    )
+    .await;
+
+    let client = reqwest::Client::new();
+
+    // Park one request (fits the budget). It blocks waiting for the model to
+    // wake, so fire it as a background task.
+    let handle = {
+        let c = client.clone();
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
+        let p = payload.clone();
+        tokio::spawn(async move { c.post(url).json(&p).send().await })
+    };
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // A second request of the same size pushes the parked total past the
+    // budget and should be rejected immediately.
+    let resp = client
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
+        .json(&payload)
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "exceeding the parking byte budget should return 503"
+    );
+
+    let body: serde_json::Value = resp.json().await.expect("response not JSON");
+    assert_eq!(body["error"]["type"], "parking_limit_reached");
+
+    handle.abort();
 }
 
 #[tokio::test]
@@ -104,21 +165,19 @@ async fn test_global_parking_limit() {
     let mut handles = Vec::new();
     for model in [model_a, model_b] {
         let c = client.clone();
-        let url = format!("{}/v1/chat/completions", proxy.proxy_url());
+        let url = format!("{}/openai/v1/chat/completions", proxy.proxy_url());
         let p = serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "Hi"}]
         });
-        handles.push(tokio::spawn(async move {
-            c.post(url).json(&p).send().await
-        }));
+        handles.push(tokio::spawn(async move { c.post(url).json(&p).send().await }));
     }
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // A 3rd request (any model) should be rejected by the global limit.
     let resp = client
-        .post(format!("{}/v1/chat/completions", proxy.proxy_url()))
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
         .json(&serde_json::json!({
             "model": model_a,
             "messages": [{"role": "user", "content": "Hi"}]

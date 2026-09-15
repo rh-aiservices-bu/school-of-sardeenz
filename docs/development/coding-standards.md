@@ -41,7 +41,7 @@ Order imports in groups separated by blank lines:
 ### General
 
 - Follow standard Rust conventions and idioms
-- Target Rust edition 2021, MSRV 1.82
+- Target Rust edition 2021, MSRV 1.86
 - Run `cargo clippy -- -D warnings` before committing
 
 ### Error Handling

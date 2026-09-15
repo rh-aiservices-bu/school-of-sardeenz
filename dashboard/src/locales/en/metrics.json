@@ -1,0 +1,52 @@
+{
+  "title": "Metrics",
+  "autoRefresh": "Auto-refresh",
+  "timeRangeSelector": "Time range selector",
+  "charts": {
+    "requestLatency": "Request Latency (p50 / p95 / p99)",
+    "requestThroughput": "Request Throughput",
+    "activeConnections": "Active Connections",
+    "parkedConnections": "Parked Connections",
+    "parkingDuration": "Parking Duration (p50 / p95)",
+    "wakeTriggers": "Wake Triggers",
+    "stateTransitions": "State Transitions",
+    "evictions": "Evictions",
+    "memoryOverTime": "Memory Over Time",
+    "operationDuration": "Operation Duration (avg)",
+    "deviceMemoryCurrent": "Device Memory (Current)"
+  },
+  "operations": {
+    "deploy": "Deploy",
+    "sleep": "Sleep",
+    "wake": "Wake",
+    "eviction": "Eviction",
+    "placement": "Placement",
+    "tooltip": "{{operation}}: avg {{averageSeconds}} s over {{count}} ops"
+  },
+  "yLabels": {
+    "latency": "Latency (s)",
+    "throughput": "req/s",
+    "connections": "connections",
+    "duration": "duration (s)",
+    "triggers": "triggers/s",
+    "transitions": "transitions/s",
+    "evictions": "evictions/s",
+    "vram": "VRAM"
+  },
+  "table": {
+    "deviceModel": "Device / Model",
+    "memoryUsed": "Memory Used"
+  },
+  "empty": {
+    "title": "No metrics data available",
+    "body": "Metrics require a running Prometheus instance and active traffic."
+  },
+  "loading": "Loading metrics…",
+  "loadingMemory": "Loading memory metrics…",
+  "customRange": "Custom",
+  "customRangeStart": "Start",
+  "customRangeStartTime": "Start time",
+  "customRangeEnd": "End",
+  "customRangeEndTime": "End time",
+  "customRangeInvalid": "End must be after start"
+}

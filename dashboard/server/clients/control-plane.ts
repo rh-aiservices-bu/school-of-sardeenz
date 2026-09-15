@@ -1,0 +1,209 @@
+import type { Config } from '../config.js';
+import type { ControlPlaneComponents } from '@sardeenz/types';
+import { BffError } from '../errors.js';
+
+export interface ProxyResult {
+  status: number;
+  data: unknown;
+}
+
+export class ControlPlaneClient {
+  private readonly baseUrl: string;
+  private readonly token: string;
+
+  constructor(config: Config) {
+    this.baseUrl = config.controlPlaneUrl;
+    this.token = config.controlPlaneApiToken;
+  }
+
+  async proxyRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    const url = `${this.baseUrl}${path}`;
+    const init: RequestInit = { method };
+    // Only send a JSON content-type when there is actually a body. Setting it on
+    // bodyless requests (DELETE, sleep/wake, etc.) trips Fastify's default JSON
+    // parser with FST_ERR_CTP_EMPTY_JSON_BODY on the control plane.
+    if (body !== undefined) {
+      init.headers = { 'Content-Type': 'application/json' };
+      init.body = JSON.stringify(body);
+    }
+    if (this.token) {
+      const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+      headers['Authorization'] = `Bearer ${this.token}`;
+      init.headers = headers;
+    }
+    return fetch(url, init);
+  }
+
+  async request(method: string, path: string, body?: unknown): Promise<ProxyResult> {
+    let res: Response;
+    try {
+      res = await this.proxyRequest(method, path, body);
+    } catch (cause) {
+      throw BffError.upstreamError('Control plane unreachable', {
+        path,
+        cause: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+    // 204 and 205 responses are intentionally bodyless. Trying to decode them as JSON turns a
+    // successful mutation into a spurious 502 at the BFF boundary.
+    if (res.status === 204 || res.status === 205) {
+      return { status: res.status, data: undefined };
+    }
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      throw BffError.upstreamError('Control plane returned non-JSON response', {
+        path,
+        status: res.status,
+      });
+    }
+    return { status: res.status, data };
+  }
+
+  async listModels(state?: string): Promise<ProxyResult> {
+    const path = state ? `/api/v1/models?state=${encodeURIComponent(state)}` : '/api/v1/models';
+    return this.request('GET', path);
+  }
+
+  async getModel(name: string): Promise<ProxyResult> {
+    return this.request('GET', `/api/v1/models/${encodeURIComponent(name)}`);
+  }
+
+  async deployModel(body: unknown): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/models', body);
+  }
+
+  async updateModel(name: string, body: unknown): Promise<ProxyResult> {
+    return this.request('PUT', `/api/v1/models/${encodeURIComponent(name)}`, body);
+  }
+
+  async deleteModel(name: string, force = false): Promise<ProxyResult> {
+    const query = force ? '?force=true' : '';
+    return this.request('DELETE', `/api/v1/models/${encodeURIComponent(name)}${query}`);
+  }
+
+  async sleepModel(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/sleep`);
+  }
+
+  async wakeModel(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/wake`);
+  }
+
+  async stopModel(name: string, force = false): Promise<ProxyResult> {
+    const query = force ? '?force=true' : '';
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/stop${query}`);
+  }
+
+  async startModel(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/start`);
+  }
+
+  async createInstance(name: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/instances`);
+  }
+
+  async deleteInstance(name: string, instanceId: string): Promise<ProxyResult> {
+    return this.request(
+      'DELETE',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}`,
+    );
+  }
+
+  async sleepInstance(name: string, instanceId: string): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/sleep`,
+    );
+  }
+
+  async wakeInstance(name: string, instanceId: string): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/wake`,
+    );
+  }
+
+  async moveInstance(
+    name: string,
+    instanceId: string,
+    body: ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
+  ): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/move`,
+      body,
+    );
+  }
+
+  async browseWeights(path?: string): Promise<ProxyResult> {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+    return this.request('GET', `/api/v1/weights${qs}`);
+  }
+
+  async listWorkers(): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/workers');
+  }
+
+  async getWorker(id: string): Promise<ProxyResult> {
+    return this.request('GET', `/api/v1/workers/${encodeURIComponent(id)}`);
+  }
+
+  async getClusterStatus(): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/cluster/status');
+  }
+
+  async getClusterMemory(): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/cluster/memory');
+  }
+
+  async isHealthy(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/healthz`);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async listCatalog(): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/catalog');
+  }
+
+  async refreshCatalog(): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/catalog/refresh');
+  }
+
+  async importRunner(id: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/catalog/${encodeURIComponent(id)}/import`);
+  }
+
+  async uninstallRunner(id: string): Promise<ProxyResult> {
+    return this.request('DELETE', `/api/v1/catalog/${encodeURIComponent(id)}`);
+  }
+
+  async listNotifications(limit?: number, offset?: number): Promise<ProxyResult> {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set('limit', String(limit));
+    if (offset !== undefined) params.set('offset', String(offset));
+    const qs = params.toString();
+    return this.request('GET', `/api/v1/notifications${qs ? `?${qs}` : ''}`);
+  }
+
+  async markNotificationRead(id: string): Promise<ProxyResult> {
+    return this.request('POST', `/api/v1/notifications/${encodeURIComponent(id)}/read`);
+  }
+
+  async markAllNotificationsRead(): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/notifications/read-all');
+  }
+
+  async removeNotification(id: string): Promise<ProxyResult> {
+    return this.request('DELETE', `/api/v1/notifications/${encodeURIComponent(id)}`);
+  }
+
+  async clearAllNotifications(): Promise<ProxyResult> {
+    return this.request('DELETE', '/api/v1/notifications');
+  }
+}

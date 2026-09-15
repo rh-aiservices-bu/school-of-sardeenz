@@ -5,7 +5,9 @@
 # Pre-fetch and compile all dependencies before copying application source.
 # This layer is invalidated only when Cargo.toml or Cargo.lock changes.
 # =============================================================================
-FROM rust:1.82-bookworm AS deps
+# Keep this aligned with Cargo.toml's rust-version. CI verifies the locked
+# dependency graph with this exact MSRV before the image build.
+FROM rust:1.86-bookworm AS deps
 
 # Install musl toolchain and build-time dependencies for aws-lc-sys (rustls/reqwest)
 RUN apt-get update && apt-get install -y --no-install-recommends \

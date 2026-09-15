@@ -48,12 +48,16 @@ export type paths = {
         };
         /**
          * Get the full routing map
-         * @description Returns the complete routing map as a JSON object. This is a fallback
-         *     for initial proxy bootstrap or recovery when the Redis-based routing
-         *     map is unavailable.
+         * @description Returns the complete routing map as a JSON object. This is a planned
+         *     fallback for initial proxy bootstrap or recovery when the Redis-based
+         *     routing map is unavailable.
+         *
+         *     **Status:** This endpoint will be implemented by the control plane in
+         *     Phase 2. The proxy does not currently use this fallback — it relies
+         *     exclusively on Redis for routing map data.
          *
          *     In normal operation, the proxy reads the routing map from Redis/Valkey
-         *     and receives updates via pub/sub. This endpoint exists for:
+         *     and receives updates via pub/sub. This endpoint will exist for:
          *
          *     1. **Bootstrap** — the proxy can seed its in-memory cache before
          *        Redis pub/sub is fully connected
@@ -97,6 +101,18 @@ export type components = {
          * @enum {string}
          */
         ModelState: ModelState;
+        /**
+         * @description Protocol family a model speaks, and the proxy path prefix under which
+         *     it is invoked. `openai` → OpenAI-compatible surface (`/openai/v1/...`,
+         *     vLLM). `oip` → KServe V2 Open Inference Protocol surface
+         *     (`/oip/v2/...`, MLServer). Extensible: a new value is a coordinated
+         *     change to this spec, the hand-maintained Rust mirror, and (by the
+         *     forward-compat guard) a proxy release. Values are lowercase and match
+         *     both the URL prefix and the catalog `protocol` field — deliberately
+         *     not SCREAMING_SNAKE_CASE.
+         * @enum {string}
+         */
+        Protocol: Protocol;
         /**
          * @description Request to wake a sleeping model. Sent by the proxy to the control
          *     plane when an inference request arrives for a model in `SLEEPING`
@@ -168,6 +184,13 @@ export type components = {
             modelName: string;
             state: components["schemas"]["ModelState"];
             /**
+             * @description Written by the control plane. The proxy filters both model
+             *     listings on this value — `/openai/v1/models` lists only `openai`
+             *     entries, `/oip/v2/models` only `oip` — so it must be present on
+             *     every entry.
+             */
+            protocol: components["schemas"]["Protocol"];
+            /**
              * @description Runner endpoints serving this model. Empty when the model is
              *     in `SLEEPING` or `ERROR` state. Multiple entries indicate
              *     replicas for load balancing.
@@ -176,7 +199,9 @@ export type components = {
             /**
              * Format: date-time
              * @description ISO 8601 timestamp of the last routing map update for this model.
-             *     Used by the proxy to detect stale entries.
+             *     Written by the control plane for operator diagnostics and dashboard
+             *     display. The proxy deserializes this field for round-trip fidelity
+             *     but does not consult it for routing or staleness decisions.
              */
             updatedAt: string;
             /**
@@ -192,11 +217,6 @@ export type components = {
                 ownedBy?: string;
                 /** @description Maximum context length supported by this model deployment. */
                 maxModelLen?: number;
-                /**
-                 * @description The inference engine type serving this model (e.g., "vllm",
-                 *     "triton").
-                 */
-                engineType?: string;
             } & {
                 [key: string]: unknown;
             };
@@ -244,6 +264,33 @@ export type components = {
             runnerId?: string;
         };
         /**
+         * @description Response body of the proxy's `GET /oip/v2/models`. NOT part of the
+         *     standard KServe V2 dataplane spec — defined by Sardeenz. Answered by
+         *     the proxy from the routing map (never forwarded), listing only
+         *     `oip`-protocol models. SLEEPING models ARE listed (`ready: false`):
+         *     they are invocable, and a request to one parks and wakes it. "not
+         *     ready" means "asleep, wakes on inference", NOT "unavailable".
+         */
+        OipModelList: {
+            models: {
+                /** @description The Sardeenz model (configuration) name — the routing key. */
+                name: string;
+                /** @description `true` when ACTIVE, `false` when SLEEPING. */
+                ready: boolean;
+            }[];
+        };
+        /**
+         * @description JSON value stored at the Redis string key `{prefix}:proxy:protocols`.
+         *     The set of protocol families the running proxy supports. Written on
+         *     every Redis (re)connect; not TTL'd. Consumed by the control plane's
+         *     catalog-import forward-compat guard.
+         * @example [
+         *       "openai",
+         *       "oip"
+         *     ]
+         */
+        ProxyProtocolSet: components["schemas"]["Protocol"][];
+        /**
          * @description Published to the `sardeenz:routing-updates` Redis pub/sub channel
          *     whenever the routing map changes. The proxy subscribes to this
          *     channel to keep its in-memory cache current.
@@ -265,6 +312,29 @@ export type components = {
             /**
              * Format: date-time
              * @description ISO 8601 timestamp of when this update was applied.
+             */
+            timestamp: string;
+        };
+        /**
+         * @description Published to `{prefix}:routing-barriers` after the control plane has
+         *     committed a destructive routing-map change. Each subscribed proxy
+         *     refreshes its cache, waits for requests admitted through the previous
+         *     entry to finish, then adds its process id to the Redis set
+         *     `{prefix}:routing-barrier-acks:{barrierId}`. Ready proxies maintain a
+         *     short-lived `{prefix}:proxies:{proxyId}` presence key; the publisher
+         *     snapshots those keys and does not tear down the old runner until every
+         *     pre-cutover proxy acknowledges or its presence lease expires. A proxy
+         *     that reconnects after the cutover loads the new map before admitting
+         *     inference and therefore does not need to acknowledge the old generation.
+         */
+        RoutingPropagationBarrier: {
+            /** @description Unique id for this propagation barrier. */
+            barrierId: string;
+            /** @description Model whose routing entry changed. */
+            modelName: string;
+            /**
+             * Format: date-time
+             * @description ISO 8601 timestamp of the committed routing change.
              */
             timestamp: string;
         };
@@ -394,6 +464,10 @@ export enum ModelState {
     STARTING = "STARTING",
     DRAINING = "DRAINING",
     ERROR = "ERROR"
+}
+export enum Protocol {
+    openai = "openai",
+    oip = "oip"
 }
 export enum RoutingMapUpdateType {
     MODEL_STATE_CHANGED = "MODEL_STATE_CHANGED",

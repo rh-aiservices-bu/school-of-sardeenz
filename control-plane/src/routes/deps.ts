@@ -1,0 +1,45 @@
+import type { Config } from '../config.js';
+import type { ModelRepository } from '../services/model-repository.js';
+import type { InstanceRepository } from '../services/instance-repository.js';
+import type { ModelLifecycleService } from '../services/model-lifecycle.js';
+import type { MemoryBudgetService } from '../services/memory-budget.js';
+import type { WorkerPoolService } from '../services/worker-pool.js';
+import type { RoutingMapService } from '../services/routing-map.js';
+import type { PlacementPipeline } from '../services/placement.js';
+import type { EvictionEngine } from '../services/eviction.js';
+import type { SleepWakeService } from '../services/sleep-wake.js';
+import type { DeployOrchestrationService } from '../services/deploy-orchestration.js';
+import type { LeaderElectionService } from '../services/leader-election.js';
+import type { NotificationService } from '../services/notification.js';
+import type { CatalogService } from '../services/catalog-service.js';
+import type { ModuleStoreService } from '../services/module-store.js';
+import type { WeightsBrowserService } from '../services/weights-browser.js';
+import type { ProxyProtocolsService } from '../services/proxy-protocols.js';
+import type { MoveOrchestrationService } from '../services/move-orchestration.js';
+import type { RunnerClient } from '../clients/runner.js';
+import type { WorkerClient } from '../clients/worker.js';
+import type { StartupLogRepository } from '../services/startup-log-repository.js';
+
+export interface RouteDeps {
+  config: Config;
+  modelRepository: ModelRepository;
+  instanceRepository: InstanceRepository;
+  lifecycle: ModelLifecycleService;
+  memoryBudget: MemoryBudgetService;
+  workerPool: WorkerPoolService;
+  routingMap: RoutingMapService;
+  placement: PlacementPipeline;
+  eviction: EvictionEngine;
+  sleepWake: SleepWakeService;
+  deployOrchestration: DeployOrchestrationService;
+  moveOrchestration: MoveOrchestrationService;
+  leaderElection: LeaderElectionService;
+  notifications: NotificationService;
+  catalogService: CatalogService;
+  moduleStore: ModuleStoreService;
+  weightsBrowser: WeightsBrowserService;
+  proxyProtocols: ProxyProtocolsService;
+  createRunnerClient: (host: string, port: number) => RunnerClient;
+  createWorkerClient: (baseUrl: string) => WorkerClient;
+  startupLogRepository?: StartupLogRepository;
+}

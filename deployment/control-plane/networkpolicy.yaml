@@ -1,0 +1,39 @@
+# Restricts ingress to the control plane Service to the routing proxy and dashboard BFF only
+# (see docs/usage/deployment-security.md). SARDEENZ_API_TOKEN provides bearer authentication, and
+# network isolation remains a required defense-in-depth boundary. Any other pod in the namespace
+# is denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-control-plane
+  labels:
+    app.kubernetes.io/name: sardeenz-control-plane
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-control-plane
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-proxy
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-dashboard
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Prometheus scrape of the unauthenticated /metrics endpoint (see
+    # docs/usage/deployment-security.md). OpenShift user-workload monitoring's Prometheus pods run
+    # in openshift-user-workload-monitoring, outside this namespace, so this rule is scoped to
+    # that namespace rather than a pod label within it.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-user-workload-monitoring
+      ports:
+        - protocol: TCP
+          port: 3000

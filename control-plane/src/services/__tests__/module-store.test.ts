@@ -1,0 +1,154 @@
+// @vitest-environment node
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ClusterEventType, CatalogItemState, type ControlPlaneComponents } from '@sardeenz/types';
+import { ModuleStoreService } from '../module-store.js';
+import { StubImporter } from '../sif-importer.js';
+import type { CatalogEntry } from '../catalog-service.js';
+
+type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
+
+const DIGEST = 'a'.repeat(64);
+
+const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+function entry(over: Partial<CatalogEntry> = {}): CatalogEntry {
+  return {
+    id: 'vllm-0.21',
+    title: 'vLLM 0.21',
+    description: 'd',
+    runnerType: 'vllm',
+    version: '0.21',
+    image: `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
+    sifName: 'vllm-0.21',
+    protocol: 'openai' as CatalogEntry['protocol'],
+    maxTensorParallelism: 1,
+    kvCacheElasticSharing: false,
+    ...over,
+  };
+}
+
+async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pred()) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error('waitFor timed out');
+}
+
+describe('ModuleStoreService with StubImporter', () => {
+  let dir: string;
+  let events: ClusterEvent[];
+  let store: ModuleStoreService;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sardeenz-modules-'));
+    events = [];
+    store = new ModuleStoreService(dir, new StubImporter(1), (e) => events.push(e), logger);
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('imports a SIF, emits progress/completed events, and reflects it in listImportedStems', async () => {
+    const status = store.startImport(entry());
+    expect(status.state).toBe(CatalogItemState.IMPORTING);
+
+    await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain(ClusterEventType.CATALOG_IMPORT_STARTED);
+    expect(types).toContain(ClusterEventType.CATALOG_IMPORT_PROGRESS);
+    expect(types).toContain(ClusterEventType.CATALOG_IMPORT_COMPLETED);
+
+    const stems = await store.listImportedStems();
+    expect(stems.has('vllm-0.21')).toBe(true);
+    expect((await store.listImportedModules()).get('vllm-0.21')).toBe(DIGEST);
+    const metadata = JSON.parse(
+      await readFile(join(dir, 'vllm-0.21.sif.metadata.json'), 'utf8'),
+    ) as { imageDigest: string; image: string };
+    expect(metadata.imageDigest).toBe(DIGEST);
+    expect(metadata.image).toBe(`oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`);
+    // No transient status once completed (state is fs-derived).
+    expect(store.getTransientStatus('vllm-0.21')).toBeUndefined();
+    // The temp file was renamed away, not left behind.
+    const leftover = (await import('node:fs/promises')).readdir(dir);
+    expect((await leftover).filter((f) => f.startsWith('.'))).toHaveLength(0);
+  });
+
+  it('is idempotent while an import is in flight', async () => {
+    const first = store.startImport(entry());
+    const second = store.startImport(entry());
+    expect(second).toBe(first);
+    // Drain the in-flight import: its emit callback closes over the mutable
+    // `events` binding, so a leaked late event would land in the next test's array.
+    await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
+  });
+
+  it('uninstall deletes the SIF and emits a removed event', async () => {
+    await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
+    await writeFile(join(dir, 'vllm-0.21.sif.metadata.json'), '{}');
+    const removed = await store.uninstall(entry());
+    expect(removed).toBe(true);
+    expect((await store.listImportedStems()).has('vllm-0.21')).toBe(false);
+    await expect(readFile(join(dir, 'vllm-0.21.sif.metadata.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect(events.at(-1)?.type).toBe(ClusterEventType.CATALOG_MODULE_REMOVED);
+  });
+
+  it('uninstall returns false when the SIF is absent', async () => {
+    expect(await store.uninstall(entry())).toBe(false);
+  });
+
+  it('records a FAILED transient status when the importer throws', async () => {
+    const failing = {
+      kind: 'stub' as const,
+      import: () => Promise.reject(new Error('boom')),
+    };
+    const s = new ModuleStoreService(dir, failing, (e) => events.push(e), logger);
+    s.startImport(entry());
+    await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_FAILED));
+    expect(s.getTransientStatus('vllm-0.21')?.state).toBe(CatalogItemState.FAILED);
+    expect(s.getTransientStatus('vllm-0.21')?.error).toContain('boom');
+  });
+
+  it('listImportedStems ignores temp/dotfiles and returns empty for a missing dir', async () => {
+    await writeFile(join(dir, '.vllm-0.21.sif.tmp.123'), 'x');
+    await writeFile(join(dir, 'notes.txt'), 'x');
+    expect([...(await store.listImportedStems())]).toEqual([]);
+    const missing = new ModuleStoreService(
+      join(dir, 'nope'),
+      new StubImporter(1),
+      () => {},
+      logger,
+    );
+    expect((await missing.listImportedStems()).size).toBe(0);
+  });
+
+  it('sweeps interrupted SIF and metadata temporary files', async () => {
+    const sifTmp = join(dir, '.vllm-0.21.sif.tmp.123');
+    const metadataTmp = join(dir, '.vllm-0.21.sif.metadata.json.tmp.123');
+    await writeFile(sifTmp, 'x');
+    await writeFile(metadataTmp, 'x');
+    await store.sweepTempFiles();
+    await expect(readFile(sifTmp)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(metadataTmp)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports an unknown digest for a legacy SIF without metadata', async () => {
+    await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
+    expect((await store.listImportedModules()).get('vllm-0.21')).toBeUndefined();
+  });
+
+  it('imported stub SIF has the expected placeholder content', async () => {
+    store.startImport(entry());
+    await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
+    const content = await readFile(join(dir, 'vllm-0.21.sif'), 'utf8');
+    expect(content).toContain('SARDEENZ-DEV-STUB-SIF');
+  });
+});

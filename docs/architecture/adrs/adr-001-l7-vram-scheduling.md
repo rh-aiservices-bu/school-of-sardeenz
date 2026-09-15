@@ -30,7 +30,7 @@ The control plane tracks VRAM budgets, runs eviction algorithms, and coordinates
 
 - **Accelerator overcommitment becomes possible.** The cluster can host more models than fit in device memory simultaneously by sleeping inactive ones.
 - **Cold starts drop from minutes to seconds.** No container lifecycle involved — just memory allocation and weight loading within an already-warm process.
-- **Engine upgrades decouple from infrastructure.** New engine versions load as processes inside existing containers (via Highlander modules), not as new Pod deployments.
+- **Engine upgrades decouple from infrastructure.** New engine versions run as processes inside existing containers (via Apptainer SIF `apptainer exec` off a shared volume — see [ADR-015](adr-015-sif-runtime-packaging.md)), not as new Pod deployments.
 - **Application-aware operations become possible.** The platform can implement intelligent load balancing, automated model placement, rebalancing across nodes, and other management strategies that infrastructure-level scheduling cannot express.
 - **Kubernetes-level accelerator monitoring becomes misleading.** Standard utilization metrics reflect the static allocation, not actual usage. Sardeenz must provide its own observability layer.
 - **The platform owns availability.** If a Sardeenz worker crashes, Kubernetes restarts the Pod, but model placement and device memory state must be reconstructed by the control plane.

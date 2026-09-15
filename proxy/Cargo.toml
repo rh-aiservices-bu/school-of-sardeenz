@@ -3,12 +3,12 @@ members = ["."]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.86"
 license = "Apache-2.0"
 
 [package]
 name = "sardeenz-proxy"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -19,8 +19,9 @@ axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "http2"] }
+http-body = "1"
 tower = { version = "0.5", features = ["timeout", "util"] }
-tower-http = { version = "0.6", features = ["trace", "cors"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +44,7 @@ thiserror = "2"
 anyhow = "1"
 
 # Utilities
+dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 bytes = "1"

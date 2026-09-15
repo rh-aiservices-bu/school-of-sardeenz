@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sardeenz-redis
+spec:
+  accessModes: ['ReadWriteOnce']
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: gp3-csi # set per cluster when the default is unsuitable

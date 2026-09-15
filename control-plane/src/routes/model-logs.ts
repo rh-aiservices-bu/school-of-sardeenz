@@ -1,0 +1,282 @@
+import type { FastifyInstance } from 'fastify';
+import { Readable } from 'node:stream';
+import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
+import { ModelLifecycleState } from '@sardeenz/types';
+
+import type { RouteDeps } from './deps.js';
+import { ControlPlaneError } from '../errors.js';
+import { assertValidModelName } from '../utils/model-name.js';
+import { delaySafe } from '../utils.js';
+
+const POLL_INTERVAL_MS = 500;
+const PING_INTERVAL_MS = 30_000;
+const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
+
+/**
+ * Bound how long we'll wait, polling model state, for the runner to be placed before
+ * giving up. Uses the configured deploy timeout when sensible, but never longer than
+ * DEFAULT_MAX_WAIT_MS — a runaway/misconfigured deploy timeout shouldn't pin a log
+ * connection open indefinitely.
+ */
+function resolveMaxWaitMs(config: RouteDeps['config']): number {
+  const configured = config?.deployTimeoutSecs;
+  if (typeof configured === 'number' && configured > 0) {
+    return Math.min(configured * 1000, DEFAULT_MAX_WAIT_MS);
+  }
+  return DEFAULT_MAX_WAIT_MS;
+}
+
+export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  app.get<{ Params: { modelName: string } }>(
+    '/api/v1/models/:modelName/startup-logs',
+    async (request) => {
+      const { modelName } = request.params;
+      assertValidModelName(modelName);
+      const sessions = await deps.startupLogRepository?.listByModel(modelName);
+      return {
+        sessions: (sessions ?? []).map((session) => ({
+          ...session,
+          startedAt: session.startedAt.toISOString(),
+          completedAt: session.completedAt?.toISOString(),
+          errorMessage: session.errorMessage ?? undefined,
+        })),
+      };
+    },
+  );
+
+  app.get<{ Params: { modelName: string; instanceId: string } }>(
+    '/api/v1/models/:modelName/instances/:instanceId/startup-logs',
+    async (request, reply) => {
+      const { modelName, instanceId } = request.params;
+      assertValidModelName(modelName);
+      const repository = deps.startupLogRepository;
+      const initial = await repository?.find(instanceId);
+      if (!repository || !initial || initial.modelName !== modelName) {
+        throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}/startup-logs`);
+      }
+
+      await reply.hijack();
+      app.hijackedResponses.add(reply.raw);
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders();
+
+      const abortController = new AbortController();
+      const cleanup = (): void => {
+        abortController.abort();
+        app.hijackedResponses.delete(reply.raw);
+        if (!reply.raw.writableEnded) reply.raw.end();
+      };
+      request.raw.on('close', cleanup);
+      request.raw.on('error', cleanup);
+
+      let cursor = 0;
+      while (!abortController.signal.aborted) {
+        const lines = await repository.linesAfter(instanceId, cursor);
+        for (const line of lines) {
+          cursor = line.id;
+          reply.raw.write(
+            `event: log\ndata: ${JSON.stringify({
+              ts: line.ts,
+              stream: line.stream,
+              content: line.content,
+            })}\n\n`,
+          );
+        }
+        const session = await repository.find(instanceId);
+        if (session?.captureComplete) {
+          reply.raw.write('event: end\ndata: \n\n');
+          cleanup();
+          return;
+        }
+        reply.raw.write(': waiting\n\n');
+        await delaySafe(POLL_INTERVAL_MS, abortController.signal);
+      }
+    },
+  );
+
+  app.get<{ Params: { modelName: string } }>(
+    '/api/v1/models/:modelName/logs',
+    async (request, reply) => {
+      const { modelName } = request.params;
+      assertValidModelName(modelName);
+
+      // Mirror the GET /:modelName detail route's not-found check — do this BEFORE
+      // hijacking, since a 404 after hijack can't be delivered as a normal HTTP error
+      // (EventSource treats any post-hijack non-200 as an unrecoverable connection reset).
+      const [initialInstances, record] = await Promise.all([
+        deps.lifecycle.getInstancesForModel(modelName),
+        deps.modelRepository.findByName(modelName),
+      ]);
+
+      if (initialInstances.length === 0 && !record) {
+        throw ControlPlaneError.modelNotFound(modelName);
+      }
+
+      await reply.hijack();
+      app.hijackedResponses.add(reply.raw);
+
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders();
+
+      const write = (event: string, data: string): void => {
+        reply.raw.write(`event: ${event}\ndata: ${data}\n\n`);
+      };
+      const writeComment = (comment: string): void => {
+        reply.raw.write(`: ${comment}\n\n`);
+      };
+
+      const abortController = new AbortController();
+      const maxWaitMs = resolveMaxWaitMs(deps.config);
+      const waitStartedAt = Date.now();
+
+      let ended = false;
+      let pollTimer: ReturnType<typeof setInterval> | undefined;
+      let upstreamStream: Readable | undefined;
+
+      const pingTimer = setInterval(() => {
+        write('ping', new Date().toISOString());
+      }, PING_INTERVAL_MS);
+
+      const cleanup = (): void => {
+        if (ended) return;
+        ended = true;
+        if (pollTimer) clearInterval(pollTimer);
+        clearInterval(pingTimer);
+        abortController.abort();
+        upstreamStream?.destroy();
+        app.hijackedResponses.delete(reply.raw);
+        if (!reply.raw.writableEnded) {
+          reply.raw.end();
+        }
+      };
+
+      request.raw.on('close', cleanup);
+      request.raw.on('error', cleanup);
+
+      // Guards a single in-flight attach attempt so overlapping poll ticks (poll is async and the
+      // interval doesn't await it) can't open two upstream connections.
+      let attaching = false;
+
+      // Try to attach to the worker's per-instance log stream. Returns true once the attach is
+      // resolved (piping started, or a terminal error was surfaced) so the poll loop can stop;
+      // returns false to signal "retry" — the worker hasn't received the start command yet (404),
+      // the worker isn't reachable.
+      const tryAttach = async (workerId: string, instanceId: string): Promise<boolean> => {
+        const worker = deps.workerPool.getWorker(workerId);
+        if (!worker) return false;
+
+        const workerClient = deps.createWorkerClient(worker.managementUrl);
+
+        let upstream: Response;
+        try {
+          upstream = await workerClient.streamRunnerLogsByInstance(
+            instanceId,
+            abortController.signal,
+          );
+        } catch {
+          // Worker unreachable (e.g. still coming up) — retry on the next tick.
+          return false;
+        }
+
+        if (ended) return true;
+
+        if (upstream.status === 404) {
+          // Runner not registered on the worker yet — the start command is in flight. Retry.
+          return false;
+        }
+
+        if (!upstream.ok || !upstream.body) {
+          write('end', `worker returned ${upstream.status}`);
+          cleanup();
+          return true;
+        }
+
+        upstreamStream = Readable.fromWeb(
+          upstream.body as unknown as NodeWebReadableStream<Uint8Array>,
+        );
+        upstreamStream.on('error', () => cleanup());
+        upstreamStream.on('end', () => {
+          if (!ended) write('end', '');
+          cleanup();
+        });
+        upstreamStream.pipe(reply.raw, { end: false });
+        return true;
+      };
+
+      // Deploy is async: the model reaches STARTING (workerId set) before the worker has actually
+      // received the start command, and the runnerId isn't known to the control plane until the
+      // worker's blocking start call returns (after the runner is healthy — too late to watch
+      // startup). So we attach by stable instance id as soon as workerId is known and retry until
+      // the worker endpoint is live, writing keepalive comments meanwhile and bounding the wait by
+      // maxWaitMs so a stuck deploy doesn't hold the connection forever. Instance addressing also
+      // keeps sealed failure logs reachable after the worker removes the failed runner record.
+      const poll = async (): Promise<void> => {
+        if (ended || attaching) return;
+
+        let instances;
+        try {
+          instances = await deps.lifecycle.getInstancesForModel(modelName);
+        } catch {
+          return;
+        }
+
+        if (ended) return;
+
+        if (instances.length === 0) {
+          write('end', 'model removed');
+          cleanup();
+          return;
+        }
+
+        // With replicas, several instances may exist for this model — prefer whichever one is
+        // cold-starting (the case this stream exists for); fall back to the most recently
+        // changed instance otherwise.
+        const current =
+          instances.find((i) => i.state === ModelLifecycleState.STARTING) ??
+          [...instances].sort((a, b) => b.stateChangedAt.localeCompare(a.stateChangedAt))[0];
+
+        if (current.workerId) {
+          attaching = true;
+          try {
+            const done = await tryAttach(current.workerId, current.instanceId);
+            if (done) {
+              if (pollTimer) clearInterval(pollTimer);
+              return;
+            }
+          } finally {
+            attaching = false;
+          }
+        }
+
+        if (ended) return;
+
+        if (Date.now() - waitStartedAt >= maxWaitMs) {
+          write('end', 'timed out waiting for runner placement');
+          cleanup();
+          return;
+        }
+
+        writeComment('waiting');
+      };
+
+      // Check immediately so an already-running runner (the common case, e.g. "View logs" on an
+      // ACTIVE model) doesn't pay the first poll interval as latency.
+      await poll();
+      if (!ended && !upstreamStream) {
+        pollTimer = setInterval(() => {
+          poll().catch(() => cleanup());
+        }, POLL_INTERVAL_MS);
+      }
+    },
+  );
+}

@@ -37,7 +37,7 @@ import { Button, Card, CardBody } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 
 // Charts
-import { Chart, ChartBar } from '@patternfly/react-charts';
+import { Chart, ChartBar } from '@patternfly/react-charts/victory';
 
 // Table
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';

@@ -295,6 +295,47 @@ export type components = {
              *     plane uses this alongside `memoryUsedBytes` to compute utilization.
              */
             memoryTotalBytes: number;
+            kvCache?: components["schemas"]["KVCachePoolStats"];
+        };
+        /**
+         * @description Measured state of the kvcached elastic KV-cache pool for this device,
+         *     read from the pool's IPC/shared-memory segment (the same struct
+         *     `kvtop` displays). The four figures form a partition:
+         *     `totalBytes = usedBytes + preallocBytes + freeBytes`.
+         *
+         *     Under kvcached co-tenancy several runners' pools can coexist on one
+         *     device; the runner reports the sum of the pools it participates in on
+         *     this device. Absent when the runner does not use a kvcached-backed KV
+         *     pool on this device (e.g. kvcached disabled, no GPU, or the pool's
+         *     segment is not yet readable).
+         */
+        KVCachePoolStats: {
+            /**
+             * Format: int64
+             * @description Pool's reserved virtual capacity in bytes (the pool's initial
+             *     limit; it does not change as the pool elastically resizes).
+             */
+            totalBytes: number;
+            /**
+             * Format: int64
+             * @description Bytes of physical device memory currently pinned by the pool's
+             *     in-use KV blocks.
+             */
+            usedBytes: number;
+            /**
+             * Format: int64
+             * @description Bytes of physical device memory pinned by the pool's preallocated
+             *     (reserved) pages — backed but not yet serving KV blocks, still
+             *     occupying device memory.
+             */
+            preallocBytes: number;
+            /**
+             * Format: int64
+             * @description Virtual capacity not yet backed by physical memory
+             *     (`totalBytes - usedBytes - preallocBytes`) — the headroom the pool
+             *     can elastically grow into.
+             */
+            freeBytes: number;
         };
         /**
          * @description Aggregate memory consumption across all devices used by this runner.
@@ -427,9 +468,21 @@ export type components = {
              */
             maxTensorParallelism: number;
             /**
+             * @description True when the runner supports elastic, reclaimable GPU-memory
+             *     sharing across co-located runners on one device (e.g. vLLM +
+             *     kvcached). The control plane uses this for oversubscription
+             *     placement policy.
+             * @default false
+             */
+            kvCacheElasticSharing: boolean;
+            /**
              * @description Optional feature flags for engine-specific capabilities. The
              *     control plane may use these for fine-grained placement or to
              *     enable engine-specific optimizations.
+             *
+             *     A key that the control plane, proxy, or placement makes a
+             *     decision on MUST be promoted to a first-class field on this
+             *     schema; features is for informational engine flags only.
              *
              *     Well-known keys (runners should use these when applicable):
              *     - `kvCacheOffload` (boolean) — supports KV cache offload to host

@@ -12,26 +12,28 @@ The platform replaces the [Sardeenz v1 prototype](https://github.com/rh-aiservic
 
 Four components, each independently deployable:
 
-| Component | What it does | Tech stack |
-| --- | --- | --- |
-| **Routing Proxy** | Routes every inference request to the right model, parks connections when models are waking up | Rust (axum / tokio) |
-| **Control Plane** | Decides where models run, manages GPU memory budgets, orchestrates sleep/wake/eviction | TypeScript (Fastify) |
-| **Admin Dashboard** | Shows cluster state, lets admins deploy/manage models, visualizes GPU memory | React + PatternFly 6 (frontend), TypeScript Fastify (backend) |
-| **Engine Runners** | Run the actual inference engines (vLLM, Triton, etc.) inside worker pods | Engine-specific, behind a common contract |
+| Component           | What it does                                                                                   | Tech stack                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| **Routing Proxy**   | Routes every inference request to the right model, parks connections when models are waking up | Rust (axum / tokio)                                           |
+| **Control Plane**   | Decides where models run, manages GPU memory budgets, orchestrates sleep/wake/eviction         | TypeScript (Fastify)                                          |
+| **Admin Dashboard** | Shows cluster state, lets admins deploy/manage models, visualizes GPU memory                   | React + PatternFly 6 (frontend), TypeScript Fastify (backend) |
+| **Engine Runners**  | Run the actual inference engines (vLLM, Triton, etc.) inside worker pods                       | Engine-specific, behind a common contract                     |
 
 All four communicate through OpenAPI contracts (the single source of truth for cross-language types) and a shared Redis/Valkey state store. Full architecture details: [`docs/architecture/overview.md`](../architecture/overview.md).
 
 ## Delivery Phases
 
-The project is delivered in five sequential phases. Each phase produces a usable increment and has clear entry/exit criteria.
+The project was delivered in seven sequential phases (0, 1, 2, 3, 3.5, 3.6, 4), all complete. Each phase produced a usable increment with clear entry/exit criteria. Since Phase 4, work continues on two tracks: a **milestone backlog** (M2 onward, groomed GitHub milestones on `dev`) and **Phase 5**. Current state: [`status.md`](status.md).
 
 ```text
-Phase 0          Phase 1          Phase 2          Phase 3        Phase 4
-Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  Highlander
-(spec only)      (Rust)           (TypeScript)       (React)        (HPC runtime)
+Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5       Phase 3.6        Phase 4          Phase 5
+Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners ──►  kvcached
+(spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)      co-location
+                                                                                                          │
+                                                                                          Milestones M2 … M13 (backlog track)
 ```
 
-Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while Highlander integration starts), but the critical path runs through Phases 0 → 1 → 2.
+Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while the runtime work starts), but the critical path runs through Phases 0 → 1 → 2.
 
 ---
 
@@ -43,11 +45,11 @@ Phases are sequential because each depends on the output of the previous one. Ph
 
 #### Deliverables
 
-| # | Deliverable | Format |
-| --- | --- | --- |
-| 0.1 | Runner contract OpenAPI specification | `packages/contracts/specs/engine-runner.yaml` |
-| 0.2 | Generated TypeScript types from the spec | `packages/types/src/generated/` |
-| 0.3 | Runner contract design document | `docs/architecture/components/runner-contract.md` |
+| #   | Deliverable                              | Format                                            |
+| --- | ---------------------------------------- | ------------------------------------------------- |
+| 0.1 | Runner contract OpenAPI specification    | `packages/contracts/specs/engine-runner.yaml`     |
+| 0.2 | Generated TypeScript types from the spec | `packages/types/src/generated/`                   |
+| 0.3 | Runner contract design document          | `docs/architecture/components/runner-contract.md` |
 
 #### Scope
 
@@ -71,9 +73,9 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Contract misses a capability needed by a future engine | Rework in later phases | Validate against three known runner types (vLLM, Triton, MLServer) before sign-off |
+| Risk                                                           | Impact                   | Mitigation                                                                                |
+| -------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
+| Contract misses a capability needed by a future engine         | Rework in later phases   | Validate against three known runner types (vLLM, Triton, MLServer) before sign-off        |
 | Over-engineering the contract for engines we haven't built yet | Complexity without value | Start minimal; the contract should support vLLM fully and accommodate others structurally |
 
 ---
@@ -86,12 +88,12 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 1.1 | Routing proxy binary | `proxy/` — production-ready Rust binary |
-| 1.2 | Proxy ↔ Control Plane OpenAPI spec | Wake trigger API, routing map schema, model state definitions |
-| 1.3 | Container image | Multi-stage Docker build for the proxy |
-| 1.4 | Integration test suite | Tests covering all four request flow scenarios |
+| #   | Deliverable                              | Description                                                               |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------- |
+| 1.1 | Routing proxy binary                     | `proxy/` — production-ready Rust binary                                   |
+| 1.2 | Proxy ↔ Control Plane OpenAPI spec       | Wake trigger API, routing map schema, model state definitions             |
+| 1.3 | Container image                          | Multi-stage Docker build for the proxy                                    |
+| 1.4 | Integration test suite                   | Tests covering all four request flow scenarios                            |
 | 1.5 | Structured output compatibility solution | Documented approach for handling structured output across engine versions |
 
 #### Scope
@@ -112,13 +114,13 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 #### Definition of Done
 
 - [ ] Proxy routes requests to active models with < 1ms overhead (p99, excluding network transit)
-- [ ] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
-- [ ] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
-- [ ] Circuit breaker trips after configurable failure threshold and recovers after backoff
-- [ ] All four request flows from the [architecture overview](../architecture/overview.md#request-flows) pass integration tests
-- [ ] Structured output compatibility approach documented and validated
-- [ ] Container image builds and runs in CI
-- [ ] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
+- [x] Connection parking works end-to-end: client sends request → proxy parks → model wakes → client receives response, with no client-side retry needed
+- [x] Thundering herd: 100 concurrent requests to the same sleeping model produce exactly 1 wake trigger
+- [x] Circuit breaker trips after configurable failure threshold and recovers after backoff
+- [x] All four request flows from the [architecture overview](../architecture/overview.md#request-flows) pass integration tests
+- [x] Structured output compatibility approach documented and validated
+- [x] Container image builds and runs in CI
+- [x] Prometheus metrics endpoint exposes: request count, latency histogram, active connections, parked connections, circuit breaker state
 
 #### Dependencies
 
@@ -127,11 +129,11 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Structured output compatibility across engine versions | Proxy may need to transform or validate response schemas | Research early; prototype before full implementation |
-| Connection parking memory under sustained load | High parked connection count could exhaust proxy memory | Configurable limits with backpressure; load test with 10K+ parked connections |
-| SSE streaming edge cases | Partial frames, client disconnects mid-stream | Comprehensive integration tests with fault injection |
+| Risk                                                   | Impact                                                   | Mitigation                                                                    |
+| ------------------------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Structured output compatibility across engine versions | Proxy may need to transform or validate response schemas | Research early; prototype before full implementation                          |
+| Connection parking memory under sustained load         | High parked connection count could exhaust proxy memory  | Configurable limits with backpressure; load test with 10K+ parked connections |
+| SSE streaming edge cases                               | Partial frames, client disconnects mid-stream            | Comprehensive integration tests with fault injection                          |
 
 ---
 
@@ -141,14 +143,14 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 2.1 | Control plane service | `control-plane/` — Fastify application |
-| 2.2 | Control plane OpenAPI spec | Full admin API for model lifecycle, worker management, cluster state |
-| 2.3 | Dashboard ↔ Control Plane OpenAPI spec | API contract the dashboard will consume |
-| 2.4 | Database migrations | PostgreSQL schema for configurations, benchmarks, memory profiles |
-| 2.5 | Integration test suite | Tests for placement, eviction, sleep/wake, state machine transitions |
-| 2.6 | Container image | Docker build for the control plane |
+| #   | Deliverable                            | Description                                                          |
+| --- | -------------------------------------- | -------------------------------------------------------------------- |
+| 2.1 | Control plane service                  | `control-plane/` — Fastify application                               |
+| 2.2 | Control plane OpenAPI spec             | Full admin API for model lifecycle, worker management, cluster state |
+| 2.3 | Dashboard ↔ Control Plane OpenAPI spec | API contract the dashboard will consume                              |
+| 2.4 | Database migrations                    | PostgreSQL schema for configurations, benchmarks, memory profiles    |
+| 2.5 | Integration test suite                 | Tests for placement, eviction, sleep/wake, state machine transitions |
+| 2.6 | Container image                        | Docker build for the control plane                                   |
 
 #### Scope
 
@@ -169,15 +171,15 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Definition of Done
 
-- [ ] Model lifecycle state machine covers all transitions, including error recovery (e.g., runner fails to start → state returns to `STOPPED`)
-- [ ] Placement pipeline correctly matches models to workers across the three scenarios: GPU with capacity, GPU without capacity (triggers eviction), CPU-only fallback
-- [ ] LRU eviction frees enough memory for a new deployment by sleeping the least-recently-used model(s)
-- [ ] Sleep/wake round-trip works end-to-end: control plane sends sleep → runner offloads → control plane sends wake → runner reloads → model serves traffic
-- [ ] Worker join/leave detected within 30 seconds without control plane restart
-- [ ] Leader failover completes within the K8s Lease duration (typically 15s); inference traffic is unaffected during failover (proxy continues forwarding to active runners)
-- [ ] All OpenAPI specs pass `redocly lint`
-- [ ] Generated TypeScript types compile cleanly
-- [ ] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
+- [x] Model lifecycle state machine covers all transitions, including error recovery (e.g., runner fails to start → state returns to `STOPPED`)
+- [x] Placement pipeline correctly matches models to workers across the three scenarios: GPU with capacity, GPU without capacity (triggers eviction), CPU-only fallback
+- [x] LRU eviction frees enough memory for a new deployment by sleeping the least-recently-used model(s)
+- [x] Sleep/wake round-trip works end-to-end: control plane sends sleep → runner offloads → control plane sends wake → runner reloads → model serves traffic
+- [x] Worker join/leave detected within 30 seconds without control plane restart
+- [x] Leader failover completes within the K8s Lease duration (typically 15s); inference traffic is unaffected during failover (proxy continues forwarding to active runners)
+- [x] All OpenAPI specs pass `redocly lint`
+- [x] Generated TypeScript types compile cleanly
+- [x] Integration tests pass against real Redis and PostgreSQL instances (no mocks for data stores)
 
 #### Dependencies
 
@@ -187,11 +189,11 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| State machine edge cases under concurrent operations | Models stuck in intermediate states, orphaned runners | Exhaustive state transition tests; timeout-based recovery for every non-terminal state |
-| Eviction cascades | Evicting model A to load model B triggers eviction of model C, thrashing the cluster | Configurable eviction limits (max evictions per cycle); circuit breaker on eviction frequency |
-| Worker self-report lag | Control plane makes placement decisions on stale memory data | Heartbeat timeout detection; placement pipeline re-validates capacity before starting a runner |
+| Risk                                                 | Impact                                                                               | Mitigation                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| State machine edge cases under concurrent operations | Models stuck in intermediate states, orphaned runners                                | Exhaustive state transition tests; timeout-based recovery for every non-terminal state         |
+| Eviction cascades                                    | Evicting model A to load model B triggers eviction of model C, thrashing the cluster | Configurable eviction limits (max evictions per cycle); circuit breaker on eviction frequency  |
+| Worker self-report lag                               | Control plane makes placement decisions on stale memory data                         | Heartbeat timeout detection; placement pipeline re-validates capacity before starting a runner |
 
 ---
 
@@ -199,16 +201,16 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 **Objective:** Build a web-based administration interface where operators can deploy and manage models, monitor GPU memory utilization, and observe cluster health — all in real time.
 
-**Approach:** New build using React 18 + PatternFly 6, not a port of the v1 dashboard. Proven v1 UI components (GPU memory cards, model status panels, benchmark views) will be cherry-picked and adapted to the new platform's data model.
+**Approach:** React 18 + PatternFly 6 frontend with a reuse-first strategy. The v1 dashboard is a functional React + PatternFly application covering the same domain — v1 components (GPU memory cards, model status panels, deploy forms, worker layouts) should be **ported directly** to the v2 data model and upgraded from PatternFly 5 to 6. Build new only when v1 has no equivalent or when the v2 data model diverges too far for porting to be practical.
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 3.1 | Dashboard frontend | `dashboard/` — React + PatternFly 6 + Vite SPA |
+| #   | Deliverable             | Description                                                       |
+| --- | ----------------------- | ----------------------------------------------------------------- |
+| 3.1 | Dashboard frontend      | `dashboard/` — React + PatternFly 6 + Vite SPA                    |
 | 3.2 | Dashboard backend (BFF) | Fastify service aggregating from control plane, Redis, Prometheus |
-| 3.3 | Container image(s) | Frontend static build + backend service |
-| 3.4 | E2E test suite | Playwright tests for critical admin workflows |
+| 3.3 | Container image(s)      | Frontend static build + backend service                           |
+| 3.4 | E2E test suite          | Playwright tests for critical admin workflows                     |
 
 #### Scope
 
@@ -217,7 +219,7 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 - **Cluster overview** — worker status, aggregate GPU memory utilization, active/sleeping model counts
 - **Model management** — deploy, stop, sleep, wake models; view state history and logs
 - **Worker detail** — per-worker GPU memory breakdown, running runners, hardware capabilities
-- **Device memory visualization** — graphical representation of memory allocation across devices (cherry-pick from v1)
+- **Device memory visualization** — graphical representation of memory allocation across devices (port from v1)
 - **Metrics dashboards** — inference latency, throughput, device utilization (data from Prometheus)
 
 **Infrastructure:**
@@ -235,14 +237,14 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Definition of Done
 
-- [ ] Admin can deploy a model through the dashboard and see it transition through `STARTING` → `ACTIVE`
-- [ ] Admin can sleep and wake a model through the dashboard
-- [ ] Cluster overview shows real-time GPU memory utilization (updates within 5 seconds of state change)
-- [ ] Device memory visualization renders correctly for workers with 1, 2, 4, and 8 GPUs
-- [ ] Dashboard remains responsive and displays cached state during a brief control plane restart (BFF reads from Redis/Prometheus independently)
-- [ ] All views pass PatternFly 6 accessibility standards (WCAG 2.1 AA)
-- [ ] Playwright E2E tests cover: model deploy, model sleep/wake, cluster overview loads, worker detail loads
-- [ ] Frontend builds with zero TypeScript errors and zero ESLint warnings
+- [x] Admin can deploy a model through the dashboard and see it transition through `STARTING` → `ACTIVE`
+- [x] Admin can sleep and wake a model through the dashboard
+- [x] Cluster overview shows real-time GPU memory utilization (updates within 5 seconds of state change)
+- [x] Device memory visualization renders correctly for workers with 1, 2, 4, and 8 GPUs
+- [x] Dashboard remains responsive and displays cached state during a brief control plane restart (BFF reads from Redis/Prometheus independently)
+- [x] All views pass PatternFly 6 accessibility standards (WCAG 2.1 AA)
+- [x] Playwright E2E tests cover: model deploy, model sleep/wake, cluster overview loads, worker detail loads
+- [x] Frontend builds with zero TypeScript errors and zero ESLint warnings
 
 #### Dependencies
 
@@ -252,70 +254,155 @@ Lifecycle management (drain, stop) is a worker-level concern — the control pla
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
+| Risk                                                   | Impact                                           | Mitigation                                                                                                          |
+| ------------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | PatternFly 6 is newer and community examples are fewer | Slower UI development, unexpected component gaps | Use official PatternFly.org docs as sole reference; avoid Context7 for PF components (may return outdated versions) |
-| Real-time updates create excessive Redis load | Dashboard polling degrades proxy performance | Use pub/sub for state changes, not polling; rate-limit dashboard subscriptions |
-| v1 component cherry-pick takes longer than expected | UI delivery slows | Time-box cherry-pick to 2 days per component; rebuild from scratch if adaptation is too invasive |
+| Real-time updates create excessive Redis load          | Dashboard polling degrades proxy performance     | Use pub/sub for state changes, not polling; rate-limit dashboard subscriptions                                      |
+| v1 component porting takes longer than expected        | UI delivery slows                                | Time-box porting to 2 days per component; rebuild only if porting costs more than building new                      |
 
 ---
 
-### Phase 4: Highlander Runtime Integration
+### Phase 3.5: Admin UI Finalization
 
-**Objective:** Replace traditional container image pulls with HPC-style module loading — workers load engine runtimes (vLLM, Triton) from shared network storage in seconds instead of minutes, enabling fast version switching, zero-downtime upgrades, and canary deployments.
-
-**Why "Highlander":** Named after the [ODH Highlander](https://odh-highlander.github.io/) project that provides the upstream Lmod/EasyBuild module management system.
+**Objective:** Bring the v2 Admin Dashboard to feature parity with the v1 dashboard header bar — SVG logo, dark/light theme toggle, full notification system (backend + frontend), user dropdown menu, and sidebar footer with GitHub link.
 
 #### Deliverables
 
-| # | Deliverable | Description |
-| --- | --- | --- |
-| 4.1 | Base worker container image | `containers/worker-base/` — slim image with OS, accelerator drivers, Lmod |
-| 4.2 | EasyBuild configurations | `easyconfigs/` — build recipes for vLLM and initial engine set |
-| 4.3 | Module load/unload IPC | Control plane → worker communication for `module load`/`unload` |
-| 4.4 | CephFS mount architecture | Storage layout documentation and K8s volume configuration |
-| 4.5 | Squashfs/erofs packaging | Packaged modules to mitigate CephFS metadata storms |
-| 4.6 | Integration test suite | Tests for module load, runner start, version switch, canary deployment |
+| #     | Deliverable           | Description                                                               |
+| ----- | --------------------- | ------------------------------------------------------------------------- |
+| 3.5.1 | Notification backend  | `NotificationService` in control plane with Redis storage + pub/sub push  |
+| 3.5.2 | Notification API      | REST endpoints for list, mark-read, remove, clear; BFF proxy layer        |
+| 3.5.3 | Notification frontend | Context provider, drawer overlay, toast alerts, SSE integration           |
+| 3.5.4 | Theme system          | Dark/light toggle with localStorage persistence, PF6 `pf-v6-theme-dark`   |
+| 3.5.5 | Masthead overhaul     | SVG logo, sidebar toggle, theme toggle, notification badge, user dropdown |
 
 #### Scope
 
-- **Worker container image** — minimal base with OS, accelerator drivers (CUDA/ROCm), and Lmod; no engine runtimes baked in
-- **EasyBuild recipes** — self-contained easyconfigs that build engine runtimes as Lmod modules
-- **CephFS storage layout** — separate mount points for application modules (read-only) and model weights (read-write)
-- **Module load/unload protocol** — control plane instructs workers to load specific engine versions before spawning runners
-- **Metadata storm mitigation** — squashfs or erofs packaging for module directories to reduce CephFS metadata operations at scale
-- **Version management** — support multiple engine versions simultaneously on the same worker (e.g., vLLM 0.19.1 and 0.20.0 serving side-by-side)
-
-#### Out of Scope
-
-- Automated EasyBuild CI pipeline (manual builds initially)
-- Non-CephFS shared storage backends
-- GPU driver management (assumes drivers are pre-installed on worker nodes)
-
-#### Definition of Done
-
-- [ ] Worker container image starts and loads an Lmod module within 10 seconds (measured from `module load` to module available)
-- [ ] Control plane can instruct a worker to load a specific engine version and start a runner using that version
-- [ ] Two versions of the same engine can run simultaneously on one worker (canary scenario)
-- [ ] Zero-downtime version upgrade: new version starts → proxy shifts traffic → old version drains → old version stops, with no client errors
-- [ ] Squashfs-packaged modules reduce CephFS metadata operations by at least 90% compared to unpacked directories (measured with `strace` metadata syscall count)
-- [ ] Base worker image size is under 2 GB (excluding mounted modules and weights)
-- [ ] EasyBuild recipes for vLLM build successfully and produce a working Lmod module
+- SVG logo with sidebar toggle (hamburger button)
+- Dark/light theme switching (Sun/Moon icons, `prefers-color-scheme` on first visit)
+- Notification backend: `NotificationService` stores history in Redis list (capped at 200), publishes via pub/sub, REST CRUD endpoints
+- Notification frontend: `NotificationContext`, `NotificationDrawer`, `AlertToastGroup`, deduplication (500ms window)
+- Lifecycle event integration: model deploy/fail/sleep/wake/delete, worker join/leave, stuck model recovery all generate notifications
+- User dropdown with username, role, and logout action
+- Sidebar footer with GitHub link and theme-aware icons
+- i18n keys for all new UI strings
 
 #### Dependencies
 
-- Phase 1 (proxy) — proxy must support traffic shifting for zero-downtime upgrades
-- Phase 2 (control plane) — control plane issues module load commands to workers
-- CephFS cluster — shared storage infrastructure
-- EasyBuild/Lmod — installed in worker containers and on the build host
+- Phase 3 (complete) — AppLayout, AuthContext, useEventStream, BFF SSE proxy all exist
+
+---
+
+### Phase 4: SIF Runner Runtime (Apptainer)
+
+**Objective:** Deliver engine runtimes (vLLM, Triton, …) as **Apptainer SIF files** on a shared
+RWX volume, executed in place by the worker — enabling fast version switching, hot-add of new
+versions without recycling workers, side-by-side versions, and no per-host image copy, with GPU
+access and kvcached co-tenancy intact.
+
+**Why SIF (not EasyBuild/Lmod):** the original Highlander/EasyBuild plan ([ADR-004](../architecture/adrs/adr-004-highlander-runtime.md))
+was superseded after the Phase 4 feasibility spike. A SIF is a single squashfs file = a whole
+OCI image, built with the normal container toolchain (no from-source easyconfigs) and mounted
+in place (no metadata storm). See [ADR-015](../architecture/adrs/adr-015-sif-runtime-packaging.md),
+[ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md), and
+[ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md).
+
+**Spike outcome:** validated GO on a live OKD 4.21 cluster (all gates green, including two vLLM
+runners sharing one GPU via kvcached). Detailed runbook, findings, and the exact security posture
+are in [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md). The implementation task
+breakdown is in [`phase4.md`](phase4.md).
+
+#### Deliverables
+
+| #   | Deliverable             | Description                                                                             |
+| --- | ----------------------- | --------------------------------------------------------------------------------------- |
+| 4.1 | Base worker image       | `containers/worker-base/` — slim UBI + Apptainer + FUSE helpers + `/etc/localtime`      |
+| 4.2 | Runner image(s)         | `containers/runners/vllm/0.21.0/` (base vLLM + kvcached) — the image that becomes a SIF |
+| 4.3 | SIF librarian build job | CI/Job that builds+signs images and converts image→SIF onto the module PVC              |
+| 4.4 | Worker security profile | Custom seccomp SCC + `/dev/fuse` annotation + Deployment/Pod shape (ADR-016)            |
+| 4.5 | Worker agent SIF launch | Runner start = `apptainer exec` of the engine SIF (replaces the dev-worker stub path)   |
+| 4.6 | Integration test suite  | Runner start, version switch/hot-add, GPU `--nv`, kvcached co-tenancy, clean drain      |
+
+#### Scope
+
+- **Base worker image** — minimal UBI + accelerator driver access + Apptainer (rootless) + FUSE
+  helpers; no engine baked in ([ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md))
+- **Runner images** — one `containers/runners/<engine>/<version>/Containerfile` per engine; vLLM+kvcached
+  is the reference
+- **SIF build/sign/convert pipeline** — CI builds+scans+signs the OCI image; a librarian Job
+  converts it to a signed SIF (node-local scratch) and writes it to the module PVC with versioned
+  filenames
+- **Worker security posture** — the mild custom SCC (seccomp `Unconfined`, no privileged/caps),
+  `/dev/fuse` via `io.kubernetes.cri-o.Devices`, in-container userns (not `hostUsers: false`)
+- **Worker agent SIF launch** — the production worker agent starts a runner by `apptainer exec`
+  of the model's engine SIF (with `--nv`, bind-mounted weights, writable scratch); clean SIGTERM
+  drain
+- **Version management** — multiple engine versions coexist on one worker; hot-add a new SIF with
+  no Pod restart
+
+#### Out of Scope
+
+- Autoscaling workers (manual provisioning initially)
+- Non-RWX / block storage backends for the module store
+- GPU driver management (assumes the NVIDIA GPU Operator / drivers on worker nodes)
+- Replacing the dev-worker stub path (Phase 3.6) — it stays for containerless local dev
+
+#### Definition of Done
+
+- [ ] `containers/worker-base` and `containers/runners/vllm/0.21.0` build in CI; the vLLM+kvcached image
+      converts to a signed SIF via the librarian job
+- [ ] A worker Pod admits under the custom SCC with `/dev/fuse` present and runs `apptainer exec`
+      unprivileged (spike Gates 0–3)
+- [ ] The worker agent starts a real vLLM runner from a SIF on the module PVC, reads weights via
+      `--bind`, serves OpenAI traffic, and drains cleanly on SIGTERM (spike Gates 4–5)
+- [ ] Two engine versions run side-by-side and a new SIF hot-adds with no Pod restart (Gate 6)
+- [ ] GPU is visible inside the SIF via `--nv`, and **two runners share one GPU via kvcached**
+      (Gates 7–9)
+- [ ] SIFs are signed by the librarian and verified at exec; the module PVC is RBAC-restricted to
+      the librarian for writes
+- [ ] Runtime perf is characterized on the target RWX backend (EFS proven in the spike; CephFS
+      re-run recorded)
+
+#### Dependencies
+
+- Phase 1 (proxy) — traffic shifting for zero-downtime upgrades
+- Phase 2 (control plane) — issues runner start/stop to the worker agent
+- Phase 3.6 (dev worker) — the worker-agent management API and runner contract the production
+  worker agent reuses
+- OpenShift/OKD 4.15+ with `crun`, a shared RWX StorageClass, and GPU nodes (GPU Operator)
 
 #### Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| CephFS metadata storms at scale | Slow module loads, worker timeouts | Squashfs/erofs packaging (deliverable 4.5); benchmark at target scale early |
-| EasyBuild recipe complexity for GPU-accelerated Python stacks | Slow initial builds, hard-to-debug failures | Start with vLLM only; leverage existing Highlander community recipes where available |
-| Lmod/EasyBuild unfamiliarity on the team | Slower delivery, integration surprises | Time-box a spike at phase start to validate the full load/unload cycle before committing to the implementation plan |
+| Risk                                                    | Impact                                  | Mitigation                                                                                               |
+| ------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Custom SCC (seccomp `Unconfined`) fails security review | Blocks the product default              | Productionize as a scoped seccomp profile via the Security Profiles Operator (ADR-016)                   |
+| Perf on the target backend (CephFS) differs from EFS    | Cold-start economics weaker than spiked | Re-run the spike's Gate 10 on CephFS/ODF; the spike numbers are a conservative (NFS-grade) floor         |
+| kvcached image drift (pinned commit vs. vLLM version)   | Elastic sharing breaks on upgrade       | Pin the kvcached commit per vLLM version in `containers/runners/vllm/0.21.0/`; test Gate 9 on every bump |
+| SIF supply-chain (RWX bypasses image admission)         | Code-injection path into workers        | Sign at build, verify at exec, RBAC-lock the module PVC to the librarian (ADR-017)                       |
+
+---
+
+### Phase 5: kvcached Oversubscription and Co-location Policy
+
+**Objective:** Let the control plane place several models on one GPU when their runners declare
+`kvCacheElasticSharing`, treating KV-cache memory as reclaimable rather than fixed. Phase 4 proved
+two vLLM runners can share a GPU via kvcached (spike Gate 9); Phase 5 turns that into a placement
+policy: which models may co-locate, how much oversubscription is allowed, and how eviction reacts
+when a shared pool is under pressure.
+
+**Status:** not started. Detailed scope will be written as `phase5.md` when the milestone backlog
+in front of it (M13) is closed.
+
+**Dependencies:** Phase 4 complete; measured-only VRAM telemetry (#163/#164) so pool pressure is
+observed, not estimated; per-device kvcached pool reporting from the runner contract.
+
+---
+
+## Milestone Track
+
+Alongside the phases, issues from the full audit (August 2026) are grouped into GitHub milestones
+and executed one milestone per branch, merged to `dev`. M2 through M12 are complete; M13 is next.
+The list of themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---
 
@@ -329,11 +416,11 @@ All inter-component communication is defined by OpenAPI specs in `packages/contr
 
 ### Testing Strategy
 
-| Level | Scope | Tooling |
-| --- | --- | --- |
-| Unit | Individual functions and modules | Vitest (TypeScript), `cargo test` (Rust) |
-| Integration | Component against real data stores | Vitest + test containers (TypeScript), integration test harness (Rust) |
-| E2E | Full system workflows | Playwright (dashboard), custom harness (proxy + control plane + runner) |
+| Level       | Scope                              | Tooling                                                                 |
+| ----------- | ---------------------------------- | ----------------------------------------------------------------------- |
+| Unit        | Individual functions and modules   | Vitest (TypeScript), `cargo test` (Rust)                                |
+| Integration | Component against real data stores | Vitest + test containers (TypeScript), integration test harness (Rust)  |
+| E2E         | Full system workflows              | Playwright (dashboard), custom harness (proxy + control plane + runner) |
 
 Integration tests use real Redis and PostgreSQL instances — no mocks for data stores.
 
@@ -349,7 +436,7 @@ The monorepo uses a unified Makefile. CI runs `make all` (typecheck + lint) and 
 
 - The proxy does not handle authentication (handled by ingress/sidecar)
 - The control plane API is internal — not exposed to end users
-- The dashboard backend enforces authorization (integration point TBD)
+- The dashboard BFF enforces authentication (`simple` / `oauth` modes) and holds the control plane API token; the control plane and worker agents check shared bearer tokens as defense in depth (see [deployment security](../usage/deployment-security.md))
 - Runner contract communication is cluster-internal (no public network exposure)
 
 ---
@@ -364,6 +451,7 @@ The monorepo uses a unified Makefile. CI runs `make all` (typecheck + lint) and 
 
 **Supporting documents:**
 
+- [Project Status](status.md) — delivered phases and milestones, what is next
 - [Architecture Overview](../architecture/overview.md) — system design, diagrams, request flows
 - [Architecture Decision Records](../architecture/adrs/) — rationale for every major technical choice
 - [Development Setup](../development/setup.md) — how to build and run locally

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Proxy ↔ Control Plane Contract
-  version: 0.1.0
+  version: 0.1.1
   description: |
     Contract between the routing proxy (Rust) and the control plane (TypeScript).
     Defines two interface areas:
@@ -25,6 +25,14 @@ info:
 
     - `RoutingMapUpdate` — published to the `sardeenz:routing-updates`
       Redis pub/sub channel by the control plane
+    - `RoutingPropagationBarrier` — published to
+      `sardeenz:routing-barriers` when a destructive routing change must be
+      applied and quiesced by every connected proxy before runner teardown
+    - `{prefix}:proxy:protocols` — a Redis **string** key (JSON array of
+      `Protocol`) written by the proxy at startup advertising the protocol
+      families it can serve. The control plane reads it at catalog-import
+      time to reject runners whose protocol the running proxy does not
+      support.
 
     ## Conventions
 
@@ -185,6 +193,21 @@ components:
         - DRAINING
         - ERROR
 
+    Protocol:
+      type: string
+      description: |
+        Protocol family a model speaks, and the proxy path prefix under which
+        it is invoked. `openai` → OpenAI-compatible surface (`/openai/v1/...`,
+        vLLM). `oip` → KServe V2 Open Inference Protocol surface
+        (`/oip/v2/...`, MLServer). Extensible: a new value is a coordinated
+        change to this spec, the hand-maintained Rust mirror, and (by the
+        forward-compat guard) a proxy release. Values are lowercase and match
+        both the URL prefix and the catalog `protocol` field — deliberately
+        not SCREAMING_SNAKE_CASE.
+      enum:
+        - openai
+        - oip
+
     # -------------------------------------------------------------------------
     # Wake Trigger
     # -------------------------------------------------------------------------
@@ -270,6 +293,7 @@ components:
       required:
         - modelName
         - state
+        - protocol
         - endpoints
         - updatedAt
       properties:
@@ -282,6 +306,13 @@ components:
             - "meta-llama/Llama-3.1-8B-Instruct"
         state:
           $ref: "#/components/schemas/ModelState"
+        protocol:
+          $ref: "#/components/schemas/Protocol"
+          description: |
+            Written by the control plane. The proxy filters both model
+            listings on this value — `/openai/v1/models` lists only `openai`
+            entries, `/oip/v2/models` only `oip` — so it must be present on
+            every entry.
         endpoints:
           type: array
           items:
@@ -295,7 +326,9 @@ components:
           format: date-time
           description: |
             ISO 8601 timestamp of the last routing map update for this model.
-            Used by the proxy to detect stale entries.
+            Written by the control plane for operator diagnostics and dashboard
+            display. The proxy deserializes this field for round-trip fidelity
+            but does not consult it for routing or staleness decisions.
         metadata:
           type: object
           description: |
@@ -313,11 +346,6 @@ components:
               minimum: 1
               description: |
                 Maximum context length supported by this model deployment.
-            engineType:
-              type: string
-              description: |
-                The inference engine type serving this model (e.g., "vllm",
-                "triton").
           additionalProperties: true
 
     RunnerEndpoint:
@@ -329,7 +357,6 @@ components:
       required:
         - host
         - port
-        - weight
         - healthy
       properties:
         host:
@@ -373,6 +400,45 @@ components:
             Unique identifier for the runner instance. Used for logging,
             metrics, and correlating with control plane state.
 
+    OipModelList:
+      type: object
+      description: |
+        Response body of the proxy's `GET /oip/v2/models`. NOT part of the
+        standard KServe V2 dataplane spec — defined by Sardeenz. Answered by
+        the proxy from the routing map (never forwarded), listing only
+        `oip`-protocol models. SLEEPING models ARE listed (`ready: false`):
+        they are invocable, and a request to one parks and wakes it. "not
+        ready" means "asleep, wakes on inference", NOT "unavailable".
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - ready
+            properties:
+              name:
+                type: string
+                description: The Sardeenz model (configuration) name — the routing key.
+              ready:
+                type: boolean
+                description: "`true` when ACTIVE, `false` when SLEEPING."
+
+    ProxyProtocolSet:
+      type: array
+      description: |
+        JSON value stored at the Redis string key `{prefix}:proxy:protocols`.
+        The set of protocol families the running proxy supports. Written on
+        every Redis (re)connect; not TTL'd. Consumed by the control plane's
+        catalog-import forward-compat guard.
+      items:
+        $ref: "#/components/schemas/Protocol"
+      examples:
+        - ["openai", "oip"]
+
     # -------------------------------------------------------------------------
     # Routing Map Updates (pub/sub)
     # -------------------------------------------------------------------------
@@ -413,6 +479,35 @@ components:
           type: string
           format: date-time
           description: ISO 8601 timestamp of when this update was applied.
+
+    RoutingPropagationBarrier:
+      type: object
+      description: |
+        Published to `{prefix}:routing-barriers` after the control plane has
+        committed a destructive routing-map change. Each subscribed proxy
+        refreshes its cache, waits for requests admitted through the previous
+        entry to finish, then adds its process id to the Redis set
+        `{prefix}:routing-barrier-acks:{barrierId}`. Ready proxies maintain a
+        short-lived `{prefix}:proxies:{proxyId}` presence key; the publisher
+        snapshots those keys and does not tear down the old runner until every
+        pre-cutover proxy acknowledges or its presence lease expires. A proxy
+        that reconnects after the cutover loads the new map before admitting
+        inference and therefore does not need to acknowledge the old generation.
+      required:
+        - barrierId
+        - modelName
+        - timestamp
+      properties:
+        barrierId:
+          type: string
+          description: Unique id for this propagation barrier.
+        modelName:
+          type: string
+          description: Model whose routing entry changed.
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the committed routing change.
 
     # -------------------------------------------------------------------------
     # Common

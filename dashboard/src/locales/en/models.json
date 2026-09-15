@@ -1,0 +1,319 @@
+{
+  "title": "Models",
+  "deploy": {
+    "title": "Deploy Model",
+    "fields": {
+      "displayName": "Display Name",
+      "modelName": "Model Name",
+      "servedModelName": "Served Model Name",
+      "runnerType": "Runner Type",
+      "modelPath": "Model Path",
+      "requiredMemory": "Required Memory (GiB)",
+      "deviceType": "Device Type",
+      "tensorParallel": "Tensor Parallelism",
+      "runtimeModule": "Runtime Module",
+      "runtimeModulePlaceholder": "Select a runtime module",
+      "pinned": "Pinned",
+      "engineConfig": "Engine Config (JSON)",
+      "engineArgs": "Engine Arguments",
+      "engineArgsPlaceholder": "--max-model-len=8192\n--gpu-memory-utilization=0.85\n--enable-prefix-caching",
+      "deviceTypeAny": "Any"
+    },
+    "hints": {
+      "displayName": "Optional human-friendly label shown in the dashboard only. Falls back to the model name when unset.",
+      "modelName": "Engine-agnostic API identifier clients send in the model field of OpenAI requests. Must be unique across the cluster.",
+      "servedModelName": "Model identity the engine reports in metrics and responses. Defaults to the model name.",
+      "modelPath": "Absolute path to model weights on shared storage.",
+      "requiredMemory": "Estimated device memory in GiB. Used for placement.",
+      "deviceType": "Required device type. Leave blank to accept any compatible device.",
+      "tensorParallel": "Number of devices to split the model across on a single worker.",
+      "runtimeModule": "Installed SIF the worker execs (→ /modules/<name>.sif), filtered to the selected runner.",
+      "runtimeModuleNone": "No runtime modules for this runner are installed. Import one from the Runner Catalog to deploy.",
+      "pinned": "Pinned models cannot be evicted by the LRU eviction engine.",
+      "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided.",
+      "engineArgs": "One engine CLI flag per line (--flag=value, --flag value, or --flag). Passed verbatim to the engine. Blank lines and # comments are ignored.",
+      "runnerTypeFallback": "No worker capabilities are available yet — showing default runner types. The list will update once workers come online."
+    },
+    "validation": {
+      "displayNameLength": "Display name must be 1–200 characters.",
+      "modelNameRequired": "Model name is required.",
+      "servedModelNamePattern": "Served model name may only contain letters, digits, and . _ / - (max 200 characters).",
+      "runnerTypeRequired": "Runner type is required.",
+      "modelPathRequired": "Model path is required.",
+      "modelPathStartsWithSlash": "Model path must start with /.",
+      "requiredMemoryPositive": "Required memory must be a positive number.",
+      "tensorParallelMin": "Tensor parallelism must be at least 1.",
+      "runtimeModuleRequired": "Runtime module is required. Import one from the Runner Catalog if the list is empty.",
+      "runtimeModulePattern": "Runtime module may only contain letters, digits, and . _ - (e.g. vllm-0.21).",
+      "engineConfigObject": "Engine config must be a JSON object.",
+      "engineConfigValidJson": "Engine config must be valid JSON.",
+      "engineArgsFlagPrefix": "Line {{line}} must start with -- : {{content}}",
+      "engineArgsReserved": "{{flag}} is reserved and set by the platform — remove it.",
+      "engineArgsAbbreviatesReserved": "{{flag}} is an ambiguous abbreviation of the reserved flag {{reserved}} — remove it."
+    },
+    "browse": {
+      "button": "Browse",
+      "title": "Select model folder",
+      "root": "Weights",
+      "select": "Select",
+      "selectCurrent": "Select current folder",
+      "modelLabel": "model",
+      "empty": "No subfolders",
+      "emptyBody": "This folder has no subfolders. Use \"Select current folder\" to choose it, or go back.",
+      "error": "Could not list the weights directory"
+    },
+    "errors": {
+      "deploymentFailed": "Deployment failed"
+    },
+    "button": "Deploy"
+  },
+  "edit": {
+    "title": "Modify model configuration",
+    "button": "Save changes",
+    "errors": {
+      "failedToLoad": "Failed to load model configuration",
+      "updateFailed": "Configuration update failed",
+      "mustBeStopped": "The model must be stopped before its configuration can be modified."
+    }
+  },
+  "list": {
+    "heading": "Models",
+    "filterByState": "Filter by state",
+    "filterStateCount": "State ({{count}})",
+    "filterByRunner": "Filter by runner type",
+    "filterRunnerCount": "Runner ({{count}})",
+    "pagination": {
+      "ariaLabel": "Models pagination",
+      "ariaLabelTop": "Models pagination (top)",
+      "ariaLabelBottom": "Models pagination (bottom)"
+    },
+    "bulkActions": {
+      "selected": "{{count}} selected",
+      "sleep": "Sleep selected",
+      "delete": "Delete selected",
+      "sleepConfirmTitle": "Sleep selected models?",
+      "sleepConfirmBody": "This will put {{count}} model(s) to sleep, freeing their device memory. They can be woken back up on demand.",
+      "deleteConfirmTitle": "Delete selected models?",
+      "deleteConfirmBody": "This will permanently delete {{count}} model(s) from the cluster. This action cannot be undone.",
+      "deleteSkippedHint": "{{count}} selected model(s) are pending, draining or stopping and will be skipped — they cannot be deleted until they settle.",
+      "deleteSkipped": "Skipped {{count}} model(s) in a transient state (pending, draining or stopping).",
+      "deleteNothingDeletable": "All selected models are in a transient state and cannot be deleted right now."
+    },
+    "empty": {
+      "title": "No models deployed",
+      "body": "Deploy a model to get started with inference."
+    },
+    "emptyFiltered": {
+      "title": "No models match the filter",
+      "body": "Try adjusting or clearing the state filter."
+    },
+    "errors": {
+      "failedToLoad": "Failed to load models",
+      "actionFailed": "Action failed"
+    },
+    "table": {
+      "modelName": "Model Name",
+      "state": "State",
+      "runner": "Runner",
+      "worker": "Worker",
+      "memory": "Memory",
+      "lastInference": "Last Inference",
+      "pinned": "Pinned",
+      "actions": "Actions"
+    },
+    "instances": {
+      "columnHeader": "Instances",
+      "count": "{{count}} instance(s)"
+    },
+    "addInstance": {
+      "menuItem": "Add instance"
+    },
+    "sleep": {
+      "menuItem": "Sleep",
+      "confirmTitle": "Put model to sleep?",
+      "confirmBody": "This will put {{modelName}} to sleep, freeing its device memory. It can be woken back up on demand."
+    },
+    "delete": {
+      "menuItem": "Delete",
+      "forceButton": "Force delete",
+      "confirmTitle": "Delete model?",
+      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. Force delete skips runner teardown and can leave an unmanaged process; use it only after confirming no runner remains. This action cannot be undone."
+    },
+    "wake": {
+      "menuItem": "Wake"
+    },
+    "start": {
+      "menuItem": "Start"
+    },
+    "edit": {
+      "menuItem": "Modify"
+    },
+    "stop": {
+      "menuItem": "Stop",
+      "forceButton": "Force stop",
+      "confirmTitle": "Stop model?",
+      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Force stop skips runner teardown and clears failed runtime bookkeeping; use it only after confirming no process remains. Its configuration is kept."
+    }
+  },
+  "detail": {
+    "errors": {
+      "failedToLoad": "Failed to load model",
+      "actionFailed": "Action failed",
+      "notFound": "Model not found",
+      "notFoundBody": "No model named {{modelName}} exists.",
+      "backToModels": "Back to models",
+      "modelError": "Model error"
+    },
+    "fields": {
+      "displayName": "Display Name",
+      "state": "State",
+      "runnerType": "Runner Type",
+      "modelPath": "Model Path",
+      "servedModelName": "Served Model Name",
+      "requiredMemory": "Required Memory (placement indicator)",
+      "deviceType": "Device Type",
+      "tensorParallel": "Tensor Parallelism",
+      "runtimeModule": "Runtime Module",
+      "pinned": "Pinned",
+      "lastInference": "Last Inference",
+      "created": "Created"
+    },
+    "pinned": {
+      "yes": "Yes",
+      "no": "No"
+    },
+    "neverInferred": "Never",
+    "engineConfig": {
+      "show": "Show engine config",
+      "hide": "Hide engine config"
+    },
+    "engineArgs": {
+      "show": "Show engine arguments",
+      "hide": "Hide engine arguments"
+    },
+    "progress": {
+      "phasePrefix": "Phase: ",
+      "remainingSeconds": " — ~{{seconds}}s remaining"
+    },
+    "sleep": {
+      "button": "Sleep",
+      "confirmTitle": "Put model to sleep?",
+      "confirmBody": "This will put {{modelName}} to sleep, freeing its device memory. It can be woken back up on demand."
+    },
+    "wake": {
+      "button": "Wake"
+    },
+    "start": {
+      "button": "Start"
+    },
+    "edit": {
+      "button": "Modify"
+    },
+    "stop": {
+      "button": "Stop",
+      "forceButton": "Force stop",
+      "confirmTitle": "Stop model?",
+      "confirmBody": "This will stop {{modelName}}'s runner and free its device memory. Force stop skips runner teardown and clears failed runtime bookkeeping; use it only after confirming no process remains. Its configuration is kept."
+    },
+    "delete": {
+      "button": "Delete",
+      "forceButton": "Force delete",
+      "confirmTitle": "Delete model?",
+      "confirmBody": "This will permanently delete {{modelName}} and remove it from the cluster. Force delete skips runner teardown and can leave an unmanaged process; use it only after confirming no runner remains. This action cannot be undone."
+    },
+    "addInstance": {
+      "button": "Add instance"
+    },
+    "instances": {
+      "title": "Instances",
+      "empty": "No instances — use Add instance or Start to deploy one.",
+      "columns": {
+        "instanceId": "Instance ID",
+        "state": "State",
+        "worker": "Worker",
+        "memory": "Memory",
+        "endpoint": "Endpoint",
+        "created": "Created",
+        "startupLogs": "Startup logs",
+        "actions": "Actions"
+      }
+    },
+    "startupHistory": {
+      "title": "Previous startup attempts",
+      "outcome": "Outcome",
+      "outcomes": {
+        "IN_PROGRESS": "In progress",
+        "SUCCEEDED": "Succeeded",
+        "FAILED": "Failed",
+        "UNKNOWN": "Unknown"
+      }
+    },
+    "move": {
+      "title": "Move model instance",
+      "description": "Move instance {{instanceId}} to an explicit worker and GPU set.",
+      "loading": "Loading move targets",
+      "worker": "Target worker",
+      "selectWorker": "Select a worker",
+      "devices": "Select {{count}} GPU",
+      "devices_plural": "Select {{count}} GPUs",
+      "gpu": "GPU",
+      "noCompatibleDevices": "This worker has no compatible devices for this model.",
+      "submit": "Move instance",
+      "close": "Close",
+      "cancel": "Cancel",
+      "failed": "Move could not be started",
+      "progress": {
+        "deploying": "Deploying replacement instance…",
+        "cutting-over": "Replacement is active; moving traffic…",
+        "draining-source": "Traffic moved; draining the source instance…",
+        "complete": "Move complete.",
+        "failed-before-cutover": "Move failed before traffic cutover; the source is still serving.",
+        "failed-after-cutover": "Traffic moved, but source teardown failed. The replacement remains serving.",
+        "unavailable": "Move status is temporarily unavailable."
+      }
+    },
+    "instance": {
+      "sleep": {
+        "button": "Sleep"
+      },
+      "wake": {
+        "button": "Wake"
+      },
+      "delete": {
+        "button": "Delete",
+        "confirmTitle": "Delete instance?",
+        "confirmBody": "This will permanently stop and remove instance {{instanceId}}. Other instances of this model, if any, are unaffected. This action cannot be undone."
+      }
+    },
+    "breadcrumb": {
+      "cluster": "Cluster",
+      "models": "Models"
+    },
+    "viewLogs": {
+      "button": "View starting logs"
+    },
+    "inference": {
+      "title": "Inference",
+      "description": "Paste-ready request using this model's routing name (the model field clients send).",
+      "descriptionOip": "Paste-ready KServe V2 request using this model's name in the URL path. Edit the inputs tensor for your model.",
+      "curlCopy": "Copy",
+      "curlCopied": "Copied",
+      "curlAria": "Copy curl snippet"
+    }
+  },
+  "logs": {
+    "modalTitle": "Model launch logs",
+    "title": "Runner logs",
+    "connected": "Connected",
+    "reconnecting": "Reconnecting…",
+    "recorded": "Recorded",
+    "waiting": "Waiting for logs…",
+    "noOutputRecorded": "No startup output was recorded.",
+    "unavailable": "Log stream unavailable — connection failed.",
+    "startingProgress": "Starting model…",
+    "successTitle": "Model started successfully",
+    "successBody": "The model is now active.",
+    "failureTitle": "Model failed to start",
+    "failureBodyFallback": "The model entered an error state. Check the logs above for details."
+  }
+}

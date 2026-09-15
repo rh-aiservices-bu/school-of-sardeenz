@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sardeenz-postgres
+spec:
+  selector:
+    app.kubernetes.io/name: sardeenz-postgres
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
