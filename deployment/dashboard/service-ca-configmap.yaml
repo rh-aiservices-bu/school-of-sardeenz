@@ -1,0 +1,10 @@
+# OpenShift's service-ca operator injects the cluster's internal CA bundle (service-ca.crt) into
+# this ConfigMap because of the inject-cabundle annotation. The dashboard BFF mounts it to
+# validate the Thanos Querier tenancy endpoint's TLS certificate (SARDEENZ_PROMETHEUS_CA_PATH).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sardeenz-dashboard-service-ca
+  annotations:
+    service.beta.openshift.io/inject-cabundle: 'true'
+data: {}

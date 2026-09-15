@@ -1,0 +1,17 @@
+# Scraped by OpenShift user-workload monitoring (see deployment/dashboard/README.md). The control
+# plane's /metrics endpoint is unauthenticated (see docs/usage/deployment-security.md), so this
+# NetworkPolicy-restricted scrape is the intended access path, not a public one.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sardeenz-control-plane
+  labels:
+    app.kubernetes.io/name: sardeenz-control-plane
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-control-plane
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

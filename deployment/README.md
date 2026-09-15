@@ -30,7 +30,8 @@ deployment/
 ├── prereq/                 # PoC PostgreSQL + Valkey backing services
 ├── proxy/                  # routing proxy Deployment and inference/admin Services
 ├── sif-runner/             # worker security posture + worker Deployment (Task 8)
-└── librarian/              # SIF build/sign/convert Job + signing keys (Task 7)
+├── librarian/              # SIF build/sign/convert Job + signing keys (Task 7)
+└── monitoring/             # ServiceMonitors for OpenShift user-workload monitoring
 ```
 
 Each directory is independently deployable. The root Kustomization composes the full PoC stack;
@@ -97,6 +98,7 @@ resources:
   - ../../dashboard
   - ../../sif-runner
   - ../../librarian
+  - ../../monitoring # ServiceMonitors; see deployment/dashboard/README.md
 ```
 
 Apply the full stack and activate module-PVC write protection:

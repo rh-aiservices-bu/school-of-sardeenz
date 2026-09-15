@@ -2,6 +2,8 @@ apiVersion: v1
 kind: Service
 metadata:
   name: sardeenz-proxy
+  labels:
+    app.kubernetes.io/name: sardeenz-proxy
 spec:
   selector:
     app.kubernetes.io/name: sardeenz-proxy

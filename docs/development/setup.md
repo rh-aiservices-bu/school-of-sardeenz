@@ -132,7 +132,10 @@ Host ports are the defaults; override them in `.env` (see "Local configuration")
 | `redis`    | `valkey/valkey:8` | 6379              | `SARDEENZ_REDIS_HOST_PORT`    | Proxy (routing map), control plane (state), integration tests |
 | `postgres` | `postgres:16`     | 5432              | `SARDEENZ_POSTGRES_HOST_PORT` | Control plane (model + budget state)                          |
 
-Prometheus will be added in a later phase.
+The dev compose stack has no Prometheus. The dashboard's metrics page is instead exercised with
+the Playwright e2e mock (`dashboard/e2e/mocks/prometheus.ts`). Production deployments query
+Prometheus through OpenShift user-workload monitoring — see
+[`deployment/dashboard/README.md`](../../deployment/dashboard/README.md).
 
 ### Connecting from code
 

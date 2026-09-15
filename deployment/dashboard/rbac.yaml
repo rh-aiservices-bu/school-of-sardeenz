@@ -43,3 +43,27 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: sardeenz-dashboard
+---
+# The Thanos Querier tenancy port (9092) authorises the caller's bearer token against `get pods`
+# in the target namespace instead of checking a Prometheus-specific permission, so the dashboard
+# BFF's ServiceAccount needs read access to Pods in this namespace purely to satisfy that check.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sardeenz-dashboard-metrics-reader
+rules:
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['get', 'list']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sardeenz-dashboard-metrics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sardeenz-dashboard-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: sardeenz-dashboard

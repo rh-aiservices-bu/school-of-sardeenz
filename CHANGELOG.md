@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Dashboard metrics can now query OpenShift user-workload monitoring** (#198). The Prometheus
+  BFF client supports bearer-token auth, a custom CA, and a tenancy `namespace` query parameter
+  via three new optional env vars (`SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH`,
+  `SARDEENZ_PROMETHEUS_CA_PATH`, `SARDEENZ_PROMETHEUS_TENANT_NAMESPACE`), so the dashboard can
+  query Thanos Querier's tenancy port instead of only an unauthenticated plain Prometheus. New
+  `deployment/monitoring/` ServiceMonitors, a service-CA ConfigMap, and a metrics-reader
+  Role/RoleBinding provision this on OpenShift.
+
 - **Chatbot Playground rebuilt to v1 look and behaviour.** The page now uses
   `@patternfly/chatbot` (header, welcome prompt, message bubbles with avatars, message bar with
   stop button) inside the v1 workspace: collapsible/resizable model sidebar with search and GPU
@@ -46,6 +54,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in `ERROR`.
 
 ### Changed
+
+- **The dashboard deployment manifest points at Thanos Querier by default** (#198):
+  `SARDEENZ_PROMETHEUS_URL` in `deployment/dashboard/deployment.yaml` changed from a placeholder
+  `sardeenz-prometheus` Service to `https://thanos-querier.openshift-monitoring.svc:9092`, with the
+  bearer-token, CA, and tenant-namespace env vars wired up to match. The control plane's
+  NetworkPolicy also allows ingress from `openshift-user-workload-monitoring` on port 3000 so its
+  `/metrics` endpoint can be scraped.
 
 - **Model colours on the GPU placement panel no longer collide.** The palette doubled to 14
   PatternFly chart colours (seven hues in two shades), and colours are assigned per page from the

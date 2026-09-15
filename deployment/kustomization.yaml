@@ -10,6 +10,7 @@ resources:
   - dashboard
   - sif-runner
   - librarian
+  - monitoring
 
 labels:
   - pairs:

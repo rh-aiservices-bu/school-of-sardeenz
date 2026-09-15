@@ -30,7 +30,15 @@ spec:
             - name: SARDEENZ_INFERENCE_URL
               value: http://sardeenz-proxy:8080
             - name: SARDEENZ_PROMETHEUS_URL
-              value: http://sardeenz-prometheus:9090
+              value: https://thanos-querier.openshift-monitoring.svc:9092
+            - name: SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH
+              value: /var/run/secrets/kubernetes.io/serviceaccount/token
+            - name: SARDEENZ_PROMETHEUS_CA_PATH
+              value: /etc/sardeenz/service-ca/service-ca.crt
+            - name: SARDEENZ_PROMETHEUS_TENANT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
@@ -47,6 +55,10 @@ spec:
           envFrom:
             - secretRef:
                 name: sardeenz-dashboard-auth
+          volumeMounts:
+            - name: service-ca
+              mountPath: /etc/sardeenz/service-ca
+              readOnly: true
           ports:
             - name: http
               containerPort: 4000
@@ -81,3 +93,7 @@ spec:
             capabilities:
               drop: ['ALL']
             runAsNonRoot: true
+      volumes:
+        - name: service-ca
+          configMap:
+            name: sardeenz-dashboard-service-ca
