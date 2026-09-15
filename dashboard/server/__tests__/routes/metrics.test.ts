@@ -164,6 +164,20 @@ describe('GET /api/metrics/latency', () => {
     expect(query).toContain('histogram_quantile');
   });
 
+  it('aggregates buckets with sum by (le) so multi-replica series merge into one quantile', async () => {
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/latency' });
+    await app.close();
+
+    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
+    expect(queries.every((q) => q.includes('sum by (le)'))).toBe(true);
+  });
+
   it('passes start, end, step query params to Prometheus', async () => {
     queryRangeFn.mockResolvedValue({
       status: 'success',
@@ -406,6 +420,20 @@ describe('GET /api/metrics/parking-duration', () => {
     expect(queries.some((q) => q.includes('0.95'))).toBe(true);
   });
 
+  it('aggregates buckets with sum by (le) so multi-replica series merge into one quantile', async () => {
+    queryRangeFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'matrix', result: [] },
+    });
+
+    const app = await buildApp(buildDeps());
+    await app.inject({ method: 'GET', url: '/api/metrics/parking-duration' });
+    await app.close();
+
+    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
+    expect(queries.every((q) => q.includes('sum by (le)'))).toBe(true);
+  });
+
   it('passes start, end, step query params to Prometheus', async () => {
     queryRangeFn.mockResolvedValue({
       status: 'success',
@@ -642,10 +670,72 @@ describe('GET /api/metrics/operations', () => {
     vi.clearAllMocks();
   });
 
-  it('queries p95 of deploy, sleep, wake, eviction, and placement duration histograms', async () => {
-    queryRangeFn.mockResolvedValue({
+  function instantVector(value: number): {
+    status: string;
+    data: { resultType: string; result: Array<{ metric: object; value: [number, string] }> };
+  } {
+    return {
       status: 'success',
-      data: { resultType: 'matrix', result: [] },
+      data: {
+        resultType: 'vector',
+        result: [{ metric: {}, value: [1234567890, value.toString()] }],
+      },
+    };
+  }
+
+  it('runs 10 instant queries (sum + count per operation) at time=end with the window derived from start/end', async () => {
+    queryInstantFn.mockResolvedValue(instantVector(0));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/metrics/operations?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z',
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(queryInstantFn).toHaveBeenCalledTimes(10);
+
+    const ops = ['deploy', 'sleep', 'wake', 'eviction', 'placement'];
+    for (const op of ops) {
+      expect(queryInstantFn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `sum(increase(sardeenz_control_plane_${op}_duration_seconds_sum[3600s]))`,
+        ),
+        '2026-01-01T01:00:00Z',
+      );
+      expect(queryInstantFn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `sum(increase(sardeenz_control_plane_${op}_duration_seconds_count[3600s]))`,
+        ),
+        '2026-01-01T01:00:00Z',
+      );
+    }
+  });
+
+  it('uses a minimum 60s window when the computed window is smaller', async () => {
+    queryInstantFn.mockResolvedValue(instantVector(0));
+
+    const app = await buildApp(buildDeps());
+    await app.inject({
+      method: 'GET',
+      url: '/api/metrics/operations?start=2026-01-01T00:00:00Z&end=2026-01-01T00:00:10Z',
+    });
+    await app.close();
+
+    expect(queryInstantFn).toHaveBeenCalledWith(
+      expect.stringContaining('[60s]'),
+      expect.any(String),
+    );
+  });
+
+  it('returns the fixed-order response shape with averageSeconds and count per operation', async () => {
+    queryInstantFn.mockImplementation((query: string) => {
+      if (query.includes('deploy') && query.includes('_sum'))
+        return Promise.resolve(instantVector(40));
+      if (query.includes('deploy') && query.includes('_count'))
+        return Promise.resolve(instantVector(4));
+      return Promise.resolve(instantVector(0));
     });
 
     const app = await buildApp(buildDeps());
@@ -653,56 +743,85 @@ describe('GET /api/metrics/operations', () => {
     await app.close();
 
     expect(res.statusCode).toBe(200);
-    // 5 parallel queries
-    expect(queryRangeFn).toHaveBeenCalledTimes(5);
-    const queries = (queryRangeFn.mock.calls as [string, ...unknown[]][]).map(([q]) => q);
-    expect(
-      queries.some((q) => q.includes('sardeenz_control_plane_deploy_duration_seconds_bucket')),
-    ).toBe(true);
-    expect(
-      queries.some((q) => q.includes('sardeenz_control_plane_sleep_duration_seconds_bucket')),
-    ).toBe(true);
-    expect(
-      queries.some((q) => q.includes('sardeenz_control_plane_wake_duration_seconds_bucket')),
-    ).toBe(true);
-    expect(
-      queries.some((q) => q.includes('sardeenz_control_plane_eviction_duration_seconds_bucket')),
-    ).toBe(true);
-    expect(
-      queries.some((q) => q.includes('sardeenz_control_plane_placement_duration_seconds_bucket')),
-    ).toBe(true);
-    expect(queries.every((q) => q.includes('0.95'))).toBe(true);
-    // Response must have all operation keys
-    expect(res.json()).toHaveProperty('deploy');
-    expect(res.json()).toHaveProperty('sleep');
-    expect(res.json()).toHaveProperty('wake');
-    expect(res.json()).toHaveProperty('eviction');
-    expect(res.json()).toHaveProperty('placement');
+    const body: { operations: Array<{ operation: string }> } = res.json();
+    expect(body.operations.map((o) => o.operation)).toEqual([
+      'deploy',
+      'sleep',
+      'wake',
+      'eviction',
+      'placement',
+    ]);
+    expect(body.operations[0]).toEqual({ operation: 'deploy', averageSeconds: 10, count: 4 });
   });
 
-  it('passes start, end, step query params to each Prometheus query', async () => {
-    queryRangeFn.mockResolvedValue({
-      status: 'success',
-      data: { resultType: 'matrix', result: [] },
+  it('rounds fractional extrapolated counts while averaging over the raw ratio', async () => {
+    queryInstantFn.mockImplementation((query: string) => {
+      if (query.includes('wake') && query.includes('_sum'))
+        return Promise.resolve(instantVector(30));
+      if (query.includes('wake') && query.includes('_count'))
+        return Promise.resolve(instantVector(2.4));
+      if (query.includes('sleep') && query.includes('_sum'))
+        return Promise.resolve(instantVector(1));
+      if (query.includes('sleep') && query.includes('_count'))
+        return Promise.resolve(instantVector(0.3));
+      return Promise.resolve(instantVector(0));
     });
 
     const app = await buildApp(buildDeps());
-    await app.inject({
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });
+    await app.close();
+
+    const body: {
+      operations: Array<{ operation: string; averageSeconds: number | null; count: number }>;
+    } = res.json();
+    const wake = body.operations.find((o) => o.operation === 'wake');
+    expect(wake?.count).toBe(2);
+    expect(wake?.averageSeconds).toBeCloseTo(12.5);
+    // A positive count below 0.5 still reports one operation rather than vanishing.
+    const sleep = body.operations.find((o) => o.operation === 'sleep');
+    expect(sleep?.count).toBe(1);
+  });
+
+  it('returns averageSeconds: null when count is 0', async () => {
+    queryInstantFn.mockResolvedValue(instantVector(0));
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });
+    await app.close();
+
+    const body: { operations: Array<{ averageSeconds: number | null }> } = res.json();
+    expect(body.operations.every((o) => o.averageSeconds === null)).toBe(true);
+  });
+
+  it('treats an absent result vector as 0', async () => {
+    queryInstantFn.mockResolvedValue({
+      status: 'success',
+      data: { resultType: 'vector', result: [] },
+    });
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });
+    await app.close();
+
+    const body: { operations: Array<{ count: number; averageSeconds: unknown }> } = res.json();
+    expect(body.operations.every((o) => o.count === 0 && o.averageSeconds === null)).toBe(true);
+  });
+
+  it('returns 400 when start or end is not a valid date', async () => {
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({
       method: 'GET',
-      url: '/api/metrics/operations?start=2026-01-01T00:00:00Z&end=2026-01-01T01:00:00Z&step=30s',
+      url: '/api/metrics/operations?start=not-a-date&end=2026-01-01T01:00:00Z',
     });
     await app.close();
 
-    for (const call of queryRangeFn.mock.calls as [string, string, string, string][]) {
-      const [, start, end, step] = call;
-      expect(start).toBe('2026-01-01T00:00:00Z');
-      expect(end).toBe('2026-01-01T01:00:00Z');
-      expect(step).toBe('30s');
-    }
+    expect(res.statusCode).toBe(400);
   });
 
   it('returns 502 when Prometheus is unreachable', async () => {
-    queryRangeFn.mockRejectedValue(new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'));
+    queryInstantFn.mockRejectedValue(
+      new BffError(502, 'PROMETHEUS_ERROR', 'Prometheus unreachable'),
+    );
 
     const app = await buildApp(buildDeps());
     const res = await app.inject({ method: 'GET', url: '/api/metrics/operations' });

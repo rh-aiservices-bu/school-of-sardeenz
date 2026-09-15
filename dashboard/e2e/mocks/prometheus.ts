@@ -115,6 +115,37 @@ export class MockPrometheus {
     };
   }
 
+  /**
+   * Factory for the `/api/metrics/operations` instant queries: returns the given sum/count for
+   * every `<op>_duration_seconds_sum`/`_count` query, and an empty vector for anything else.
+   */
+  static operationsInstantFactory(
+    values: Partial<Record<string, { sum: number; count: number }>>,
+  ): InstantResponseFactory {
+    return (query: string): PrometheusInstantResponse => {
+      const now = Math.floor(Date.now() / 1000);
+      for (const [operation, stats] of Object.entries(values)) {
+        if (!stats) continue;
+        if (query.includes(`${operation}_duration_seconds_sum`)) {
+          return {
+            status: 'success',
+            data: { resultType: 'vector', result: [{ metric: {}, value: [now, `${stats.sum}`] }] },
+          };
+        }
+        if (query.includes(`${operation}_duration_seconds_count`)) {
+          return {
+            status: 'success',
+            data: {
+              resultType: 'vector',
+              result: [{ metric: {}, value: [now, `${stats.count}`] }],
+            },
+          };
+        }
+      }
+      return MockPrometheus.emptyInstantResponse();
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Route registration
   // ---------------------------------------------------------------------------

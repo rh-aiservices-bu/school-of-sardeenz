@@ -248,6 +248,18 @@ function formatMetricsParams(params: MetricsParams): string {
 
 export { type MetricsParams };
 
+export type OperationName = 'deploy' | 'sleep' | 'wake' | 'eviction' | 'placement';
+
+export interface OperationDuration {
+  operation: OperationName;
+  averageSeconds: number | null;
+  count: number;
+}
+
+export interface OperationDurationsResponse {
+  operations: OperationDuration[];
+}
+
 export const api = {
   cluster: {
     getStatus: (signal?: AbortSignal) => request<ClusterStatus>('/cluster/status', { signal }),
@@ -334,7 +346,9 @@ export const api = {
     getMemoryHistory: (params: MetricsParams, signal?: AbortSignal) =>
       request<unknown>(`/metrics/memory-history?${formatMetricsParams(params)}`, { signal }),
     getOperations: (params: MetricsParams, signal?: AbortSignal) =>
-      request<unknown>(`/metrics/operations?${formatMetricsParams(params)}`, { signal }),
+      request<OperationDurationsResponse>(`/metrics/operations?${formatMetricsParams(params)}`, {
+        signal,
+      }),
   },
   weights: {
     list: (path?: string, signal?: AbortSignal) => {

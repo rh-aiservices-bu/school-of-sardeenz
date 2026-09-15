@@ -73,6 +73,26 @@ describe('PrometheusClient', () => {
       expect(firstCallInit().headers).toEqual({});
     });
 
+    it('adds the time param when provided', async () => {
+      const client = new PrometheusClient(baseConfig);
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { data: 'ok' }));
+
+      await client.queryInstant('up', '2026-01-01T01:00:00Z');
+
+      expect(firstCallUrl()).toBe(
+        `http://prom.test/api/v1/query?query=up&time=${encodeURIComponent('2026-01-01T01:00:00Z')}`,
+      );
+    });
+
+    it('omits the time param when not provided', async () => {
+      const client = new PrometheusClient(baseConfig);
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { data: 'ok' }));
+
+      await client.queryInstant('up');
+
+      expect(firstCallUrl()).not.toContain('time=');
+    });
+
     it('uses /-/healthy for the health probe', async () => {
       const client = new PrometheusClient(baseConfig);
       fetchSpy.mockResolvedValue({ ok: true });

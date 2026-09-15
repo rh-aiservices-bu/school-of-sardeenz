@@ -56,6 +56,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The Operation Duration metrics panel is now a bar chart of average durations, not a p95 line**
+  (#202). The deploy/sleep/wake/eviction/placement operations are sparse, one-off events, so
+  `histogram_quantile` over a rolling 5-minute rate window produced a mostly-`NaN` flat line with
+  occasional steps. `GET /api/metrics/operations` now runs instant `sum`/`count` queries over
+  `increase(..._sum|_count[<window>])` at the range's `end`, with `<window>` derived from
+  `end - start` (minimum 60s), and returns `{ operation, averageSeconds, count }` for all five
+  operations in a fixed order; the dashboard renders these as a single-hue `ChartBar` bar chart
+  with per-bar tooltips instead of the old line chart. The Request Latency and Parking Duration
+  quantile queries now wrap their `rate(..._bucket[5m])` in `sum by (le) (...)` so multiple proxy
+  replicas (or extra `pod`/`instance` labels from OpenShift) aggregate into one cluster-wide
+  quantile instead of one series per pod.
+
 - **The dashboard deployment manifest points at Thanos Querier by default** (#198):
   `SARDEENZ_PROMETHEUS_URL` in `deployment/dashboard/deployment.yaml` changed from a placeholder
   `sardeenz-prometheus` Service to `https://thanos-querier.openshift-monitoring.svc:9092`, with the

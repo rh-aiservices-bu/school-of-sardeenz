@@ -97,11 +97,40 @@ test.describe('Metrics Dashboard', () => {
       // (ariaTitle/ariaDesc), so an unscoped getByText() becomes a strict-mode violation
       // (3 matches) as soon as the chart finishes rendering.
       await expect(
-        page.locator('.pf-v6-c-card__title').filter({ hasText: 'Request Latency (p50 / p95 / p99)' }),
+        page
+          .locator('.pf-v6-c-card__title')
+          .filter({ hasText: 'Request Latency (p50 / p95 / p99)' }),
       ).toBeVisible();
       await expect(
         page.locator('.pf-v6-c-card__title').filter({ hasText: 'Request Throughput' }),
       ).toBeVisible();
+    });
+
+    test('operations card renders bars when instant data has counts', async ({
+      page,
+      bffPort,
+      mockPrometheus,
+    }) => {
+      mockPrometheus.setInstantFactory(
+        MockPrometheus.operationsInstantFactory({
+          deploy: { sum: 40, count: 4 },
+          sleep: { sum: 10, count: 5 },
+        }),
+      );
+
+      await page.goto(bffUrl(bffPort, '/metrics'));
+
+      const operationsCard = page
+        .locator('.pf-v6-c-card')
+        .filter({ has: page.locator('.pf-v6-c-card__title', { hasText: 'Operation Duration' }) });
+      await expect(operationsCard).toBeVisible();
+      // The card only mounts the Victory <Chart> (rendering an <svg><title>{ariaTitle}</title>)
+      // once there is at least one non-zero count; the empty-state chrome has no such svg title.
+      await expect(
+        operationsCard.locator('svg title', { hasText: 'Operation Duration (avg)' }),
+      ).toBeAttached();
+      // One <path role="presentation"> per bar — five operations, deploy/sleep with data.
+      await expect(operationsCard.locator('svg path[role="presentation"]')).toHaveCount(5);
     });
 
     test('memory section renders when instant data available', async ({

@@ -90,8 +90,11 @@ export class PrometheusClient {
     return this.request('/api/v1/query_range', params);
   }
 
-  async queryInstant(query: string): Promise<unknown> {
+  async queryInstant(query: string, time?: string): Promise<unknown> {
     const params = new URLSearchParams({ query });
+    if (time !== undefined) {
+      params.set('time', time);
+    }
     return this.request('/api/v1/query', params);
   }
 
