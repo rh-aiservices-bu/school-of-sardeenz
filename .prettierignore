@@ -6,3 +6,6 @@ coverage/
 packages/types/src/generated/
 packages/contracts/specs/
 *.log
+site/
+# Hand-formatted single-file canvas app; Prettier would explode its dense data tables
+docs/architecture-visualizer.html

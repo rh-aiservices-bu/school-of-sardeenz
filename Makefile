@@ -7,7 +7,7 @@ COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podm
 .PHONY: help all lint lint-specs format format-check typecheck test test-deployment test-integration \
         test-coverage test-python test-python-deps codegen clean services services-stop \
         dev dev-full dev-full-logged dev-cp dev-bff dev-dashboard dev-proxy \
-        dev-worker dev-worker-2 dev-worker-stop
+        dev-worker dev-worker-2 dev-worker-stop docs-deps docs-build docs-serve
 
 ##@ Help
 
@@ -142,3 +142,14 @@ clean: ## Remove all build artifacts
 ifdef CARGO
 	cd proxy && cargo clean
 endif
+
+##@ Documentation
+
+docs-deps: ## Install the docs toolchain (mkdocs-material)
+	pip install -r requirements-docs.txt
+
+docs-build: ## Build the docs site into site/ (strict, same as the Pages workflow)
+	NO_MKDOCS_2_WARNING=1 mkdocs build --strict
+
+docs-serve: ## Serve the docs site locally with live reload on :8000
+	NO_MKDOCS_2_WARNING=1 mkdocs serve

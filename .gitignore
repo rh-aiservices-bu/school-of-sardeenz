@@ -77,3 +77,6 @@ dashboard/test-results/
 
 # Blocking local overlays
 deployment/overlays
+
+# MkDocs build output
+site/
