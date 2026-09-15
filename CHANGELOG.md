@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Flaky dashboard e2e accessibility test: the Cluster Overview readiness check now targets the
+  Workers summary card instead of an unscoped text match that also hit the sidebar nav link.
 - Sidebar GitHub star and fork counts now render in production: the lookup goes through a cached
   BFF route instead of a browser fetch the Content Security Policy blocked.
 

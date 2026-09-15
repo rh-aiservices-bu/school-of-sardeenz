@@ -161,8 +161,10 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
 
     await page.goto(bffUrl(bffPort, '/'));
 
-    // Wait for the main content to be visible
-    await expect(page.getByText('Workers')).toBeVisible();
+    // Wait for the main content to be visible. Scope to the summary card: an unscoped
+    // getByText('Workers') also matches the sidebar nav link and fails strict mode once
+    // the card has rendered (see cluster-overview.spec.ts).
+    await expect(page.getByTestId('summary-card-workers').getByText('Workers')).toBeVisible();
 
     await runA11yCheck(page);
   });
