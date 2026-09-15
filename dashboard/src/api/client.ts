@@ -395,4 +395,13 @@ export const api = {
   config: {
     get: (signal?: AbortSignal) => request<{ inferenceUrl: string }>('/config', { signal }),
   },
+  repoStats: {
+    get: (signal?: AbortSignal) => request<RepoStats>('/repo-stats', { signal }),
+  },
 };
+
+export interface RepoStats {
+  stars: number | null;
+  forks: number | null;
+  fetchedAt: string | null;
+}

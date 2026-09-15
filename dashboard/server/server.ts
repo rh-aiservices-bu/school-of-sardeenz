@@ -18,6 +18,7 @@ import { registerInferenceRoutes } from './routes/inference.js';
 import { registerWorkerRoutes } from './routes/workers.js';
 import { registerClusterRoutes } from './routes/cluster.js';
 import { registerConfigRoutes } from './routes/config.js';
+import { registerRepoStatsRoutes } from './routes/repo-stats.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerEventRoutes } from './routes/events.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
@@ -74,6 +75,9 @@ export async function buildServer(deps: ServerDeps) {
     },
   });
 
+  // Wire the app logger in now that it exists (the client is constructed before the app is).
+  deps.routes.githubRepoStats.setLogger((msg) => app.log.debug(msg));
+
   // Auth plugin MUST be registered before routes
   await app.register(authPlugin, { config: deps.config });
 
@@ -85,6 +89,7 @@ export async function buildServer(deps: ServerDeps) {
   registerWorkerRoutes(app, deps.routes);
   registerClusterRoutes(app, deps.routes);
   registerConfigRoutes(app, deps.routes);
+  registerRepoStatsRoutes(app, deps.routes);
   registerMetricsRoutes(app, deps.routes);
   registerEventRoutes(app, deps.routes);
   registerNotificationRoutes(app, deps.routes);

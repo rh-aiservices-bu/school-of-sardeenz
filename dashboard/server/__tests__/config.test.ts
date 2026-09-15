@@ -33,6 +33,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     namespace: 'sardeenz',
     controlPlaneApiToken: '',
     publicUrl: '',
+    repoStatsUrl: '',
     ...overrides,
   };
 }

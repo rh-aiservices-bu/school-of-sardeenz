@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Page,
@@ -35,6 +35,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useRepoStats } from '../hooks/useRepoStats';
 import {
   sardeenzIcon,
   sardeenzLogo,
@@ -63,18 +64,9 @@ export function AppLayout({ children }: AppLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
-  const [repoStars, setRepoStars] = useState<number | null>(null);
-  const [repoForks, setRepoForks] = useState<number | null>(null);
-
-  useEffect(() => {
-    fetch('https://api.github.com/repos/rh-aiservices-bu/school-of-sardeenz')
-      .then((res) => res.json())
-      .then((data: { stargazers_count?: number; forks_count?: number }) => {
-        setRepoStars(data.stargazers_count ?? null);
-        setRepoForks(data.forks_count ?? null);
-      })
-      .catch(() => {});
-  }, []);
+  const { data: repoStats } = useRepoStats();
+  const repoStars = repoStats?.stars ?? null;
+  const repoForks = repoStats?.forks ?? null;
 
   const onUserDropdownToggle = () => {
     setIsUserDropdownOpen(!isUserDropdownOpen);

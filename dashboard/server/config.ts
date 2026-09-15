@@ -15,6 +15,8 @@ export interface Config {
   /** Namespace sent as the `namespace` query parameter on every Prometheus request (Thanos Querier tenancy). */
   readonly prometheusTenantNamespace: string;
   readonly inferenceUrl: string;
+  /** GitHub repo API URL for sidebar star/fork counts. Empty string disables the lookup. */
+  readonly repoStatsUrl: string;
   readonly maxConcurrentInferenceRequestsPerUser: number;
   readonly authMode: AuthMode;
   readonly adminUsername: string;
@@ -76,6 +78,10 @@ export function loadConfig(): Config {
     prometheusCaPath: optionalEnv('SARDEENZ_PROMETHEUS_CA_PATH', ''),
     prometheusTenantNamespace: optionalEnv('SARDEENZ_PROMETHEUS_TENANT_NAMESPACE', ''),
     inferenceUrl: optionalEnv('SARDEENZ_INFERENCE_URL', 'http://localhost:8080'),
+    repoStatsUrl: optionalEnv(
+      'SARDEENZ_REPO_STATS_URL',
+      'https://api.github.com/repos/rh-aiservices-bu/school-of-sardeenz',
+    ),
     maxConcurrentInferenceRequestsPerUser: positiveSafeIntegerEnv(
       'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
       4,

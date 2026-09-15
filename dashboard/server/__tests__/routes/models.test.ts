@@ -37,6 +37,7 @@ const mockConfig: Config = {
   namespace: 'sardeenz',
   controlPlaneApiToken: '',
   publicUrl: '',
+  repoStatsUrl: '',
 };
 
 const sampleModel: ModelInfo = {
@@ -93,6 +94,10 @@ function buildDeps(): RouteDeps {
       chatCompletions: vi.fn(),
       isHealthy: vi.fn(),
     } as unknown as RouteDeps['inference'],
+    githubRepoStats: {
+      getStats: () => Promise.resolve({ stars: null, forks: null, fetchedAt: null }),
+      setLogger: () => {},
+    } as unknown as RouteDeps['githubRepoStats'],
   };
 }
 

@@ -31,6 +31,7 @@ const mockConfig: Config = {
   namespace: 'sardeenz',
   controlPlaneApiToken: '',
   publicUrl: '',
+  repoStatsUrl: '',
 };
 
 const cpIsHealthyFn = vi.fn<() => Promise<boolean>>();
@@ -76,6 +77,10 @@ function buildDeps(): RouteDeps {
       chatCompletions: vi.fn(),
       isHealthy: vi.fn(),
     } as unknown as RouteDeps['inference'],
+    githubRepoStats: {
+      getStats: () => Promise.resolve({ stars: null, forks: null, fetchedAt: null }),
+      setLogger: () => {},
+    } as unknown as RouteDeps['githubRepoStats'],
   };
 }
 
