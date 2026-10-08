@@ -19,6 +19,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   catalog entry gains the `onnx` tag and is pinned to the rebuilt `mlserver:1.7.1-rc2` SIF
   (`sha256:3fe5c281…`), the first build that contains the runtime.
 
+### Fixed
+
+- **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
+  `/health`, so the control plane's drain loop could never observe drain completion and every
+  stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
+  The shim now scrapes MLServer's metrics listener for the REST server's
+  `rest_server_requests_in_progress` gauge and reports it as `activeRequests` (unknown/omitted
+  only when the scrape fails, never a fake 0), matching the vLLM shim's behavior.
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the

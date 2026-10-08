@@ -12,12 +12,13 @@ import os
 import sys
 import types
 
+import httpx
 import pytest
 from sardeenz_mlserver_runner import memory as mem
 from sardeenz_mlserver_runner import settings as cfg
 from sardeenz_mlserver_runner import state as st
 from sardeenz_mlserver_runner.cli import _extract_served_names, aux_ports, parse_args
-from sardeenz_mlserver_runner.engine import MLServerEngine
+from sardeenz_mlserver_runner.engine import MLServerEngine, scrape_active_requests
 
 
 def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) -> None:
@@ -471,3 +472,84 @@ def test_coerce_input_and_output_round_trip():
     assert onnx.coerce_output([[0.1, 0.9]]).dtype == np.float64
     # ZipMap-style sequence(map) output → one JSON document per row
     assert onnx.coerce_output([{0: 0.25, 1: np.float32(0.75)}]) == ['{"0": 0.25, "1": 0.75}']
+
+# --- engine.py (metrics scrape, #206) --------------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeClient:
+    def __init__(self, resp: _FakeResp | Exception) -> None:
+        self._resp = resp
+
+    async def get(self, url: str, timeout: float) -> _FakeResp:
+        del url, timeout
+        if isinstance(self._resp, Exception):
+            raise self._resp
+        return self._resp
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_sums_in_progress_gauge():
+    # starlette_exporter exposes one sample per (method, app_name) label set; the drain
+    # signal is their sum. GET vs POST samples must both count.
+    body = (
+        '# HELP rest_server_requests_in_progress Total HTTP requests currently in progress\n'
+        '# TYPE rest_server_requests_in_progress gauge\n'
+        'rest_server_requests_in_progress{method="GET",app_name="mlserver"} 1.0\n'
+        'rest_server_requests_in_progress{method="POST",app_name="mlserver"} 2.0\n'
+    )
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "rest_server")
+    assert active == 3
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_zero_when_drained():
+    body = 'rest_server_requests_in_progress{method="POST",app_name="mlserver"} 0.0\n'
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "rest_server")
+    assert active == 0
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_ignores_other_gauge_names():
+    # The scrape must not confuse the in-progress gauge with e.g.
+    # rest_server_requests_in_progress_created or other prefix-adjacent metrics.
+    body = (
+        'rest_server_requests_in_progress_created{method="GET",app_name="mlserver"} 1.5\n'
+        'rest_server_requests{method="GET",path="/",status_code="200",app_name="mlserver"} 9.0\n'
+    )
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "rest_server")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_when_metrics_unreachable():
+    active = await scrape_active_requests(
+        _FakeClient(httpx.ConnectError("refused")), "http://x", "rest_server"
+    )
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_on_non_200():
+    active = await scrape_active_requests(_FakeClient(_FakeResp(503, "")), "http://x", "rest_server")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_when_gauge_absent():
+    # Metrics listener reachable but the in-progress gauge absent (metrics disabled):
+    # unknown, not drained.
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, "")), "http://x", "rest_server")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_honors_custom_prefix():
+    body = 'custom_requests_in_progress{method="GET",app_name="mlserver"} 4.0\n'
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "custom")
+    assert active == 4

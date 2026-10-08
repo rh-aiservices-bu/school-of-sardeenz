@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from . import state as st
 from .cli import RunnerArgs
-from .engine import MLServerEngine
+from .engine import MLServerEngine, scrape_active_requests
 from .memory import memory_report
 from .settings import build_model_settings, write_model_repository
 
@@ -80,10 +80,17 @@ def create_app(args: RunnerArgs) -> FastAPI:
 
     @app.get("/health")
     async def get_health() -> JSONResponse:
-        # MLServer has no vLLM-equivalent running/waiting gauge; the control plane drains traffic
-        # via the routing map before /sleep, so activeRequests is omitted (optional in the
-        # contract) rather than faked.
-        return JSONResponse(status().health(active_requests=None))
+        # MLServer has no vLLM-equivalent running/waiting gauge; the control plane drains
+        # traffic via the routing map before /sleep. The REST server's in-progress gauge
+        # (scraped off MLServer's metrics listener, #206) is still reported so the control
+        # plane can observe drain completion instead of polling out the full sleep timeout —
+        # omitted only when the scrape fails (None = unknown, never a fake 0).
+        active = await scrape_active_requests(
+            app.state.client,
+            app.state.engine.metrics_url,
+            app.state.engine.rest_metrics_prefix,
+        )
+        return JSONResponse(status().health(active_requests=active))
 
     @app.get("/capabilities")
     async def get_capabilities() -> JSONResponse:
