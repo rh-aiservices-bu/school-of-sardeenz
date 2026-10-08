@@ -19,6 +19,44 @@ from . import state as st
 from .cli import RunnerArgs
 
 
+async def scrape_active_requests(
+    client: httpx.AsyncClient, metrics_base_url: str, rest_metrics_prefix: str
+) -> int | None:
+    """Scrape MLServer's metrics listener for the REST server's in-flight request count.
+
+    MLServer's REST server instruments every request with starlette_exporter's
+    ``<prefix>_requests_in_progress`` gauge (prefix = ``metrics_rest_server_prefix``,
+    default ``rest_server``). Summing the gauge's samples gives the number of requests
+    currently in flight against the engine — including in-flight ``/v2/models/{name}/infer``
+    calls — which is the drain-progress signal the control plane needs (#206).
+
+    Returns None (unknown) rather than 0 when the metric can't be read, so callers don't
+    mistake "couldn't scrape" for "drained" — a false 0 would short-circuit the drain loop.
+    """
+    try:
+        resp = await client.get(f"{metrics_base_url}/metrics", timeout=2.0)
+        if resp.status_code != 200:
+            return None
+        in_progress = 0
+        found = False
+        for line in resp.text.splitlines():
+            gauge = f"{rest_metrics_prefix}_requests_in_progress"
+            if not line.startswith(gauge) or line.startswith(gauge + "_"):
+                continue
+            found = True
+            try:
+                in_progress += int(float(line.split()[-1]))
+            except ValueError:
+                return None
+        if not found:
+            # Metrics listener reachable but no in-progress gauge (e.g. metrics disabled via
+            # MLSERVER_METRICS_ENDPOINT=""): unknown, not drained.
+            return None
+        return in_progress
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 class MLServerEngine:
     def __init__(self, args: RunnerArgs, repo_dir: str) -> None:
         self._args = args
@@ -27,11 +65,27 @@ class MLServerEngine:
         # shim→engine control calls stay loopback-local within the SIF; the engine's
         # externally-reachable *bind* host is set via MLSERVER_HOST below (#159).
         self._base_url = f"http://127.0.0.1:{args.engine_port}"
+        # MLServer's Prometheus metrics listener (its own port — see cli.py aux_ports) exposes
+        # the REST server's in-progress gauge (#206), the drain-progress signal the control
+        # plane reads off this shim's /health.
+        self._metrics_url = f"http://127.0.0.1:{args.metrics_port}"
+        # metrics_rest_server_prefix default (MLServer settings); overridable via MLSERVER_ env.
+        self._rest_metrics_prefix = os.environ.get(
+            "MLSERVER_METRICS_REST_SERVER_PREFIX", "rest_server"
+        )
         self._model_name = args.served_name
 
     @property
     def base_url(self) -> str:
         return self._base_url
+
+    @property
+    def metrics_url(self) -> str:
+        return self._metrics_url
+
+    @property
+    def rest_metrics_prefix(self) -> str:
+        return self._rest_metrics_prefix
 
     def start(self) -> None:
         env = os.environ.copy()
