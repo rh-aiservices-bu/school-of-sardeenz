@@ -124,8 +124,9 @@ Supported `extra` keys:
 ### 3. Deploy
 
 In the dashboard, enter `/weights/accident-detection` as **Model Path**, choose the MLServer runner
-type and an `IMPORTED` MLServer module that contains ONNX support (`mlserver-1.7.1`, built as
-`1.7.1-rc4` or later), and deploy. The runner log reports the active providers, for example
+type and an `IMPORTED` MLServer module that contains GPU-backed ONNX support (catalog entry
+**MLServer 1.7.1 v2**, module `mlserver-1.7.1-v2`; the first `mlserver-1.7.1` build serves ONNX
+on CPU only), and deploy. The runner log reports the active providers, for example
 `providers=['CUDAExecutionProvider', 'CPUExecutionProvider']`; CPU only means the CUDA provider
 failed to initialize, which the runtime also logs as a warning (see Troubleshooting). To refuse a
 CPU fallback outright, pin `"providers": ["CUDAExecutionProvider"]` in `model-settings.json`: the
@@ -237,8 +238,8 @@ is placed.
 - **ONNX model runs on CPU although a GPU was assigned:** the CUDA execution provider failed to
   initialize; the runner log shows the onnxruntime message and a `falling back to` warning from
   the runtime, and the instance reports 0 B of measured VRAM. `libcudnn.so.9: cannot open shared
-object file` means the SIF predates `1.7.1-rc4` (its CUDA 12 libraries were not on the loader
-  path); re-import a current SIF. Otherwise the host driver is usually older than the CUDA 12.8
+object file` means the first `mlserver-1.7.1` build is in use (its CUDA 12 libraries were not
+  on the loader path); import **MLServer 1.7.1 v2** from the catalog and redeploy on it. Otherwise the host driver is usually older than the CUDA 12.8
   libraries bundled in the SIF (570 or newer is required).
 - **Request inputs do not match the model's inputs:** name the request inputs after the graph's
   inputs as listed by `GET /oip/v2/models/<served-model-name>`.
