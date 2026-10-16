@@ -16,8 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   execution providers (`parameters.extra.providers`, CUDA preferred with CPU fallback), provider
   options and session options. Tensors map to KServe V2 inputs/outputs by name; structured
   outputs (e.g. ZipMap classifier probabilities) come back as `BYTES` JSON. The `mlserver-1.7.1`
-  catalog entry gains the `onnx` tag and is pinned to the rebuilt `mlserver:1.7.1-rc3` SIF
-  (`sha256:b3b8b5a4…`), the first published build with the runtime and the #206 drain fix.
+  catalog entry gains the `onnx` tag and is pinned to the rebuilt `mlserver:1.7.1-rc4` SIF
+  (`sha256:c9c6f049…`), the first published build with the runtime, the #206 drain fix and the
+  CUDA-library fix below.
   The runtime now checks the session's active providers after load: an explicit
   `parameters.extra.providers` list that onnxruntime could not initialise fails the load, and
   the default CUDA-then-CPU preference logs a `falling back to` warning instead of serving
@@ -32,10 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (0 B measured VRAM). The Containerfile now puts the cu12 `lib/` directories on
   `LD_LIBRARY_PATH`, `dlopen()`s every CUDA/cuDNN library at build time (the previous
   `preload_dlls` check only printed), and pins `torch==2.10.0` — the last CUDA 12 torch — since an
-  unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. The rebuilt
-  SIF ships as a new catalog entry, **MLServer 1.7.1 v2** (`mlserver-1.7.1-v2`,
-  `mlserver:1.7.1-rc4`), so already-imported `mlserver-1.7.1` modules keep running unchanged;
-  that entry's description now flags the CPU-only ONNX limitation.
+  unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. Verified
+  on-cluster: an ONNX model now loads with `CUDAExecutionProvider` and reports measured VRAM.
 - **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
   `/health`, so the control plane's drain loop could never observe drain completion and every
   stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
