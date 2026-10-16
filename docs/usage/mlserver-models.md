@@ -70,21 +70,40 @@ For a Hugging Face repository, point `parameters.uri` at the directory:
 All model content must already be on shared storage. The runner sets `HF_HUB_OFFLINE=1` and does
 not download missing files at runtime.
 
-For an ONNX model (exported with sklearn-onnx, `torch.onnx`, tf2onnx, or similar), point
-`parameters.uri` at the `.onnx` file:
+For an ONNX model, see the dedicated walkthrough below: no settings file is needed when the
+directory holds a single `.onnx` file.
+
+## Deploying an ONNX model
+
+ONNX exports (sklearn-onnx, `torch.onnx`, tf2onnx, or similar) are served by the ONNX runtime
+that the Sardeenz shim ships inside the MLServer SIF and executes with onnxruntime. Hugging Face
+models exported with optimum are transformer pipelines, not raw graphs: keep them on the Hugging
+Face runtime.
+
+### 1. Stage the model
+
+Put the exported file in its own directory below the weights root. Nothing else is required:
 
 ```text
-/weights/fraud-detector/
-├── model.onnx
-└── model-settings.json
+/weights/accident-detection/
+└── accident_detect.onnx
 ```
+
+The file name does not matter as long as it is the only `.onnx` file in the directory.
+
+### 2. Add `model-settings.json` only when needed
+
+Add a settings file when the directory holds several `.onnx` files, when you want to force a
+provider or pass onnxruntime options, or when the directory also contains scikit-learn or Hugging
+Face artifacts that automatic detection would select first:
 
 ```json
 {
-  "name": "fraud-detector",
+  "name": "accident-detection",
   "implementation": "sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel",
   "parameters": {
-    "uri": "./model.onnx",
+    "uri": "./accident_detect.onnx",
+    "version": "v0.1.0",
     "extra": {
       "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"]
     }
@@ -92,22 +111,61 @@ For an ONNX model (exported with sklearn-onnx, `torch.onnx`, tf2onnx, or similar
 }
 ```
 
-The ONNX runtime is provided by the Sardeenz shim inside the SIF and executes the graph with
-onnxruntime. Without `extra.providers` it uses the CUDA execution provider when the SIF has one and
-falls back to CPU. `extra.provider_options` (for example
-`{"CUDAExecutionProvider": {"device_id": 0}}`) and `extra.session_options` (attributes of
-`onnxruntime.SessionOptions`, such as `intra_op_num_threads`) are passed through. If the directory
-holds exactly one `.onnx` file, `parameters.uri` may name the directory instead.
+The `implementation` must be exactly the string shown; Seldon publishes no `mlserver_onnx`
+runtime. As with every runtime, `name` is replaced by the deployment's served model name.
+Supported `extra` keys:
 
-Inference follows the graph's signature: each request input is fed to the model input with the
-same name (a single-input model also accepts any one input name), and every model output is
-returned under its own name unless the request lists `outputs`. `GET /oip/v2/models/<name>`
-reports the graph's input and output names, data types, and shapes (`-1` for symbolic
-dimensions). Numeric inputs are cast to the declared type, so sending `FP64` data to a
-`tensor(float)` input works. Non-tensor outputs, such as the per-row probability maps emitted by a
-sklearn-onnx classifier's ZipMap node, are returned as `BYTES` JSON documents. Hugging Face
-models exported with optimum are transformer pipelines, not raw graphs: keep them on the Hugging
-Face runtime.
+| Key                | Meaning                                                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `providers`        | onnxruntime execution providers in priority order. Default: `CUDAExecutionProvider` when the SIF has it, then `CPUExecutionProvider`. |
+| `provider_options` | Per-provider options, for example `{"CUDAExecutionProvider": {"device_id": 0}}`.                                                      |
+| `session_options`  | Attributes set on `onnxruntime.SessionOptions`, for example `{"intra_op_num_threads": 4}`.                                            |
+
+### 3. Deploy
+
+In the dashboard, enter `/weights/accident-detection` as **Model Path**, choose the MLServer runner
+type and an `IMPORTED` MLServer module that contains ONNX support (`mlserver-1.7.1`, built as
+`1.7.1-rc2` or later), and deploy. The runner log reports the selected providers, for example
+`providers=['CUDAExecutionProvider', 'CPUExecutionProvider']`; CPU only means the CUDA provider
+failed to initialize (see Troubleshooting).
+
+### 4. Inspect the graph signature
+
+The runtime publishes the graph's inputs and outputs on the V2 metadata endpoint. Symbolic
+dimensions such as the batch size appear as `-1`:
+
+```bash
+curl -s "$PROXY/oip/v2/models/<served-model-name>"
+```
+
+```json
+{
+  "name": "accident-detection",
+  "inputs": [{ "name": "images", "datatype": "FP32", "shape": [-1, 3, 224, 224] }],
+  "outputs": [{ "name": "output0", "datatype": "FP32", "shape": [-1, 2] }]
+}
+```
+
+### 5. Run inference
+
+Send a KServe V2 request whose inputs are named after the graph's inputs. A single-input model
+also accepts any one input name:
+
+```bash
+curl -s "$PROXY/oip/v2/models/<served-model-name>/infer" \
+  -H 'content-type: application/json' \
+  -d '{
+    "inputs": [
+      { "name": "images", "datatype": "FP32", "shape": [1, 3, 224, 224], "data": [0.0, 0.1, ...] }
+    ]
+  }'
+```
+
+Every model output is returned under its own name unless the request lists `outputs`. Numeric
+inputs are cast to the declared type, so `FP64` data sent to a `tensor(float)` input works.
+Non-tensor outputs, such as the per-row probability maps emitted by a sklearn-onnx classifier's
+ZipMap node, are returned as `BYTES` JSON documents. MLServer encodes one-dimensional data as
+`[N, 1]`; the runtime squeezes that trailing dimension when the graph declares a rank-1 input.
 
 ## Automatic detection
 
