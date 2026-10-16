@@ -20,6 +20,8 @@ class _FakeEngine:  # mirrors the MLServerEngine(args, repo_dir) surface app.py 
     def __init__(self, args: Any, repo_dir: str) -> None:  # noqa: ANN401
         del args, repo_dir
         self.base_url = "http://127.0.0.1:0"
+        self.metrics_url = "http://127.0.0.1:0"
+        self.rest_metrics_prefix = "rest_server"
 
     def start(self) -> None: ...
 

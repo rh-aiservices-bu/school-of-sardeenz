@@ -15,9 +15,13 @@ from typing import Any
 
 SKLEARN_IMPL = "mlserver_sklearn.SKLearnModel"
 HUGGINGFACE_IMPL = "mlserver_huggingface.HuggingFaceRuntime"
+# Shipped by this package (Seldon publishes no mlserver-onnx); resolved by `mlserver start` inside
+# the SIF where the shim is installed next to mlserver + onnxruntime-gpu.
+ONNX_IMPL = "sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel"
 
 _SKLEARN_MARKERS = (".joblib", ".pkl", ".bst")
 _HUGGINGFACE_WEIGHT_MARKERS = (".safetensors", "pytorch_model.bin", "tokenizer.json")
+_ONNX_MARKERS = (".onnx",)
 
 
 def infer_implementation(source_dir: str) -> str:
@@ -38,10 +42,16 @@ def infer_implementation(source_dir: str) -> str:
     if "config.json" in entries and any(name.endswith(_HUGGINGFACE_WEIGHT_MARKERS) for name in entries):
         return HUGGINGFACE_IMPL
 
+    # Checked after HuggingFace on purpose: an optimum export (config.json + tokenizer.json +
+    # model.onnx) is a transformers model that needs the HF runtime's tokenizer pipeline, not the
+    # raw-tensor ONNX runtime. A bare *.onnx export (sklearn-onnx, torch.onnx, tf2onnx) lands here.
+    if any(name.endswith(_ONNX_MARKERS) for name in entries):
+        return ONNX_IMPL
+
     raise ValueError(
         f"Could not infer an MLServer runtime for {source_dir!r}: expected sklearn/xgboost "
-        "artifacts (*.joblib, *.pkl, *.bst, model.json) or a HuggingFace repo (config.json + "
-        "*.safetensors/pytorch_model.bin/tokenizer.json)."
+        "artifacts (*.joblib, *.pkl, *.bst, model.json), a HuggingFace repo (config.json + "
+        "*.safetensors/pytorch_model.bin/tokenizer.json), or an ONNX export (*.onnx)."
     )
 
 

@@ -8,19 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Published documentation site (mkdocs-material, GitHub Pages) built from `docs/` by a new
-  `deploy-docs` workflow (application docs only: project planning and ADRs stay in the repo), with an interactive Architecture Flow Visualizer
-  (`docs/architecture-visualizer.html`) animating eight v2 flows: cluster bootstrap, model
-  deployment, inference hot path, park-and-wake, LRU eviction, instance move, control plane
-  failover, and runner catalog import. Links to source files outside `docs/` are rewritten to
-  GitHub URLs at build time so `mkdocs build --strict` validates in-site links.
+- **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
+  `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last PyPI build for CUDA 12) and the shim ships its own
+  MLServer runtime, `sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel`, since Seldon
+  publishes no `mlserver-onnx`. A model directory holding a `*.onnx` export (and no sklearn or
+  Hugging Face markers) is auto-detected; explicit `model-settings.json` can pin the artifact,
+  execution providers (`parameters.extra.providers`, CUDA preferred with CPU fallback), provider
+  options and session options. Tensors map to KServe V2 inputs/outputs by name; structured
+  outputs (e.g. ZipMap classifier probabilities) come back as `BYTES` JSON. The `mlserver-1.7.1`
+  catalog entry gains the `onnx` tag and is pinned to the rebuilt `mlserver:1.7.1-rc4` SIF
+  (`sha256:c9c6f049…`), the first published build with the runtime, the #206 drain fix and the
+  CUDA-library fix below.
+  The runtime now checks the session's active providers after load: an explicit
+  `parameters.extra.providers` list that onnxruntime could not initialise fails the load, and
+  the default CUDA-then-CPU preference logs a `falling back to` warning instead of serving
+  silently on CPU.
 
 ### Fixed
 
-- Flaky dashboard e2e accessibility test: the Cluster Overview readiness check now targets the
-  Workers summary card instead of an unscoped text match that also hit the sidebar nav link.
-- Sidebar GitHub star and fork counts now render in production: the lookup goes through a cached
-  BFF route instead of a browser fetch the Content Security Policy blocked.
+- **MLServer SIF: ONNX models silently ran on CPU.** The `1.7.1-rc3` image installed the
+  `nvidia-*-cu12` wheels for `onnxruntime-gpu`, but RHEL-family Python places those pure wheels
+  under `/usr/local/lib/...` while `onnxruntime-gpu` sits under `/usr/local/lib64/...`, so
+  `onnxruntime.preload_dlls` never found `libcudnn.so.9` and the CUDA provider degraded to CPU
+  (0 B measured VRAM). The Containerfile now puts the cu12 `lib/` directories on
+  `LD_LIBRARY_PATH`, `dlopen()`s every CUDA/cuDNN library at build time (the previous
+  `preload_dlls` check only printed), and pins `torch==2.10.0` — the last CUDA 12 torch — since an
+  unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. Verified
+  on-cluster: an ONNX model now loads with `CUDAExecutionProvider` and reports measured VRAM.
+- **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
+  `/health`, so the control plane's drain loop could never observe drain completion and every
+  stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
+  The shim now scrapes MLServer's metrics listener for the REST server's
+  `rest_server_requests_in_progress` gauge and reports it as `activeRequests` (unknown/omitted
+  only when the scrape fails, never a fake 0), matching the vLLM shim's behavior.
 
 ## [0.2.0] - 2026-09-15
 
@@ -130,6 +150,13 @@ development (Phases 0-4 and milestones M1-M14) is preserved in the git history o
   conformance suites, and service container build and smoke tests on every pull request.
 - Architecture overview, 21 ADRs, per-component specs, and per-component `AGENTS.md` guides for
   AI-assisted development.
+- Published documentation site (mkdocs-material, GitHub Pages) built from `docs/` by a
+  `deploy-docs` workflow. Application docs only: project planning and ADRs stay in the repo, and
+  links to them or to source files are rewritten to GitHub URLs at build time so
+  `mkdocs build --strict` validates in-site links. Includes an interactive Architecture Flow
+  Visualizer (`docs/architecture-visualizer.html`) animating eight flows: cluster bootstrap, model
+  deployment, inference hot path, park-and-wake, LRU eviction, instance move, control plane
+  failover, and runner catalog import.
 
 ### Notable fixes folded into this release
 
@@ -138,4 +165,7 @@ runner processes not terminated on delete, stop, or eviction; VRAM reservations 
 prematurely or leaked; move and delete races; parked-connection and circuit-breaker leaks in the
 proxy; routing entries corrupted on sleep; integration tests wiping the dev database; MLServer
 failing on read-only images; OAuth identity and RBAC lookups on OpenShift; and proxy histograms
-rendered as summaries, which left latency panels empty.
+rendered as summaries, which left latency panels empty; sidebar GitHub star and fork counts
+blocked by the Content Security Policy in production (now proxied through a cached BFF route);
+and a flaky dashboard e2e accessibility test whose readiness check matched both the sidebar nav
+link and the Workers summary card.
