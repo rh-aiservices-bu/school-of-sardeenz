@@ -125,7 +125,7 @@ Supported `extra` keys:
 
 In the dashboard, enter `/weights/accident-detection` as **Model Path**, choose the MLServer runner
 type and an `IMPORTED` MLServer module that contains ONNX support (`mlserver-1.7.1`, built as
-`1.7.1-rc2` or later), and deploy. The runner log reports the selected providers, for example
+`1.7.1-rc3` or later), and deploy. The runner log reports the selected providers, for example
 `providers=['CUDAExecutionProvider', 'CPUExecutionProvider']`; CPU only means the CUDA provider
 failed to initialize (see Troubleshooting).
 
