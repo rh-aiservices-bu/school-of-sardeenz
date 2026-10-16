@@ -16,8 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   execution providers (`parameters.extra.providers`, CUDA preferred with CPU fallback), provider
   options and session options. Tensors map to KServe V2 inputs/outputs by name; structured
   outputs (e.g. ZipMap classifier probabilities) come back as `BYTES` JSON. The `mlserver-1.7.1`
-  catalog entry gains the `onnx` tag; the published SIF must be rebuilt from the updated
-  Containerfile to pick the runtime up.
+  catalog entry gains the `onnx` tag and is pinned to the rebuilt `mlserver:1.7.1-rc2` SIF
+  (`sha256:3fe5c281…`), the first build that contains the runtime.
 
 ## [0.2.0] - 2026-09-15
 
