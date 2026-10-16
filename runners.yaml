@@ -92,8 +92,9 @@ runners:
     title: MLServer 1.7.1 (KServe V2)
     description: >-
       Seldon MLServer 1.7.1 inference server speaking the KServe V2 Open Inference Protocol
-      (/oip/v2). GPU-backed runtimes (scikit-learn CPU-classical + HuggingFace/torch). Supports
-      sleep/wake via model unload/load. Not OpenAI-compatible.
+      (/oip/v2). Runtimes: scikit-learn (CPU-classical), HuggingFace/torch, and plain ONNX graphs
+      via onnxruntime-gpu (CUDA with CPU fallback). Supports sleep/wake via model unload/load.
+      Not OpenAI-compatible.
     engine: MLServer
     runnerType: mlserver
     version: '1.7.1'
@@ -101,7 +102,7 @@ runners:
     sifName: mlserver-1.7.1
     protocol: oip
     entrypoint: [python3, -m, sardeenz_mlserver_runner]
-    tags: [oip, cuda, sklearn, huggingface]
+    tags: [oip, cuda, sklearn, huggingface, onnx]
     minVRAMGiB: 1
     license: Apache-2.0
     supportedModelTypes: [PREDICTIVE, LLM, EMBEDDING]

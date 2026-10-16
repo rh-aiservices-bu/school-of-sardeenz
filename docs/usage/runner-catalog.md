@@ -104,7 +104,7 @@ are covered in the [MLServer model deployment guide](mlserver-models.md).
 ```yaml
 - id: mlserver-1.7
   title: MLServer 1.7 (KServe V2)
-  description: Seldon MLServer 1.7 — KServe V2 Open Inference Protocol, sklearn/HF-backed.
+  description: Seldon MLServer 1.7 — KServe V2 Open Inference Protocol, sklearn/HF/ONNX-backed.
   engine: MLServer
   runnerType: mlserver
   version: '1.7'

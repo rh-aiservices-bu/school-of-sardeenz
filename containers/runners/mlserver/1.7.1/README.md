@@ -18,8 +18,12 @@ wheels, nothing to compile):
    from UBI AppStream; UBI does not expose a `python312` DNF module stream.
 2. `pip install`s the pinned MLServer runtime set — `mlserver==1.7.1`,
    `mlserver-sklearn==1.7.1` (CPU-classical baseline), `mlserver-huggingface==1.7.1` (GPU torch
-   runtime). No xgboost/lightgbm/mlflow runtimes yet (issue "Initial runtime set"; additive later
-   as a package pin + catalog entry, no code change).
+   runtime) — then swaps the CPU-only `onnxruntime` wheel that `mlserver-huggingface` pulls in
+   for `onnxruntime-gpu[cuda,cudnn]==1.26.0`, which backs the shim's own ONNX runtime
+   (`sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel`; Seldon publishes no
+   `mlserver-onnx`). The `[cuda,cudnn]` extras ship the CUDA 12.8 + cuDNN 9 libraries that build
+   links against, since the base's 12.6 toolkit is older; the runtime preloads them. No
+   xgboost/lightgbm/mlflow runtimes yet (additive later as a package pin + catalog entry).
 3. `pip install`s the runner-contract shim from `runners/mlserver/` (`sardeenz-mlserver-runner`),
    so the SIF serves the [engine-runner
    contract](../../../../packages/contracts/specs/engine-runner.yaml) and drives MLServer.
@@ -31,16 +35,20 @@ quay.io/rh-aiservices-bu/sardeenz-runner-images/mlserver:1.7 .`
 
 ## Pins (keep in sync; re-test on any bump)
 
-| Input                  | Value                             | Note                                              |
-| ---------------------- | --------------------------------- | ------------------------------------------------- |
-| base image             | `nvidia/cuda:12.6.3-runtime-ubi9` | **placeholder — pin `@sha256` before publishing** |
-| Python                 | `3.12`                            | MLServer 1.7.1 requires `>=3.9,<3.13`             |
-| `mlserver`             | `1.7.1`                           |                                                   |
-| `mlserver-sklearn`     | `1.7.1`                           | CPU-classical baseline                            |
-| `mlserver-huggingface` | `1.7.1`                           | GPU torch runtime                                 |
+| Input                  | Value                             | Note                                               |
+| ---------------------- | --------------------------------- | -------------------------------------------------- |
+| base image             | `nvidia/cuda:12.6.3-runtime-ubi9` | **placeholder — pin `@sha256` before publishing**  |
+| Python                 | `3.12`                            | MLServer 1.7.1 requires `>=3.9,<3.13`              |
+| `mlserver`             | `1.7.1`                           |                                                    |
+| `mlserver-sklearn`     | `1.7.1`                           | CPU-classical baseline                             |
+| `mlserver-huggingface` | `1.7.1`                           | GPU torch runtime                                  |
+| `onnxruntime-gpu`      | `1.26.0` (`[cuda,cudnn]` extras)  | last PyPI build for CUDA 12; 1.27+ default CUDA 13 |
 
-On any bump, re-run the MLServer shim's pytest suite (`runners/mlserver`) and re-validate the
-gRPC/metrics aux-port offsets (`sardeenz_mlserver_runner/cli.py`) before publishing.
+On any bump, re-run the MLServer shim's pytest suite (`runners/mlserver`, including
+`tests/test_onnx_runtime.py` from a venv with `mlserver`, `onnxruntime` and `onnx` installed) and
+re-validate the gRPC/metrics aux-port offsets (`sardeenz_mlserver_runner/cli.py`) before
+publishing. Bumping `onnxruntime-gpu` past 1.26 requires either a CUDA 13 base + driver or the
+separate CUDA 12 package index documented by onnxruntime.
 
 ## Runtime notes (handled by the worker agent, not here)
 

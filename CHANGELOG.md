@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
+  `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last PyPI build for CUDA 12) and the shim ships its own
+  MLServer runtime, `sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel`, since Seldon
+  publishes no `mlserver-onnx`. A model directory holding a `*.onnx` export (and no sklearn or
+  Hugging Face markers) is auto-detected; explicit `model-settings.json` can pin the artifact,
+  execution providers (`parameters.extra.providers`, CUDA preferred with CPU fallback), provider
+  options and session options. Tensors map to KServe V2 inputs/outputs by name; structured
+  outputs (e.g. ZipMap classifier probabilities) come back as `BYTES` JSON. The `mlserver-1.7.1`
+  catalog entry gains the `onnx` tag; the published SIF must be rebuilt from the updated
+  Containerfile to pick the runtime up.
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the
