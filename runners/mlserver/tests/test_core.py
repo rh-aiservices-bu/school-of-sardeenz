@@ -12,13 +12,13 @@ import os
 import sys
 import types
 
+import httpx
 import pytest
-
 from sardeenz_mlserver_runner import memory as mem
 from sardeenz_mlserver_runner import settings as cfg
 from sardeenz_mlserver_runner import state as st
 from sardeenz_mlserver_runner.cli import _extract_served_names, aux_ports, parse_args
-from sardeenz_mlserver_runner.engine import MLServerEngine
+from sardeenz_mlserver_runner.engine import MLServerEngine, scrape_active_requests
 
 
 def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) -> None:
@@ -352,3 +352,224 @@ def test_memory_report_empty_without_cuda(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delitem(sys.modules, "torch", raising=False)
     report = mem.memory_report()
     assert report["devices"] == []
+
+
+# --- settings.py + onnx_support.py (ONNX runtime selection + pure helpers) ---------------------
+
+
+def test_infer_implementation_onnx_export(tmp_path):
+    (tmp_path / "model.onnx").write_bytes(b"fake")
+
+    assert cfg.infer_implementation(str(tmp_path)) == cfg.ONNX_IMPL
+
+
+def test_infer_implementation_prefers_huggingface_over_optimum_onnx(tmp_path):
+    # An optimum export (config.json + tokenizer.json + model.onnx) is a transformers model:
+    # it must stay on the HF runtime, not the raw-tensor ONNX runtime.
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "tokenizer.json").write_text("{}")
+    (tmp_path / "model.onnx").write_bytes(b"fake")
+
+    assert cfg.infer_implementation(str(tmp_path)) == cfg.HUGGINGFACE_IMPL
+
+
+def test_build_model_settings_generates_onnx_when_absent(tmp_path):
+    (tmp_path / "classifier.onnx").write_bytes(b"fake")
+
+    settings = cfg.build_model_settings(str(tmp_path), "served")
+
+    assert settings == {
+        "name": "served",
+        "implementation": cfg.ONNX_IMPL,
+        "parameters": {"uri": str(tmp_path)},
+    }
+
+
+def test_resolve_onnx_artifact_prefers_wellknown_then_single_file(tmp_path):
+    from sardeenz_mlserver_runner import onnx_support as onnx
+
+    single = tmp_path / "single"
+    single.mkdir()
+    (single / "classifier.onnx").write_bytes(b"fake")
+    assert onnx.resolve_onnx_artifact(str(single)) == str(single / "classifier.onnx")
+
+    wellknown = tmp_path / "wellknown"
+    wellknown.mkdir()
+    (wellknown / "model.onnx").write_bytes(b"fake")
+    (wellknown / "other.onnx").write_bytes(b"fake")
+    assert onnx.resolve_onnx_artifact(str(wellknown)) == str(wellknown / "model.onnx")
+
+    assert onnx.resolve_onnx_artifact(str(single / "classifier.onnx")) == str(single / "classifier.onnx")
+
+
+def test_resolve_onnx_artifact_rejects_none_or_ambiguous(tmp_path):
+    from sardeenz_mlserver_runner import onnx_support as onnx
+
+    with pytest.raises(ValueError, match="No \\*.onnx artifact"):
+        onnx.resolve_onnx_artifact(str(tmp_path))
+
+    (tmp_path / "a.onnx").write_bytes(b"fake")
+    (tmp_path / "b.onnx").write_bytes(b"fake")
+    with pytest.raises(ValueError, match="Several \\*.onnx artifacts"):
+        onnx.resolve_onnx_artifact(str(tmp_path))
+
+    with pytest.raises(ValueError, match="neither a file nor a directory"):
+        onnx.resolve_onnx_artifact(str(tmp_path / "missing"))
+
+
+def test_select_providers_prefers_cuda_and_validates_requests():
+    from sardeenz_mlserver_runner import onnx_support as onnx
+
+    gpu_build = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert onnx.select_providers(None, gpu_build) == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert onnx.select_providers(None, ["CPUExecutionProvider"]) == ["CPUExecutionProvider"]
+    assert onnx.select_providers(["CPUExecutionProvider"], gpu_build) == ["CPUExecutionProvider"]
+    with pytest.raises(ValueError, match="not available"):
+        onnx.select_providers(["CUDAExecutionProvider"], ["CPUExecutionProvider"])
+    with pytest.raises(ValueError, match="No usable"):
+        onnx.select_providers(None, [])
+
+
+def test_map_request_inputs_exact_then_positional_single():
+    from sardeenz_mlserver_runner import onnx_support as onnx
+
+    assert onnx.map_request_inputs(["x", "y"], ["y", "x"]) == {"x": "x", "y": "y"}
+    assert onnx.map_request_inputs(["input-0"], ["float_input"]) == {"input-0": "float_input"}
+    with pytest.raises(ValueError, match="do not match"):
+        onnx.map_request_inputs(["x", "typo"], ["x", "y"])
+    with pytest.raises(ValueError, match="do not match"):
+        onnx.map_request_inputs(["typo"], ["x", "y"])
+
+
+def test_ort_type_mapping_and_shape_normalisation():
+    from sardeenz_mlserver_runner import onnx_support as onnx
+
+    assert onnx.ort_type_to_numpy_dtype("tensor(float)") == "float32"
+    assert onnx.ort_type_to_numpy_dtype("seq(map(int64,tensor(float)))") is None
+    assert onnx.ort_type_to_v2_datatype("tensor(int64)") == "INT64"
+    assert onnx.ort_type_to_v2_datatype("tensor(string)") == "BYTES"
+    assert onnx.ort_type_to_v2_datatype("seq(map(int64,tensor(float)))") == "BYTES"
+    assert onnx.normalize_shape(["batch", 4, None]) == [-1, 4, -1]
+    assert onnx.normalize_shape(None) == []
+
+
+def test_coerce_input_and_output_round_trip():
+    np = pytest.importorskip("numpy")
+    from sardeenz_mlserver_runner import onnx_support as onnx
+
+    doubles = np.array([[1.0, 2.0]], dtype=np.float64)
+    assert onnx.coerce_input(doubles, "tensor(float)").dtype == np.float32
+    assert onnx.coerce_input(doubles, "tensor(double)") is doubles
+    assert onnx.coerce_input(doubles, "seq(tensor(float))") is doubles
+    # MLServer encodes 1-D data as [N, 1]; a rank-1 model input gets it squeezed back
+    column = np.array([[1.0], [2.0]], dtype=np.float32)
+    assert onnx.coerce_input(column, "tensor(float)", ["batch"]).shape == (2,)
+    assert onnx.coerce_input(column, "tensor(float)", ["batch", 1]).shape == (2, 1)
+    assert onnx.coerce_input(column, "tensor(float)", None).shape == (2, 1)
+
+    ints = np.array([1, 2], dtype=np.int64)
+    assert onnx.coerce_output(ints) is ints
+    assert onnx.coerce_output([[0.1, 0.9]]).dtype == np.float64
+    # ZipMap-style sequence(map) output → one JSON document per row
+    assert onnx.coerce_output([{0: 0.25, 1: np.float32(0.75)}]) == ['{"0": 0.25, "1": 0.75}']
+
+# --- engine.py (metrics scrape, #206) --------------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeClient:
+    def __init__(self, resp: _FakeResp | Exception) -> None:
+        self._resp = resp
+
+    async def get(self, url: str, timeout: float) -> _FakeResp:
+        del url, timeout
+        if isinstance(self._resp, Exception):
+            raise self._resp
+        return self._resp
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_sums_in_progress_gauge():
+    # starlette_exporter exposes one sample per (method, app_name) label set; the drain
+    # signal is their sum. GET vs POST samples must both count.
+    body = (
+        '# HELP rest_server_requests_in_progress Total HTTP requests currently in progress\n'
+        '# TYPE rest_server_requests_in_progress gauge\n'
+        'rest_server_requests_in_progress{method="GET",app_name="mlserver"} 1.0\n'
+        'rest_server_requests_in_progress{method="POST",app_name="mlserver"} 2.0\n'
+    )
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "rest_server")
+    assert active == 3
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_zero_when_drained():
+    body = 'rest_server_requests_in_progress{method="POST",app_name="mlserver"} 0.0\n'
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "rest_server")
+    assert active == 0
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_ignores_other_gauge_names():
+    # The scrape must not confuse the in-progress gauge with e.g.
+    # rest_server_requests_in_progress_created or other prefix-adjacent metrics.
+    body = (
+        'rest_server_requests_in_progress_created{method="GET",app_name="mlserver"} 1.5\n'
+        'rest_server_requests{method="GET",path="/",status_code="200",app_name="mlserver"} 9.0\n'
+    )
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "rest_server")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_when_metrics_unreachable():
+    active = await scrape_active_requests(
+        _FakeClient(httpx.ConnectError("refused")), "http://x", "rest_server"
+    )
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_on_non_200():
+    active = await scrape_active_requests(_FakeClient(_FakeResp(503, "")), "http://x", "rest_server")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_when_gauge_absent():
+    # Metrics listener reachable but the in-progress gauge absent (metrics disabled):
+    # unknown, not drained.
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, "")), "http://x", "rest_server")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_honors_custom_prefix():
+    body = 'custom_requests_in_progress{method="GET",app_name="mlserver"} 4.0\n'
+    active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "custom")
+    assert active == 4
+
+
+# --- onnx_support.missing_providers ---------------------------------------------------------
+
+
+def test_missing_providers_empty_when_session_has_everything():
+    from sardeenz_mlserver_runner import onnx_support as support
+
+    chosen = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert support.missing_providers(chosen, chosen) == []
+
+
+def test_missing_providers_reports_dropped_cuda_in_order():
+    from sardeenz_mlserver_runner import onnx_support as support
+
+    chosen = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert support.missing_providers(chosen, ["CPUExecutionProvider"]) == [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+    ]

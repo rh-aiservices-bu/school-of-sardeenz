@@ -27,8 +27,16 @@ identity out of the `--served-model-name` passthrough instead of forwarding it.
   it is copied with only `name` overridden (and `parameters.uri` rebased to an absolute path);
   otherwise one is generated, inferring the runtime `implementation` from the dir's contents
   (sklearn/xgboost artifacts → `mlserver_sklearn.SKLearnModel`; a HuggingFace repo →
-  `mlserver_huggingface.HuggingFaceRuntime`). This enforces the served identity regardless of what
-  name the weights happen to carry (#77 lesson).
+  `mlserver_huggingface.HuggingFaceRuntime`; a bare `*.onnx` export →
+  `sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel`). This enforces the served identity
+  regardless of what name the weights happen to carry (#77 lesson).
+- Ships the **ONNX runtime** MLServer resolves for that last implementation string
+  (`onnx_runtime.py`, pure helpers in `onnx_support.py`): one `onnxruntime.InferenceSession`
+  per model, CUDA provider preferred with CPU fallback, request inputs fed by name (a single-input
+  model accepts any one name), outputs returned by name, structured (`sequence(map)`) outputs
+  JSON-encoded as `BYTES`. `parameters.extra` accepts `providers`, `provider_options` and
+  `session_options`. Seldon publishes no `mlserver-onnx`, hence the in-package runtime; it is
+  only imported by `mlserver start` inside the SIF, never by the management API.
 - Launches `mlserver start <generated-repo-dir>` as a child process — the KServe V2 HTTP server.
   Inference traffic flows straight to that port via the proxy (`/oip/v2/...`, stripped to `/v2/...`
   before forwarding) — it is **not** part of this contract.
@@ -92,6 +100,8 @@ sardeenz_mlserver_runner/
 ├── settings.py   # writable model-repository generation/rewrite (pure + filesystem)
 ├── engine.py     # MLServer subprocess lifecycle + KServe V2 repository client
 ├── memory.py     # best-effort device memory report (verbatim from the vLLM shim)
+├── onnx_runtime.py  # MLServer MLModel for *.onnx graphs (imports mlserver + onnxruntime; SIF-only)
+├── onnx_support.py  # pure helpers behind it: artifact/provider selection, dtype/shape fitting
 └── state.py      # RunnerState machine + contract-shape response builders + V2 path builders (pure)
 ```
 
@@ -102,17 +112,22 @@ sardeenz_mlserver_runner/
 - **Memory attribution** is best-effort, identical to the vLLM shim's `memory.py`. CPU-only
   sklearn models introspect no CUDA device, so `/memory-report` answers 409.
 - **Dependencies** (`fastapi`, `uvicorn`, `httpx`, `mlserver`, `mlserver-sklearn`,
-  `mlserver-huggingface`, `torch`) come from the `runner-mlserver` image; `pyproject.toml` lists
-  them for dev installs but does not pin them.
+  `mlserver-huggingface`, `onnxruntime-gpu`, `torch`) come from the `runner-mlserver` image;
+  `pyproject.toml` lists them for dev installs but does not pin them.
 
 ## Tests
 
-`cli.py`/`settings.py`/`state.py`/`memory.py` are pure (or filesystem-only) and unit-tested without
-MLServer/torch/httpx/FastAPI:
+`cli.py`/`settings.py`/`state.py`/`memory.py`/`onnx_support.py` are pure (or filesystem-only) and
+unit-tested without MLServer/torch/httpx/FastAPI:
 
 ```bash
 cd runners/mlserver && python3 -m pytest
 ```
+
+`tests/test_onnx_runtime.py` drives the real `ONNXRuntimeModel` through MLServer's `MLModel` API
+with a generated graph; it skips unless `mlserver`, `onnxruntime` and `onnx` are importable, so run
+it from a venv that has them (e.g. `uv pip install mlserver==1.7.1 onnxruntime onnx`) whenever the
+runtime or the pinned `onnxruntime-gpu` changes.
 
 This suite plus the vLLM shim's and the shared `runners/conformance` suite run together in CI
 (the `python` job) and via `make test-python` (after `make test-python-deps`).

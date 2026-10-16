@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
+  `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last PyPI build for CUDA 12) and the shim ships its own
+  MLServer runtime, `sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel`, since Seldon
+  publishes no `mlserver-onnx`. A model directory holding a `*.onnx` export (and no sklearn or
+  Hugging Face markers) is auto-detected; explicit `model-settings.json` can pin the artifact,
+  execution providers (`parameters.extra.providers`, CUDA preferred with CPU fallback), provider
+  options and session options. Tensors map to KServe V2 inputs/outputs by name; structured
+  outputs (e.g. ZipMap classifier probabilities) come back as `BYTES` JSON. The `mlserver-1.7.1`
+  catalog entry gains the `onnx` tag and is pinned to the rebuilt `mlserver:1.7.1-rc4` SIF
+  (`sha256:c9c6f049…`), the first published build with the runtime, the #206 drain fix and the
+  CUDA-library fix below.
+  The runtime now checks the session's active providers after load: an explicit
+  `parameters.extra.providers` list that onnxruntime could not initialise fails the load, and
+  the default CUDA-then-CPU preference logs a `falling back to` warning instead of serving
+  silently on CPU.
+
+### Fixed
+
+- **MLServer SIF: ONNX models silently ran on CPU.** The `1.7.1-rc3` image installed the
+  `nvidia-*-cu12` wheels for `onnxruntime-gpu`, but RHEL-family Python places those pure wheels
+  under `/usr/local/lib/...` while `onnxruntime-gpu` sits under `/usr/local/lib64/...`, so
+  `onnxruntime.preload_dlls` never found `libcudnn.so.9` and the CUDA provider degraded to CPU
+  (0 B measured VRAM). The Containerfile now puts the cu12 `lib/` directories on
+  `LD_LIBRARY_PATH`, `dlopen()`s every CUDA/cuDNN library at build time (the previous
+  `preload_dlls` check only printed), and pins `torch==2.10.0` — the last CUDA 12 torch — since an
+  unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. Verified
+  on-cluster: an ONNX model now loads with `CUDAExecutionProvider` and reports measured VRAM.
+- **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
+  `/health`, so the control plane's drain loop could never observe drain completion and every
+  stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
+  The shim now scrapes MLServer's metrics listener for the REST server's
+  `rest_server_requests_in_progress` gauge and reports it as `activeRequests` (unknown/omitted
+  only when the scrape fails, never a fake 0), matching the vLLM shim's behavior.
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the
