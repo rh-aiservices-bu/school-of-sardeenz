@@ -115,19 +115,21 @@ The `implementation` must be exactly the string shown; Seldon publishes no `mlse
 runtime. As with every runtime, `name` is replaced by the deployment's served model name.
 Supported `extra` keys:
 
-| Key                | Meaning                                                                                                                               |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `providers`        | onnxruntime execution providers in priority order. Default: `CUDAExecutionProvider` when the SIF has it, then `CPUExecutionProvider`. |
-| `provider_options` | Per-provider options, for example `{"CUDAExecutionProvider": {"device_id": 0}}`.                                                      |
-| `session_options`  | Attributes set on `onnxruntime.SessionOptions`, for example `{"intra_op_num_threads": 4}`.                                            |
+| Key                | Meaning                                                                                                                                                                                                                                                                           |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `providers`        | onnxruntime execution providers in priority order. Default: `CUDAExecutionProvider` when the SIF has it, then `CPUExecutionProvider`. With an explicit list, a provider that fails to initialize is a load error; with the default, the runtime logs a warning and serves on CPU. |
+| `provider_options` | Per-provider options, for example `{"CUDAExecutionProvider": {"device_id": 0}}`.                                                                                                                                                                                                  |
+| `session_options`  | Attributes set on `onnxruntime.SessionOptions`, for example `{"intra_op_num_threads": 4}`.                                                                                                                                                                                        |
 
 ### 3. Deploy
 
 In the dashboard, enter `/weights/accident-detection` as **Model Path**, choose the MLServer runner
 type and an `IMPORTED` MLServer module that contains ONNX support (`mlserver-1.7.1`, built as
-`1.7.1-rc3` or later), and deploy. The runner log reports the selected providers, for example
+`1.7.1-rc4` or later), and deploy. The runner log reports the active providers, for example
 `providers=['CUDAExecutionProvider', 'CPUExecutionProvider']`; CPU only means the CUDA provider
-failed to initialize (see Troubleshooting).
+failed to initialize, which the runtime also logs as a warning (see Troubleshooting). To refuse a
+CPU fallback outright, pin `"providers": ["CUDAExecutionProvider"]` in `model-settings.json`: the
+load then fails instead of serving silently on CPU.
 
 ### 4. Inspect the graph signature
 
@@ -233,8 +235,11 @@ is placed.
   provider listed in `extra.providers`, or the imported SIF predates ONNX support. Remove the
   entry to let the runtime fall back, or re-import a current MLServer SIF.
 - **ONNX model runs on CPU although a GPU was assigned:** the CUDA execution provider failed to
-  initialize; the runner log shows the onnxruntime message. Usually the host driver is older than
-  the CUDA 12.8 libraries bundled in the SIF.
+  initialize; the runner log shows the onnxruntime message and a `falling back to` warning from
+  the runtime, and the instance reports 0 B of measured VRAM. `libcudnn.so.9: cannot open shared
+object file` means the SIF predates `1.7.1-rc4` (its CUDA 12 libraries were not on the loader
+  path); re-import a current SIF. Otherwise the host driver is usually older than the CUDA 12.8
+  libraries bundled in the SIF (570 or newer is required).
 - **Request inputs do not match the model's inputs:** name the request inputs after the graph's
   inputs as listed by `GET /oip/v2/models/<served-model-name>`.
 - **MLServer is absent from Runner Type:** confirm an online worker advertises `mlserver` through

@@ -14,7 +14,9 @@ back under its own name. Structured (non-tensor) outputs such as a ZipMap classi
 ``parameters.extra`` keys understood from ``model-settings.json``:
 
 - ``providers``: list of onnxruntime execution providers, in priority order. Default: CUDA when
-  the build has it, then CPU.
+  the build has it, then CPU. onnxruntime silently drops a provider that fails to initialise
+  (missing CUDA libraries, no visible GPU); with an explicit list that is a load error, with the
+  default preference it is logged as a warning and the model serves on CPU.
 - ``provider_options``: ``{provider name: {option: value}}`` passed to the session (e.g.
   ``{"CUDAExecutionProvider": {"device_id": 0}}``).
 - ``session_options``: ``{option: value}`` applied as attributes on
@@ -49,11 +51,10 @@ class ONNXRuntimeModel(MLModel):
         model_uri = await get_model_uri(
             self._settings, wellknown_filenames=list(support.WELLKNOWN_ONNX_FILENAMES)
         )
+        requested = extra.get("providers")
         try:
             artifact = support.resolve_onnx_artifact(model_uri)
-            providers = support.select_providers(
-                extra.get("providers"), ort.get_available_providers()
-            )
+            providers = support.select_providers(requested, ort.get_available_providers())
         except ValueError as exc:
             raise MLServerError(str(exc)) from exc
 
@@ -79,13 +80,31 @@ class ONNXRuntimeModel(MLModel):
                 artifact, sess_options=session_options, providers=provider_args
             ),
         )
+        active = list(self._session.get_providers())
+        missing = support.missing_providers(providers, active)
+        if missing and requested:
+            self._session = None
+            raise MLServerError(
+                f"onnxruntime could not initialise the requested providers {missing} for model "
+                f"{self.name} (session runs on {active}); see the onnxruntime warnings above "
+                "(missing CUDA/cuDNN libraries, no visible GPU, or driver too old)."
+            )
+        if missing:
+            logger.warning(
+                "ONNX model %s: providers %s failed to initialise, falling back to %s — the "
+                "model is NOT on the GPU; see the onnxruntime warnings above.",
+                self.name,
+                missing,
+                active,
+            )
+
         self._model_inputs = {node.name: node for node in self._session.get_inputs()}
         self._model_outputs = [node.name for node in self._session.get_outputs()]
         self._publish_metadata()
         logger.info(
             "ONNX model %s ready: providers=%s inputs=%s outputs=%s",
             self.name,
-            self._session.get_providers(),
+            active,
             list(self._model_inputs),
             self._model_outputs,
         )
@@ -165,18 +184,38 @@ class ONNXRuntimeModel(MLModel):
             ]
 
 
+def _cuda_provider_libraries(ort: Any) -> tuple[str, ...]:
+    """Sonames the CUDA provider dlopen()s, for the onnxruntime build's CUDA major (12 → ``.so.12``)."""
+    major = str(getattr(ort, "cuda_version", "") or "").split(".")[0] or "12"
+    return (f"libcudart.so.{major}", f"libcublasLt.so.{major}", "libcudnn.so.9")
+
+
 def _preload_cuda_libraries(ort: Any) -> None:
     """Load CUDA/cuDNN from the pip-installed NVIDIA packages before the CUDA provider initialises.
 
     ``onnxruntime-gpu`` is built against a newer CUDA toolkit than the SIF's base image carries,
-    so the image installs the ``[cuda,cudnn]`` extras (``nvidia-*-cu12`` wheels). ``preload_dlls``
-    (onnxruntime ≥ 1.21) makes the provider resolve those instead of whatever ``LD_LIBRARY_PATH``
-    happens to expose. Best-effort: on failure the provider itself reports what is missing.
+    so the image installs the ``[cuda,cudnn]`` extras (``nvidia-*-cu12`` wheels) and puts their
+    ``lib/`` directories on ``LD_LIBRARY_PATH`` (the Containerfile explains why ``preload_dlls``
+    alone cannot find them on a RHEL-family Python). ``preload_dlls`` (onnxruntime ≥ 1.21) never
+    raises — it only prints — so the libraries are re-checked by soname here and a failure is
+    logged at ERROR; the provider check in ``load`` then fails or warns.
     """
+    import ctypes
+
     preload = getattr(ort, "preload_dlls", None)
-    if preload is None:
-        return
-    try:
-        preload(cuda=True, cudnn=True, msvc=False)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("onnxruntime.preload_dlls failed (continuing): %s", exc)
+    if preload is not None:
+        try:
+            preload(cuda=True, cudnn=True, msvc=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("onnxruntime.preload_dlls failed (continuing): %s", exc)
+
+    for library in _cuda_provider_libraries(ort):
+        try:
+            ctypes.CDLL(library)
+        except OSError as exc:
+            logger.error(
+                "CUDA provider library %s is not loadable (%s): the CUDAExecutionProvider will "
+                "fail to initialise. Check LD_LIBRARY_PATH / the nvidia-*-cu12 wheels in the SIF.",
+                library,
+                exc,
+            )

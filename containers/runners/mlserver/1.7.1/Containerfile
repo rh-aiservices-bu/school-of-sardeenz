@@ -42,11 +42,19 @@ ENV HF_HUB_OFFLINE=1
 
 # Pinned MLServer runtime set (issue "Initial runtime set" — one CPU-classical + one GPU runtime;
 # NOT xgboost/lightgbm/mlflow, additive later as a package pin + catalog entry, no code change).
+#
+# torch is pinned to 2.10.0: the last PyPI torch built for CUDA 12 (2.11+ ship CUDA 13 wheels, which
+# need a >= 580 host driver and pull `nvidia-cudnn-cu13` — a wheel that writes the SAME
+# `nvidia/cudnn/lib/libcudnn.so.9` files as the `nvidia-cudnn-cu12` wheel onnxruntime-gpu needs,
+# so an unpinned torch silently clobbers one of the two cuDNN builds). 2.10.0 pulls the
+# `nvidia-*-cu12` wheels (CUDA 12.8, cuDNN 9.10) that onnxruntime-gpu 1.26 below reuses as-is.
 RUN python3.12 -m pip install --no-cache-dir --only-binary=:all: \
       mlserver==1.7.1 \
       mlserver-sklearn==1.7.1 \
-      mlserver-huggingface==1.7.1 && \
-    python3.12 -c 'from importlib.metadata import version; assert all(version(package) == "1.7.1" for package in ("mlserver", "mlserver-sklearn", "mlserver-huggingface"))'
+      mlserver-huggingface==1.7.1 \
+      torch==2.10.0 && \
+    python3.12 -c 'from importlib.metadata import version; assert all(version(package) == "1.7.1" for package in ("mlserver", "mlserver-sklearn", "mlserver-huggingface")); assert version("torch") == "2.10.0"; assert version("nvidia-cudnn-cu12").startswith("9.")' && \
+    if python3.12 -m pip show -q nvidia-cudnn-cu13 2>/dev/null; then echo "nvidia-cudnn-cu13 must not be installed (clobbers the cu12 cuDNN)"; exit 1; fi
 
 # ONNX runtime for the shim's ONNXRuntimeModel. mlserver-huggingface (via optimum[onnxruntime])
 # drags in the CPU-only `onnxruntime` wheel; it shares the `onnxruntime/` site-packages tree with
@@ -54,13 +62,25 @@ RUN python3.12 -m pip install --no-cache-dir --only-binary=:all: \
 # providers; optimum's import still resolves). Pinned to 1.26.0 — the last onnxruntime-gpu on
 # PyPI built for CUDA 12 (1.27+ default to CUDA 13; CUDA 12 builds moved to a separate index).
 # That build links against CUDA 12.8 + cuDNN 9, newer than this base's 12.6 toolkit, hence the
-# [cuda,cudnn] extras: the nvidia-*-cu12 wheels ship those libraries and the runtime preloads
-# them (onnxruntime.preload_dlls) before the CUDA provider initialises. Host driver must support
-# CUDA 12.8 (>= 570) — same requirement as the pip torch wheel the HF runtime pulls in.
+# [cuda,cudnn] extras: the nvidia-*-cu12 wheels (already present via the torch pin above) ship
+# those libraries. Host driver must support CUDA 12.8 (>= 570) — same requirement as torch 2.10.
 RUN python3.12 -m pip uninstall -y onnxruntime && \
     python3.12 -m pip install --no-cache-dir --only-binary=:all: \
       'onnxruntime-gpu[cuda,cudnn]==1.26.0' && \
-    python3.12 -c 'import onnxruntime as ort; from importlib.metadata import version; assert version("onnxruntime-gpu") == "1.26.0"; assert "CUDAExecutionProvider" in ort.get_available_providers(), ort.get_available_providers(); ort.preload_dlls(cuda=True, cudnn=True, msvc=False)'
+    python3.12 -c 'import onnxruntime as ort; from importlib.metadata import version; assert version("onnxruntime-gpu") == "1.26.0"; assert "CUDAExecutionProvider" in ort.get_available_providers(), ort.get_available_providers()'
+
+# Make the pip-shipped CUDA 12 libraries resolvable by the dynamic loader. RHEL-family Python splits
+# site-packages: platform wheels (onnxruntime-gpu, torch) go to /usr/local/lib64/..., pure wheels
+# (every nvidia-*-cu12 package) to /usr/local/lib/.... `onnxruntime.preload_dlls` only looks for
+# `nvidia/` next to its own package (lib64), so without this the CUDA provider fails with
+# "libcudnn.so.9: cannot open shared object file" and the session silently runs on CPU (rc3 bug).
+# The runtime check below dlopen()s every library the provider needs so a layout or pin change
+# fails the build instead of degrading to CPU at serve time. --cleanenv on the worker's
+# `apptainer exec` drops the HOST environment only; this image ENV is still applied in the SIF.
+ARG NVIDIA_PIP_LIBS=/usr/local/lib/python3.12/site-packages/nvidia
+ENV LD_LIBRARY_PATH=${NVIDIA_PIP_LIBS}/cuda_runtime/lib:${NVIDIA_PIP_LIBS}/cublas/lib:${NVIDIA_PIP_LIBS}/cudnn/lib:${NVIDIA_PIP_LIBS}/cuda_nvrtc/lib:${NVIDIA_PIP_LIBS}/cufft/lib:${NVIDIA_PIP_LIBS}/curand/lib:${LD_LIBRARY_PATH}
+RUN for d in cuda_runtime cublas cudnn cuda_nvrtc cufft curand; do test -d "${NVIDIA_PIP_LIBS}/$d/lib" || { echo "missing ${NVIDIA_PIP_LIBS}/$d/lib"; exit 1; }; done && \
+    python3.12 -c 'import ctypes, onnxruntime as ort; ort.preload_dlls(cuda=True, cudnn=True, msvc=False); [ctypes.CDLL(name) for name in ("libcudart.so.12", "libcublas.so.12", "libcublasLt.so.12", "libnvrtc.so.12", "libcufft.so.11", "libcurand.so.10", "libcudnn.so.9")]; print("CUDA 12 + cuDNN 9 libraries load")'
 
 # Runner-contract shim: serves the engine-runner contract and drives MLServer over KServe V2.
 # BUILD CONTEXT is the repo root (needed to reach runners/mlserver), e.g.

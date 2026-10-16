@@ -120,6 +120,18 @@ def select_providers(requested: Sequence[str] | None, available: Sequence[str]) 
     return chosen
 
 
+def missing_providers(chosen: Sequence[str], active: Sequence[str]) -> list[str]:
+    """Return the providers the session was asked for but did not end up with, in order.
+
+    onnxruntime never fails ``InferenceSession`` when a provider cannot initialise (missing
+    cuDNN, no visible GPU, driver too old): it logs a warning and runs on the remaining ones,
+    typically CPU. The runtime compares ``session.get_providers()`` against what it requested and
+    fails the load (explicit ``parameters.extra.providers``) or warns (default preference).
+    """
+    active_set = set(active)
+    return [p for p in chosen if p not in active_set]
+
+
 def ort_type_to_numpy_dtype(ort_type: str) -> str | None:
     """Map an onnxruntime type string (``tensor(float)``) to a numpy dtype name, or ``None``."""
     return _ORT_TO_NUMPY.get(ort_type)

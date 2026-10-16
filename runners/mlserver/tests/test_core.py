@@ -553,3 +553,23 @@ async def test_scrape_active_requests_honors_custom_prefix():
     body = 'custom_requests_in_progress{method="GET",app_name="mlserver"} 4.0\n'
     active = await scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x", "custom")
     assert active == 4
+
+
+# --- onnx_support.missing_providers ---------------------------------------------------------
+
+
+def test_missing_providers_empty_when_session_has_everything():
+    from sardeenz_mlserver_runner import onnx_support as support
+
+    chosen = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert support.missing_providers(chosen, chosen) == []
+
+
+def test_missing_providers_reports_dropped_cuda_in_order():
+    from sardeenz_mlserver_runner import onnx_support as support
+
+    chosen = ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+    assert support.missing_providers(chosen, ["CPUExecutionProvider"]) == [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+    ]
