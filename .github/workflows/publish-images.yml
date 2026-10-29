@@ -1,0 +1,281 @@
+name: Publish impacted images
+
+# Runs on every merge to dev. Detects which platform images are impacted by
+# the merge's changed paths, builds only those, tags them with the merge
+# commit's short sha (the 7-char form `git log --oneline` shows), and pushes
+# them to Quay. Worker-base/worker are digest-paired: worker always builds FROM
+# the digest of the worker-base built in the same run, and a worker-only change
+# fetches the last published worker-base digest from Quay.
+#
+# Impact map (mirrors the Dockerfiles' actual COPY graphs):
+#   proxy/**                                     → proxy
+#   control-plane/** or containers/control-plane/** → control-plane
+#   dashboard/**    or containers/dashboard/**   → dashboard
+#   packages/**, package.json, package-lock.json,
+#   tsconfig*.json (shared code)                 → control-plane + dashboard
+#   containers/worker-base/**                    → worker-base, then worker
+#   containers/worker/**                         → worker (from last worker-base)
+#   nothing matching (docs, CI, CHANGELOG only)  → no build, job exits green
+
+run-name: Publish impacted images :${{ github.sha }} from ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: quay.io
+  QUAY_NAMESPACE: rh-aiservices-bu
+
+jobs:
+  detect:
+    name: Detect impacted images
+    runs-on: ubuntu-latest
+    outputs:
+      proxy: ${{ steps.map.outputs.proxy }}
+      control-plane: ${{ steps.map.outputs.control-plane }}
+      dashboard: ${{ steps.map.outputs.dashboard }}
+      worker-base: ${{ steps.map.outputs.worker-base }}
+      worker: ${{ steps.map.outputs.worker }}
+      any: ${{ steps.map.outputs.any }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Map changed paths to images
+        id: map
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # For the first push after a branch creation github.event.before is the
+          # zero sha — diff the new commit against its parent instead.
+          if [[ "$BEFORE" =~ ^0+$ || -z "$BEFORE" ]]; then
+            BEFORE="$(git rev-parse "$AFTER^")"
+          fi
+
+          # Squash merges carry the whole PR; merge commits diff against the
+          # first parent so only the merged changes count.
+          if git rev-parse --verify "$BEFORE" >/dev/null 2>&1; then
+            changed="$(git diff --name-only "$BEFORE" "$AFTER")"
+          else
+            changed="$(git diff --name-only "$AFTER^" "$AFTER")"
+          fi
+          echo "Changed paths between $BEFORE and $AFTER:"
+          echo "$changed"
+          echo "$changed" > /tmp/changed.txt
+
+          has() { grep -qE "$1" /tmp/changed.txt; }
+
+          proxy=false
+          control_plane=false
+          dashboard=false
+          worker_base=false
+          worker=false
+
+          if has '^proxy/'; then
+            proxy=true
+          fi
+
+          if has '^(control-plane/|containers/control-plane/)'; then
+            control_plane=true
+          fi
+
+          if has '^(dashboard/|containers/dashboard/)'; then
+            dashboard=true
+          fi
+
+          # Shared code: workspaces consumed by both control-plane and dashboard
+          # (packages/contracts, packages/types, packages/utils), the root
+          # manifests that drive npm ci, and the shared tsconfig graph.
+          if has '^(packages/|package\.json$|package-lock\.json$|tsconfig[^/]*\.json$)'; then
+            control_plane=true
+            dashboard=true
+          fi
+
+          if has '^containers/worker-base/'; then
+            worker_base=true
+            worker=true
+          elif has '^containers/worker/'; then
+            worker=true
+          fi
+
+          any=false
+          if [[ "$proxy" == true || "$control_plane" == true || "$dashboard" == true || "$worker" == true ]]; then
+            any=true
+          fi
+
+          {
+            echo "proxy=$proxy"
+            echo "control-plane=$control_plane"
+            echo "dashboard=$dashboard"
+            echo "worker-base=$worker_base"
+            echo "worker=$worker"
+            echo "any=$any"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Impacted images: proxy=$proxy control-plane=$control_plane dashboard=$dashboard worker-base=$worker_base worker=$worker"
+
+  images:
+    name: Publish ${{ matrix.role }}
+    needs: detect
+    if: needs.detect.outputs.any == 'true' && matrix.build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role: proxy
+            build: ${{ needs.detect.outputs.proxy == 'true' }}
+            context: ./proxy
+            file: ./proxy/Dockerfile
+            repository: sardeenz-proxy
+          - role: control-plane
+            build: ${{ needs.detect.outputs.control-plane == 'true' }}
+            context: .
+            file: ./containers/control-plane/Dockerfile
+            repository: sardeenz-control-plane
+          - role: dashboard
+            build: ${{ needs.detect.outputs.dashboard == 'true' }}
+            context: .
+            file: ./containers/dashboard/Dockerfile
+            repository: sardeenz-dashboard
+          - role: worker-base
+            build: ${{ needs.detect.outputs.worker-base == 'true' }}
+            context: ./containers/worker-base
+            file: ./containers/worker-base/Containerfile
+            repository: sardeenz-worker-base
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Quay
+        env:
+          QUAY_ROBOT_SARDEENZ_USERNAME: ${{ secrets.QUAY_ROBOT_SARDEENZ_USERNAME }}
+          QUAY_ROBOT_SARDEENZ_TOKEN: ${{ secrets.QUAY_ROBOT_SARDEENZ_TOKEN }}
+        run: |
+          : "${QUAY_ROBOT_SARDEENZ_USERNAME:?QUAY_ROBOT_SARDEENZ_USERNAME secret is required}"
+          : "${QUAY_ROBOT_SARDEENZ_TOKEN:?QUAY_ROBOT_SARDEENZ_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_SARDEENZ_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
+
+      - name: Compute image tag
+        id: tag
+        env:
+          SHA: ${{ github.sha }}
+        run: echo "tag=${SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.role }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=publish-${{ matrix.role }}
+          cache-to: type=gha,mode=max,scope=publish-${{ matrix.role }},ignore-error=true
+
+      - name: Log out of Quay
+        if: always()
+        run: docker logout "$REGISTRY" || true
+
+  worker:
+    name: Publish worker
+    needs: [detect, images]
+    if: needs.detect.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Quay
+        env:
+          QUAY_ROBOT_SARDEENZ_USERNAME: ${{ secrets.QUAY_ROBOT_SARDEENZ_USERNAME }}
+          QUAY_ROBOT_SARDEENZ_TOKEN: ${{ secrets.QUAY_ROBOT_SARDEENZ_TOKEN }}
+        run: |
+          : "${QUAY_ROBOT_SARDEENZ_USERNAME:?QUAY_ROBOT_SARDEENZ_USERNAME secret is required}"
+          : "${QUAY_ROBOT_SARDEENZ_TOKEN:?QUAY_ROBOT_SARDEENZ_TOKEN secret is required}"
+          printf '%s' "$QUAY_ROBOT_SARDEENZ_TOKEN" \
+            | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
+
+      - name: Compute image tag
+        id: tag
+        env:
+          SHA: ${{ github.sha }}
+        run: echo "tag=${SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # Digest-paired builds: when worker-base was rebuilt in this run, worker
+      # builds FROM that digest (re-queried from Quay by sha tag). A worker-only
+      # change pairs with the last published worker-base digest from the
+      # `latest` tag, so base and worker in one run always match.
+      - name: Resolve worker-base digest
+        id: base
+        env:
+          WORKER_BASE_BUILT: ${{ needs.detect.outputs.worker-base == 'true' }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [[ "$WORKER_BASE_BUILT" == true ]]; then
+            digest="$(docker buildx imagetools inspect \
+              "$REGISTRY/$QUAY_NAMESPACE/sardeenz-worker-base:${SHA::7}" \
+              --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          else
+            digest="$(docker buildx imagetools inspect \
+              "$REGISTRY/$QUAY_NAMESPACE/sardeenz-worker-base:latest" \
+              --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Pairing worker with worker-base@$digest"
+
+      - name: Build and push worker
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./containers/worker/Containerfile
+          build-args: |
+            WORKER_BASE_IMAGE=${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base@${{ steps.base.outputs.digest }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=publish-worker
+          cache-to: type=gha,mode=max,scope=publish-worker,ignore-error=true
+
+      - name: Log out of Quay
+        if: always()
+        run: docker logout "$REGISTRY" || true
+
+  noop:
+    name: No impacted images
+    needs: detect
+    if: needs.detect.outputs.any != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report no build
+        run: echo "No platform image is impacted by this merge — nothing to build or push."
