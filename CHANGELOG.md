@@ -52,6 +52,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `quay.io/rh-aiservices-bu`. Worker always builds FROM the worker-base digest built in the
   same run (or the last published one for worker-only changes). Docs/CI-only merges publish
   nothing. The manual multi-image `publish-platform-images.yml` stays for explicit republishes.
+  Fix: the first `publish-images.yml` runs failed at validation because `jobs.<job_id>.if`
+  cannot reference the `matrix` context (github, needs, vars, inputs only); the build decision
+  now gates each step's `if`, where `matrix` IS available.
 - **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
   `/health`, so the control plane's drain loop could never observe drain completion and every
   stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
