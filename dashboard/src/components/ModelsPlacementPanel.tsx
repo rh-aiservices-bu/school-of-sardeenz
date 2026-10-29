@@ -3,21 +3,28 @@
  *
  * Replaces the old ledger-based PlacementBoard/WorkerGpuSection/MemoryVisualization trio.
  * Renders every worker's GPUs as a v1-style card: a nivo stacked bar (per-model colored
- * segments + Other + Free), a model legend with colored dots and sleeping-moon icons, and a
+ * segments + Other + Free), a model chip row with colored dots and sleeping-moon icons, and a
  * GPU header showing device name/utilization/temperature when the worker reports them.
  *
- * Adapted for v2:
+ * Two views, switchable in the card header and persisted in localStorage:
+ *  - "cards" (default): one card per worker placed side by side in a responsive grid. Since the
+ *    fleet is one GPU per worker, each card renders its single GpuCard full width — the old
+ *    per-worker collapsible section stacked full-width and left most of each row empty.
+ *    Multi-GPU workers keep an inner auto-fill grid of GpuCards.
+ *  - "compact": one row per worker (status label, worker link, inline CSS segment bar, summary,
+ *    kebab). Actions aggregate: sleep all active / wake all sleeping / stop all. Per-model Move
+ *    stays in the cards view, where the model a Move applies to is unambiguous.
+ *
+ * Other v2 adaptations (unchanged):
  *  - v1 fetched per-pod over N requests; v2's single `/api/cluster/memory` response already
  *    carries every worker, so one useClusterMemory() call replaces the whole per-pod fetch
  *    fan-out (fetchMemoryUsage/allPodsData in the v1 source).
- *  - v1 "pod" ≙ v2 "worker" — the collapsible NodeGroup concept is kept, now keyed by workerId.
- *  - Worker status comes from useWorkers() (ClusterMemory doesn't carry it) instead of v1's
- *    healthy/leader chips, which the v1 panel didn't actually have real data for either (see
- *    the source's own comment on `leaderPodId`).
+ *  - v1 "pod" ≙ v2 "worker" — keyed by workerId.
+ *  - Worker status comes from useWorkers() (ClusterMemory doesn't carry it).
  *  - KVCache mini-bar: activated (#165) — renders a Prealloc/Used/Free sub-bar per GPU when the
  *    worker reports a kvcached pool for that device (DeviceInfo.kvCache), v1 parity.
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useMemo, useState } from 'react';
 import {
   Card,
   CardHeader,
@@ -38,8 +45,18 @@ import {
   Dropdown,
   DropdownItem,
   DropdownList,
+  ToggleGroup,
+  ToggleGroupItem,
+  Tooltip,
 } from '@patternfly/react-core';
-import { CubesIcon, EllipsisVIcon, MoonIcon, ServerIcon } from '@patternfly/react-icons';
+import {
+  BarsIcon,
+  CubesIcon,
+  EllipsisVIcon,
+  MoonIcon,
+  ServerIcon,
+  ThLargeIcon,
+} from '@patternfly/react-icons';
 import { ResponsiveBar } from '@nivo/bar';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -56,16 +73,18 @@ import {
   attributeModelsToDevice,
   buildDeviceBarData,
   buildKvcacheData,
+  buildWorkerBarData,
   summarizeWorkerVram,
   SLEEPING_PATTERN_DEFS,
   KVCACHE_COLORS,
+  type WorkerBarSegment,
 } from '../utils/gpuMemoryPanel';
 import { assignModelColors, colorHexForModel, hexForColorIndex } from '../utils/memorySegments';
 
 /**
  * Panel-wide model → color lookup. Computed once from every model in the cluster memory report
- * so co-displayed models never share a color and the same model is the same color on every
- * GPU card. Falls back to the plain hash outside the provider.
+ * so co-displayed models never share a color and the same model is the same color everywhere
+ * (both views).
  */
 const ModelColorContext = createContext<(modelName: string) => string>(colorHexForModel);
 
@@ -73,22 +92,91 @@ type DeviceInfo = ControlPlaneComponents['schemas']['DeviceInfo'];
 type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
 type MemoryWorker = ControlPlaneComponents['schemas']['ClusterMemory']['workers'][number];
 
-// Auto-expand every worker group only when the cluster is small enough that "expand
-// everything" is still a reasonable default (v1 adaptation — v1 had no multi-worker cap).
-const AUTO_EXPAND_MAX_WORKERS = 2;
+/** Which presentation the panel renders; persisted so a refresh keeps the chosen view. */
+type PlacementView = 'cards' | 'compact';
 
-const REFRESH_OPTIONS: Array<{ value: number | null; labelKey: string }> = [
+const VIEW_STORAGE_KEY = 'sardeenz-placement-view';
+
+function readStoredView(): PlacementView {
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === 'compact' ? 'compact' : 'cards';
+  } catch {
+    return 'cards';
+  }
+}
+
+const REFRESH_OPTIONS = [
   { value: null, labelKey: 'none' },
   { value: 5000, labelKey: '5s' },
   { value: 15000, labelKey: '15s' },
   { value: 30000, labelKey: '30s' },
   { value: 60000, labelKey: '1m' },
-];
+] as const;
 const DEFAULT_REFRESH_MS = 5000;
 
 // ---------------------------------------------------------------------------
-// GpuCard — one device's stacked VRAM bar + legend
+// Shared bits
 // ---------------------------------------------------------------------------
+
+/** Moon icon marking a sleeping model (v1 signature). */
+function SleepingMoon() {
+  return (
+    <MoonIcon
+      style={{
+        marginLeft: '3px',
+        fontSize: '10px',
+        color: 'var(--pf-t--global--text--color--subtle)',
+      }}
+    />
+  );
+}
+
+/** Pure-CSS stacked VRAM strip for the compact view — no chart library for a 10px bar. */
+function WorkerInlineBar({
+  segments,
+  otherBytes,
+  freeBytes,
+}: {
+  segments: WorkerBarSegment[];
+  otherBytes: number;
+  freeBytes: number;
+}) {
+  const total = segments.reduce((sum, s) => sum + s.bytes, 0) + otherBytes + freeBytes;
+  if (total <= 0) return null;
+  const pct = (bytes: number) => `${(bytes / total) * 100}%`;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '10px',
+        borderRadius: '3px',
+        overflow: 'hidden',
+        background: 'var(--pf-t--global--background--color--secondary--default)',
+      }}
+    >
+      {segments.map((segment) => (
+        <div
+          key={segment.key}
+          style={{
+            width: pct(segment.bytes),
+            background: segment.color,
+            opacity: segment.sleeping ? 0.55 : 1,
+          }}
+        />
+      ))}
+      {otherBytes > 0 && (
+        <div style={{ width: pct(otherBytes), background: '#8B8D8F' }} />
+      )}
+      {freeBytes > 0 && <div style={{ width: pct(freeBytes), background: '#D2D2D2' }} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GpuCard — one device's stacked VRAM bar + model chip row
+// ---------------------------------------------------------------------------
+
 function GpuCard({
   device,
   workerDeviceCount,
@@ -133,18 +221,83 @@ function GpuCard({
     for (const entry of bar.entries) map.set(entry.key, entry);
     return map;
   }, [bar.entries]);
-  const modelRows = useMemo(
+
+  // Every model with an instance — ERROR/STARTING models carry no NVML bytes (measured-only
+  // doctrine) but must still get action rows (Stop an ERROR instance).
+  const actionModels = useMemo(() => {
+    const withBytes = new Set(bar.entries.map((entry) => entry.key));
+    const extra = (models ?? []).filter((model) => {
+      const key = model.instanceId ? `${model.modelName}#${model.instanceId}` : model.modelName;
+      return model.instanceId && !withBytes.has(key);
+    });
+    return [
+      ...bar.entries,
+      ...extra.map((model) => ({
+        key: `${model.modelName}#${model.instanceId}`,
+        modelName: model.modelName,
+        displayName: model.displayName,
+        instanceId: model.instanceId,
+        state: model.state,
+        bytes: 0,
+        sleeping: model.state === ModelLifecycleState.SLEEPING,
+      })),
+    ].sort(
+      (a, b) =>
+        b.bytes - a.bytes ||
+        a.modelName.localeCompare(b.modelName) ||
+        (a.instanceId ?? '').localeCompare(b.instanceId ?? ''),
+    );
+  }, [bar.entries, models]);
+
+  // Chips render measured models only; action rows render every model with an instance.
+  const modelChips = useMemo(
     () =>
-      [...attributed].sort(
+      [...bar.entries].sort(
         (a, b) =>
+          b.bytes - a.bytes ||
           a.modelName.localeCompare(b.modelName) ||
           (a.instanceId ?? '').localeCompare(b.instanceId ?? ''),
       ),
-    [attributed],
+    [bar.entries],
   );
 
   const header = device.deviceName ?? `GPU ${device.deviceIndex} · ${device.deviceType}`;
   const hasUtilOrTemp = device.utilizationPercent != null || device.temperatureC != null;
+
+  // Legend details moved into a hover tooltip (#206): the card previously spent three rows
+  // restating what the segments and tooltips already show.
+  const legendTooltip = (
+    <div>
+      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+        {t('overview.modelsPlacement.legend.segments')}
+      </div>
+      {modelChips.map((model) => (
+        <div key={model.key}>
+          <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
+          {model.displayName ?? model.modelName}
+          {model.sleeping && ' ☾'} — {formatBytes(model.bytes)}
+        </div>
+      ))}
+      {bar.otherBytes > 0 && (
+        <div>
+          <span style={{ color: bar.colors['Other'] }}>●</span>{' '}
+          {t('overview.modelsPlacement.legend.other')} — {formatBytes(bar.otherBytes)}
+        </div>
+      )}
+      <div>
+        <span style={{ color: bar.colors['Free'] }}>●</span>{' '}
+        {t('overview.modelsPlacement.legend.free', { value: formatBytes(bar.freeBytes) })}
+      </div>
+      {kvcache && (
+        <div style={{ marginTop: '4px' }}>
+          {t('overview.modelsPlacement.gpu.kvCacheLine', {
+            used: formatBytes(kvcache.usedBytes),
+            total: formatBytes(kvcache.totalBytes),
+          })}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -231,58 +384,19 @@ function GpuCard({
         />
       </div>
 
-      {/* Models on this GPU */}
-      <div
-        style={{
-          marginTop: 'var(--pf-t--global--spacer--xs)',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        {modelRows.map((model, index) => {
-          const hasInstance = Boolean(model.instanceId);
-          const canSleep = model.state === ModelLifecycleState.ACTIVE;
-          const canWake = model.state === ModelLifecycleState.SLEEPING;
-          const canStop =
-            model.state === ModelLifecycleState.ACTIVE ||
-            model.state === ModelLifecycleState.SLEEPING ||
-            model.state === ModelLifecycleState.ERROR;
-          const isPending =
-            (sleepInstance.isPending && sleepInstance.variables?.instanceId === model.instanceId) ||
-            (wakeInstance.isPending && wakeInstance.variables?.instanceId === model.instanceId) ||
-            (stopInstance.isPending && stopInstance.variables?.instanceId === model.instanceId);
-
-          const mutateInstance = (action: 'sleep' | 'wake' | 'stop') => {
-            if (!model.instanceId) return;
-            setOpenMenuKey(null);
-            setActionError(null);
-            const variables = { modelName: model.modelName, instanceId: model.instanceId };
-            const mutation =
-              action === 'sleep' ? sleepInstance : action === 'wake' ? wakeInstance : stopInstance;
-            mutation.mutate(variables, {
-              onError: (error) =>
-                setActionError(
-                  error instanceof Error
-                    ? error.message
-                    : t('overview.modelsPlacement.actions.failed'),
-                ),
-            });
-          };
-
-          return (
-            <div
-              key={model.key}
-              style={{
-                minHeight: '36px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--pf-t--global--spacer--xs)',
-                borderBottom:
-                  index < modelRows.length - 1
-                    ? '1px solid var(--pf-t--global--border--color--default)'
-                    : undefined,
-              }}
-            >
+      {/* Model chips + Other/Free — details in the hover tooltip */}
+      <Tooltip content={legendTooltip}>
+        <Flex
+          flexWrap={{ default: 'wrap' }}
+          alignItems={{ default: 'alignItemsCenter' }}
+          style={{
+            marginTop: '6px',
+            columnGap: 'var(--pf-t--global--spacer--sm)',
+            rowGap: '2px',
+          }}
+        >
+          {modelChips.map((model) => (
+            <FlexItem key={model.key}>
               <Link
                 to={`/models/${encodeURIComponent(model.modelName)}`}
                 aria-label={t('overview.modelsPlacement.legend.viewModel', {
@@ -290,8 +404,7 @@ function GpuCard({
                 })}
                 style={{
                   fontSize: 'var(--pf-t--global--font--size--xs)',
-                  flex: 1,
-                  minWidth: 0,
+                  whiteSpace: 'nowrap',
                   opacity: model.sleeping ? 0.7 : 1,
                   textDecoration: 'none',
                   color: 'var(--pf-t--global--text--color--default)',
@@ -299,18 +412,102 @@ function GpuCard({
               >
                 <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
                 {model.displayName ?? model.modelName}
-                {model.sleeping && (
-                  <MoonIcon
-                    style={{
-                      marginLeft: '3px',
-                      fontSize: '10px',
-                      color: 'var(--pf-t--global--text--color--subtle)',
-                    }}
-                  />
-                )}{' '}
-                ({formatBytes(model.bytes)})
+                {model.sleeping && <SleepingMoon />} ({formatBytes(model.bytes)})
               </Link>
-              {canMove && (
+            </FlexItem>
+          ))}
+          {bar.otherBytes > 0 && (
+            <FlexItem>
+              <span
+                style={{
+                  fontSize: 'var(--pf-t--global--font--size--xs)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ color: bar.colors['Other'] }}>●</span>{' '}
+                {t('overview.modelsPlacement.legend.other')} (
+                {formatBytes(bar.otherBytes)})
+              </span>
+            </FlexItem>
+          )}
+          <FlexItem>
+            <span
+              style={{ fontSize: 'var(--pf-t--global--font--size--xs)', whiteSpace: 'nowrap' }}
+            >
+              <span style={{ color: bar.colors['Free'] }}>●</span>{' '}
+              {t('overview.modelsPlacement.legend.free', {
+                value: formatBytes(bar.freeBytes),
+              })}
+            </span>
+          </FlexItem>
+        </Flex>
+      </Tooltip>
+
+      {/* Per-model actions — kept as the one place with a per-model Move */}
+      {canMove && actionModels.some((model) => model.instanceId) && (
+        <div
+          style={{
+            marginTop: '4px',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {actionModels.map((model) => {
+            const hasInstance = Boolean(model.instanceId);
+            const canSleep = model.state === ModelLifecycleState.ACTIVE;
+            const canWake = model.state === ModelLifecycleState.SLEEPING;
+            const canStop =
+              model.state === ModelLifecycleState.ACTIVE ||
+              model.state === ModelLifecycleState.SLEEPING ||
+              model.state === ModelLifecycleState.ERROR;
+            const isPending =
+              (sleepInstance.isPending &&
+                sleepInstance.variables?.instanceId === model.instanceId) ||
+              (wakeInstance.isPending && wakeInstance.variables?.instanceId === model.instanceId) ||
+              (stopInstance.isPending && stopInstance.variables?.instanceId === model.instanceId);
+
+            const mutateInstance = (action: 'sleep' | 'wake' | 'stop') => {
+              if (!model.instanceId) return;
+              setOpenMenuKey(null);
+              setActionError(null);
+              const variables = { modelName: model.modelName, instanceId: model.instanceId };
+              const mutation =
+                action === 'sleep' ? sleepInstance : action === 'wake' ? wakeInstance : stopInstance;
+              mutation.mutate(variables, {
+                onError: (error) =>
+                  setActionError(
+                    error instanceof Error
+                      ? error.message
+                      : t('overview.modelsPlacement.actions.failed'),
+                  ),
+              });
+            };
+
+            return (
+              <div
+                key={model.key}
+                style={{
+                  minHeight: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--pf-t--global--spacer--xs)',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 'var(--pf-t--global--font--size--xs)',
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    opacity: model.sleeping ? 0.7 : 1,
+                  }}
+                >
+                  <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
+                  {model.displayName ?? model.modelName}
+                  {model.sleeping && <SleepingMoon />} ({formatBytes(model.bytes)})
+                </span>
                 <Dropdown
                   isOpen={openMenuKey === model.key}
                   onSelect={() => setOpenMenuKey(null)}
@@ -355,9 +552,10 @@ function GpuCard({
                           modelName: model.modelName,
                           instanceId: model.instanceId,
                           workerId: '',
-                          deviceIndices: models?.find(
-                            (candidate) => candidate.instanceId === model.instanceId,
-                          )?.deviceIndices ?? [device.deviceIndex],
+                          deviceIndices:
+                            models?.find(
+                              (candidate) => candidate.instanceId === model.instanceId,
+                            )?.deviceIndices ?? [device.deviceIndex],
                         });
                       }}
                     >
@@ -373,11 +571,11 @@ function GpuCard({
                     </DropdownItem>
                   </DropdownList>
                 </Dropdown>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {actionError && (
         <Alert
@@ -390,30 +588,6 @@ function GpuCard({
           {actionError}
         </Alert>
       )}
-
-      <Flex
-        flexWrap={{ default: 'wrap' }}
-        style={{
-          marginTop: '4px',
-          columnGap: 'var(--pf-t--global--spacer--sm)',
-          rowGap: '2px',
-        }}
-      >
-        {bar.otherBytes > 0 && (
-          <FlexItem>
-            <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-              <span style={{ color: bar.colors['Other'] }}>●</span>{' '}
-              {t('overview.modelsPlacement.legend.other')}
-            </span>
-          </FlexItem>
-        )}
-        <FlexItem>
-          <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-            <span style={{ color: bar.colors['Free'] }}>●</span>{' '}
-            {t('overview.modelsPlacement.legend.free', { value: formatBytes(bar.freeBytes) })}
-          </span>
-        </FlexItem>
-      </Flex>
 
       {/*
         KVCache mini-bar (issue #165, v1 parity): renders when the worker reports a kvcached
@@ -461,26 +635,6 @@ function GpuCard({
               theme={getNivoTooltipTheme()}
             />
           </div>
-          <Flex gap={{ default: 'gapSm' }} style={{ marginTop: '2px' }}>
-            <FlexItem>
-              <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-                <span style={{ color: KVCACHE_COLORS.Prealloc }}>●</span> Prealloc (
-                {formatBytes(kvcache.preallocBytes)})
-              </span>
-            </FlexItem>
-            <FlexItem>
-              <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-                <span style={{ color: KVCACHE_COLORS.Used }}>●</span> Used (
-                {formatBytes(kvcache.usedBytes)})
-              </span>
-            </FlexItem>
-            <FlexItem>
-              <span style={{ fontSize: 'var(--pf-t--global--font--size--xs)' }}>
-                <span style={{ color: KVCACHE_COLORS.Free }}>●</span> Free (
-                {formatBytes(kvcache.freeBytes)})
-              </span>
-            </FlexItem>
-          </Flex>
         </div>
       )}
     </div>
@@ -488,20 +642,17 @@ function GpuCard({
 }
 
 // ---------------------------------------------------------------------------
-// WorkerSection — collapsible group header + GPU grid for one worker
+// WorkerCard — one worker in the cards view: header + GPU card grid
 // ---------------------------------------------------------------------------
-function WorkerSection({
+
+function WorkerCard({
   worker,
   status,
-  isExpanded,
-  onToggle,
   onMove,
   canMove,
 }: {
   worker: MemoryWorker;
   status?: WorkerStatus;
-  isExpanded: boolean;
-  onToggle: () => void;
   onMove: (source: MoveSource) => void;
   canMove: boolean;
 }) {
@@ -512,16 +663,9 @@ function WorkerSection({
   const statusLabel = status ? status.charAt(0) + status.slice(1).toLowerCase() : null;
 
   return (
-    <div style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
+    <div>
       {/* Header */}
       <div
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') onToggle();
-        }}
-        role="button"
-        tabIndex={0}
-        aria-expanded={isExpanded}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -529,32 +673,22 @@ function WorkerSection({
           padding: '8px 12px',
           background: 'var(--pf-t--global--background--color--secondary--default)',
           border: '1px solid var(--pf-t--global--border--color--default)',
-          borderRadius: isExpanded ? '6px 6px 0 0' : '6px',
-          cursor: 'pointer',
-          userSelect: 'none',
+          borderRadius: '6px 6px 0 0',
         }}
       >
-        <span
-          style={{
-            fontSize: '10px',
-            color: 'var(--pf-t--global--text--color--subtle)',
-            transition: 'transform 0.15s',
-            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-            width: '14px',
-          }}
-        >
-          ▼
-        </span>
         <ServerIcon style={{ color: 'var(--pf-t--global--text--color--subtle)' }} />
         <Link
           to={`/workers/${encodeURIComponent(worker.workerId)}`}
-          onClick={(e) => e.stopPropagation()}
           style={{
             fontFamily: 'var(--pf-t--global--font--family--mono)',
             fontSize: 'var(--pf-t--global--font--size--sm)',
             fontWeight: 'var(--pf-t--global--font--weight--bold)',
             color: 'var(--pf-t--global--text--color--link--default)',
             textDecoration: 'none',
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
           }}
         >
           {worker.workerId}
@@ -564,11 +698,172 @@ function WorkerSection({
             {statusLabel}
           </Label>
         )}
+      </div>
+
+      {/* GPU grid — one GPU per worker renders full width (the fleet norm); a multi-GPU
+          worker keeps an auto-fill grid of per-GPU cards. */}
+      <div
+        style={{
+          padding: 'var(--pf-t--global--spacer--sm)',
+          border: '1px solid var(--pf-t--global--border--color--default)',
+          borderTop: 'none',
+          borderRadius: '0 0 6px 6px',
+          display: 'grid',
+          gridTemplateColumns:
+            worker.devices.length === 1 ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))',
+          gap: 'var(--pf-t--global--spacer--sm)',
+        }}
+      >
+        {worker.devices.map((device) => (
+          <GpuCard
+            key={device.deviceIndex}
+            device={device}
+            workerDeviceCount={worker.devices.length}
+            models={worker.models}
+            onMove={(source) => onMove({ ...source, workerId: worker.workerId })}
+            canMove={canMove}
+          />
+        ))}
+        {worker.devices.length === 0 && (
+          <span
+            style={{
+              fontSize: 'var(--pf-t--global--font--size--xs)',
+              color: 'var(--pf-t--global--text--color--subtle)',
+            }}
+          >
+            {t('overview.modelsPlacement.empty.title')}
+          </span>
+        )}
+      </div>
+
+      {/* Summary — under the card so the header line stays single-line */}
+      <div
+        style={{
+          marginTop: '2px',
+          fontSize: 'var(--pf-t--global--font--size--xs)',
+          color: 'var(--pf-t--global--text--color--subtle)',
+        }}
+      >
+        {[
+          t('overview.modelsPlacement.worker.gpuCount', { count: worker.devices.length }),
+          t('overview.modelsPlacement.worker.modelCount', { count: modelCount }),
+          t('overview.modelsPlacement.worker.vramPercent', { percent: usedPercent }),
+        ].join(' · ')}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorkerRow — one worker in the compact view: single ~48px row + aggregate kebab
+// ---------------------------------------------------------------------------
+
+function WorkerRow({
+  worker,
+  status,
+  colorFor,
+}: {
+  worker: MemoryWorker;
+  status?: WorkerStatus;
+  colorFor: (modelName: string) => string;
+}) {
+  const { t } = useTranslation('cluster');
+  const sleepInstance = useSleepInstance();
+  const wakeInstance = useWakeInstance();
+  const stopInstance = useDeleteInstance();
+  const [openMenu, setOpenMenu] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const modelRows = worker.models ?? [];
+  const modelCount = modelRows.length;
+  const { usedPercent } = summarizeWorkerVram(worker.devices);
+  const statusColor = status ? getWorkerStatusColor(status) : undefined;
+  const statusLabel = status ? status.charAt(0) + status.slice(1).toLowerCase() : null;
+
+  const bar = useMemo(
+    () => buildWorkerBarData(worker.devices, worker.models, colorFor),
+    [worker.devices, worker.models, colorFor],
+  );
+
+  const isPending = modelRows.some(
+    (model) =>
+      (sleepInstance.isPending && sleepInstance.variables?.instanceId === model.instanceId) ||
+      (wakeInstance.isPending && wakeInstance.variables?.instanceId === model.instanceId) ||
+      (stopInstance.isPending && stopInstance.variables?.instanceId === model.instanceId),
+  );
+
+  const targets = (action: 'sleep' | 'wake' | 'stop') =>
+    modelRows.filter((model) => {
+      if (!model.instanceId) return false;
+      if (action === 'sleep') return model.state === ModelLifecycleState.ACTIVE;
+      if (action === 'wake') return model.state === ModelLifecycleState.SLEEPING;
+      return (
+        model.state === ModelLifecycleState.ACTIVE ||
+        model.state === ModelLifecycleState.SLEEPING ||
+        model.state === ModelLifecycleState.ERROR
+      );
+    });
+
+  const mutateWorker = (action: 'sleep' | 'wake' | 'stop') => {
+    setOpenMenu(false);
+    setActionError(null);
+    const mutation =
+      action === 'sleep' ? sleepInstance : action === 'wake' ? wakeInstance : stopInstance;
+    for (const model of targets(action)) {
+      mutation.mutate(
+        { modelName: model.modelName, instanceId: model.instanceId! },
+        {
+          onError: (error) =>
+            setActionError(
+              error instanceof Error ? error.message : t('overview.modelsPlacement.actions.failed'),
+            ),
+        },
+      );
+    }
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          minHeight: '44px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--pf-t--global--spacer--sm)',
+          padding: '6px 0',
+          borderBottom: '1px solid var(--pf-t--global--border--color--default)',
+        }}
+      >
+        {statusLabel && (
+          <Label color={statusColor} isCompact>
+            {statusLabel}
+          </Label>
+        )}
+        <Link
+          to={`/workers/${encodeURIComponent(worker.workerId)}`}
+          style={{
+            fontFamily: 'var(--pf-t--global--font--family--mono)',
+            fontSize: 'var(--pf-t--global--font--size--sm)',
+            fontWeight: 'var(--pf-t--global--font--weight--bold)',
+            color: 'var(--pf-t--global--text--color--link--default)',
+            textDecoration: 'none',
+            flexShrink: 0,
+          }}
+        >
+          {worker.workerId}
+        </Link>
+        <div style={{ flex: 1, minWidth: '120px' }}>
+          <WorkerInlineBar
+            segments={bar.segments}
+            otherBytes={bar.otherBytes}
+            freeBytes={bar.freeBytes}
+          />
+        </div>
         <span
           style={{
             color: 'var(--pf-t--global--text--color--subtle)',
             fontSize: 'var(--pf-t--global--font--size--xs)',
-            marginLeft: 'auto',
+            whiteSpace: 'nowrap',
           }}
         >
           {[
@@ -577,33 +872,66 @@ function WorkerSection({
             t('overview.modelsPlacement.worker.vramPercent', { percent: usedPercent }),
           ].join(' · ')}
         </span>
-      </div>
-
-      {/* GPU grid */}
-      {isExpanded && (
-        <div
-          style={{
-            padding: 'var(--pf-t--global--spacer--sm)',
-            border: '1px solid var(--pf-t--global--border--color--default)',
-            borderTop: 'none',
-            borderRadius: '0 0 6px 6px',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 'var(--pf-t--global--spacer--sm)',
+        <Dropdown
+          isOpen={openMenu}
+          onSelect={() => setOpenMenu(false)}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setOpenMenu(false);
           }}
+          toggle={(toggleRef) => (
+            <MenuToggle
+              ref={toggleRef}
+              variant="plain"
+              isExpanded={openMenu}
+              isDisabled={modelCount === 0 || isPending}
+              aria-label={t('overview.modelsPlacement.row.ariaLabel', { worker: worker.workerId })}
+              onClick={() => setOpenMenu(!openMenu)}
+            >
+              <EllipsisVIcon />
+            </MenuToggle>
+          )}
+          popperProps={{ position: 'right' }}
         >
-          {worker.devices.map((device) => (
-            <GpuCard
-              key={device.deviceIndex}
-              device={device}
-              workerDeviceCount={worker.devices.length}
-              models={worker.models}
-              onMove={(source) => onMove({ ...source, workerId: worker.workerId })}
-              canMove={canMove}
-            />
-          ))}
-        </div>
+          <DropdownList>
+            <DropdownItem
+              key="sleep"
+              isDisabled={targets('sleep').length === 0}
+              onClick={() => mutateWorker('sleep')}
+            >
+              {t('overview.modelsPlacement.row.sleepAll')}
+            </DropdownItem>
+            <DropdownItem
+              key="wake"
+              isDisabled={targets('wake').length === 0}
+              onClick={() => mutateWorker('wake')}
+            >
+              {t('overview.modelsPlacement.row.wakeAll')}
+            </DropdownItem>
+            <DropdownItem
+              key="stop"
+              isDanger
+              isDisabled={targets('stop').length === 0}
+              onClick={() => mutateWorker('stop')}
+            >
+              {t('overview.modelsPlacement.row.stopAll')}
+            </DropdownItem>
+          </DropdownList>
+        </Dropdown>
+      </div>
+      {actionError && (
+        <Alert
+          variant="danger"
+          isInline
+          isPlain
+          title={t('overview.modelsPlacement.actions.failed')}
+        >
+          {actionError}
+        </Alert>
       )}
+      {/*
+        Kept out of the single-line row: raw used/total bytes are available on hover via the
+        worker summary (vramPercent) and the worker detail page.
+      */}
     </div>
   );
 }
@@ -613,10 +941,9 @@ function WorkerSection({
 // ---------------------------------------------------------------------------
 export function ModelsPlacementPanel() {
   const { t } = useTranslation('cluster');
+  const [view, setView] = useState<PlacementView>(readStoredView);
   const [refreshInterval, setRefreshInterval] = useState<number | null>(DEFAULT_REFRESH_MS);
   const [isSelectOpen, setIsSelectOpen] = useState(false);
-  const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set());
-  const hasAutoExpanded = useRef(false);
   const [moveSource, setMoveSource] = useState<MoveSource | null>(null);
   const { isAdmin } = useAuth();
 
@@ -629,25 +956,6 @@ export function ModelsPlacementPanel() {
     return map;
   }, [workers]);
 
-  // Default expanded/collapsed is decided once, the first time data arrives — later refetches
-  // must not clobber the user's manual toggles.
-  useEffect(() => {
-    if (hasAutoExpanded.current || !memory) return;
-    hasAutoExpanded.current = true;
-    if (memory.workers.length <= AUTO_EXPAND_MAX_WORKERS) {
-      setExpandedWorkers(new Set(memory.workers.map((w) => w.workerId)));
-    }
-  }, [memory]);
-
-  const toggleWorker = (workerId: string) => {
-    setExpandedWorkers((prev) => {
-      const next = new Set(prev);
-      if (next.has(workerId)) next.delete(workerId);
-      else next.add(workerId);
-      return next;
-    });
-  };
-
   // One collision-free color assignment for every model in the report (see ModelColorContext).
   const colorFor = useMemo(() => {
     const names = (memory?.workers ?? []).flatMap((w) => (w.models ?? []).map((m) => m.modelName));
@@ -657,6 +965,15 @@ export function ModelsPlacementPanel() {
       return index === undefined ? colorHexForModel(modelName) : hexForColorIndex(index);
     };
   }, [memory]);
+
+  const switchView = (next: PlacementView) => {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // storage unavailable (private mode, SSR) — session-only choice is fine
+    }
+  };
 
   const totals = useMemo(() => {
     const allDevices = (memory?.workers ?? []).flatMap((w) => w.devices);
@@ -703,9 +1020,36 @@ export function ModelsPlacementPanel() {
     </Select>
   );
 
+  const viewToggle = (
+    <ToggleGroup aria-label={t('overview.modelsPlacement.view.ariaLabel')}>
+      <Tooltip content={t('overview.modelsPlacement.view.cards')}>
+        <ToggleGroupItem
+          icon={<ThLargeIcon />}
+          aria-label={t('overview.modelsPlacement.view.cards')}
+          buttonId="placement-view-cards"
+          isSelected={view === 'cards'}
+          onChange={(_event, selected) => {
+            if (selected) switchView('cards');
+          }}
+        />
+      </Tooltip>
+      <Tooltip content={t('overview.modelsPlacement.view.compact')}>
+        <ToggleGroupItem
+          icon={<BarsIcon />}
+          aria-label={t('overview.modelsPlacement.view.compact')}
+          buttonId="placement-view-compact"
+          isSelected={view === 'compact'}
+          onChange={(_event, selected) => {
+            if (selected) switchView('compact');
+          }}
+        />
+      </Tooltip>
+    </ToggleGroup>
+  );
+
   return (
     <Card>
-      <CardHeader actions={{ actions: refreshSelect }}>
+      <CardHeader actions={{ actions: [viewToggle, refreshSelect] }}>
         <CardTitle>
           <Content component="h2">{t('overview.modelsPlacement.title')}</Content>
         </CardTitle>
@@ -735,17 +1079,37 @@ export function ModelsPlacementPanel() {
           </EmptyState>
         ) : (
           <ModelColorContext.Provider value={colorFor}>
-            {memory.workers.map((worker) => (
-              <WorkerSection
-                key={worker.workerId}
-                worker={worker}
-                status={statusByWorkerId.get(worker.workerId)}
-                isExpanded={expandedWorkers.has(worker.workerId)}
-                onToggle={() => toggleWorker(worker.workerId)}
-                onMove={setMoveSource}
-                canMove={isAdmin}
-              />
-            ))}
+            {view === 'cards' ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+                  gap: 'var(--pf-t--global--spacer--md)',
+                  alignItems: 'start',
+                }}
+              >
+                {memory.workers.map((worker) => (
+                  <WorkerCard
+                    key={worker.workerId}
+                    worker={worker}
+                    status={statusByWorkerId.get(worker.workerId)}
+                    onMove={setMoveSource}
+                    canMove={isAdmin}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {memory.workers.map((worker) => (
+                  <WorkerRow
+                    key={worker.workerId}
+                    worker={worker}
+                    status={statusByWorkerId.get(worker.workerId)}
+                    colorFor={colorFor}
+                  />
+                ))}
+              </div>
+            )}
 
             {totals.deviceCount > 1 && (
               <div

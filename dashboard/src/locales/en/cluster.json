@@ -85,6 +85,23 @@
         "30s": "30s",
         "1m": "1m"
       },
+      "view": {
+        "ariaLabel": "Placement view",
+        "cards": "Card view — one card per worker, side by side",
+        "compact": "Compact view — one row per worker"
+      },
+      "row": {
+        "ariaLabel": "Actions for worker {{worker}}",
+        "sleepAll": "Sleep all active models",
+        "wakeAll": "Wake all sleeping models",
+        "stopAll": "Stop all models"
+      },
+      "legend": {
+        "other": "Other",
+        "free": "Free ({{value}})",
+        "viewModel": "Go to {{model}}",
+        "segments": "VRAM segments"
+      },
       "worker": {
         "gpuCount": "{{count}} GPU",
         "gpuCount_plural": "{{count}} GPUs",
