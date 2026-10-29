@@ -35,8 +35,67 @@ env:
   QUAY_NAMESPACE: rh-aiservices-bu
 
 jobs:
+  ci-green:
+    # Publish is blocked until CI turns green on this sha. The CI workflow
+    # (ci.yml) fires on the same push; on a merged PR whose head already ran
+    # green, its push-run triage skips the gates and the run concludes success
+    # without re-testing; otherwise the gates re-run here first. Waiting on the
+    # run via the check-runs API (not `needs:` — different workflow file).
+    name: Wait for CI green
+    runs-on: ubuntu-latest
+    outputs:
+      green: ${{ steps.wait.outputs.green }}
+    steps:
+      - name: Wait for the CI run on this sha
+        id: wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # GitHub starts the CI run on this push within seconds. Poll the
+          # check-runs API for every CI check on this sha until all three
+          # (quality / e2e / python) are completed, then require success.
+          expected=("typecheck / lint / test" "dashboard e2e (Playwright)" "runner shims + conformance (pytest)")
+
+          for attempt in $(seq 1 120); do
+            gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" > /tmp/checks.json
+            completed=true
+            failed=false
+            found_any=false
+            for name in "${expected[@]}"; do
+              conclusion="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+                --jq "[.check_runs[] | select(.name == \"$name\")][0].conclusion // \"missing\"")"
+              if [[ "$conclusion" == "missing" || "$conclusion" == "pending" || "$conclusion" == "queued" || "$conclusion" == "in_progress" ]]; then
+                completed=false
+              elif [[ "$conclusion" != "success" && "$conclusion" != "skipped" && "$conclusion" != "neutral" ]]; then
+                failed=true
+              fi
+              if [[ "$conclusion" != "missing" ]]; then found_any=true; fi
+            done
+
+            if [[ "$failed" == true ]]; then
+              echo "CI checks failed on $SHA — publish blocked."
+              echo "green=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ "$completed" == true ]]; then
+              echo "All CI checks green on $SHA."
+              echo "green=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "CI checks did not settle after 20 minutes — publish blocked."
+          echo "green=false" >> "$GITHUB_OUTPUT"
+
   detect:
     name: Detect impacted images
+    needs: ci-green
+    if: needs.ci-green.outputs.green == 'true'
     runs-on: ubuntu-latest
     outputs:
       proxy: ${{ steps.map.outputs.proxy }}
@@ -287,9 +346,18 @@ jobs:
 
   noop:
     name: No impacted images
-    needs: detect
-    if: needs.detect.outputs.any != 'true'
+    needs: [ci-green, detect]
+    if: always() && needs.ci-green.outputs.green == 'true' && needs.detect.outputs.any != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Report no build
         run: echo "No platform image is impacted by this merge — nothing to build or push."
+
+  blocked:
+    name: Publish blocked — CI not green
+    needs: [ci-green, detect]
+    if: always() && needs.ci-green.outputs.green != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report blocked
+        run: echo "Publish blocked — CI did not turn green on this sha; check the CI run for this push."

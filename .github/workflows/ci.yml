@@ -3,6 +3,13 @@ name: CI
 # Quality gates only — no image builds. It enforces every gate that previously
 # ran only manually: typecheck, ESLint, clippy, OpenAPI spec validation
 # (redocly), unit tests (vitest + cargo test), and contract-codegen drift.
+#
+# PR runs (event=pull_request) always execute. Push runs (merges to dev/main)
+# execute only when the pushed tree has not already been tested green by the
+# PR run: `triage` compares the pushed sha against the merged PR's head sha
+# (same git tree ⇒ identical content ⇒ the tests just passed on it) and skips
+# the three gate jobs when a green pull_request run exists. A direct push to
+# dev, or a merge whose head never turned green, always runs CI.
 on:
   pull_request:
     branches: [dev, main]
@@ -16,10 +23,69 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  triage:
+    # Decide whether the pushed tree still needs the gates. Only the push event
+    # reaches here with an already-tested tree (PR merged); on pull_request the
+    # triage job is skipped and the gates always run.
+    name: Triage — already tested?
+    runs-on: ubuntu-latest
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+    if: github.event_name == 'push'
+    steps:
+      - name: Check for a green CI run on the same tree
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # A push of a merged PR is associated with exactly one closed PR via
+          # commits/{sha}/pulls. A direct push matches no PR → run CI.
+          if [[ "$(gh api "repos/$REPO/commits/$PUSH_SHA/pulls" --jq 'length')" -eq 0 ]]; then
+            echo "Pushed sha is not associated with a merged PR → run CI."
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The merged PR's head sha — the commit whose tree the merge commit
+          # carries (GitHub merge commits keep the PR head's tree).
+          pr_number="$(gh api "repos/$REPO/commits/$PUSH_SHA/pulls" --jq '.[0].number')"
+          head_sha="$(gh api "repos/$REPO/pulls/$pr_number" --jq '.head.sha')"
+          echo "Merged PR #$pr_number head: $head_sha"
+
+          # Tree equality: identical content even if the shas differ (merge
+          # strategy). If the trees differ, the pushed content was not what the
+          # PR tested — run CI.
+          push_tree="$(gh api "repos/$REPO/commits/$PUSH_SHA" --jq '.commit.tree.sha')"
+          head_tree="$(gh api "repos/$REPO/commits/$head_sha" --jq '.commit.tree.sha')"
+          if [[ "$push_tree" != "$head_tree" ]]; then
+            echo "Pushed tree $push_tree differs from PR head tree $head_tree → run CI."
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Green pull_request CI run on that head?
+          green="$(gh api \
+            "repos/$REPO/actions/runs?head_sha=$head_sha&event=pull_request&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name == "CI")] | length')"
+          if [[ "$green" -gt 0 ]]; then
+            echo "PR head $head_sha has a green CI run on the same tree → skip gates."
+            echo "tested=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No green CI run on $head_sha → run CI."
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+          fi
+
   quality:
     name: typecheck / lint / test
+    needs: triage
+    if: always() && (needs.triage.result == 'skipped' || needs.triage.outputs.tested != 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -74,6 +140,8 @@ jobs:
   # to dev, tagged with the merge commit's short sha.
   e2e:
     name: dashboard e2e (Playwright)
+    needs: triage
+    if: always() && (needs.triage.result == 'skipped' || needs.triage.outputs.tested != 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -104,6 +172,8 @@ jobs:
 
   python:
     name: runner shims + conformance (pytest)
+    needs: triage
+    if: always() && (needs.triage.result == 'skipped' || needs.triage.outputs.tested != 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
