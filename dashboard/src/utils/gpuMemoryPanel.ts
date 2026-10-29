@@ -194,6 +194,68 @@ export function buildDeviceBarData(
 
   return { data: [dataObj], keys, colors, fill, entries: ordered, otherBytes, freeBytes };
 }
+/**
+ * One inline segment of the worker-level bar (compact view): a co-located model grouping, or
+ * Other/Free rendered separately by the caller.
+ */
+export interface WorkerBarSegment {
+  /** Key: `${modelName}` — compact view aggregates replicas of the same model into one segment. */
+  key: string;
+  color: string;
+  bytes: number;
+  sleeping: boolean;
+}
+
+/** Worker-level rollup for the compact view's inline CSS bar. */
+export interface WorkerBarData {
+  /** Per-model segments, largest first. */
+  segments: WorkerBarSegment[];
+  /** Used bytes not attributable to any model on the worker's devices. */
+  otherBytes: number;
+  /** Sum of per-device free bytes (each clamped at zero). */
+  freeBytes: number;
+}
+
+/**
+ * Build the compact view's worker-level bar data: models aggregated across the worker's devices
+ * (replicas of the same model collapse into one segment), then Other (used bytes no model
+ * accounts for), then Free (sum of per-device free bytes). Same measured-only doctrine as
+ * buildDeviceBarData — every figure traces back to device.memoryUsedBytes.
+ */
+export function buildWorkerBarData(
+  devices: DeviceInfo[],
+  models: WorkerModelInfo[] | undefined,
+  colorFor: (modelName: string) => string = colorHexForModel,
+): WorkerBarData {
+  const totalBytes = new Map<string, { bytes: number; sleeping: boolean; instances: number }>();
+  for (const model of models ?? []) {
+    if ((model.memoryUsedBytes ?? 0) <= 0) continue;
+    const entry = totalBytes.get(model.modelName) ?? { bytes: 0, sleeping: false, instances: 0 };
+    entry.bytes += model.memoryUsedBytes ?? 0;
+    entry.sleeping = entry.sleeping || model.state === ModelLifecycleState.SLEEPING;
+    entry.instances += 1;
+    totalBytes.set(model.modelName, entry);
+  }
+
+  const segments = [...totalBytes.entries()]
+    .map(([modelName, entry]) => ({
+      key: modelName,
+      color: colorFor(modelName),
+      bytes: entry.bytes,
+      sleeping: entry.sleeping,
+    }))
+    .sort((a, b) => b.bytes - a.bytes || a.key.localeCompare(b.key));
+
+  const usedBytes = devices.reduce((sum, d) => sum + d.memoryUsedBytes, 0);
+  const attributedTotal = segments.reduce((sum, s) => sum + s.bytes, 0);
+  const otherBytes = Math.max(0, usedBytes - attributedTotal);
+  const freeBytes = devices.reduce(
+    (sum, d) => sum + Math.max(0, d.memoryTotalBytes - d.memoryUsedBytes),
+    0,
+  );
+
+  return { segments, otherBytes, freeBytes };
+}
 
 /** Worker-level rollup: total GPUs, total attributed models, and overall VRAM percent used. */
 export function summarizeWorkerVram(devices: DeviceInfo[]): {

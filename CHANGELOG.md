@@ -35,6 +35,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `preload_dlls` check only printed), and pins `torch==2.10.0` — the last CUDA 12 torch — since an
   unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. Verified
   on-cluster: an ONNX model now loads with `CUDAExecutionProvider` and reports measured VRAM.
+- **Dashboard: Models placement panel redesigned (#163 round two).** Worker cards now sit side
+  by side in a responsive grid instead of one full-width collapsible section per worker — with
+  one GPU per worker, the old layout left most of each row empty. The per-card model legend
+  collapses into hover tooltips and model rows become one-line chips, cutting ~80px per card.
+  A header toggle switches between the card view (default) and a compact one-row-per-worker
+  view (~48px/worker, aggregate sleep-all/wake-all/stop-all kebab); the choice persists in
+  localStorage. Models sort by measured size, largest first.
+- **CI: PRs run quality gates only; merges to dev publish impacted images.** PR CI
+  (`ci.yml`) now runs typecheck/lint/tests/e2e without building container images. A new
+  `publish-images.yml` runs on every merge to `dev`: it maps the merge's changed paths to the
+  platform images they impact (`proxy/` → proxy; `control-plane/`, `dashboard/`, and their
+  container dirs → their images; `packages/**` and root manifests → both service images;
+  `containers/worker-base|worker/` → the digest-paired worker images), builds only those,
+  tags them with the merge commit's short sha (`git log --oneline` form), and pushes to
+  `quay.io/rh-aiservices-bu`. Worker always builds FROM the worker-base digest built in the
+  same run (or the last published one for worker-only changes). Docs/CI-only merges publish
+  nothing. The manual multi-image `publish-platform-images.yml` stays for explicit republishes.
 - **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
   `/health`, so the control plane's drain loop could never observe drain completion and every
   stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
