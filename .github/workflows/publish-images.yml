@@ -130,7 +130,9 @@ jobs:
   images:
     name: Publish ${{ matrix.role }}
     needs: detect
-    if: needs.detect.outputs.any == 'true' && matrix.build
+    # matrix context is NOT available in jobs.<job_id>.if (github, needs, vars,
+    # inputs only) — the build decision lives in the first step's if instead.
+    if: needs.detect.outputs.any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -158,13 +160,23 @@ jobs:
             file: ./containers/worker-base/Containerfile
             repository: sardeenz-worker-base
     steps:
+      # matrix.build gates every step: matrix context IS available in steps.if
+      # (unlike jobs.if), so a non-impacted role skips without building.
+      - name: Skip — not impacted
+        id: gate
+        if: matrix.build != true
+        run: echo "role=${{ matrix.role }} is not impacted by this merge — skipping."
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: matrix.build
         with:
           persist-credentials: false
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: matrix.build
 
       - name: Log in to Quay
+        if: matrix.build
         env:
           QUAY_ROBOT_SARDEENZ_USERNAME: ${{ secrets.QUAY_ROBOT_SARDEENZ_USERNAME }}
           QUAY_ROBOT_SARDEENZ_TOKEN: ${{ secrets.QUAY_ROBOT_SARDEENZ_TOKEN }}
@@ -175,12 +187,14 @@ jobs:
             | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
 
       - name: Compute image tag
+        if: matrix.build
         id: tag
         env:
           SHA: ${{ github.sha }}
         run: echo "tag=${SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.role }}
+        if: matrix.build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ${{ matrix.context }}
@@ -196,7 +210,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=publish-${{ matrix.role }},ignore-error=true
 
       - name: Log out of Quay
-        if: always()
+        if: always() && matrix.build
         run: docker logout "$REGISTRY" || true
 
   worker:
