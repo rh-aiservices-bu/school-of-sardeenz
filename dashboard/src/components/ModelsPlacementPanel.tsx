@@ -57,7 +57,7 @@ import {
   ServerIcon,
   ThLargeIcon,
 } from '@patternfly/react-icons';
-import { ResponsiveBar } from '@nivo/bar';
+import { ResponsiveBar, type BarTooltipProps } from '@nivo/bar';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ModelLifecycleState, WorkerStatus, type ControlPlaneComponents } from '@sardeenz/types';
@@ -169,6 +169,35 @@ function WorkerInlineBar({
         <div style={{ width: pct(otherBytes), background: '#8B8D8F' }} />
       )}
       {freeBytes > 0 && <div style={{ width: pct(freeBytes), background: '#D2D2D2' }} />}
+    </div>
+  );
+}
+
+/**
+ * Custom nivo tooltip for both views' stacked bars (#206): the default renders the raw nivo
+ * key — for the cards view that key is `modelName#instanceId`, leaking an internal instance
+ * id — so both label and value are rebuilt here: served name (instance id stripped) plus the
+ * measured byte figure. Applies to the model segments; Other/Free keep the default tooltip
+ * (their keys are already plain "Other"/"Free" labels).
+ */
+function ModelTooltip({
+  datum,
+}: {
+  datum: BarTooltipProps<Record<string, number | string>>;
+}) {
+  const label = String(datum.id).split('#')[0];
+  return (
+    <div
+      style={{
+        background: 'var(--pf-t--global--background--color--primary--default)',
+        color: 'var(--pf-t--global--text--color--default)',
+        border: '1px solid var(--pf-t--global--border--color--default)',
+        borderRadius: '4px',
+        padding: '8px 12px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
+      }}
+    >
+      <strong>{label}</strong>: {formatBytes(datum.value)}
     </div>
   );
 }
@@ -365,6 +394,7 @@ function GpuCard({
           margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
           padding={0}
           valueFormat={formatBytes}
+          tooltip={(datum) => <ModelTooltip datum={datum} />}
           colors={(datum) => bar.colors[datum.id as string] || '#ccc'}
           defs={SLEEPING_PATTERN_DEFS}
           fill={bar.fill}
@@ -376,7 +406,6 @@ function GpuCard({
           axisRight={null}
           axisBottom={null}
           axisLeft={null}
-          theme={getNivoTooltipTheme()}
           onClick={(datum) => {
             const model = keyToModel.get(datum.id as string);
             if (model) void navigate(`/models/${encodeURIComponent(model.modelName)}`);
@@ -853,11 +882,37 @@ function WorkerRow({
           {worker.workerId}
         </Link>
         <div style={{ flex: 1, minWidth: '120px' }}>
-          <WorkerInlineBar
-            segments={bar.segments}
-            otherBytes={bar.otherBytes}
-            freeBytes={bar.freeBytes}
-          />
+          <Tooltip
+            content={
+              <div>
+                {bar.segments.map((segment) => (
+                  <div key={segment.key}>
+                    <span style={{ color: segment.color }}>●</span>{' '}
+                    {segment.displayName}
+                    {segment.sleeping && ' ☾'} — {formatBytes(segment.bytes)}
+                  </div>
+                ))}
+                {bar.otherBytes > 0 && (
+                  <div>
+                    <span style={{ color: '#8B8D8F' }}>●</span>{' '}
+                    {t('overview.modelsPlacement.legend.other')} — {formatBytes(bar.otherBytes)}
+                  </div>
+                )}
+                <div>
+                  <span style={{ color: '#D2D2D2' }}>●</span>{' '}
+                  {t('overview.modelsPlacement.legend.free', {
+                    value: formatBytes(bar.freeBytes),
+                  })}
+                </div>
+              </div>
+            }
+          >
+            <WorkerInlineBar
+              segments={bar.segments}
+              otherBytes={bar.otherBytes}
+              freeBytes={bar.freeBytes}
+            />
+          </Tooltip>
         </div>
         <span
           style={{
@@ -929,8 +984,8 @@ function WorkerRow({
         </Alert>
       )}
       {/*
-        Kept out of the single-line row: raw used/total bytes are available on hover via the
-        worker summary (vramPercent) and the worker detail page.
+        Raw used/total bytes stay out of the single-line row; hovering the inline bar shows
+        every model, Other and Free with their measured figures (same tooltip as the card view).
       */}
     </div>
   );

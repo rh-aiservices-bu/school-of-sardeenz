@@ -42,6 +42,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   A header toggle switches between the card view (default) and a compact one-row-per-worker
   view (~48px/worker, aggregate sleep-all/wake-all/stop-all kebab); the choice persists in
   localStorage. Models sort by measured size, largest first.
+- **Dashboard: Models placement tooltips — model name only, no instance id (#206).** The card
+  view's stacked bar now uses a custom tooltip that strips the `#instanceId` suffix from the
+  nivo segment key, so hovering a colored segment shows the model name and measured bytes only.
+  The compact view's inline bar gains the same hover tooltip as the cards: every model with its
+  color, sleeping moon and bytes, plus Other/Free when present. Compact segments carry the
+  served display name (`WorkerModelInfo.displayName`) instead of the raw model key.
 - **CI: PRs run quality gates only; merges to dev publish impacted images.** PR CI
   (`ci.yml`) now runs typecheck/lint/tests/e2e without building container images. A new
   `publish-images.yml` runs on every merge to `dev`: it maps the merge's changed paths to the
