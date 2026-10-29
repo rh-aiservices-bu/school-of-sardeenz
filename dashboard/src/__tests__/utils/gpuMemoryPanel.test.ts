@@ -9,6 +9,7 @@ import {
   attributeModelsToDevice,
   buildDeviceBarData,
   buildKvcacheData,
+  buildWorkerBarData,
   summarizeWorkerVram,
   SLEEPING_PATTERN_ID,
   KVCACHE_COLORS,
@@ -178,6 +179,53 @@ describe('buildDeviceBarData', () => {
     const bar = buildDeviceBarData(device, attributed);
     expect(bar.colors['model-a']).toBeDefined();
     expect(bar.colors['Free']).toBeDefined();
+  });
+});
+
+describe('buildWorkerBarData (compact view)', () => {
+  it('aggregates replicas of the same model into one segment with summed bytes', () => {
+    const devices = [makeDevice()];
+    const models = [
+      makeModel({ instanceId: 'inst-a', memoryUsedBytes: 2 * 1024 ** 3 }),
+      makeModel({ instanceId: 'inst-b', memoryUsedBytes: 3 * 1024 ** 3 }),
+    ];
+    const bar = buildWorkerBarData(devices, models);
+    expect(bar.segments).toHaveLength(1);
+    expect(bar.segments[0].key).toBe('llama-3-8b');
+    expect(bar.segments[0].bytes).toBe(5 * 1024 ** 3);
+  });
+
+  it('propagates displayName, falling back to the bare model name', () => {
+    const devices = [makeDevice()];
+    const models = [
+      makeModel({ modelName: 'm-with', displayName: 'Llama 3 8B Instruct', memoryUsedBytes: 1024 }),
+      makeModel({ modelName: 'm-without', memoryUsedBytes: 1024 }),
+    ];
+    const bar = buildWorkerBarData(devices, models);
+    expect(bar.segments.map((s) => [s.key, s.displayName])).toEqual([
+      ['m-with', 'Llama 3 8B Instruct'],
+      ['m-without', 'm-without'],
+    ]);
+  });
+
+  it('marks a segment sleeping when any replica sleeps and omits zero-byte models', () => {
+    const devices = [makeDevice()];
+    const models = [
+      makeModel({ instanceId: 'sleepy', state: ModelLifecycleState.SLEEPING, memoryUsedBytes: 1024 }),
+      makeModel({ modelName: 'zero-model', memoryUsedBytes: 0 }),
+    ];
+    const bar = buildWorkerBarData(devices, models);
+    expect(bar.segments).toHaveLength(1);
+    expect(bar.segments[0].key).toBe('llama-3-8b');
+    expect(bar.segments[0].sleeping).toBe(true);
+  });
+
+  it('computes Other and Free from the worker devices', () => {
+    const devices = [makeDevice({ memoryUsedBytes: 8 * 1024 ** 3 })];
+    const models = [makeModel({ memoryUsedBytes: 5 * 1024 ** 3 })];
+    const bar = buildWorkerBarData(devices, models);
+    expect(bar.otherBytes).toBe(3 * 1024 ** 3);
+    expect(bar.freeBytes).toBe(8 * 1024 ** 3);
   });
 });
 

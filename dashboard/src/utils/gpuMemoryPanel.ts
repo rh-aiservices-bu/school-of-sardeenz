@@ -201,6 +201,8 @@ export function buildDeviceBarData(
 export interface WorkerBarSegment {
   /** Key: `${modelName}` — compact view aggregates replicas of the same model into one segment. */
   key: string;
+  /** Served name shown to users (`WorkerModelInfo.displayName`), falling back to the model name. */
+  displayName: string;
   color: string;
   bytes: number;
   sleeping: boolean;
@@ -227,19 +229,19 @@ export function buildWorkerBarData(
   models: WorkerModelInfo[] | undefined,
   colorFor: (modelName: string) => string = colorHexForModel,
 ): WorkerBarData {
-  const totalBytes = new Map<string, { bytes: number; sleeping: boolean; instances: number }>();
+  const totalBytes = new Map<string, { bytes: number; sleeping: boolean }>();
   for (const model of models ?? []) {
     if ((model.memoryUsedBytes ?? 0) <= 0) continue;
-    const entry = totalBytes.get(model.modelName) ?? { bytes: 0, sleeping: false, instances: 0 };
+    const entry = totalBytes.get(model.modelName) ?? { bytes: 0, sleeping: false };
     entry.bytes += model.memoryUsedBytes ?? 0;
     entry.sleeping = entry.sleeping || model.state === ModelLifecycleState.SLEEPING;
-    entry.instances += 1;
     totalBytes.set(model.modelName, entry);
   }
 
   const segments = [...totalBytes.entries()]
     .map(([modelName, entry]) => ({
       key: modelName,
+      displayName: models?.find((m) => m.modelName === modelName)?.displayName ?? modelName,
       color: colorFor(modelName),
       bytes: entry.bytes,
       sleeping: entry.sleeping,
