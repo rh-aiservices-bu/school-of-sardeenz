@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { realpath as nodeRealpath } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { basename, resolve, sep } from 'node:path';
 import type {
   LaunchHandle,
   LaunchHandleSink,
@@ -20,6 +20,14 @@ const RESERVED_ENGINE_FLAGS = new Set([
   '--tensor-parallel-size',
   '--engine-port',
 ]);
+
+// kvcached only patches the vLLM Model Runner V2 path from vLLM 0.28 onwards, so these kvcached
+// modules must be launched with Model Runner V1 forced on. Keep in sync with
+// containers/runners/vllm/<version>/Containerfile, which bakes the same pin into the SIF.
+const VLLM_MODEL_RUNNER_V1_MODULES: Record<string, true> = {
+  'vllm-0.24': true,
+  'vllm-0.26': true,
+};
 
 // Production launcher: `apptainer exec`s an engine SIF from the shared module volume.
 //
@@ -277,10 +285,11 @@ export class ApptainerLauncher implements RunnerLauncher {
       // asyncio.get_event_loop() before installing a loop. Zero bypasses that redundant pool.
       MLSERVER_PARALLEL_WORKERS: String(this.config.mlserverParallelWorkers ?? 0),
     };
-    // vLLM 0.24 may select Model Runner V2 by default, but kvcached's autopatch targets Model
-    // Runner V1. Pass this explicitly as well as baking it into the SIF so already-published 0.24
-    // modules become usable as soon as the worker is upgraded.
-    if (sifPath.endsWith('/vllm-0.24.sif')) {
+    // vLLM 0.24+ may select Model Runner V2 by default, but kvcached only autopatches the Model
+    // Runner V2 path from vLLM 0.28 onwards, so the 0.24 and 0.26 modules must stay on V1. Pass
+    // this explicitly as well as baking it into the SIF so already-published modules become usable
+    // as soon as the worker is upgraded.
+    if (VLLM_MODEL_RUNNER_V1_MODULES[basename(sifPath, '.sif')]) {
       envFlags.VLLM_USE_V2_MODEL_RUNNER = '0';
     }
     if (useNv) {

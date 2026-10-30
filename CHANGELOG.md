@@ -24,8 +24,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
   (`reports/`, `plans/`, `worktrees/`, `profiles`).
 
-
 ### Added
+
+- **vLLM 0.26 runner image (`containers/runners/vllm/0.26.0/`).** A second current vLLM line,
+  built from `quay.io/vllm/vllm-cuda:0.26.0_rhaiv.9` pinned to the OCI index digest
+  `sha256:a16d7271…` (amd64 runtime plus attestation, as with 0.24), with Python 3.12, CUDA
+  toolkit 13.0.2 and torch 2.11.0+cu130. kvcached is pinned to v0.1.6 (`2235a9ec…`), the first
+  release that supports vLLM 0.26 and later. This base no longer ships kvcached's `posix_ipc` and
+  `wrapt` dependencies (the 0.24 base did), so the builder also emits their wheels
+  (`posix_ipc 1.3.2`, `wrapt 2.4.0`) and the runtime stage keeps installing `--no-index` from
+  `/wheels`. Build-time assertions cover `cuda-toolkit 13.0.2`, vLLM `0.26.0`, torch's CUDA 13.0
+  build, the compiler/Ninja toolchain and `Python.h`; the driver-stub RPM pin is unchanged
+  (`cuda-driver-devel-13-0-13.0.96-1`). `VLLM_USE_V2_MODEL_RUNNER=0` is baked into the SIF, and the
+  worker now forces Model Runner V1 for every kvcached module in the 0.24+ range (`vllm-0.24`,
+  `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The `vllm-0.26`
+  catalog entry follows once the librarian publishes the SIF.
 
 - **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
   `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last PyPI build for CUDA 12) and the shim ships its own
@@ -103,7 +116,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is also anchored per legend chip now — one Tooltip per chip/Other/Free entry — so the full
   VRAM breakdown appears right above the hovered chip, matching the stacked-bar tooltip
   behavior, instead of top-center of the legend row.
-
 
 ## [0.2.0] - 2026-09-15
 
