@@ -45,6 +45,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dashboard: models placement — single model list per GPU card.** The card previously
+  listed every model twice: once as the legend chips under the stacked bar, again as the
+  per-model action rows. The legend chips row is removed; the action-row list is the single
+  list and renders for every user (the sleep/wake/move/stop dropdown is admin-only). "Other"
+  and "Free" ride at the bottom of that list as legend rows without a kebab, styled like the
+  model rows. The now-unused `legend.segments`/`legend.viewModel` i18n keys are dropped.
+
 - **MLServer SIF: ONNX models silently ran on CPU.** The `1.7.1-rc3` image installed the
   `nvidia-*-cu12` wheels for `onnxruntime-gpu`, but RHEL-family Python places those pure wheels
   under `/usr/local/lib/...` while `onnxruntime-gpu` sits under `/usr/local/lib64/...`, so

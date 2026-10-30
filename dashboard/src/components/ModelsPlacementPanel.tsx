@@ -202,6 +202,28 @@ function ModelTooltip({
   );
 }
 
+/** Legend row for Other/Free — same look as a model row, no kebab. */
+function ModelLegendRow({ color, children }: { color: string; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        minHeight: '28px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--pf-t--global--spacer--xs)',
+        fontSize: 'var(--pf-t--global--font--size--xs)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        flex: 1,
+        minWidth: 0,
+      }}
+    >
+      <span style={{ color }}>●</span> {children}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // GpuCard — one device's stacked VRAM bar + model chip row
 // ---------------------------------------------------------------------------
@@ -278,55 +300,8 @@ function GpuCard({
     );
   }, [bar.entries, models]);
 
-  // Chips render measured models only; action rows render every model with an instance.
-  const modelChips = useMemo(
-    () =>
-      [...bar.entries].sort(
-        (a, b) =>
-          b.bytes - a.bytes ||
-          a.modelName.localeCompare(b.modelName) ||
-          (a.instanceId ?? '').localeCompare(b.instanceId ?? ''),
-      ),
-    [bar.entries],
-  );
-
   const header = device.deviceName ?? `GPU ${device.deviceIndex} · ${device.deviceType}`;
   const hasUtilOrTemp = device.utilizationPercent != null || device.temperatureC != null;
-
-  // Legend details moved into a hover tooltip (#206): the card previously spent three rows
-  // restating what the segments and tooltips already show.
-  const legendTooltip = (
-    <div>
-      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-        {t('overview.modelsPlacement.legend.segments')}
-      </div>
-      {modelChips.map((model) => (
-        <div key={model.key}>
-          <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
-          {model.displayName ?? model.modelName}
-          {model.sleeping && ' ☾'} — {formatBytes(model.bytes)}
-        </div>
-      ))}
-      {bar.otherBytes > 0 && (
-        <div>
-          <span style={{ color: bar.colors['Other'] }}>●</span>{' '}
-          {t('overview.modelsPlacement.legend.other')} — {formatBytes(bar.otherBytes)}
-        </div>
-      )}
-      <div>
-        <span style={{ color: bar.colors['Free'] }}>●</span>{' '}
-        {t('overview.modelsPlacement.legend.free', { value: formatBytes(bar.freeBytes) })}
-      </div>
-      {kvcache && (
-        <div style={{ marginTop: '4px' }}>
-          {t('overview.modelsPlacement.gpu.kvCacheLine', {
-            used: formatBytes(kvcache.usedBytes),
-            total: formatBytes(kvcache.totalBytes),
-          })}
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div
@@ -413,73 +388,13 @@ function GpuCard({
         />
       </div>
 
-      {/* Model chips + Other/Free — per-chip hover tooltip: one Tooltip per chip so the full
-          VRAM breakdown anchors right above the hovered chip, like the bar tooltip, instead
-          of top-center of the legend row. */}
-      <Flex
-        flexWrap={{ default: 'wrap' }}
-        alignItems={{ default: 'alignItemsCenter' }}
-        style={{
-          marginTop: '6px',
-          columnGap: 'var(--pf-t--global--spacer--sm)',
-          rowGap: '2px',
-        }}
-      >
-        {modelChips.map((model) => (
-          <FlexItem key={model.key}>
-            <Tooltip content={legendTooltip}>
-              <Link
-                to={`/models/${encodeURIComponent(model.modelName)}`}
-                aria-label={t('overview.modelsPlacement.legend.viewModel', {
-                  model: model.displayName ?? model.modelName,
-                })}
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--xs)',
-                  whiteSpace: 'nowrap',
-                  opacity: model.sleeping ? 0.7 : 1,
-                  textDecoration: 'none',
-                  color: 'var(--pf-t--global--text--color--default)',
-                }}
-              >
-                <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
-                {model.displayName ?? model.modelName}
-                {model.sleeping && <SleepingMoon />} ({formatBytes(model.bytes)})
-              </Link>
-            </Tooltip>
-          </FlexItem>
-        ))}
-        {bar.otherBytes > 0 && (
-          <FlexItem>
-            <Tooltip content={legendTooltip}>
-              <span
-                style={{
-                  fontSize: 'var(--pf-t--global--font--size--xs)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <span style={{ color: bar.colors['Other'] }}>●</span>{' '}
-                {t('overview.modelsPlacement.legend.other')} (
-                {formatBytes(bar.otherBytes)})
-              </span>
-            </Tooltip>
-          </FlexItem>
-        )}
-        <FlexItem>
-          <Tooltip content={legendTooltip}>
-            <span
-              style={{ fontSize: 'var(--pf-t--global--font--size--xs)', whiteSpace: 'nowrap' }}
-            >
-              <span style={{ color: bar.colors['Free'] }}>●</span>{' '}
-              {t('overview.modelsPlacement.legend.free', {
-                value: formatBytes(bar.freeBytes),
-              })}
-            </span>
-          </Tooltip>
-        </FlexItem>
-      </Flex>
 
-      {/* Per-model actions — kept as the one place with a per-model Move */}
-      {canMove && actionModels.some((model) => model.instanceId) && (
+      {/*
+        Per-model rows — the single list (one line per model, kebab for admins). Rendered for
+        every user; the actions dropdown is admin-only. Other/Free ride at the bottom as
+        legend rows without a kebab, same look as the model rows.
+      */}
+      {(actionModels.length > 0 || bar.otherBytes > 0) && (
         <div
           style={{
             marginTop: '4px',
@@ -543,72 +458,85 @@ function GpuCard({
                   {model.displayName ?? model.modelName}
                   {model.sleeping && <SleepingMoon />} ({formatBytes(model.bytes)})
                 </span>
-                <Dropdown
-                  isOpen={openMenuKey === model.key}
-                  onSelect={() => setOpenMenuKey(null)}
-                  onOpenChange={(isOpen) => {
-                    if (!isOpen) setOpenMenuKey(null);
-                  }}
-                  toggle={(toggleRef) => (
-                    <MenuToggle
-                      ref={toggleRef}
-                      variant="plain"
-                      isExpanded={openMenuKey === model.key}
-                      isDisabled={!hasInstance || isPending}
-                      aria-label={t('overview.modelsPlacement.actions.ariaLabel', {
-                        model: model.displayName ?? model.modelName,
-                      })}
-                      onClick={() => setOpenMenuKey(openMenuKey === model.key ? null : model.key)}
-                    >
-                      <EllipsisVIcon />
-                    </MenuToggle>
-                  )}
-                  popperProps={{ position: 'right' }}
-                >
-                  <DropdownList>
-                    <DropdownItem
-                      key={canWake ? 'wake' : 'sleep'}
-                      isDisabled={!hasInstance || (!canSleep && !canWake)}
-                      onClick={() => mutateInstance(canWake ? 'wake' : 'sleep')}
-                    >
-                      {t(
-                        canWake
-                          ? 'overview.modelsPlacement.actions.wake'
-                          : 'overview.modelsPlacement.actions.sleep',
-                      )}
-                    </DropdownItem>
-                    <DropdownItem
-                      key="move"
-                      isDisabled={!hasInstance || model.state !== ModelLifecycleState.ACTIVE}
-                      onClick={() => {
-                        if (!model.instanceId || model.state !== ModelLifecycleState.ACTIVE) return;
-                        setOpenMenuKey(null);
-                        onMove({
-                          modelName: model.modelName,
-                          instanceId: model.instanceId,
-                          workerId: '',
-                          deviceIndices:
-                            models?.find(
-                              (candidate) => candidate.instanceId === model.instanceId,
-                            )?.deviceIndices ?? [device.deviceIndex],
-                        });
-                      }}
-                    >
-                      {t('overview.modelsPlacement.actions.move')}
-                    </DropdownItem>
-                    <DropdownItem
-                      key="stop"
-                      isDanger
-                      isDisabled={!hasInstance || !canStop}
-                      onClick={() => mutateInstance('stop')}
-                    >
-                      {t('overview.modelsPlacement.actions.stop')}
-                    </DropdownItem>
-                  </DropdownList>
-                </Dropdown>
+                {canMove && (
+                  <Dropdown
+                    isOpen={openMenuKey === model.key}
+                    onSelect={() => setOpenMenuKey(null)}
+                    onOpenChange={(isOpen) => {
+                      if (!isOpen) setOpenMenuKey(null);
+                    }}
+                    toggle={(toggleRef) => (
+                      <MenuToggle
+                        ref={toggleRef}
+                        variant="plain"
+                        isExpanded={openMenuKey === model.key}
+                        isDisabled={!hasInstance || isPending}
+                        aria-label={t('overview.modelsPlacement.actions.ariaLabel', {
+                          model: model.displayName ?? model.modelName,
+                        })}
+                        onClick={() =>
+                          setOpenMenuKey(openMenuKey === model.key ? null : model.key)
+                        }
+                      >
+                        <EllipsisVIcon />
+                      </MenuToggle>
+                    )}
+                    popperProps={{ position: 'right' }}
+                  >
+                    <DropdownList>
+                      <DropdownItem
+                        key={canWake ? 'wake' : 'sleep'}
+                        isDisabled={!hasInstance || (!canSleep && !canWake)}
+                        onClick={() => mutateInstance(canWake ? 'wake' : 'sleep')}
+                      >
+                        {t(
+                          canWake
+                            ? 'overview.modelsPlacement.actions.wake'
+                            : 'overview.modelsPlacement.actions.sleep',
+                        )}
+                      </DropdownItem>
+                      <DropdownItem
+                        key="move"
+                        isDisabled={!hasInstance || model.state !== ModelLifecycleState.ACTIVE}
+                        onClick={() => {
+                          if (!model.instanceId || model.state !== ModelLifecycleState.ACTIVE)
+                            return;
+                          setOpenMenuKey(null);
+                          onMove({
+                            modelName: model.modelName,
+                            instanceId: model.instanceId,
+                            workerId: '',
+                            deviceIndices:
+                              models?.find(
+                                (candidate) => candidate.instanceId === model.instanceId,
+                              )?.deviceIndices ?? [device.deviceIndex],
+                          });
+                        }}
+                      >
+                        {t('overview.modelsPlacement.actions.move')}
+                      </DropdownItem>
+                      <DropdownItem
+                        key="stop"
+                        isDanger
+                        isDisabled={!hasInstance || !canStop}
+                        onClick={() => mutateInstance('stop')}
+                      >
+                        {t('overview.modelsPlacement.actions.stop')}
+                      </DropdownItem>
+                    </DropdownList>
+                  </Dropdown>
+                )}
               </div>
             );
           })}
+          {bar.otherBytes > 0 && (
+            <ModelLegendRow color={bar.colors['Other']}>
+              {t('overview.modelsPlacement.legend.other')} ({formatBytes(bar.otherBytes)})
+            </ModelLegendRow>
+          )}
+          <ModelLegendRow color={bar.colors['Free']}>
+            {t('overview.modelsPlacement.legend.free', { value: formatBytes(bar.freeBytes) })}
+          </ModelLegendRow>
         </div>
       )}
 
