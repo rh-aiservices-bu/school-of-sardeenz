@@ -98,9 +98,7 @@
       },
       "legend": {
         "other": "Other",
-        "free": "Free ({{value}})",
-        "viewModel": "Go to {{model}}",
-        "segments": "VRAM segments"
+        "free": "Free ({{value}})"
       },
       "worker": {
         "gpuCount": "{{count}} GPU",
