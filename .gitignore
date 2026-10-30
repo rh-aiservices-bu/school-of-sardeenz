@@ -80,3 +80,15 @@ deployment/overlays
 
 # MkDocs build output
 site/
+
+# Reports scratchpad — agent reports, never committed
+.omp/reports/
+
+# Plans, notes and PR drafts from milestone runs
+.omp/plans/
+
+# Worktrees for issue branches
+.omp/worktrees/
+
+# OMP profiles
+.omp/profiles

@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
+  pre-tool safety hook imported from the agents-jukebox project kept their orchestration method
+  (Direct/Light/Full pipelines, role agents, report-scratchpad custody) but every
+  repository-specific reference was rewritten for sardeenz: role models resolve through
+  `modelRoles` aliases (`plan`/`slow`) instead of nonexistent explicit IDs, npm instead of pnpm,
+  Kustomize instead of Helm (helm block rule dropped from the safety hook), JWT auth on
+  `dashboard/server/plugins/auth.ts` instead of Keycloak, Playwright e2e specs in
+  `dashboard/e2e/` instead of `dev-tools/e2e-scenarios/`, and `.omp/RULES.md` pointing at
+  `docs/development/setup.md`. The boundary reviewer and `domain-rules`/`test-ui`/`verify`
+  skills were rewritten wholesale (OpenAPI contract drift, proxy↔control-plane↔BFF shapes,
+  DB migrations, runner contract); the duplicate `work-item-template.md` under
+  `plan-milestone/references/` was deleted in favour of the `implement/` copy. The previously
+  missing `docs/development/agent-profile.md` (required by the milestone skills) was created
+  from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
+  (`reports/`, `plans/`, `worktrees/`, `profiles`).
+
+
 ### Added
 
 - **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
