@@ -413,19 +413,21 @@ function GpuCard({
         />
       </div>
 
-      {/* Model chips + Other/Free — details in the hover tooltip */}
-      <Tooltip content={legendTooltip}>
-        <Flex
-          flexWrap={{ default: 'wrap' }}
-          alignItems={{ default: 'alignItemsCenter' }}
-          style={{
-            marginTop: '6px',
-            columnGap: 'var(--pf-t--global--spacer--sm)',
-            rowGap: '2px',
-          }}
-        >
-          {modelChips.map((model) => (
-            <FlexItem key={model.key}>
+      {/* Model chips + Other/Free — per-chip hover tooltip: one Tooltip per chip so the full
+          VRAM breakdown anchors right above the hovered chip, like the bar tooltip, instead
+          of top-center of the legend row. */}
+      <Flex
+        flexWrap={{ default: 'wrap' }}
+        alignItems={{ default: 'alignItemsCenter' }}
+        style={{
+          marginTop: '6px',
+          columnGap: 'var(--pf-t--global--spacer--sm)',
+          rowGap: '2px',
+        }}
+      >
+        {modelChips.map((model) => (
+          <FlexItem key={model.key}>
+            <Tooltip content={legendTooltip}>
               <Link
                 to={`/models/${encodeURIComponent(model.modelName)}`}
                 aria-label={t('overview.modelsPlacement.legend.viewModel', {
@@ -443,10 +445,12 @@ function GpuCard({
                 {model.displayName ?? model.modelName}
                 {model.sleeping && <SleepingMoon />} ({formatBytes(model.bytes)})
               </Link>
-            </FlexItem>
-          ))}
-          {bar.otherBytes > 0 && (
-            <FlexItem>
+            </Tooltip>
+          </FlexItem>
+        ))}
+        {bar.otherBytes > 0 && (
+          <FlexItem>
+            <Tooltip content={legendTooltip}>
               <span
                 style={{
                   fontSize: 'var(--pf-t--global--font--size--xs)',
@@ -457,9 +461,11 @@ function GpuCard({
                 {t('overview.modelsPlacement.legend.other')} (
                 {formatBytes(bar.otherBytes)})
               </span>
-            </FlexItem>
-          )}
-          <FlexItem>
+            </Tooltip>
+          </FlexItem>
+        )}
+        <FlexItem>
+          <Tooltip content={legendTooltip}>
             <span
               style={{ fontSize: 'var(--pf-t--global--font--size--xs)', whiteSpace: 'nowrap' }}
             >
@@ -468,9 +474,9 @@ function GpuCard({
                 value: formatBytes(bar.freeBytes),
               })}
             </span>
-          </FlexItem>
-        </Flex>
-      </Tooltip>
+          </Tooltip>
+        </FlexItem>
+      </Flex>
 
       {/* Per-model actions — kept as the one place with a per-model Move */}
       {canMove && actionModels.some((model) => model.instanceId) && (

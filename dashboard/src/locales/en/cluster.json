@@ -114,11 +114,6 @@
         "vramLine": "{{used}} / {{total}} — {{percent}}%",
         "kvCacheLine": "KVCache: {{used}} / {{total}}"
       },
-      "legend": {
-        "other": "Other",
-        "free": "Free ({{value}})",
-        "viewModel": "Go to {{model}}"
-      },
       "totalFree": "Total system free GPU memory: {{value}} across {{count}} GPU",
       "totalFree_plural": "Total system free GPU memory: {{value}} across {{count}} GPUs"
     },

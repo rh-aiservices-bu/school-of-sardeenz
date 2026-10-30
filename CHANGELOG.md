@@ -87,6 +87,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `rest_server_requests_in_progress` gauge and reports it as `activeRequests` (unknown/omitted
   only when the scrape fails, never a fake 0), matching the vLLM shim's behavior.
 
+### Fixed
+
+- **Models placement legend tooltip (cards view).** Hovering the model legend showed the raw
+  i18n key `overview.modelsPlacement.legend.segments` as its title: `cluster.json` carried two
+  duplicate `"legend"` blocks and JSON parsing keeps the last duplicate, which lacked the
+  `"segments"` entry. The duplicate block is removed (the survivor keeps all keys). The tooltip
+  is also anchored per legend chip now — one Tooltip per chip/Other/Free entry — so the full
+  VRAM breakdown appears right above the hovered chip, matching the stacked-bar tooltip
+  behavior, instead of top-center of the legend row.
+
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the
