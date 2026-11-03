@@ -37,8 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   build, the compiler/Ninja toolchain and `Python.h`; the driver-stub RPM pin is unchanged
   (`cuda-driver-devel-13-0-13.0.96-1`). `VLLM_USE_V2_MODEL_RUNNER=0` is baked into the SIF, and the
   worker now forces Model Runner V1 for every kvcached module in the 0.24+ range (`vllm-0.24`,
-  `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The `vllm-0.26`
-  catalog entry follows once the librarian publishes the SIF.
+  `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The catalog entry is
+  pinned to the published `vllm:0.26-rc1` SIF (`sha256:075b3057…`).
 
 - **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
   `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last PyPI build for CUDA 12) and the shim ships its own
