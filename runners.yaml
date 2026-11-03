@@ -88,6 +88,32 @@ runners:
       toolUse: true
       kvCacheOffload: false
       prefixCaching: true
+  - id: vllm-0.26
+    title: vLLM 0.26 (+ kvcached)
+    description: >-
+      vLLM (0.26) with kvcached, kept for models pinned to that engine version.
+      Forces Model Runner V1 for kvcached compatibility. Runs side by side with
+      newer versions — hot-add without recycling workers.
+    engine: vLLM
+    runnerType: vllm
+    version: '0.26'
+    image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.26-rc1@sha256:075b3057000fca8122a4c059c66087bb4ed15aa240ca64b8ef953ccc048fa52b
+    sifName: vllm-0.26
+    protocol: openai
+    tags: [llm, cuda, kvcached, openai]
+    minVRAMGiB: 16
+    license: Apache-2.0
+    supportedModelTypes: [LLM]
+    supportedDeviceTypes: [CUDA]
+    supportedSleepLevels: [L1_HOST_RAM]
+    maxTensorParallelism: 8
+    kvCacheElasticSharing: true
+    features:
+      streamingInference: true
+      chatTemplate: true
+      toolUse: true
+      kvCacheOffload: false
+      prefixCaching: true
   - id: mlserver-1.7.1
     title: MLServer 1.7.1 (KServe V2)
     description: >-

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { describe, expect, it } from 'vitest';
@@ -173,13 +173,33 @@ describe('SIF runner deployment manifests (#181)', () => {
   });
 });
 
-describe('vLLM 0.24 runner compatibility', () => {
-  it('forces Model Runner V1 because kvcached does not support Model Runner V2', () => {
-    const containerfile = readFileSync(
-      resolve(repoRoot, 'containers/runners/vllm/0.24.0/Containerfile'),
-      'utf8',
-    );
+describe('vLLM kvcached runner compatibility', () => {
+  // vLLM selects Model Runner V2 from the 0.24 line onwards, and kvcached only autopatches that
+  // path from 0.28 — so every kvcached runner image in the 0.24+ range must bake the V1 pin.
+  const modelRunnerV2Versions = readdirSync(resolve(repoRoot, 'containers/runners/vllm'), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((version) => {
+      const [major = 0, minor = 0] = version.split('.').map(Number);
+      return major > 0 || minor >= 24;
+    })
+    .sort();
 
-    expect(containerfile).toMatch(/VLLM_USE_V2_MODEL_RUNNER=0/);
+  it('covers the versioned vLLM runner images', () => {
+    expect(modelRunnerV2Versions.length).toBeGreaterThan(0);
   });
+
+  it.each(modelRunnerV2Versions)(
+    'forces Model Runner V1 in the vLLM %s runner image because kvcached cannot patch V2',
+    (version) => {
+      const containerfile = readFileSync(
+        resolve(repoRoot, 'containers/runners/vllm', version, 'Containerfile'),
+        'utf8',
+      );
+
+      expect(containerfile).toMatch(/VLLM_USE_V2_MODEL_RUNNER=0/);
+    },
+  );
 });
