@@ -22,6 +22,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (verified against the 10.1.0/10.2.7 tarballs — the runtime deltas are stricter option
   validation and a double-callback guard, neither reachable from the plugin's usage).
 
+- **Control plane and dashboard BFF: `undici` bumped to clear the 29 open Dependabot alerts
+  on the 7.x line.** The direct `undici` dependency in both workspaces moves from `^7.10.0`
+  to `^7.30.1` (same major, explicit security floor), lifting the resolved 7.27.2 to
+  7.30.1 — the highest published 7.x and the only release outside every vulnerable range on
+  this line (10 high, 14 medium, 5 low). 7.29.1 is not sufficient: Dependabot alert #40
+  (DoS via an unhandled error on excessive content-encodings, `>= 7.18.0 < 7.30.1`) is
+  first patched in 7.30.1, which also restores TLS options dropped by `Agent`'s constructor
+  clone (Dependabot alert #8 class) and fixes the TLS 1.2 renegotiation DoS. Consumers are
+  the control-plane SIF importer (`control-plane/src/services/sif-importer.ts`, undici
+  `fetch`/`Headers`) and the dashboard BFF Prometheus client
+  (`dashboard/server/clients/prometheus.ts`, an `Agent` with `connect: { ca }` injected as
+  the `dispatcher` fetch option); 7.30.1 changes no runtime dependency, engine constraint
+  or type declaration on either surface, so no source edits are needed. The remaining open
+  `undici` Dependabot alerts apply to the dev-tooling 6.24.1 copy pinned by
+  `@redocly/respect-core` and are tracked in #227.
+
 ### Changed
 
 - **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
