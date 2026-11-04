@@ -38,6 +38,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `undici` Dependabot alerts apply to the dev-tooling 6.24.1 copy pinned by
   `@redocly/respect-core` and are tracked in #227.
 
+- **Dashboard: `react-router-dom` bumped to clear the open redirect alert on the 6.x
+  line.** The direct dependency moves from `^6.28.0` to `^6.30.6` (same major, explicit
+  security floor), lifting the resolved 6.30.4 to 6.30.6 — the final 6.x release and the
+  patched version for Dependabot alert #1 (GHSA-jjmj-jmhj-qwj2 / CVE-2026-53668,
+  moderate: protocol-relative open redirect — a
+  `//evil.com` target given to `<Link>`, `<Navigate>` or `useNavigate` was resolved as an
+  external URL, enabling an attacker-controlled redirect; vulnerable `>= 6.30.2 <= 6.30.5`,
+  fixed 6.30.6). The sole behavioral change is a `resolvePath()` hardening in
+  `@remix-run/router` 1.23.4: every resolved path is now double-slash-normalized, so
+  external/protocol-relative navigations are treated as in-app paths — the dashboard's
+  own `Link`/`Navigate`/`useNavigate` targets are app paths, but its login redirect
+  derives `state.from` from `location.pathname` (reachable with a crafted SPA-fallback
+  URL pre-patch), so the hardening closes that path too; no source edits are needed. No
+  public API or type changes; 6.30.5 is a broken publish (its router dependency stayed
+  1.23.3) and is never resolved under this range. Two Dependabot alerts remain open on
+  `react-router` itself (#92 GHSA-337j-9hxr-rhxg — constructor injection via
+  `deserializeErrors()` in SSR hydration, not applicable to this BrowserRouter SPA; #93
+  GHSA-wrjc-x8rr-h8h6 — open redirect via backslash in `<Link>`/`useNavigate`, residual
+  but not reachable here): they are fixed only in 7.18.0, v6 is EOL, and clearing them
+  requires the v7 major upgrade tracked as a separate follow-up — this bump does NOT fix
+  them.
+
 ### Changed
 
 - **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
