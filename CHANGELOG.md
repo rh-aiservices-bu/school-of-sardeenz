@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **Dashboard BFF: JWT library bumped to clear the 6 open Dependabot alerts on the
+  transitive `fast-jwt` verifier.** `@fastify/jwt` moves from `^10.1.0` to `^10.2.7`
+  (same major, explicit security floor), which lifts `fast-jwt` from the pinned 6.2.4
+  to 6.3.6 — outside every vulnerable range. The alerts (Dependabot #20–#25): 1 critical
+  (incomplete CVE-2026-34950 patch, non-whitespace key-prefix re-enabling HS confusion),
+  3 high (raw public JWK JSON treated as HMAC secret, unsigned-JWT acceptance, silent
+  claim-validator bypass on array payloads), 2 medium (`clockTolerance: Infinity`
+  bypassing exp/nbf, verifier cache accepting expired JWTs without iat). The sole
+  importer is `dashboard/server/plugins/auth.ts` (register opts +
+  `request.jwtVerify<JwtPayload>()`; `dashboard/server/routes/auth.ts` also signs via
+  `app.jwt.sign`). `@fastify/jwt` 10.2.x introduces no breaking change on that surface
+  (verified against the 10.1.0/10.2.7 tarballs — the runtime deltas are stricter option
+  validation and a double-callback guard, neither reachable from the plugin's usage).
+
 ### Changed
 
 - **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
