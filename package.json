@@ -31,7 +31,10 @@
     "logs:clear": "rm -rf logs/*.log"
   },
   "overrides": {
-    "dotenv": "^17.0.0"
+    "dotenv": "^17.0.0",
+    "monaco-editor": {
+      "dompurify": "3.4.17"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

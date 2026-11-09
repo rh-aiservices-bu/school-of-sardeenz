@@ -60,6 +60,108 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   requires the v7 major upgrade tracked as a separate follow-up — this bump does NOT fix
   them.
 
+- **Dev tooling and runtime bundles: transitive dependency sweep clears 87 of the 100
+  Dependabot alerts firing against the base lockfile (GitHub shows 141 open rows — 136
+  npm + 5 rust — because alerts already fixed by #224/#225/#226 stay open until
+  re-scan; the 5 Rust rows are untouched here).** A root
+  `npm update --package-lock-only` refresh (npm workspaces, no pnpm) lifts every
+  alerted dependency reachable in-range to its Dependabot fix or beyond — 13 alerts
+  remain on the refreshed tree: the residuals enumerated below plus the two
+  `react-router` 6.x alerts (#92/#93) carried by the #226 entry above and tracked in
+  #229. The one `dompurify` copy npm update cannot reach — `monaco-editor`'s nested
+  copy — is collapsed via a scoped override, and the existing root `"dotenv": "^17.0.0"`
+  override (the dotenv unification override) is preserved; the combined `overrides`
+  object in root `package.json` is:
+
+  ```json
+  "overrides": {
+    "dotenv": "^17.0.0",
+    "monaco-editor": {
+      "dompurify": "3.4.17"
+    }
+  }
+  ```
+
+  No direct dependency range changes and no source files change.
+  Per-package outcomes (locked before → after; Dependabot floor where applicable):
+  `@redocly/cli` 1.34.15 → 1.34.24, `handlebars` 4.7.9 → 4.7.10 (critical alert #28),
+  `js-yaml` 4.2.0 (+3×4.1.1 nested) → 4.3.2 single copy, `undici` (the
+  `@redocly/respect-core` 6.x copy) 6.24.1 → 6.29.1, `undici` (direct, hoisted to root)
+  7.30.1 → 7.30.2, `vite` 7.3.5 (×3: dashboard + `vitest`/`vite-node` nested) → 7.3.8
+  single copy, `esbuild` 0.27.7 (+ `tsx`-nested 0.28.1) → 0.28.2 single copy,
+  `postcss` 8.5.15 → 8.5.32, `browserslist` 4.28.2 → 4.29.5,
+  `baseline-browser-mapping` 2.10.37 → 2.11.35, `source-map-js` 1.2.1 → 1.2.2,
+  `form-data` 4.0.4 → 4.0.6, `shell-quote` 1.8.4 → 1.12.0, `fast-uri` 3.1.2 → 3.1.9 root
+  copy (new 4.2.3 nested under `@fastify/ajv-compiler` / `fast-json-stringify`, outside
+  every alert range), `brace-expansion` 1.1.15 → 1.1.21, 2.1.1 → 2.1.7, 5.0.6 → 5.0.12,
+  `dompurify` 3.4.15 (+ `monaco-editor`'s nested 3.1.7) → 3.4.17 single copy,
+  `monaco-editor` 0.54.0 → 0.56.0. Three land above the issue's stated minimum: `vite`
+  7.3.8 > 7.3.7, `baseline-browser-mapping` 2.11.35 > 2.11.0, and `@redocly/cli`
+  1.34.24 > 1.34.17 — 1.34.17's `@redocly/respect-core` pins `undici` exactly at
+  6.27.0, still inside the 6.x vulnerable ranges; only 1.34.24 pins 6.29.1, so all 11
+  undici-6.x alerts clear together with the handlebars fix (1.34.17 still pins 4.7.9).
+  This closes the loop on the #225 entry, which left the 6.x `undici` copy
+  "tracked in #227": the 6.x copy is now 6.29.1 and all 11 undici-6.x alerts close.
+  Two side-effect clearances ride the sweep: `fastify` 5.8.5 → 5.12.8 (first patched
+  5.12.5 — 7 alerts: 4 high #135–#138, 3 medium #120/#121/#139) and `find-my-way`
+  9.6.0 → 9.10.0 (first patched 9.7.0 — 1 alert, #91 high), shrinking the planned
+  fastify-stack follow-up (#231) to `@fastify/static` + `glob`.
+  The dompurify collapse clears every open dompurify alert, including #63 (low;
+  `<= 3.4.6` — GitHub shows no first-patched version on that advisory, but 3.4.17 sits
+  outside its range and the alert closes on re-scan). One residual rides inside that
+  outcome: `monaco-editor` 0.56.0 also vendors its own DOMPurify 3.4.8 copy inside its
+  published dist (`domSanitize` imports it), so the override fixes the dependency-graph
+  alert only — the vendored in-bundle copy remains inside the #36 critical / #39 high
+  windows but is not demonstrably exploitable through monaco's sanitizer configuration;
+  the true fix is upstream (monaco unbundling DOMPurify), documented as a residual
+  below.
+  Scope disclosure: `npm update --package-lock-only` refreshes the whole in-range tree
+  (~313 changed lock paths), not only the alerted packages. Several majors land only
+  because their pullers bumped their own dependency ranges in the same refresh —
+  `fastify` 5.12.x now declares `fast-json-stringify` `^7`, `react-i18next` 17.1.13
+  now declares `html-parse-stringify` `^4`, and `style-to-object` rides a puller swap
+  (`style-to-js` dropped for `hast-util-to-jsx-runtime`'s new `style-to-object ^2.0.0`)
+  — and npm resolves the rest in-range under the pullers' declared ranges,
+  npm-canonical, exercised by the deferred host gates below: `cookie` 1.1.1 → 2.0.2 (via
+  `@fastify/cookie` 11.1.5, which now declares `cookie ^2.0.0`; consumed on the BFF
+  `sardeenz_sse` cookie path), `fast-json-stringify` 6.4.0 → 7.3.4 (`fastify` response
+  serialization), `style-to-object` 1.0.14 → 2.0.2 (markdown rendering in the chat path
+  via `react-markdown`); `html-parse-stringify` 3.0.1 → 4.0.1 (dashboard i18n —
+  `react-i18next` 17.0.8 → 17.1.13 now declares `^4.0.1`; `i18next` 26.3.1 → 26.7.2
+  rides along), `@patternfly/chatbot` 6.7.1 → 6.9.0
+  (this is what carried `monaco-editor` 0.54.0 → 0.56.0 via its `^0.56.0` peer),
+  `@patternfly/react-{core,icons,styles,table,tokens,code-editor}` 6.6.1 → 6.7.0,
+  `@patternfly/react-charts` 8.5.1 → 8.7.0 (the `@patternfly/react-*` wildcard
+  doesn't cover it), `victory` 37.3.6 → 37.4.1, `posthog-js` 1.433.2 → 1.447.4,
+  `set-cookie-parser` 2.7.1 → 3.2.2 (via `light-my-request`, now declaring
+  `^3.0.1`, under `fastify`; the dev-chain root copy 2.7.1 stays pinned exactly
+  by `@redocly/respect-core` 1.34.24), `sonic-boom` 4.2.1 → 5.0.2 (dev-chain
+  `pino-pretty`, now declaring `^5.0.0`; the prod `pino` keeps the root 4.2.1),
+  `@fastify/static` 9.1.3 → 9.3.0 (dashboard BFF static server; runtime).
+  npm's dedupe also relocated or stepped down a few packages
+  (`d3-format`, `d3-time-format`, `semver`, `react-dropzone`, `mobx-react`) — each
+  resolves inside every puller's declared range and reopens no advisory.
+  Residuals, documented not forced: `tinypool` 1.1.1 (2 critical alerts #140/#141) and
+  the `vitest` 3.2.7 / `@vitest/mocker` alerts #2/#4/#33 (all medium) ride the same
+  `vitest` 4 major in #228 — the fix ≥2.1.2 sits outside `vitest` 3's declared range,
+  and `vitest` 4 drops `tinypool` entirely; `glob` 13.0.6 → 13.0.7 / 10.5.0
+  unchanged (alert #156, medium) unreachable this sweep — their pullers
+  `test-exclude` / `@fastify/static@9` cap below `glob` 14, so the fix is upstream
+  plus #231; `@faker-js/faker` 7.6.0 (alert #119, high; fix ≥10.5.0 — deferred: only
+  reachable via a 7→10 major-crossing override, confined to the dev chain's
+  `redocly contract` fake-telemetry generation);
+  `@fastify/static` 9.3.0 (alerts #46/#95, high; #47/#96, medium; fix ≥10.1.10 — the
+  first-patched floor for these four is 10.1.2, but ≥10.1.10 also carries `glob` 14 and
+  so closes #156, matching the #231 follow-up, a step this sweep has already shrunk: its
+  `fastify` and `find-my-way` rows clear here); `monaco-editor` 0.56.0's vendored
+  DOMPurify 3.4.8 (see above — the in-bundle copy inside the #36 critical / #39 high
+  windows; this is a residual risk, not one of the 13; fix is upstream).
+  `@redocly/cli` 1.34.24 is the terminal v1 release (`v1-archive`); the redocly v2 major
+  migration is future work. Runtime verification (npm ci → dashboard client build →
+  control-plane/dashboard/dev-worker suites → e2e → typecheck → scoped eslint → `npm ls`
+  / `npm audit`) runs on the host by the user; nothing was executed in-container beyond
+  the lockfile refresh and static assertions.
+
 ### Changed
 
 - **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
