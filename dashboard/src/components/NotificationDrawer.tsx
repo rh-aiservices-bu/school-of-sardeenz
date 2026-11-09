@@ -18,7 +18,7 @@ import {
   DropdownList,
   MenuToggle,
 } from '@patternfly/react-core';
-import { BellIcon, EllipsisVIcon } from '@patternfly/react-icons';
+import { BellIcon, EllipsisVIcon, TimesIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../contexts/NotificationContext';
 
@@ -122,13 +122,13 @@ export function NotificationDrawer() {
                 >
                   <Button
                     variant="plain"
-                    aria-label={`Remove notification: ${notification.title}`}
+                    aria-label={`${t('notifications.remove')} ${notification.title}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       removeNotification(notification.id);
                     }}
                   >
-                    ×
+                    <TimesIcon aria-hidden="true" />
                   </Button>
                 </NotificationDrawerListItemHeader>
                 <NotificationDrawerListItemBody
@@ -156,11 +156,19 @@ interface NotificationBadgeButtonProps {
 
 export function NotificationBadgeButton({ onClick, unreadCount }: NotificationBadgeButtonProps) {
   const { t } = useTranslation('common');
+  // Label-in-name (axe label-content-name-mismatch): the accessible name must contain the
+  // visible count text. NotificationBadge renders no children when count > 0, so the sr-only
+  // label rides in the icon slot (name-from-content = "Notifications <count>").
   return (
     <NotificationBadge
       count={unreadCount}
       onClick={onClick}
-      aria-label={t('notifications.title')}
+      icon={
+        <>
+          <BellIcon aria-hidden="true" />
+          <span className="pf-v6-screen-reader">{t('notifications.title')}</span>
+        </>
+      }
     />
   );
 }

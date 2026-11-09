@@ -180,7 +180,9 @@ test.describe('Accessibility — WCAG 2.1 AA scanning', () => {
     await page.goto(bffUrl(bffPort, '/'));
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+    // Badge name is now name-from-content ("Notifications <count>") — match with a regex so
+    // the count doesn't break the lookup.
+    await page.getByRole('button', { name: /^Notifications( \d+)?$/ }).click();
 
     const notificationDrawer = page.getByRole('region', { name: 'Notifications', exact: true });
     await expect(notificationDrawer).toBeVisible();

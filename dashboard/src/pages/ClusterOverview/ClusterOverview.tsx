@@ -431,10 +431,12 @@ function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
                 tabIndex={0}
                 onClick={() => void navigate(url)}
                 onKeyDown={(e) => handleKeyDown(e, url)}
-                aria-label={t('overview.modelStateBreakdown.viewModels', { state, count })}
                 style={stateRowStyle}
               >
                 <StateLabel state={state} isCompact />
+                <span className="pf-v6-screen-reader">
+                  {t('overview.modelStateBreakdown.viewModels', { state, count })}
+                </span>
                 <span
                   style={{
                     fontSize: 'var(--pf-t--global--font--size--lg)',
@@ -458,15 +460,17 @@ function ModelStateBreakdown({ status }: { status: ClusterStatus }) {
               onKeyDown={(e) =>
                 handleKeyDown(e, `/models?${OTHER_STATES.map((s) => `state=${s}`).join('&')}`)
               }
-              aria-label={t('overview.modelStateBreakdown.viewModels', {
-                state: t('overview.modelStateBreakdown.other'),
-                count: other,
-              })}
               style={stateRowStyle}
             >
               <Label color="grey" isCompact>
                 {t('overview.modelStateBreakdown.other')}
               </Label>
+              <span className="pf-v6-screen-reader">
+                {t('overview.modelStateBreakdown.viewModels', {
+                  state: t('overview.modelStateBreakdown.other'),
+                  count: other,
+                })}
+              </span>
               <span
                 style={{
                   fontSize: 'var(--pf-t--global--font--size--lg)',
