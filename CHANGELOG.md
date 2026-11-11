@@ -30,7 +30,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `state.from` value are absolute app paths (no multi-segment splats, no relative links).
   The stale `react-router-dom`-is-CJS comment in `NotificationProvider.test.tsx` (issue
   #148's root-hoisting render-split rationale) is updated: v7's shim is ESM and resolves
-  the same React instance. Verified in-container with the v7 runtime staged from registry
+  the same React instance. One v7 signature change required source edits: `useNavigate`
+  now returns `Promise<void>` (data-router alignment), so the seven `NavItem` handlers in
+  `AppLayout.tsx` and the redirect in `OAuthCallback.tsx` adopt the `void navigate(...)`
+  idiom the codebase already uses elsewhere, satisfying `no-misused-promises` /
+  `no-floating-promises`. Verified in-container with the v7 runtime staged from registry
   tarballs: dashboard client build (`vite build`) passes, and the full workspace `vitest
   run` is 98/98 files, 1502 passed + 1 skipped; the Playwright auth/navigation e2e specs
   run in CI.
