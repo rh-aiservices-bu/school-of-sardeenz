@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Dashboard: `react-router-dom` upgraded to v7 (7.18.5), clearing the two remaining
+  medium `react-router` alerts.** The direct dependency moves from `^6.30.6` to `^7.18.5`
+  — the first version of the v7 line that patches Dependabot alerts #92 (GHSA-337j-9hxr-rhxg
+  / CVE-2026-53666: constructor injection via `deserializeErrors()` in SSR hydration;
+  inapplicable to this declarative-mode `BrowserRouter` SPA) and #93 (GHSA-wrjc-x8rr-h8h6 /
+  CVE-2026-53669: open redirect via backslash in `<Link>`/`useNavigate`; residual surface
+  confirmed unreachable — navigation targets are app paths and the `state.from` round-trip
+  carries `location.pathname` only). The v6 line is EOL (6.30.6 was its final release), so
+  the major upgrade is the only path to a clean alert state. `react-router-dom` v7 remains
+  an official package — a thin ESM re-export shim of `react-router` 7.18.5 plus
+  `RouterProvider`/`HydratedRouter` from its `react-router/dom` deep import (unused here;
+  the app uses only `<BrowserRouter>`) — so all 12 consumer files keep their
+  `react-router-dom` imports unchanged; the dependency closure shrinks by dropping
+  `@remix-run/router` and gains `cookie` 1.1.1 (nested under `react-router`, distinct from
+  the root `cookie` 2.0.2 copy) and `set-cookie-parser` 2.7.1 (already in the tree, now
+  production). v7's behavioral deltas adopted as defaults — `v7_startTransition` (router
+  state updates move to `React.useTransition`) and `v7_relativeSplatPath` (relative-link
+  resolution inside multi-segment splats) — are both no-ops for this app: it has no
+  `React.lazy` inside components, and all `<Link>`/`navigate()` targets plus the
+  `state.from` value are absolute app paths (no multi-segment splats, no relative links).
+  The stale `react-router-dom`-is-CJS comment in `NotificationProvider.test.tsx` (issue
+  #148's root-hoisting render-split rationale) is updated: v7's shim is ESM and resolves
+  the same React instance. One v7 signature change required source edits: `useNavigate`
+  now returns `Promise<void>` (data-router alignment), so the seven `NavItem` handlers in
+  `AppLayout.tsx` and the redirect in `OAuthCallback.tsx` adopt the `void navigate(...)`
+  idiom the codebase already uses elsewhere, satisfying `no-misused-promises` /
+  `no-floating-promises`. Verified in-container with the v7 runtime staged from registry
+  tarballs: dashboard client build (`vite build`) passes, and the full workspace `vitest
+  run` is 98/98 files, 1502 passed + 1 skipped; the Playwright auth/navigation e2e specs
+  run in CI.
 - **Proxy: Rust advisory bump clears the five open Rust Dependabot alerts.** A pure
   `Cargo.lock` refresh (`cargo update -p rustls -p quinn-proto`; no manifest change — both
   crates are transitive under `reqwest` 0.12 with the `rustls-tls` feature and HTTP/3):

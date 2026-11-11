@@ -183,48 +183,48 @@ export function AppLayout({ children }: AppLayoutProps) {
       >
         <Nav>
           <NavList>
-            <NavItem itemId="/" isActive={location.pathname === '/'} onClick={() => navigate('/')}>
+            <NavItem itemId="/" isActive={location.pathname === '/'} onClick={() => void navigate('/')}>
               {t('nav.clusterOverview')}
             </NavItem>
             <NavItem
               itemId="/models"
               isActive={location.pathname.startsWith('/models')}
-              onClick={() => navigate('/models')}
+              onClick={() => void navigate('/models')}
             >
               {t('nav.models')}
             </NavItem>
             <NavItem
               itemId="/workers"
               isActive={location.pathname.startsWith('/workers')}
-              onClick={() => navigate('/workers')}
+              onClick={() => void navigate('/workers')}
             >
               {t('nav.workers')}
             </NavItem>
             <NavItem
               itemId="/gpu-memory"
               isActive={location.pathname.startsWith('/gpu-memory')}
-              onClick={() => navigate('/gpu-memory')}
+              onClick={() => void navigate('/gpu-memory')}
             >
               {t('nav.gpuMemory')}
             </NavItem>
             <NavItem
               itemId="/catalog"
               isActive={location.pathname.startsWith('/catalog')}
-              onClick={() => navigate('/catalog')}
+              onClick={() => void navigate('/catalog')}
             >
               {t('nav.catalog')}
             </NavItem>
             <NavItem
               itemId="/metrics"
               isActive={location.pathname.startsWith('/metrics')}
-              onClick={() => navigate('/metrics')}
+              onClick={() => void navigate('/metrics')}
             >
               {t('nav.metrics')}
             </NavItem>
             <NavItem
               itemId="/playground"
               isActive={location.pathname.startsWith('/playground')}
-              onClick={() => navigate('/playground')}
+              onClick={() => void navigate('/playground')}
             >
               {t('nav.playground')}
             </NavItem>

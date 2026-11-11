@@ -11,7 +11,7 @@ export function OAuthCallback() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      navigate('/', { replace: true });
+      void navigate('/', { replace: true });
     }
   }, [isLoading, isAuthenticated, navigate]);
 

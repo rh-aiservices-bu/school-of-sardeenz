@@ -43,10 +43,10 @@ const mockedList = vi.mocked(api.notifications.list);
  * (authMode → isLoading → isAuthenticated). The real component additionally
  * calls useLocation() and renders <Navigate to="/login"> for the unauthenticated
  * branch; those are router-navigation concerns, not gate logic, so the test
- * gate renders a plain marker element instead. No Router wrapper is used:
- * react-router-dom is a CJS package hoisted to the monorepo root whose
- * require('react') resolves to root React 19, which would re-split the render
- * tree (issue #148).
+ * gate renders a plain marker element instead. No Router wrapper is used: the
+ * gate deliberately exercises only the auth-context logic, not routing (issue
+ * #148's render-tree split concern is gone with react-router-dom v7 — an ESM
+ * re-export shim of react-router that resolves the same React instance).
  */
 function Gate({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, authMode } = useAuth();
