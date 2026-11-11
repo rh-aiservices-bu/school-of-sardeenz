@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import {
   ModelLifecycleState,
   ModelState,
@@ -61,28 +62,28 @@ function makeRunnerResponse(overrides: Partial<StartRunnerResponse> = {}): Start
 
 interface MockDeps {
   lifecycle: {
-    transition: ReturnType<typeof vi.fn>;
-    getInstance: ReturnType<typeof vi.fn>;
-    getInstancesForModel: ReturnType<typeof vi.fn>;
-    setRunnerEndpoint: ReturnType<typeof vi.fn>;
+    transition: Mock;
+    getInstance: Mock;
+    getInstancesForModel: Mock;
+    setRunnerEndpoint: Mock;
   };
   routingMap: {
-    setModelState: ReturnType<typeof vi.fn>;
-    addEndpoint: ReturnType<typeof vi.fn>;
-    removeModel: ReturnType<typeof vi.fn>;
+    setModelState: Mock;
+    addEndpoint: Mock;
+    removeModel: Mock;
   };
   workerPool: {
-    getWorker: ReturnType<typeof vi.fn>;
+    getWorker: Mock;
   };
   memoryBudget: {
-    releaseInstanceReservations: ReturnType<typeof vi.fn>;
+    releaseInstanceReservations: Mock;
   };
   workerClient: {
-    startRunner: ReturnType<typeof vi.fn>;
-    stopRunner: ReturnType<typeof vi.fn>;
+    startRunner: Mock;
+    stopRunner: Mock;
   };
   runnerClient: {
-    getHealth: ReturnType<typeof vi.fn>;
+    getHealth: Mock;
   };
 }
 

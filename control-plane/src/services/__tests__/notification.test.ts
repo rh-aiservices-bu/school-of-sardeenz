@@ -42,8 +42,9 @@ describe('NotificationService', () => {
   describe('createNotification', () => {
     it('stores notification in Redis list via pipeline and publishes to channel', async () => {
       const uuidSpy = vi.spyOn(crypto, 'randomUUID').mockReturnValue('test-0000-0000-0000-uuid123');
-      const mockDate = new Date('2026-06-29T12:00:00.000Z');
-      vi.spyOn(global, 'Date').mockImplementation(() => mockDate);
+      // vitest 4 constructs spy implementations (Reflect.construct), so an arrow-fn Date
+      // replacement throws on `new Date()` — pin the clock with fake timers instead.
+      vi.useFakeTimers({ now: new Date('2026-06-29T12:00:00.000Z') });
 
       const params = {
         title: 'Test notification',
@@ -69,6 +70,7 @@ describe('NotificationService', () => {
       expect(mockRedis.pipeline).toHaveBeenCalled();
       expect(mockRedis.publish).toHaveBeenCalledWith('test:notifications', JSON.stringify(result));
 
+      vi.useRealTimers();
       vi.restoreAllMocks();
     });
 

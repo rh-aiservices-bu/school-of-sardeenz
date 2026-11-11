@@ -201,8 +201,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   glob cannot match dist. Residual: vitest 5.1.0 is the latest line (engines
   `^22.12 || ^24 || >=26` and vite ≥6.4.0 — both satisfied here) but is deliberately out
   of scope for this dev-chain-only bump; 4.1.12 is the terminal 4.1.x release and clears
-  every open alert on the 3.x line. Verification is deferred to the host gates (`npm ci`,
-  `npx tsc --build`, `npm test`, the control-plane integration suite, `npm ls vitest`,
+  every open alert on the 3.x line. First real execution under vitest 4 (CI run 42711031269)
+  surfaced three classes of runtime fallout, all fixed in test code only — no dependency or
+  runtime-source changes: (1) `tsc --build` fails on 6 test files: `ReturnType<typeof vi.fn>`
+  now resolves to `Mock<Procedure | Constructable>` (constraint instantiation; the untyped
+  `vi.fn()` mock is neither callable as a concrete signature nor assignable to one), so the
+  121 mock-type annotations across internal/model-logs/models/deploy-orchestration/
+  reconciliation tests now use vitest's exported bare `Mock` type (= `Mock<Procedure>`, the
+  exact v3 semantics) with `import type { Mock } from 'vitest'`; (2) `vi.restoreAllMocks()`
+  no longer resets plain `vi.fn()` mocks (jest-aligned — it only restores spies), so the
+  module-level `mockFetch` in worker.test.ts accumulates call history across tests and
+  `mock.calls[0]` assertions read a previous test's request — fixed with an explicit
+  `mockFetch.mockReset()` in `beforeEach`; (3) spy implementations are invoked via
+  `Reflect.construct` when the spied site calls `new` (jest-aligned), so the
+  `vi.spyOn(global, 'Date').mockImplementation(() => mockDate)` arrow replacement in
+  notification.test.ts throws "not a constructor" on `new Date()` — replaced with
+  `vi.useFakeTimers({ now })` (+ `vi.useRealTimers()` teardown), which also survives
+  mid-test failure without leaking the mock into subsequent tests. Verified in-container by
+  staging the vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
+  operations): `npx tsc --build` clean for all five suites, scoped eslint clean, and the
+  full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain the
+  authority for `npm ci`-materialized trees (`npm ci`, integration suite, `npm ls vitest`,
   `npm audit`).
 
 ### Changed

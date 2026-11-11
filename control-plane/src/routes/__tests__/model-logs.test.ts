@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { ServerResponse } from 'node:http';
 import { ModelLifecycleState } from '@sardeenz/types';
@@ -64,10 +65,10 @@ function make404Response(): Response {
 }
 
 interface Mocks {
-  lifecycle: { getInstancesForModel: ReturnType<typeof vi.fn> };
-  modelRepository: { findByName: ReturnType<typeof vi.fn> };
-  workerPool: { getWorker: ReturnType<typeof vi.fn> };
-  createWorkerClient: ReturnType<typeof vi.fn>;
+  lifecycle: { getInstancesForModel: Mock };
+  modelRepository: { findByName: Mock };
+  workerPool: { getWorker: Mock };
+  createWorkerClient: Mock;
 }
 
 function createMocks(): Mocks {
