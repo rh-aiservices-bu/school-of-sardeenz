@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ModelLifecycleState, Protocol } from '@sardeenz/types';
 import { registerModelRoutes } from '../models.js';
@@ -36,33 +37,33 @@ const DURABLE_MOVE: MoveOperation = {
 };
 
 interface Overrides {
-  stopModel?: ReturnType<typeof vi.fn>;
-  sleepModel?: ReturnType<typeof vi.fn>;
-  wakeModel?: ReturnType<typeof vi.fn>;
-  removeInstance?: ReturnType<typeof vi.fn>;
-  deleteModel?: ReturnType<typeof vi.fn>;
-  updateModel?: ReturnType<typeof vi.fn>;
-  deleteInstance?: ReturnType<typeof vi.fn>;
-  findByName?: ReturnType<typeof vi.fn>;
-  getInstance?: ReturnType<typeof vi.fn>;
-  getInstancesForModel?: ReturnType<typeof vi.fn>;
-  transition?: ReturnType<typeof vi.fn>;
-  getWorker?: ReturnType<typeof vi.fn>;
-  stopRunner?: ReturnType<typeof vi.fn>;
-  getRunnerByInstance?: ReturnType<typeof vi.fn>;
-  getMoveOperation?: ReturnType<typeof vi.fn>;
-  removeMoveOperation?: ReturnType<typeof vi.fn>;
-  removeModel?: ReturnType<typeof vi.fn>;
-  releaseInstanceReservations?: ReturnType<typeof vi.fn>;
+  stopModel?: Mock;
+  sleepModel?: Mock;
+  wakeModel?: Mock;
+  removeInstance?: Mock;
+  deleteModel?: Mock;
+  updateModel?: Mock;
+  deleteInstance?: Mock;
+  findByName?: Mock;
+  getInstance?: Mock;
+  getInstancesForModel?: Mock;
+  transition?: Mock;
+  getWorker?: Mock;
+  stopRunner?: Mock;
+  getRunnerByInstance?: Mock;
+  getMoveOperation?: Mock;
+  removeMoveOperation?: Mock;
+  removeModel?: Mock;
+  releaseInstanceReservations?: Mock;
 }
 
 function buildApp(over: Overrides = {}): {
   app: FastifyInstance;
-  logInfo: ReturnType<typeof vi.fn>;
-  logError: ReturnType<typeof vi.fn>;
-  logWarn: ReturnType<typeof vi.fn>;
-  stopRunner: ReturnType<typeof vi.fn>;
-  createWorkerClient: ReturnType<typeof vi.fn>;
+  logInfo: Mock;
+  logError: Mock;
+  logWarn: Mock;
+  stopRunner: Mock;
+  createWorkerClient: Mock;
 } {
   const logInfo = vi.fn();
   const logError = vi.fn();
@@ -150,40 +151,40 @@ function buildApp(over: Overrides = {}): {
 }
 
 interface DeployOverrides {
-  place?: ReturnType<typeof vi.fn>;
-  eligibleWorkerIds?: ReturnType<typeof vi.fn>;
-  selectVictims?: ReturnType<typeof vi.fn>;
-  createInstance?: ReturnType<typeof vi.fn>;
-  transition?: ReturnType<typeof vi.fn>;
-  getAllInstances?: ReturnType<typeof vi.fn>;
-  getInstancesForModel?: ReturnType<typeof vi.fn>;
-  removeInstance?: ReturnType<typeof vi.fn>;
-  stopModel?: ReturnType<typeof vi.fn>;
-  sleepModel?: ReturnType<typeof vi.fn>;
-  refreshAll?: ReturnType<typeof vi.fn>;
-  deployModel?: ReturnType<typeof vi.fn>;
-  findAll?: ReturnType<typeof vi.fn>;
-  findByName?: ReturnType<typeof vi.fn>;
-  createModelRecord?: ReturnType<typeof vi.fn>;
-  setModelState?: ReturnType<typeof vi.fn>;
-  createInstanceRecord?: ReturnType<typeof vi.fn>;
-  resolveRunnerMetadata?: ReturnType<typeof vi.fn>;
-  getMeasuredByInstance?: ReturnType<typeof vi.fn>;
-  placeFixed?: ReturnType<typeof vi.fn>;
-  getInstance?: ReturnType<typeof vi.fn>;
-  getWorker?: ReturnType<typeof vi.fn>;
-  updateEndpointWeight?: ReturnType<typeof vi.fn>;
-  createMoveOperation?: ReturnType<typeof vi.fn>;
-  getMoveOperation?: ReturnType<typeof vi.fn>;
-  updateMoveOperation?: ReturnType<typeof vi.fn>;
-  resumeMove?: ReturnType<typeof vi.fn>;
-  getEntry?: ReturnType<typeof vi.fn>;
+  place?: Mock;
+  eligibleWorkerIds?: Mock;
+  selectVictims?: Mock;
+  createInstance?: Mock;
+  transition?: Mock;
+  getAllInstances?: Mock;
+  getInstancesForModel?: Mock;
+  removeInstance?: Mock;
+  stopModel?: Mock;
+  sleepModel?: Mock;
+  refreshAll?: Mock;
+  deployModel?: Mock;
+  findAll?: Mock;
+  findByName?: Mock;
+  createModelRecord?: Mock;
+  setModelState?: Mock;
+  createInstanceRecord?: Mock;
+  resolveRunnerMetadata?: Mock;
+  getMeasuredByInstance?: Mock;
+  placeFixed?: Mock;
+  getInstance?: Mock;
+  getWorker?: Mock;
+  updateEndpointWeight?: Mock;
+  createMoveOperation?: Mock;
+  getMoveOperation?: Mock;
+  updateMoveOperation?: Mock;
+  resumeMove?: Mock;
+  getEntry?: Mock;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
   app: FastifyInstance;
   deps: Record<string, unknown>;
-  logError: ReturnType<typeof vi.fn>;
+  logError: Mock;
 } {
   const logError = vi.fn();
   let currentMoveOperation: MoveOperation | null = null;
@@ -352,7 +353,7 @@ describe('POST /api/v1/models deploy-path eviction', () => {
       instanceId: expect.stringMatching(/^inst-/) as string,
     });
 
-    const placement = deps.placement as { eligibleWorkerIds: ReturnType<typeof vi.fn> };
+    const placement = deps.placement as { eligibleWorkerIds: Mock };
     expect(placement.eligibleWorkerIds).toHaveBeenCalledOnce();
   });
 
@@ -379,12 +380,12 @@ describe('POST /api/v1/models deploy-path eviction', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    const lifecycle = deps.lifecycle as { transition: ReturnType<typeof vi.fn> };
+    const lifecycle = deps.lifecycle as { transition: Mock };
     const routingMap = deps.routingMap as {
-      setModelState: ReturnType<typeof vi.fn>;
-      removeModel: ReturnType<typeof vi.fn>;
+      setModelState: Mock;
+      removeModel: Mock;
     };
-    const notifications = deps.notifications as { createNotification: ReturnType<typeof vi.fn> };
+    const notifications = deps.notifications as { createNotification: Mock };
 
     expect(lifecycle.transition).toHaveBeenCalledWith(
       'm1',
@@ -458,7 +459,7 @@ describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
       })),
       createInstanceRecord,
     });
-    (deps.workerPool as { getAllWorkers: ReturnType<typeof vi.fn> }).getAllWorkers.mockReturnValue([
+    (deps.workerPool as { getAllWorkers: Mock }).getAllWorkers.mockReturnValue([
       { workerId: 'worker-2', devices: [{ deviceIndex: 1 }], capabilities: [], status: 'ONLINE' },
     ]);
 
@@ -513,7 +514,7 @@ describe('POST /api/v1/models/:modelName/instances/:instanceId/move', () => {
       updateMoveOperation,
       resumeMove,
     });
-    (deps.workerPool as { getAllWorkers: ReturnType<typeof vi.fn> }).getAllWorkers.mockReturnValue([
+    (deps.workerPool as { getAllWorkers: Mock }).getAllWorkers.mockReturnValue([
       { workerId: 'worker-2', devices: [{ deviceIndex: 1 }], capabilities: [], status: 'ONLINE' },
     ]);
 
@@ -918,10 +919,10 @@ describe('POST /api/v1/models modelName validation', () => {
 
     // The create-route rollback path: the Postgres row created for this attempt must not survive,
     // and the background deploy pipeline must never have been reached.
-    const modelRepository = deps.modelRepository as { delete: ReturnType<typeof vi.fn> };
+    const modelRepository = deps.modelRepository as { delete: Mock };
     expect(modelRepository.delete).toHaveBeenCalledWith('org/model');
     const deployOrchestration = deps.deployOrchestration as {
-      deployModel: ReturnType<typeof vi.fn>;
+      deployModel: Mock;
     };
     expect(deployOrchestration.deployModel).not.toHaveBeenCalled();
   });
@@ -959,7 +960,7 @@ describe('deployFromRecord synchronous-failure reservation release (security L1)
     expect(res.statusCode).toBe(500);
 
     const memoryBudget = deps.memoryBudget as {
-      releaseInstanceReservations: ReturnType<typeof vi.fn>;
+      releaseInstanceReservations: Mock;
     };
     expect(memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
       expect.stringMatching(/^inst-/) as string,
@@ -1068,8 +1069,8 @@ describe('PUT /api/v1/models/:modelName configuration update', () => {
 
 describe('DELETE /api/v1/models/:modelName background deletion', () => {
   let app: FastifyInstance;
-  let logInfo: ReturnType<typeof vi.fn>;
-  let logError: ReturnType<typeof vi.fn>;
+  let logInfo: Mock;
+  let logError: Mock;
 
   beforeEach(() => {
     ({ app, logInfo, logError } = buildApp());
@@ -1499,7 +1500,7 @@ describe('launch/stop/instance paths fenced against an in-flight model DELETE (#
       ModelLifecycleState.ERROR,
       expect.objectContaining({ errorMessage: expect.stringContaining('delete') as string }),
     );
-    const budget = deps.memoryBudget as { releaseInstanceReservations: ReturnType<typeof vi.fn> };
+    const budget = deps.memoryBudget as { releaseInstanceReservations: Mock };
     expect(budget.releaseInstanceReservations).toHaveBeenCalled();
   });
 
@@ -1538,9 +1539,9 @@ describe('launch/stop/instance paths fenced against an in-flight model DELETE (#
     await new Promise((resolve) => setImmediate(resolve));
     expect(deployModel).not.toHaveBeenCalled();
     expect(removeInstance).toHaveBeenCalledWith('m1', expect.stringMatching(/^inst-/) as string);
-    const budget = deps.memoryBudget as { releaseInstanceReservations: ReturnType<typeof vi.fn> };
+    const budget = deps.memoryBudget as { releaseInstanceReservations: Mock };
     expect(budget.releaseInstanceReservations).toHaveBeenCalled();
-    const instanceRepo = deps.instanceRepository as { delete: ReturnType<typeof vi.fn> };
+    const instanceRepo = deps.instanceRepository as { delete: Mock };
     expect(instanceRepo.delete).toHaveBeenCalled();
   });
 });

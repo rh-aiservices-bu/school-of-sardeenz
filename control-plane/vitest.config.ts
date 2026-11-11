@@ -7,6 +7,6 @@ import { defineConfig, configDefaults } from 'vitest/config';
 // (`npm run test:integration` / `make test-integration`, which sets `fileParallelism: false`).
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, '**/__tests__/integration/**'],
+    exclude: [...configDefaults.exclude, '**/__tests__/integration/**', '**/dist/**'],
   },
 });

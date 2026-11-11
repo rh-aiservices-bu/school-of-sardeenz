@@ -162,6 +162,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   / `npm audit`) runs on the host by the user; nothing was executed in-container beyond
   the lockfile refresh and static assertions.
 
+- **Dev tooling: vitest major bump clears the vitest, @vitest/mocker and tinypool
+  alerts.** The root devDependencies `vitest` and `@vitest/coverage-v8` move from `^3.2.1`
+  to `^4.1.12` in lockstep (`@vitest/coverage-v8@4.1.12` declares an exact `vitest: 4.1.12`
+  peer, so the two cannot be bumped independently). This clears Dependabot alert #2
+  (`@vitest/mocker` ≥2.1.0 <4.1.11), #4 (vitest, same range) and #33 (`@vitest/mocker`
+  ≥2.1.0-beta.7 <4.1.12) via version, plus the two tinypool criticals #140/#141
+  structurally: vitest 4 removed the tinypool-based worker pool, the new lock contains
+  zero tinypool entries, and nothing in the tree depends on tinypool anymore.
+  `@vitest/mocker` 4.1.12 no longer carries the vulnerable path (its dependencies are only
+  `@vitest/spy`, `estree-walker`, `magic-string`). The lockfile change is bump-specific and
+  its command must run under npm 11 (`npx -y npm@11 install --package-lock-only`; 11.21.2
+  validated): npm 10.9.9 crashes in arborist strict mode on this exact resolution ("Cannot
+  read properties of null (reading 'edgesOut')" in `#loadPeerSet`) — the crash is not
+  caused by the repo's overrides block and is not expected to affect `npm ci`, but CI's
+  npm 10 runs the first real execution of the new lock. A `--legacy-peer-deps` fallback
+  was validated broken (silently drops required peers `@testing-library/dom` and
+  `monaco-editor`, breaking the `monaco-editor.dompurify` override target, and jumps vite
+  to 8.3.7 with a rolldown swap). Collateral, disclosed: `chai` 5.3.3 → 6.3.0 rides the
+  bump as vitest's internal expect stack (the repo imports no chai directly); `vite` stays
+  7.3.8 as a single copy (vitest 4.1.12's peer range `^6 || ^7 || ^8` keeps the existing
+  hoisted 7.3.8); 23 top-level packages (37 lock entries) leave the lock — `tinypool`,
+  `tinyspy`, `vite-node`, `test-exclude` and the vitest 3 pool/CLI chain, plus the
+  istanbul/remapping coverage chain and the chai 5 support tree — replaced by `obug@2.2.1`
+  and `@standard-schema/spec@1.1.0` (a new `@vitest/expect@4.1.12` dependency), with
+  further version moves on the vitest chain (`ast-v8-to-istanbul` 0.3.12→1.0.8,
+  `es-module-lexer` 1.7.0→2.3.2, `magicast` 0.3.5→0.5.5, `std-env` 3.10.0→4.3.0, `tinyexec`
+  0.3.2→1.3.1, `tinyrainbow` 2.0.0→3.2.0). The lockfile shrinks 973 → 938 entries. One
+  behavioral hardening rides along: vitest 4's default test excludes shrink to
+  `node_modules` and `.git`, no longer skipping `dist/` — and CI runs `tsc --build` (which
+  emits compiled `__tests__/*.test.js` into each composite project's `dist/`) before
+  `make test`. The control-plane and dev-worker vitest configs gain an explicit
+  `**/dist/**` exclusion so compiled copies of their test files are never discovered; a
+  project-level exclusion is the effective mechanism because the root config's
+  `test.exclude` is not merged into project configs when `test.projects` is set (root
+  options only drive global behavior). The dashboard config already excluded `dist/**`
+  explicitly and is unchanged; the control-plane integration config's src-scoped `include`
+  glob cannot match dist. Residual: vitest 5.1.0 is the latest line (engines
+  `^22.12 || ^24 || >=26` and vite ≥6.4.0 — both satisfied here) but is deliberately out
+  of scope for this dev-chain-only bump; 4.1.12 is the terminal 4.1.x release and clears
+  every open alert on the 3.x line. First real execution under vitest 4 (CI run 42711031269)
+  surfaced three classes of runtime fallout, all fixed in test code only — no dependency or
+  runtime-source changes: (1) `tsc --build` fails on 6 test files: `ReturnType<typeof vi.fn>`
+  now resolves to `Mock<Procedure | Constructable>` (constraint instantiation; the untyped
+  `vi.fn()` mock is neither callable as a concrete signature nor assignable to one), so the
+  121 mock-type annotations across internal/model-logs/models/deploy-orchestration/
+  reconciliation tests now use vitest's exported bare `Mock` type (= `Mock<Procedure>`, the
+  exact v3 semantics) with `import type { Mock } from 'vitest'`; (2) `vi.restoreAllMocks()`
+  no longer resets plain `vi.fn()` mocks (jest-aligned — it only restores spies), so the
+  module-level `mockFetch` in worker.test.ts accumulates call history across tests and
+  `mock.calls[0]` assertions read a previous test's request — fixed with an explicit
+  `mockFetch.mockReset()` in `beforeEach`; (3) spy implementations are invoked via
+  `Reflect.construct` when the spied site calls `new` (jest-aligned), so the
+  `vi.spyOn(global, 'Date').mockImplementation(() => mockDate)` arrow replacement in
+  notification.test.ts throws "not a constructor" on `new Date()` — replaced with
+  `vi.useFakeTimers({ now })` (+ `vi.useRealTimers()` teardown), which also survives
+  mid-test failure without leaking the mock into subsequent tests. A second CI wave (run
+  43060242462 on the fix commit) surfaced a fourth: the type-aware eslint config flags
+  `ReturnType<typeof vi.spyOn>` as `any` under v4 (same constraint-instantiation — v4's
+  `spyOn` is generic over the spied property, so the resolved type is not the specific
+  `MockInstance`), making `warnSpy.mockRestore()` an unsafe `any` call in memory-budget
+  and worker-pool tests; those five declarations are now typed
+  `MockInstance<(...args: unknown[]) => void>` with `import type { MockInstance } from
+  'vitest'`. Verified in-container by
+  staging the vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
+  operations): `npx tsc --build` clean for all affected suites, scoped eslint clean, and
+  the full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain
+  the authority for `npm ci`-materialized trees (`npm ci`, integration suite,
+  `npm ls vitest`, `npm audit`).
+
 ### Changed
 
 - **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and

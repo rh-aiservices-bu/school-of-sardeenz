@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 
 import { WorkerPoolService } from '../worker-pool.js';
 import type { Redis } from '../../clients/redis.js';
@@ -64,7 +65,7 @@ function validPayload(overrides: Record<string, unknown> = {}): string {
 // ---------------------------------------------------------------------------
 
 describe('WorkerPoolService — parseWorkerInfo (via discoverWorkers)', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<(...args: unknown[]) => void>;
 
   beforeEach(() => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

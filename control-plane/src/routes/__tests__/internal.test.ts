@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ModelLifecycleState } from '@sardeenz/types';
 
@@ -41,28 +42,28 @@ function makeSleepingState(overrides: Partial<InstanceState> = {}): InstanceStat
 
 // Mocks keyed by method name for easy vi.fn() access without unbound-method warnings.
 interface MockLifecycle {
-  getInstancesForModel: ReturnType<typeof vi.fn>;
-  transition: ReturnType<typeof vi.fn>;
-  getAllInstances: ReturnType<typeof vi.fn>;
-  createInstance: ReturnType<typeof vi.fn>;
-  removeInstance: ReturnType<typeof vi.fn>;
+  getInstancesForModel: Mock;
+  transition: Mock;
+  getAllInstances: Mock;
+  createInstance: Mock;
+  removeInstance: Mock;
 }
 
 interface MockSleepWake {
-  wakeModel: ReturnType<typeof vi.fn>;
+  wakeModel: Mock;
 }
 
 interface MockRoutingMap {
-  getRoutingMap: ReturnType<typeof vi.fn>;
-  setModelState: ReturnType<typeof vi.fn>;
-  removeModel: ReturnType<typeof vi.fn>;
+  getRoutingMap: Mock;
+  setModelState: Mock;
+  removeModel: Mock;
 }
 
 interface Mocks {
   lifecycle: MockLifecycle;
   sleepWake: MockSleepWake;
   routingMap: MockRoutingMap;
-  createRunnerClient: ReturnType<typeof vi.fn>;
+  createRunnerClient: Mock;
   leaderElection: { isLeader: boolean };
 }
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 
 import { MemoryBudgetService } from '../memory-budget.js';
 import type { Redis } from '../../clients/redis.js';
@@ -502,7 +503,7 @@ describe('MemoryBudgetService — availableBytes formula', () => {
 // ---------------------------------------------------------------------------
 
 describe('MemoryBudgetService — parseReport validation', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<(...args: unknown[]) => void>;
 
   beforeEach(() => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -655,7 +656,7 @@ describe('MemoryBudgetService — parseReport validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('MemoryBudgetService — optional NVML device fields', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<(...args: unknown[]) => void>;
 
   beforeEach(() => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -788,7 +789,7 @@ describe('MemoryBudgetService — optional NVML device fields', () => {
 // ---------------------------------------------------------------------------
 
 describe('MemoryBudgetService — kvcached pool block (issue #165)', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<(...args: unknown[]) => void>;
 
   const validKV = { totalBytes: 16_000_000_000, usedBytes: 6_000_000_000, preallocBytes: 2_000_000_000, freeBytes: 8_000_000_000 };
 
@@ -920,7 +921,7 @@ describe('MemoryBudgetService — kvcached pool block (issue #165)', () => {
 // ---------------------------------------------------------------------------
 
 describe('MemoryBudgetService — instances[] measured attribution', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance<(...args: unknown[]) => void>;
 
   beforeEach(() => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

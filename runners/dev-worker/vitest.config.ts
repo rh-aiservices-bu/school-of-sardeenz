@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 
 // Local vitest config so `npm test -w @sardeenz/dev-worker` (cwd = runners/dev-worker) stops
 // falling back to the root vitest.config.ts, whose `test.projects` globs are relative to the
@@ -9,5 +9,8 @@ export default defineConfig({
   test: {
     // No `projects` key (that's root-only). No integration split to exclude yet; if one is
     // added later, mirror control-plane's config + `vitest.integration.config.ts` pattern.
+    // v4 default excludes no longer cover dist/; `make all` emits dist (incl. compiled
+    // __tests__) before `make test` runs — keep it out of test discovery.
+    exclude: [...configDefaults.exclude, '**/dist/**'],
   },
 });

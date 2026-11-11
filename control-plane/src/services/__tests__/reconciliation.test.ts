@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { ClusterEventType, ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
 import type { ControlPlaneComponents } from '@sardeenz/types';
 
@@ -46,51 +47,51 @@ function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
 
 interface MockDeps {
   lifecycle: {
-    getAllInstances: ReturnType<typeof vi.fn>;
-    getInstancesForModel: ReturnType<typeof vi.fn>;
-    removeInstance: ReturnType<typeof vi.fn>;
-    transition: ReturnType<typeof vi.fn>;
-    pruneLegacyInstanceKeys: ReturnType<typeof vi.fn>;
+    getAllInstances: Mock;
+    getInstancesForModel: Mock;
+    removeInstance: Mock;
+    transition: Mock;
+    pruneLegacyInstanceKeys: Mock;
   };
   workerPool: {
-    discoverWorkers: ReturnType<typeof vi.fn>;
-    checkHeartbeats: ReturnType<typeof vi.fn>;
-    getDeadWorkers: ReturnType<typeof vi.fn>;
-    getAllWorkers: ReturnType<typeof vi.fn>;
-    removeWorker: ReturnType<typeof vi.fn>;
-    getWorker: ReturnType<typeof vi.fn>;
+    discoverWorkers: Mock;
+    checkHeartbeats: Mock;
+    getDeadWorkers: Mock;
+    getAllWorkers: Mock;
+    removeWorker: Mock;
+    getWorker: Mock;
   };
   memoryBudget: {
-    refreshAll: ReturnType<typeof vi.fn>;
-    getAllBudgets: ReturnType<typeof vi.fn>;
-    clearWorkerReservations: ReturnType<typeof vi.fn>;
-    releaseInstanceReservations: ReturnType<typeof vi.fn>;
+    refreshAll: Mock;
+    getAllBudgets: Mock;
+    clearWorkerReservations: Mock;
+    releaseInstanceReservations: Mock;
   };
   routingMap: {
-    removeModel: ReturnType<typeof vi.fn>;
-    removeEndpoint: ReturnType<typeof vi.fn>;
-    setModelState: ReturnType<typeof vi.fn>;
+    removeModel: Mock;
+    removeEndpoint: Mock;
+    setModelState: Mock;
   };
   leaderElection: {
     isLeader: boolean;
   };
   logger: {
-    debug: ReturnType<typeof vi.fn>;
-    info: ReturnType<typeof vi.fn>;
-    warn: ReturnType<typeof vi.fn>;
-    error: ReturnType<typeof vi.fn>;
+    debug: Mock;
+    info: Mock;
+    warn: Mock;
+    error: Mock;
   };
   redis: {
-    publish: ReturnType<typeof vi.fn>;
+    publish: Mock;
   };
   modelRepository: {
-    findAll: ReturnType<typeof vi.fn>;
-    findByName: ReturnType<typeof vi.fn>;
+    findAll: Mock;
+    findByName: Mock;
   };
   workerClient: {
-    stopRunner: ReturnType<typeof vi.fn>;
-    getRunner: ReturnType<typeof vi.fn>;
-    getRunnerByInstance: ReturnType<typeof vi.fn>;
+    stopRunner: Mock;
+    getRunner: Mock;
+    getRunnerByInstance: Mock;
   };
 }
 
