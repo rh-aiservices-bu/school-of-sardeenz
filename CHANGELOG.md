@@ -217,12 +217,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `vi.spyOn(global, 'Date').mockImplementation(() => mockDate)` arrow replacement in
   notification.test.ts throws "not a constructor" on `new Date()` — replaced with
   `vi.useFakeTimers({ now })` (+ `vi.useRealTimers()` teardown), which also survives
-  mid-test failure without leaking the mock into subsequent tests. Verified in-container by
+  mid-test failure without leaking the mock into subsequent tests. A second CI wave (run
+  43060242462 on the fix commit) surfaced a fourth: the type-aware eslint config flags
+  `ReturnType<typeof vi.spyOn>` as `any` under v4 (same constraint-instantiation — v4's
+  `spyOn` is generic over the spied property, so the resolved type is not the specific
+  `MockInstance`), making `warnSpy.mockRestore()` an unsafe `any` call in memory-budget
+  and worker-pool tests; those five declarations are now typed
+  `MockInstance<(...args: unknown[]) => void>` with `import type { MockInstance } from
+  'vitest'`. Verified in-container by
   staging the vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
-  operations): `npx tsc --build` clean for all five suites, scoped eslint clean, and the
-  full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain the
-  authority for `npm ci`-materialized trees (`npm ci`, integration suite, `npm ls vitest`,
-  `npm audit`).
+  operations): `npx tsc --build` clean for all affected suites, scoped eslint clean, and
+  the full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain
+  the authority for `npm ci`-materialized trees (`npm ci`, integration suite,
+  `npm ls vitest`, `npm audit`).
 
 ### Changed
 
