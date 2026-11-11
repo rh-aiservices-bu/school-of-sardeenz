@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Dashboard BFF: `@fastify/static` upgraded to v10 (10.1.10), clearing the two
+  remaining `@fastify/static` manifest alerts and the dev-tooling `glob` 13.x copy.**
+  The direct dependency moves from `^9.1.3` to `^10.1.10` — the v10 major that pins
+  `glob ^14`, so the nested `glob` copy under `@fastify/static` moves 13.0.7 → 14.0.5,
+  clearing alert #156 (the remaining open `glob` alert fires on the 13.x line; the root
+  `glob` 7.2.3 copy is dev-tooling-only and not affected). The two manifest alerts on
+  `dashboard/package.json` — #46 (`@fastify/static <= 10.1.0`) and #47 (`<= 10.1.1`,
+  authorization bypass via non-canonical URL paths and route-guard bypass via path
+  traversal) — clear on version. The only 10.x-behavioral surface this BFF uses is
+  unchanged: `dashboard/server/server.ts` registers with `wildcard: false` (v10 keeps
+  per-file route registration for that mode, now via a `glob('**/**')` walk instead of
+  the v9 recursion) and serves the SPA fallback through `setNotFoundHandler` +
+  `reply.sendFile('index.html')` (still decorated in v10, same signature). Collateral
+  in-range moves, disclosed: `content-disposition` 2.0.2 → 3.0.0, and inside the nested
+  glob chain `minimatch` 10.2.6 → 11.0.8, `path-scurry` 2.0.2 → 3.0.0,
+  `brace-expansion` 5.0.12 → 5.0.13, `balanced-match` 1.1.0 → 3.0.0, plus new leaf
+  `@isaacs/nonrecursive-glob-match` 1.1.0. Verified in-container with the v10 runtime
+  staged from registry tarballs: dashboard client build passes and the full workspace
+  `vitest run` is 98/98 files, 1502 passed + 1 skipped (includes the BFF suites that
+  exercise the static/SPA-fallback path); the Playwright e2e specs run in CI.
 - **Dashboard: `react-router-dom` upgraded to v7 (7.18.5), clearing the two remaining
   medium `react-router` alerts.** The direct dependency moves from `^6.30.6` to `^7.18.5`
   — the first version of the v7 line that patches Dependabot alerts #92 (GHSA-337j-9hxr-rhxg
