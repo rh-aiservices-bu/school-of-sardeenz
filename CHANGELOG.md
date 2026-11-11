@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Proxy: Rust advisory bump clears the five open Rust Dependabot alerts.** A pure
+  `Cargo.lock` refresh (`cargo update -p rustls -p quinn-proto`; no manifest change — both
+  crates are transitive under `reqwest` 0.12 with the `rustls-tls` feature and HTTP/3):
+  `rustls` 0.23.40 → 0.23.46 clears alerts #159–#162 (2 medium + 2 low; 0.23.45 patches
+  two, 0.23.46 the other two) and `quinn-proto` 0.11.14 → 0.11.19 clears #158 (high,
+  HTTP/3 DoS, GHSA-c96f family, first fixed in 0.11.15). Collateral in-range moves,
+  disclosed: `rustls-webpki` 0.103.13 → 0.103.16, `zeroize` 1.17.0 → 1.19.0 /
+  `zeroize_derive` 0.41.0 → 0.47.0, and new leaf dependencies of `quinn-proto` 0.11.19
+  (`chacha20` 0.10.2, `cpufeatures` 0.3.1, `pkg-config` 0.3.34 build dep,
+  `rand`/`rand_core`/`rand_pcg` 0.10.x). Verified with `cargo check` (clean) and
+  `cargo test` (48/48 passed).
+
 - **Dashboard BFF: JWT library bumped to clear the 6 open Dependabot alerts on the
   transitive `fast-jwt` verifier.** `@fastify/jwt` moves from `^10.1.0` to `^10.2.7`
   (same major, explicit security floor), which lifts `fast-jwt` from the pinned 6.2.4
