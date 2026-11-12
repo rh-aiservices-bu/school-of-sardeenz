@@ -2589,7 +2589,7 @@ describe('instanceId validation (#236: boundary check before Redis key compositi
     expect(getInstance).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<[string, 'GET' | 'POST' | 'DELETE', string]>([
     ['sleep', 'POST', '/api/v1/models/m/instances/foo%3Abar/sleep'],
     ['wake', 'POST', '/api/v1/models/m/instances/foo%3Fbar/wake'],
     ['move', 'POST', '/api/v1/models/m/instances/foo*bar/move'],
