@@ -99,6 +99,16 @@ export function loadConfig(): DevWorkerConfig {
   const scratchDir = envStr('SARDEENZ_SCRATCH_DIR', '/scratch');
   const legacyRunnerType = envStr('SARDEENZ_RUNNER_TYPE', 'vllm');
   const runnerTypes = [...new Set(envList('SARDEENZ_RUNNER_TYPES', [legacyRunnerType]))];
+
+  // Same fail-closed gate as the control plane: the worker's routes gate on this token
+  // (server.ts), so an empty value means the bearer hook never registers.
+  const workerToken = envStr('SARDEENZ_WORKER_TOKEN', '');
+  if (!workerToken && !envBool('SARDEENZ_ALLOW_UNAUTHENTICATED_API', false)) {
+    throw new Error(
+      'SARDEENZ_WORKER_TOKEN must be set. ' +
+        'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
+    );
+  }
   return {
     mode: resolveMode(),
     redisUrl: envStr('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
@@ -146,7 +156,7 @@ export function loadConfig(): DevWorkerConfig {
       // inference pool also crashes under Python 3.12 + uvloop before it can load the model.
       mlserverParallelWorkers: envInt('SARDEENZ_MLSERVER_PARALLEL_WORKERS', 0),
     },
-    workerToken: envStr('SARDEENZ_WORKER_TOKEN', ''),
+    workerToken,
     catalogUrl: envStr('SARDEENZ_RUNNER_CATALOG_URL', ''),
   };
 }

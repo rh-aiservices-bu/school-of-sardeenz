@@ -72,9 +72,10 @@ dashboard, e.g. `https://sardeenz.example.com`. It is used to:
 
 ## Service-to-Service Tokens
 
-Two optional shared secrets add defense in depth between components. Both are bearer tokens
-compared in constant time; leaving them unset is only acceptable in local development (a startup
-warning is logged).
+Two shared secrets add defense in depth between components. Both are bearer tokens compared in
+constant time; services fail closed at startup when their token is unset, so local development must
+opt out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (dev-only escape hatch — never set it
+in-cluster).
 
 | Variable                | Checked by                                                              | Must also be set on                          |
 | ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
@@ -120,7 +121,14 @@ this namespace-scoped rule is its only access restriction.
 
 ## Worker Agent Network Isolation
 
-The worker agent's management API (`POST/DELETE /runners`, `GET /runners/*/logs`) on port 9100 is protected by an optional shared secret (`SARDEENZ_WORKER_TOKEN`), checked via `Authorization: Bearer <token>` on every route except `/healthz`. This token protects **only** the worker agent; it does not protect a runner shim's management endpoint at a runner block's base port or its engine listener. Those runner endpoints are unauthenticated and depend on network isolation. As with the control plane, this is a defense-in-depth measure, not a substitute for network isolation — the worker **must only be deployed within a trusted network boundary**.
+The worker agent's management API (`POST/DELETE /runners`, `GET /runners/*/logs`) on port 9100 is
+protected by the shared secret `SARDEENZ_WORKER_TOKEN` (required at startup unless
+`SARDEENZ_ALLOW_UNAUTHENTICATED_API` opts out), checked via `Authorization: Bearer <token>` on
+every route except `/healthz`. This token protects **only** the worker agent; it does not protect a
+runner shim's management endpoint at a runner block's base port or its engine listener. Those
+runner endpoints are unauthenticated and depend on network isolation. As with the control plane,
+this is a defense-in-depth measure, not a substitute for network isolation — the worker **must
+only be deployed within a trusted network boundary**.
 
 ### What is exposed without network isolation
 
@@ -134,7 +142,7 @@ Any caller with network access to a worker agent can:
 
 ### Recommended deployment constraints
 
-1. **Set `SARDEENZ_WORKER_TOKEN`**: Configure the same value on the worker agent and the control plane (`SARDEENZ_WORKER_TOKEN`) so the control plane authenticates its `WorkerClient` requests. Leave unset for local dev only — a startup warning is logged on both sides when it is empty.
+1. **Set `SARDEENZ_WORKER_TOKEN`**: Configure the same value on the worker agent and the control plane (`SARDEENZ_WORKER_TOKEN`) so the control plane authenticates its `WorkerClient` requests. Leave unset for local dev only, together with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` — startup fails when it is empty.
 
 2. **Kubernetes NetworkPolicy**: `deployment/sif-runner/networkpolicy.yaml` restricts ingress to
    the worker Pod with component-scoped selectors. In its default 32-runner configuration it

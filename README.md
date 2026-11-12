@@ -30,7 +30,7 @@ For individual design decisions, see the [ADRs](docs/architecture/adrs/).
 
 ## Getting Started
 
-Clone the repo, then follow [First-Time Setup](docs/development/setup.md#first-time-setup): `npm install`, `make services`, and `make dev` start the proxy, control plane, dashboard, and BFF locally.
+Clone the repo, then follow [First-Time Setup](docs/development/setup.md#first-time-setup): `npm install`, `make services`, and `make dev` start the proxy, control plane, dashboard, and BFF locally. Before `make dev`, copy `.env.example` to `.env` and set `SARDEENZ_API_TOKEN` / `SARDEENZ_WORKER_TOKEN`, or set `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` for local dev (the services fail closed at startup otherwise).
 
 ## Development
 

@@ -62,6 +62,11 @@ connect to whatever host ports you configured.
 > respectively (each still falling back to the legacy `SARDEENZ_LISTEN_ADDR`), so a single
 > `.env` can set both independently.
 
+> **Tokens fail closed.** The control plane requires both `SARDEENZ_API_TOKEN` and
+> `SARDEENZ_WORKER_TOKEN` at startup (the dev worker needs only `SARDEENZ_WORKER_TOKEN`);
+> missing or empty values fail the start. Set `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` in
+> `.env` for local unauthenticated runs (dev only).
+
 ## Project Structure
 
 The monorepo uses npm workspaces for TypeScript and a Cargo workspace for Rust:

@@ -14,6 +14,9 @@ describe('loadConfig', () => {
     'SARDEENZ_EVICTION_MAX_PER_CYCLE',
     'SARDEENZ_SLEEP_TIMEOUT_SECS',
     'SARDEENZ_SIF_IMPORTER',
+    'SARDEENZ_API_TOKEN',
+    'SARDEENZ_WORKER_TOKEN',
+    'SARDEENZ_ALLOW_UNAUTHENTICATED_API',
   ];
 
   beforeEach(() => {
@@ -21,6 +24,9 @@ describe('loadConfig', () => {
       savedEnv[key] = process.env[key];
       delete process.env[key];
     }
+    // Default fixture: the shape every in-cluster deployment runs — both tokens set, no opt-out.
+    process.env['SARDEENZ_API_TOKEN'] = 'test-api-token';
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
   });
 
   afterEach(() => {
@@ -33,7 +39,7 @@ describe('loadConfig', () => {
     }
   });
 
-  it('uses defaults when no env vars set', () => {
+  it('uses defaults when no configuration env vars are set', () => {
     const config = loadConfig();
     expect(config.listenAddr).toBe('0.0.0.0');
     expect(config.listenPort).toBe(3000);
@@ -85,6 +91,70 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow(
       'Environment variable SARDEENZ_SIF_IMPORTER must be "oras" or "stub", got: oraz',
     );
+  });
+
+  it('throws when both tokens are unset and the opt-out is absent', () => {
+    delete process.env['SARDEENZ_API_TOKEN'];
+    delete process.env['SARDEENZ_WORKER_TOKEN'];
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_API_TOKEN and SARDEENZ_WORKER_TOKEN must be set. ' +
+        'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
+    );
+  });
+
+  it('throws when only SARDEENZ_API_TOKEN is set and the opt-out is absent', () => {
+    delete process.env['SARDEENZ_WORKER_TOKEN'];
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_WORKER_TOKEN must be set. ' +
+        'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
+    );
+  });
+
+  it('throws when only SARDEENZ_WORKER_TOKEN is set and the opt-out is absent', () => {
+    delete process.env['SARDEENZ_API_TOKEN'];
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_API_TOKEN must be set. ' +
+        'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
+    );
+  });
+
+  it('throws when SARDEENZ_API_TOKEN is set to an empty string', () => {
+    process.env['SARDEENZ_API_TOKEN'] = '';
+    expect(() => loadConfig()).toThrow('SARDEENZ_API_TOKEN must be set.');
+  });
+
+  it('throws when SARDEENZ_WORKER_TOKEN is set to an empty string', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = '';
+    expect(() => loadConfig()).toThrow('SARDEENZ_WORKER_TOKEN must be set.');
+  });
+
+  it('starts when both tokens are set without the opt-out', () => {
+    const config = loadConfig();
+    expect(config.apiToken).toBe('test-api-token');
+    expect(config.workerToken).toBe('test-worker-token');
+  });
+
+  it('starts with SARDEENZ_ALLOW_UNAUTHENTICATED_API=true and both tokens unset', () => {
+    delete process.env['SARDEENZ_API_TOKEN'];
+    delete process.env['SARDEENZ_WORKER_TOKEN'];
+    process.env['SARDEENZ_ALLOW_UNAUTHENTICATED_API'] = 'true';
+    const config = loadConfig();
+    expect(config.apiToken).toBe('');
+    expect(config.workerToken).toBe('');
+  });
+
+  it('starts with SARDEENZ_ALLOW_UNAUTHENTICATED_API=1 and both tokens unset', () => {
+    delete process.env['SARDEENZ_API_TOKEN'];
+    delete process.env['SARDEENZ_WORKER_TOKEN'];
+    process.env['SARDEENZ_ALLOW_UNAUTHENTICATED_API'] = '1';
+    expect(loadConfig().workerToken).toBe('');
+  });
+
+  it('treats SARDEENZ_ALLOW_UNAUTHENTICATED_API=false like an absent opt-out', () => {
+    delete process.env['SARDEENZ_API_TOKEN'];
+    delete process.env['SARDEENZ_WORKER_TOKEN'];
+    process.env['SARDEENZ_ALLOW_UNAUTHENTICATED_API'] = 'false';
+    expect(() => loadConfig()).toThrow(/SARDEENZ_ALLOW_UNAUTHENTICATED_API/);
   });
 });
 

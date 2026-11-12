@@ -357,6 +357,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the authority for `npm ci`-materialized trees (`npm ci`, integration suite,
   `npm ls vitest`, `npm audit`).
 
+- **Control plane and dev worker fail closed on missing auth tokens (issue #234).**
+  `loadConfig()` now throws at startup when `SARDEENZ_API_TOKEN` or
+  `SARDEENZ_WORKER_TOKEN` (control plane, both required) or `SARDEENZ_WORKER_TOKEN`
+  (dev worker) is unset or empty, instead of booting with authentication silently
+  disabled. The startup error names the missing variable(s) so an operator with a
+  half-populated Secret can tell at a glance which key is missing. Local development
+  opts out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (truthy `1/true/yes/on`;
+  `=false` still fails) — documented in `.env.example` and the setup guide. No manifest
+  change: in-cluster tokens keep coming from `secretKeyRef`.
+
 ### Changed
 
 - **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
