@@ -20,6 +20,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**
+  The 1.x CLI pins `@faker-js/faker` exactly at 7.6.0 (via `@redocly/respect-core`), inside
+  the `GHSA-qxc2-j82w-r537` / CVE-2026-73231 range `<= 10.4.0` (high; `faker.helpers.fake`
+  arbitrary code execution, alert #119). The fix is not forceable by an override: the first
+  patched version is 10.5.0, and `respect-core` 1.x calls the `faker.name` / `faker.address` /
+  `faker.datatype` namespaces that v8–v10 removed, so an override would break Redocly's
+  `respect` command. The v2 CLI instead drops the whole dependency chain — the lockfile loses
+  148 entries (faker, `handlebars`, `redocly`, `mobx`/`styled-components`, the OpenTelemetry
+  stack, `glob` 7, `undici` 6.29.1, `yaml` 1.10.x, `swagger2openapi`, …) and adds none;
+  `redocly lint` output on all four specs is byte-identical to 1.x (valid, 7 problems ignored
+  per `.redocly.lint-ignore.yaml`) and the `build-docs` renderer still produces the prerendered
+  Redoc page. `preview-docs` is gone in v2, so `docs/usage/api-reference.md` now documents the
+  `build-docs` + open-the-file recipe. `dashboard/AGENTS.md`'s dual-React caveat (#148) is
+  restated: the root still hoists React 19 (now a peer fill, no longer via Redocly).
+  **Alert bookkeeping:** Dependabot scans the default branch (`main`), which is still at
+  `34d28a0` — 142/142 open alerts match `main`'s lockfiles, 1/142 matched `dev@c0150d4` (this
+  one) and 0/142 match the new lockfile. The remaining 141 clear when `dev` is next released to
+  `main`; they are not actionable on `dev`.
+
 - **Dashboard BFF: the deprecated `?token=` query fallback is now accepted on the
   three SSE routes only (issue #237).**
   The token extractor's query-parameter fallback fired on every protected route,
@@ -132,9 +151,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `AppLayout.tsx` and the redirect in `OAuthCallback.tsx` adopt the `void navigate(...)`
   idiom the codebase already uses elsewhere, satisfying `no-misused-promises` /
   `no-floating-promises`. Verified in-container with the v7 runtime staged from registry
-  tarballs: dashboard client build (`vite build`) passes, and the full workspace `vitest
-  run` is 98/98 files, 1502 passed + 1 skipped; the Playwright auth/navigation e2e specs
-  run in CI.
+  tarballs: dashboard client build (`vite build`) passes, and the full workspace
+  `vitest run` is 98/98 files, 1502 passed + 1 skipped; the Playwright auth/navigation e2e
+  specs run in CI.
 - **Proxy: Rust advisory bump clears the five open Rust Dependabot alerts.** A pure
   `Cargo.lock` refresh (`cargo update -p rustls -p quinn-proto`; no manifest change — both
   crates are transitive under `reqwest` 0.12 with the `rustls-tls` feature and HTTP/3):
@@ -362,9 +381,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `spyOn` is generic over the spied property, so the resolved type is not the specific
   `MockInstance`), making `warnSpy.mockRestore()` an unsafe `any` call in memory-budget
   and worker-pool tests; those five declarations are now typed
-  `MockInstance<(...args: unknown[]) => void>` with `import type { MockInstance } from
-  'vitest'`. Verified in-container by
-  staging the vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
+  `MockInstance<(...args: unknown[]) => void>` with
+  `import type { MockInstance } from 'vitest'`. Verified in-container by staging the
+  vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
   operations): `npx tsc --build` clean for all affected suites, scoped eslint clean, and
   the full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain
   the authority for `npm ci`-materialized trees (`npm ci`, integration suite,
