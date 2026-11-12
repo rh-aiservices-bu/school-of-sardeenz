@@ -10,8 +10,9 @@
  *    `[exec0, '-m', m]` is allowed for m in the known shim modules (sardeenz_vllm_runner,
  *    sardeenz_mlserver_runner — the catalog's shims, runners.yaml) plus module0. A brand-new
  *    shim module beyond the known two needs it added to KNOWN_SHIM_MODULES (worker release);
- *    configuring SARDEENZ_RUNNER_ENTRYPOINT only covers workflows whose catalog entries all
- *    use that configured vector.
+ *    configuring SARDEENZ_RUNNER_ENTRYPOINT with the `-m` shape admits the two known shims plus
+ *    the configured module, while a non-`-m` override admits only itself — and entrypoint-less
+ *    catalog entries inherit the configured vector.
  */
 export interface EntrypointAllowlist {
   /** The configured vector, accepted verbatim. */
