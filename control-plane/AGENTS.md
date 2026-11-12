@@ -40,6 +40,9 @@ on workers).
 - **Long-running ops hold a claim** (delete / stop / instance ops). Conflicts answer `409` with
   `details.reason` (`delete-in-progress`, `stop-in-progress`, …) as documented in the contract.
 - **Leader election:** background loops (reconciliation, eviction, health) only run on the leader.
+- **Path params validate before Redis:** every route taking `:modelName` calls
+  `assertValidModelName`, and every route taking `:instanceId` calls `assertValidInstanceId`,
+  before any Redis key or Postgres query — both params flow into keys by plain string join.
 - **Trust boundary:** every route is behind the auth hook (`SARDEENZ_API_TOKEN`), except when
   `SARDEENZ_ALLOW_UNAUTHENTICATED_API` opts out (startup fails without a token unless it is set —
   a dev-only posture, never set in deployments); workers use `SARDEENZ_WORKER_TOKEN`. Plain
