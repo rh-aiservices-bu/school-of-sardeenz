@@ -46,7 +46,8 @@ runner SIFs. To serve predictive or Hugging Face models, follow
 
 ## Project Status
 
-Phases 0–4 and milestones M2–M12 are complete. See [`docs/project/status.md`](docs/project/status.md) for details and the [overall plan](docs/project/overall-plan.md) for the delivery phases.
+Phases 0–4 and milestones M2–M14 are merged to `dev`; M15 (Security Hardening) is implemented on
+its milestone branch awaiting PR. See [`docs/project/status.md`](docs/project/status.md) for details and the [overall plan](docs/project/overall-plan.md) for the delivery phases.
 
 ## License
 

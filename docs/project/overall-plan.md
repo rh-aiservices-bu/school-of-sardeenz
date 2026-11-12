@@ -30,7 +30,7 @@ Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5     
 Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners ──►  kvcached
 (spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)      co-location
                                                                                                           │
-                                                                                          Milestones M2 … M13 (backlog track)
+                                                                                          Milestones M2 … M15 (backlog track)
 ```
 
 Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while the runtime work starts), but the critical path runs through Phases 0 → 1 → 2.
@@ -401,8 +401,9 @@ observed, not estimated; per-device kvcached pool reporting from the runner cont
 ## Milestone Track
 
 Alongside the phases, issues from the full audit (August 2026) are grouped into GitHub milestones
-and executed one milestone per branch, merged to `dev`. M2 through M12 are complete; M13 is next.
-The list of themes and what each delivered is maintained in [`status.md`](status.md).
+and executed one milestone per branch, merged to `dev`. M2 through M14 are merged; M15 (Security
+Hardening — Cluster & Auth) is implemented on its milestone branch awaiting PR. The list of
+themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---
 

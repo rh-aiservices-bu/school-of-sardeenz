@@ -35,6 +35,12 @@ Key design facts an agent needs on first pass:
   are distinct (ADR-020); proxy paths are split by protocol family `/openai` | `/oip` (ADR-021).
 - VRAM shown to users is **measured-only** (NVML); `requiredMemory` is a placement input, never a
   user-facing "reserved" figure.
+- **Security fails closed (M15):** service tokens are required at startup (dev-only opt-out
+  `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true`, never in `deployment/**`); Valkey requires AUTH from
+  `sardeenz-redis-credentials`; the `sardeenz` namespace ships default-deny ingress with explicit
+  allow NetworkPolicies (flow table in `docs/usage/deployment-security.md` — add a rule per new
+  flow); the worker allowlists `POST /runners` `entrypoint` argv against its configured
+  `SARDEENZ_RUNNER_ENTRYPOINT`; the BFF `?token=` query fallback is SSE-routes-only.
 
 ## Repository Structure
 
@@ -71,9 +77,11 @@ sardeenz/
 
 ## Project Status
 
-Phases 0–4 and milestones M2–M12 are complete and merged to `dev`. Next: **M13** (Feature &
-Resilience Backlog) and **Phase 5** (kvcached oversubscription / co-location policy). Details and
-history: [`docs/project/status.md`](docs/project/status.md); full plan:
+Phases 0–4 and milestones M2–M14 are complete and merged to `dev`; M15 (Security Hardening —
+Cluster & Auth) is implemented on `milestone/m15-security-hardening` awaiting its PR to `dev`.
+Next: **M17** (Runner & Shim Correctness), then **Phase 5** (kvcached oversubscription /
+co-location policy). Details and history:
+[`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
 ## Sardeenz v1 Reference

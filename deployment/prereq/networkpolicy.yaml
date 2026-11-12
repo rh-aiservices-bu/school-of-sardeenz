@@ -1,7 +1,7 @@
 # Default-deny ingress for the whole namespace (see docs/usage/deployment-security.md): every
-# Pod in the namespace drops inbound connections unless a policy below (or in a component
-# overlay) allows them. Egress is unrestricted; kubelet probes originate on the node and are
-# unaffected (network policies cannot block traffic from a Pod's own node).
+# Pod in the namespace drops inbound connections unless a policy below (or a component
+# policy elsewhere in the stack) allows them. Egress is unrestricted; kubelet probes originate
+# on the node and are unaffected (network policies cannot block traffic from a Pod's own node).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

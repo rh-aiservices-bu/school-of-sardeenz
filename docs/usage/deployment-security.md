@@ -262,12 +262,12 @@ pod level: a root-`USER` image fails fast instead of silently running as UID 0. 
 librarian's `build-oci` init container matches its `publish-sif` sibling (no privilege
 escalation, all capabilities dropped).
 
-The `sardeenz-sif-runner` SCC grants **no added capabilities**: it is `restricted-v2` with two
-deliberate relaxations — seccomp `Unconfined`, so Apptainer can create its in-container user
-namespace, and `fsGroup: RunAsAny`, so the worker and librarian pods can request `fsGroup: 0`
-for a group-writable `/scratch`
-([ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md)). All runner ports
-(worker management 9100; runner management `9101 + 4n` and HTTP engine `9102 + 4n` for
-`n = 0…31`, per the flow table above) are above 1024, so `NET_BIND_SERVICE` was dead weight
-and is not granted: `allowedCapabilities` is empty and `requiredDropCapabilities: [ALL]`
-remains.
+The `sardeenz-sif-runner` SCC grants **no added capabilities**. It is
+`restricted-v2` with two deliberate relaxations beyond stock: seccomp `Unconfined`, so Apptainer
+can create its in-container user namespace, and `fsGroup: RunAsAny`, so the worker and librarian
+pods can request `fsGroup: 0` for a group-writable `/scratch` (`deployment/sif-runner/scc.yaml`
+carries the rationale; reconciling [ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md)
+"no `RunAsAny`" wording is tracked in #267). All runner ports (worker management 9100; runner
+management `9101 + 4n` and HTTP engine `9102 + 4n` for `n = 0…31`, per the flow table above) are
+above 1024, so `NET_BIND_SERVICE` was dead weight and is not granted: no `allowedCapabilities` key
+is present and `requiredDropCapabilities: [ALL]` remains.
