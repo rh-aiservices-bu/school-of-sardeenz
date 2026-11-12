@@ -92,11 +92,13 @@ export function loadConfig(): Config {
   // Fail closed: an empty token means the auth hook never registers (server.ts) and WorkerClient
   // sends no Authorization header. Booting with authentication silently disabled is the failure
   // mode this closes; the opt-out is an explicit dev-only decision, never a default.
+  // Whitespace-only counts as missing (an operator-created Secret with a blank value must fail
+  // loudly) but the stored value is never trimmed — the bearer comparison stays byte-exact.
   const apiToken = optionalEnv('SARDEENZ_API_TOKEN', '');
   const workerToken = optionalEnv('SARDEENZ_WORKER_TOKEN', '');
   const missingTokens: string[] = [];
-  if (!apiToken) missingTokens.push('SARDEENZ_API_TOKEN');
-  if (!workerToken) missingTokens.push('SARDEENZ_WORKER_TOKEN');
+  if (!apiToken.trim()) missingTokens.push('SARDEENZ_API_TOKEN');
+  if (!workerToken.trim()) missingTokens.push('SARDEENZ_WORKER_TOKEN');
   if (missingTokens.length > 0 && !boolEnv('SARDEENZ_ALLOW_UNAUTHENTICATED_API', false)) {
     throw new Error(
       `${missingTokens.join(' and ')} must be set. ` +

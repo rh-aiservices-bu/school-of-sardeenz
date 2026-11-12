@@ -73,7 +73,7 @@ dashboard, e.g. `https://sardeenz.example.com`. It is used to:
 ## Service-to-Service Tokens
 
 Two shared secrets add defense in depth between components. Both are bearer tokens compared in
-constant time; services fail closed at startup when their token is unset, so local development must
+constant time; services fail closed at startup when their token is unset or blank, so local development must
 opt out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (dev-only escape hatch — never set it
 in-cluster).
 

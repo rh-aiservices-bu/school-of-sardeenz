@@ -447,6 +447,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Fail-closed token gate rejects whitespace-only tokens (issue #268).** The #234 startup
+  checks used plain truthiness, so `SARDEENZ_API_TOKEN=" "` (a Secret created with a blank
+  value) booted a service whose bearer auth was effectively a one-character guess. Both gates —
+  the control plane's `SARDEENZ_API_TOKEN`/`SARDEENZ_WORKER_TOKEN` pair and the dev worker's
+  `SARDEENZ_WORKER_TOKEN` — now test `token.trim()`. The stored value is deliberately not
+  trimmed, so a token configured with surrounding whitespace keeps matching byte-for-byte.
+
 - **Dashboard: models placement — single model list per GPU card.** The card previously
   listed every model twice: once as the legend chips under the stacked bar, again as the
   per-model action rows. The legend chips row is removed; the action-row list is the single

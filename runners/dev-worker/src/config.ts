@@ -101,9 +101,10 @@ export function loadConfig(): DevWorkerConfig {
   const runnerTypes = [...new Set(envList('SARDEENZ_RUNNER_TYPES', [legacyRunnerType]))];
 
   // Same fail-closed gate as the control plane: the worker's routes gate on this token
-  // (server.ts), so an empty value means the bearer hook never registers.
+  // (server.ts), so an empty value means the bearer hook never registers. Whitespace-only counts
+  // as missing; the stored value is not trimmed, so the bearer comparison stays byte-exact.
   const workerToken = envStr('SARDEENZ_WORKER_TOKEN', '');
-  if (!workerToken && !envBool('SARDEENZ_ALLOW_UNAUTHENTICATED_API', false)) {
+  if (!workerToken.trim() && !envBool('SARDEENZ_ALLOW_UNAUTHENTICATED_API', false)) {
     throw new Error(
       'SARDEENZ_WORKER_TOKEN must be set. ' +
         'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
