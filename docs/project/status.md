@@ -121,6 +121,14 @@ recorded per issue and must be exercised on first post-merge deployment:
 
 ## Notable changes
 
+- Five ADRs record M15's decisions: [ADR-022](../architecture/adrs/adr-022-fail-closed-service-tokens.md)
+  (tokens fail closed; dev-only opt-out — resolves ADR-013's inter-component-auth deferral),
+  [ADR-023](../architecture/adrs/adr-023-sse-only-query-token-fallback.md) (SSE-only query-token
+  fallback), [ADR-024](../architecture/adrs/adr-024-worker-entrypoint-allowlist.md) (entrypoint
+  allowlist seeding), [ADR-025](../architecture/adrs/adr-025-namespace-default-deny-ingress.md)
+  (namespace default-deny posture), [ADR-026](../architecture/adrs/adr-026-vap-activation-labeled-namespace.md)
+  (VAP activation by the shipped labeled Namespace — completes ADR-017's deferred mechanism
+  choice).
 - Worker-agent contract bumped 0.1.2 → 0.1.3 (`entrypoint` description constraint); generated types
   committed.
 - Dependency-update pressure now automated (#233) — the M14-style manual alert chasing has a

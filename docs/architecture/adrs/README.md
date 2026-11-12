@@ -21,3 +21,8 @@
 - [ADR-019](adr-019-logical-model-vs-instance-split.md) — Logical Model vs. Instance Split _(refines ADR-014)_
 - [ADR-020](adr-020-config-name-vs-served-model-name.md) — Configuration Name vs. Served Model Name _(refines ADR-019; amended by ADR-021)_
 - [ADR-021](adr-021-protocol-family-path-prefixes.md) — Protocol-Family Path Prefixes for Multi-Protocol Runners _(amends ADR-020)_
+- [ADR-022](adr-022-fail-closed-service-tokens.md) — Service Tokens Fail Closed; the Dev Opt-Out Is a Dev-Only Escape Hatch _(extends ADR-013)_
+- [ADR-023](adr-023-sse-only-query-token-fallback.md) — The `?token=` SSE Fallback Is Kept but Path-Gated
+- [ADR-024](adr-024-worker-entrypoint-allowlist.md) — Worker Entrypoint Allowlist Seeds from the Configured Argv
+- [ADR-025](adr-025-namespace-default-deny-ingress.md) — The Namespace Ships Default-Deny Ingress; Every Flow Needs an Explicit Allow
+- [ADR-026](adr-026-vap-activation-labeled-namespace.md) — The VAP Module-Guard Activates by Shipping the Labeled Namespace _(completes ADR-017's deferred mechanism choice)_

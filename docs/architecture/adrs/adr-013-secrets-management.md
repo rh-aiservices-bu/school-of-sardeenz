@@ -55,7 +55,7 @@ All components must follow these rules:
 
 ### What this policy does NOT cover
 
-- **Inter-component authentication** (e.g., whether the proxy authenticates to the control plane via API key, mTLS, or network policy). That is a separate design decision for Phase 2.
+- **Inter-component authentication** (e.g., whether the proxy authenticates to the control plane via API key, mTLS, or network policy). That is a separate design decision for Phase 2 — resolved by [ADR-022](adr-022-fail-closed-service-tokens.md) (shared bearer tokens that fail closed at startup) together with [ADR-025](adr-025-namespace-default-deny-ingress.md) (network isolation as the second layer).
 - **End-user authentication** (e.g., how inference API consumers authenticate). That is out of scope for the platform — it is handled upstream by the API gateway or ingress.
 - **Encryption at rest** for the Redis/Valkey data store. Redis TLS and ACLs are deployment configuration, not application-level secrets management.
 

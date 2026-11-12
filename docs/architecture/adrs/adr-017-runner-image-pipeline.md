@@ -64,7 +64,9 @@ restrict a PVC's mount mode by ServiceAccount, so "only the librarian writes it"
 by one of: a ValidatingAdmissionPolicy/Kyverno rule that rejects non-librarian Pods mounting it
 read-write; a two-PVC split (librarian-only staging PVC + a separate module PVC workers mount
 `readOnly`); or, absent admission tooling, a documented convention that Sardeenz-authored worker
-Deployments always mount it `readOnly`. Phase 4 picks and records one.
+Deployments always mount it `readOnly`. Phase 4 picks and records one —
+recorded in [ADR-026](adr-026-vap-activation-labeled-namespace.md) (ValidatingAdmissionPolicy,
+self-activated by the labeled Namespace shipped in `deployment/prereq/`).
 
 Baked cache-dir env in an app-derived image (e.g. `XDG_CACHE_HOME`/`HF_HOME`/
 `FLASHINFER_WORKSPACE_DIR` under `/opt/app-root/src`) must be **redirected to a writable path**
