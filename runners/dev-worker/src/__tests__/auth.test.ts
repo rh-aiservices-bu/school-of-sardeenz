@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
 import { createServer } from '../server.js';
+import { buildEntrypointAllowlist } from '../entrypoint-allowlist.js';
 import { RunnerManager } from '../runner-manager.js';
 import type { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
@@ -59,7 +60,11 @@ function makeRegistration(): WorkerRegistration {
 
 function buildTestApp(token: string): FastifyInstance {
   const runnerManager = new RunnerManager(makeConfig(), makeRegistration());
-  return createServer(runnerManager, token);
+  return createServer(
+    runnerManager,
+    token,
+    buildEntrypointAllowlist(makeConfig().apptainer.runnerEntrypoint),
+  );
 }
 
 describe('dev-worker API auth hook', () => {

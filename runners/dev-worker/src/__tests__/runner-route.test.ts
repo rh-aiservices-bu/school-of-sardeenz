@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import { RunnerManager } from '../runner-manager.js';
 import { registerRunnerRoutes } from '../routes/runners.js';
+import { buildEntrypointAllowlist } from '../entrypoint-allowlist.js';
 import type { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
 import type { LaunchHandle, LaunchSpec, RunnerLauncher } from '../launcher.js';
@@ -76,7 +77,11 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    registerRunnerRoutes(server, manager);
+    registerRunnerRoutes(
+      server,
+      manager,
+      buildEntrypointAllowlist(config.apptainer.runnerEntrypoint),
+    );
     baseUrl = await server.listen({ port: 0, host: '127.0.0.1' });
   });
 
@@ -142,7 +147,11 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
     };
     const pendingManager = new RunnerManager(makeConfig(), makeRegistration(), deferredLauncher);
     const pendingServer = Fastify({ logger: false });
-    registerRunnerRoutes(pendingServer, pendingManager);
+    registerRunnerRoutes(
+      pendingServer,
+      pendingManager,
+      buildEntrypointAllowlist(config.apptainer.runnerEntrypoint),
+    );
     const pendingBaseUrl = await pendingServer.listen({ port: 0, host: '127.0.0.1' });
 
     const start = pendingManager.startRunner({
@@ -187,7 +196,11 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
     };
     const pendingManager = new RunnerManager(makeConfig(), makeRegistration(), pendingLauncher);
     const pendingServer = Fastify({ logger: false });
-    registerRunnerRoutes(pendingServer, pendingManager);
+    registerRunnerRoutes(
+      pendingServer,
+      pendingManager,
+      buildEntrypointAllowlist(config.apptainer.runnerEntrypoint),
+    );
     const pendingBaseUrl = await pendingServer.listen({ port: 0, host: '127.0.0.1' });
     const starting = pendingManager.startRunner({
       modelName: 'cancel-me',

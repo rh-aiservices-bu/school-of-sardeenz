@@ -4,7 +4,11 @@ import { loadConfig } from '../config.js';
 
 describe('loadConfig', () => {
   const savedEnv: Record<string, string | undefined> = {};
-  const envKeys = ['SARDEENZ_WORKER_TOKEN', 'SARDEENZ_ALLOW_UNAUTHENTICATED_API'];
+  const envKeys = [
+    'SARDEENZ_WORKER_TOKEN',
+    'SARDEENZ_ALLOW_UNAUTHENTICATED_API',
+    'SARDEENZ_RUNNER_ENTRYPOINT',
+  ];
 
   beforeEach(() => {
     for (const key of envKeys) {
@@ -53,5 +57,17 @@ describe('loadConfig', () => {
   it('starts when SARDEENZ_WORKER_TOKEN is set without the opt-out', () => {
     process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
     expect(loadConfig().workerToken).toBe('test-worker-token');
+  });
+
+  it('refuses to start when SARDEENZ_RUNNER_ENTRYPOINT resolves to an empty argv (#238)', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
+    process.env['SARDEENZ_RUNNER_ENTRYPOINT'] = ',, '; // envList filters every segment out
+    expect(() => loadConfig()).toThrow(/SARDEENZ_RUNNER_ENTRYPOINT/);
+  });
+
+  it('accepts a non-`-m` SARDEENZ_RUNNER_ENTRYPOINT override as a verbatim-only seed (#238)', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
+    process.env['SARDEENZ_RUNNER_ENTRYPOINT'] = 'python3,sardeenz_vllm_runner.py';
+    expect(loadConfig().apptainer.runnerEntrypoint).toEqual(['python3', 'sardeenz_vllm_runner.py']);
   });
 });

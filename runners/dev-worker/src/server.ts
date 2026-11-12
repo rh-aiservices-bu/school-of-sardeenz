@@ -2,9 +2,14 @@ import Fastify from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { registerRunnerRoutes } from './routes/runners.js';
 import { registerLogRoutes } from './routes/logs.js';
+import type { EntrypointAllowlist } from './entrypoint-allowlist.js';
 import type { RunnerManager } from './runner-manager.js';
 
-export function createServer(runnerManager: RunnerManager, token: string) {
+export function createServer(
+  runnerManager: RunnerManager,
+  token: string,
+  entrypointAllowlist: EntrypointAllowlist,
+) {
   const server = Fastify({ logger: false });
 
   if (token) {
@@ -23,7 +28,7 @@ export function createServer(runnerManager: RunnerManager, token: string) {
     });
   }
 
-  registerRunnerRoutes(server, runnerManager);
+  registerRunnerRoutes(server, runnerManager, entrypointAllowlist);
   registerLogRoutes(server, runnerManager);
 
   server.get('/healthz', async (_req, reply) => {

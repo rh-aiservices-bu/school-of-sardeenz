@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import { RunnerManager } from '../runner-manager.js';
 import { registerRunnerRoutes } from '../routes/runners.js';
+import { buildEntrypointAllowlist } from '../entrypoint-allowlist.js';
 import type { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
 
@@ -62,7 +63,11 @@ describe('Dev Worker E2E', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    registerRunnerRoutes(server, manager);
+    registerRunnerRoutes(
+      server,
+      manager,
+      buildEntrypointAllowlist(config.apptainer.runnerEntrypoint),
+    );
     server.get('/healthz', () => ({ status: 'ok' }));
     const address = await server.listen({ port: 0, host: '127.0.0.1' });
     baseUrl = address;

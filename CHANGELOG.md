@@ -379,6 +379,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   opts out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (truthy `1/true/yes/on`;
   `=false` still fails) — documented in `.env.example` and the setup guide. No manifest
   change: in-cluster tokens keep coming from `secretKeyRef`.
+- **Dev worker: `POST /runners` entrypoint argv is now allowlisted (issue #238).**
+  The worker validates the incoming `entrypoint` against its configured
+  `SARDEENZ_RUNNER_ENTRYPOINT` (verbatim match) and — only when that vector has the canonical
+  3-element `<exec> -m <module>` shape — the `-m` module family: `<exec> -m <m>` is admitted for
+  `m` in {`sardeenz_vllm_runner`, `sardeenz_mlserver_runner`, the configured module}, with the
+  exec required to match the configured exec0. Anything else is rejected with `400 BAD_REQUEST`
+  before any process is spawned. Consequences for operators: a non-`-m` configured override
+  disables the `-m` family (only the override vector itself is accepted — running both vLLM and
+  MLServer catalog entries requires a `-m` vector such as the shipped default); a brand-new shim
+  module beyond the known two needs it added to `KNOWN_SHIM_MODULES` in a worker release, and
+  entrypoint-less catalog entries inherit the configured default. Absent/empty `entrypoint`
+  still falls back to the configured default, and a `SARDEENZ_RUNNER_ENTRYPOINT` that resolves
+  to an empty argv now fails worker startup loudly instead of producing per-request 400s. The
+  worker-agent contract's `entrypoint` description gained the constraint sentence (generated
+  types regenerated — description-only, no shape change).
 
 ### Changed
 
