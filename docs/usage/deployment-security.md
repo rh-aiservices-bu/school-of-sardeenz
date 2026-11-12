@@ -234,3 +234,32 @@ As with the NetworkPolicy labels above, the guard is only as strong as the RBAC 
 may patch the Namespace object: anyone who can remove the `sardeenz.io/module-guard` label (or
 edit the binding) can switch protection off. Restrict Namespace-object writes the same way you
 restrict Pod creation — labels alone are not a namespace boundary.
+
+## Container securityContexts and SCC capabilities
+
+Every Sardeenz workload container hardens its own `securityContext`: no privilege escalation
+and all Linux capabilities dropped. The control plane, proxy, dashboard, Postgres, and Valkey
+containers also run with `runAsNonRoot: true`. The control-plane and proxy containers run with
+`readOnlyRootFilesystem: true` and a scratch `emptyDir` mounted at `/tmp`: the control plane's
+`HOME=/tmp/sardeenz` and any temporary files live there, while persistent data stays on the
+modules/weights PVCs and the SIF importer's temp files stay inside the (writable) modules
+claim. The proxy pod sets `automountServiceAccountToken: false` — it never calls the
+Kubernetes API, so the default ServiceAccount carries no token into the pod. The control
+plane, dashboard, and librarian keep their ServiceAccount tokens: the control plane for
+leader-election Leases, the dashboard for its Prometheus bearer token and OAuth
+subject-access checks, the librarian for the image-build API. The worker keeps its
+ServiceAccount for the SCC binding, but its agent makes no Kubernetes API calls. The worker
+container's `runAsNonRoot: true` makes the SCC's non-root UID policy self-enforcing at the
+pod level: a root-`USER` image fails fast instead of silently running as UID 0. The
+librarian's `build-oci` init container matches its `publish-sif` sibling (no privilege
+escalation, all capabilities dropped).
+
+The `sardeenz-sif-runner` SCC grants **no added capabilities**: it is `restricted-v2` with two
+deliberate relaxations — seccomp `Unconfined`, so Apptainer can create its in-container user
+namespace, and `fsGroup: RunAsAny`, so the worker and librarian pods can request `fsGroup: 0`
+for a group-writable `/scratch`
+([ADR-016](../architecture/adrs/adr-016-sif-worker-security-posture.md)). All runner ports
+(worker management 9100; runner management `9101 + 4n` and HTTP engine `9102 + 4n` for
+`n = 0…31`, per the flow table above) are above 1024, so `NET_BIND_SERVICE` was dead weight
+and is not granted: `allowedCapabilities` is empty and `requiredDropCapabilities: [ALL]`
+remains.

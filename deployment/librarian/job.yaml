@@ -112,6 +112,10 @@ objects:
             - name: build-oci
               image: ${CLI_IMAGE}
               command: ['/bin/bash', '/opt/librarian/build-runner-sif.sh', 'build-oci']
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ['ALL']
               env:
                 - { name: PIPELINE_NAME, value: '${PIPELINE_NAME}' }
                 - { name: GIT_URI, value: '${GIT_URI}' }

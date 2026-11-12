@@ -58,6 +58,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ['ALL']
+            runAsNonRoot: true
           ports:
             - name: management
               containerPort: 9100

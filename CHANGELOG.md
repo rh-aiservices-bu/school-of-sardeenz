@@ -45,6 +45,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The manual `oc label namespace` step is retired from the runbooks in favor of a
   verify-the-label step; removing the label is the explicit opt-out (#232).
 
+- **Deployment: container securityContexts hardened across the production workloads, and the
+  `sardeenz-sif-runner` SCC no longer grants `NET_BIND_SERVICE` (issue #235 — the manifest
+  half; the image/supply-chain half moved to #266 in M19).**
+  The control-plane and proxy containers gain `readOnlyRootFilesystem: true` with an
+  `emptyDir` mounted at `/tmp` (the control plane's `HOME=/tmp/sardeenz` and all temporary
+  writes land there; persistent data stays on the modules/weights PVCs). The proxy pod sets
+  `automountServiceAccountToken: false` — it never calls the Kubernetes API. The control
+  plane, dashboard, and librarian keep their ServiceAccount tokens, and the worker keeps
+  its ServiceAccount for the SCC binding without calling the Kubernetes API. The worker
+  container gains
+  `runAsNonRoot: true` (admission-level enforcement on top of the SCC's `MustRunAsRange`, so a
+  root-`USER` image fails fast). The librarian's `build-oci` init container matches the
+  `publish-sif` sibling (no privilege escalation, all capabilities dropped). The SCC drops its
+  unused `NET_BIND_SERVICE` — every runner port (9100–9228) is above 1024 — aligning it with
+  ADR-016's "no added capabilities" posture. Operator notes in
+  `docs/usage/deployment-security.md`.
+
 - **Dashboard BFF: `@fastify/static` upgraded to v10 (10.1.10), clearing the two
   remaining `@fastify/static` manifest alerts and the dev-tooling `glob` 13.x copy.**
   The direct dependency moves from `^9.1.3` to `^10.1.10` — the v10 major that pins
