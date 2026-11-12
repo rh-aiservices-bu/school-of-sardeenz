@@ -62,6 +62,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ADR-016's "no added capabilities" posture. Operator notes in
   `docs/usage/deployment-security.md`.
 
+- **Control plane: every `:instanceId` path parameter is now validated before it reaches
+  Redis key composition (issue #236).**
+  A new `assertValidInstanceId` guard (`control-plane/src/utils/instance-id.ts`, mirroring the
+  #120 `assertValidModelName` gate) rejects ids outside `^[A-Za-z0-9._-]{1,64}$` — excluding `:`
+  (extra `redisKey` join segments), the glob metacharacters `* ? [ ]`, `/` and whitespace — with
+  a 400 `INVALID_REQUEST`. Applied beside the existing `assertValidModelName` call on all five
+  instance-scoped routes: instance delete, sleep, wake, move and startup-logs. The pattern is
+  deliberately looser than the `inst-<12hex>` mint format so legacy and manually created ids
+  keep working; valid ids see an unchanged Redis key shape.
+
 - **Dashboard BFF: `@fastify/static` upgraded to v10 (10.1.10), clearing the two
   remaining `@fastify/static` manifest alerts and the dev-tooling `glob` 13.x copy.**
   The direct dependency moves from `^9.1.3` to `^10.1.10` — the v10 major that pins
