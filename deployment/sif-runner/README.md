@@ -19,8 +19,11 @@ spike's §5/§8 manifests as a reusable Kustomize base.
 
 ```bash
 oc apply -k deployment/sif-runner/
-# Activate module write-protection in the namespace:
-oc label namespace sardeenz sardeenz.io/module-guard=enforce
+# Module write-protection ships active once the prereq base (../prereq/) has been applied — it
+# owns the Namespace resource the binding selects on; on a cluster where prereq was not applied
+# this binding matches nothing. Verify:
+oc get namespace sardeenz -o jsonpath='{.metadata.labels.sardeenz\.io/module-guard}{"\n"}'
+# -> enforce
 ```
 
 The `sardeenz-worker` image is `worker-base` (Apptainer + Node) with the built TypeScript worker

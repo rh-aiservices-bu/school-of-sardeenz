@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sardeenz
+  labels:
+    app.kubernetes.io/part-of: sardeenz
+    sardeenz.io/module-guard: enforce

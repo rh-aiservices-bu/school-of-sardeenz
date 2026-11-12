@@ -4,6 +4,7 @@ kind: Kustomization
 namespace: sardeenz
 
 resources:
+  - namespace.yaml
   - postgres-pvc.yaml
   - postgres-service.yaml
   - postgres-deployment.yaml

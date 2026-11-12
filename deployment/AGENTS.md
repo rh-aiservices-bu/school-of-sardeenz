@@ -22,7 +22,7 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | `containers/worker-base/`                            | Reusable UBI + Apptainer + FUSE + Node base; no worker-agent code       |
 | `containers/runners/<engine>/<version>/`             | Version-specific engine image converted to a SIF (`vllm`, `mlserver`)   |
 | `deployment/control-plane/`                          | NetworkPolicy for the control plane                                     |
-| `deployment/prereq/`                                 | PoC PostgreSQL and Valkey backing services                              |
+| `deployment/prereq/`                                 | Namespace + PoC PostgreSQL and Valkey backing services                  |
 | `deployment/proxy/`, `deployment/dashboard/`         | Deployable application workloads and Services                           |
 | `deployment/sif-runner/`                             | Worker SCC, RBAC, PVCs, NetworkPolicy, Deployment, PVC write-protection |
 | `deployment/librarian/`                              | Parameterized OpenShift OCI + SIF + ORAS publishing Job                 |

@@ -172,3 +172,29 @@ rules as the engine isolation boundary. Keep `SARDEENZ_WORKER_PORT`,
 when patching an overlay; changing only one can break management or inference traffic.
 
 4. **No public-facing Ingress**: Do not create an Ingress or Route for the worker agent. It should only be reachable via cluster-internal DNS.
+
+## Module store write protection
+
+The `sardeenz-modules` PVC (the module store) is write-protected by a cluster-scoped
+`ValidatingAdmissionPolicy` that rejects Pods mounting the claim read-write unless they run as
+one of the two exempt ServiceAccounts (`sardeenz-librarian`, which builds and publishes modules,
+and `sardeenz-control-plane`, which imports them); every other Pod, workers included, must mount
+it `readOnly`. The mechanism and its inline fallbacks are documented in
+[`deployment/sif-runner/module-pvc-write-protection.yaml`](../../deployment/sif-runner/module-pvc-write-protection.yaml)
+and [ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md).
+
+Protection ships active: the policy's binding selects namespaces labeled
+`sardeenz.io/module-guard=enforce`, which the `sardeenz` Namespace from `deployment/prereq/`
+carries on a stock install. Removing the label is the explicit opt-out:
+
+```bash
+oc label namespace <namespace> sardeenz.io/module-guard-
+```
+
+Admission requires ValidatingAdmissionPolicy support: OpenShift 4.17+ / Kubernetes 1.30+. On
+older clusters the binding is rejected at apply time and no protection exists.
+
+As with the NetworkPolicy labels above, the guard is only as strong as the RBAC controlling who
+may patch the Namespace object: anyone who can remove the `sardeenz.io/module-guard` label (or
+edit the binding) can switch protection off. Restrict Namespace-object writes the same way you
+restrict Pod creation — labels alone are not a namespace boundary.

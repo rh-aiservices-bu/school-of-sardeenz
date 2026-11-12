@@ -14,7 +14,8 @@ set here:
 - **Namespace:** set by the overlay via `kustomization.yaml` `namespace:` (bases are
   namespace-light). Default `sardeenz`.
 - **Naming:** all resources are prefixed `sardeenz-` (e.g. `sardeenz-sif-runner` SCC,
-  `sardeenz-worker` SA/Deployment, `sardeenz-modules`/`sardeenz-weights` PVCs).
+  `sardeenz-worker` SA/Deployment, `sardeenz-modules`/`sardeenz-weights` PVCs); the exception is
+  the `sardeenz` Namespace object itself (see `prereq/`).
 - **Cluster prerequisites** (self-managed OpenShift/OKD **4.15+**, tested on 4.21): `crun`
   runtime, a shared RWX StorageClass, rights to create a custom SCC, and the
   `io.kubernetes.cri-o.Devices: "/dev/fuse"` pod annotation (no device plugin on 4.15+).
@@ -27,7 +28,7 @@ deployment/
 ├── README.md               # install and configuration guide
 ├── control-plane/          # API Deployment, Service, Lease RBAC, catalog mounts, policy
 ├── dashboard/              # React frontend + BFF Deployment and Service
-├── prereq/                 # PoC PostgreSQL + Valkey backing services
+├── prereq/                 # Namespace + PoC PostgreSQL + Valkey backing services
 ├── proxy/                  # routing proxy Deployment and inference/admin Services
 ├── sif-runner/             # worker security posture + worker Deployment (Task 8)
 ├── librarian/              # SIF build/sign/convert Job + signing keys (Task 7)
@@ -101,11 +102,13 @@ resources:
   - ../../monitoring # ServiceMonitors; see deployment/dashboard/README.md
 ```
 
-Apply the full stack and activate module-PVC write protection:
+Apply the full stack:
 
 ```bash
 oc apply -k deployment/overlays/school-of-sardeenz/
-oc label namespace "$SARDEENZ_NAMESPACE" sardeenz.io/module-guard=enforce
+# Module write-protection ships active (Namespace resource in prereq/). Verify:
+oc get namespace "$SARDEENZ_NAMESPACE" -o jsonpath='{.metadata.labels.sardeenz\.io/module-guard}{"\n"}'
+# -> enforce
 
 oc rollout status deployment/sardeenz-postgres -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-redis -n "$SARDEENZ_NAMESPACE"
@@ -114,6 +117,11 @@ oc rollout status deployment/sardeenz-proxy -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-dashboard -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-worker -n "$SARDEENZ_NAMESPACE"
 ```
+If applying over a namespace that already exists fails with a field-ownership conflict on the
+Namespace's `metadata.labels`, apply the label directly
+(`oc label namespace "$SARDEENZ_NAMESPACE" sardeenz.io/module-guard=enforce --overwrite`) rather
+than retrying a whole kustomization with `--force-conflicts`, which can seize ownership of fields
+your overlay patches. The next `oc apply -k` then records the namespace cleanly.
 
 The worker requests one GPU and will remain Pending until a suitable node is available. Patch
 image tags/digests, PVC StorageClasses, capacities, replicas, and resources in the local overlay

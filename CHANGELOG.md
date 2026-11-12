@@ -20,6 +20,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Deployment: module-PVC write protection ships armed — `deployment/prereq/` now renders
+  a `Namespace` labelled `sardeenz.io/module-guard: enforce`, so a stock
+  `oc apply -k deployment/` activates the ValidatingAdmissionPolicyBinding on first apply.**
+  The manual `oc label namespace` step is retired from the runbooks in favor of a
+  verify-the-label step; removing the label is the explicit opt-out (#232).
+
 - **Dashboard BFF: `@fastify/static` upgraded to v10 (10.1.10), clearing the two
   remaining `@fastify/static` manifest alerts and the dev-tooling `glob` 13.x copy.**
   The direct dependency moves from `^9.1.3` to `^10.1.10` — the v10 major that pins
