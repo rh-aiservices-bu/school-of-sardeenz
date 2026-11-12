@@ -50,8 +50,9 @@ Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) thro
 
 ## Current milestone — M15 Security Hardening (implemented, awaiting PR)
 
-All 8 milestone issues are implemented on `milestone/m15-security-hardening` (10 commits over
-`dev@9a277ea`, head `d00f270`); opening the PR to `dev` is the remaining tracker step.
+All 8 milestone issues are implemented on `milestone/m15-security-hardening` (squash commits per
+issue over `dev@9a277ea`, plus type-fix and doc-sync follow-ups); opening the PR to `dev` is the
+remaining tracker step.
 In progress: nothing else.
 
 | Issue  | Delivered                                                                                                                                                                                                                              |
