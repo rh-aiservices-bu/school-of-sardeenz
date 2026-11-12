@@ -27,12 +27,45 @@ function isPublicRoute(url: string): boolean {
 }
 
 /**
+ * Routes where the deprecated `?token=` query fallback is still honored —
+ * exactly the BFF's SSE endpoints, which `EventSource` cannot authenticate
+ * with headers:
+ *   - GET /api/events                                  (server/routes/events.ts)
+ *   - GET /api/models/:name/logs                       (server/routes/model-logs.ts)
+ *   - GET /api/models/:name/instances/:id/startup-logs (server/routes/model-logs.ts)
+ *
+ * Matched segment-wise on the query-stripped path; `*` wildcards one
+ * segment (model/instance ids are percent-encoded single segments — even
+ * `my%2Fmodel` — so the segment count is stable and id content is
+ * irrelevant). A fourth SSE route adds one entry to SSE_TOKEN_PATHS.
+ */
+const SSE_TOKEN_PATHS: string[][] = [
+  ['api', 'events'],
+  ['api', 'models', '*', 'logs'],
+  ['api', 'models', '*', 'instances', '*', 'startup-logs'],
+];
+
+function isSseQueryTokenRoute(url: string): boolean {
+  // Strip the query BEFORE splitting: `/api/models/x/logs?token=abc` must
+  // segment to [..., 'logs'], not [..., 'logs?token=abc'].
+  const path = url.split('?')[0] ?? url;
+  const segments = path.split('/').filter((s) => s !== '');
+  return SSE_TOKEN_PATHS.some(
+    (pattern) =>
+      pattern.length === segments.length &&
+      pattern.every((seg, i) => seg === '*' || seg === segments[i]),
+  );
+}
+
+/**
  * Augment Fastify with `authenticate` and `requireRole` decorators.
  *
  * Behaviour depends on `AUTH_MODE`:
  *   - `none`  — decorators are no-ops; every request passes.
  *   - `simple` / `oauth` — JWT is required on protected routes.
- *     SSE routes that cannot send headers accept `?token=…` as fallback.
+ *     Only the three SSE routes accept `?token=…` as a fallback
+ *     (EventSource cannot set headers); on every other route a query
+ *     token is ignored and the request 401s.
  */
 async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): Promise<void> {
   const { config } = opts;
@@ -59,11 +92,14 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): P
           if (cookieToken) {
             return cookieToken;
           }
-          // 3. Query-parameter fallback (deprecated — tokens leak into logs/history)
+          // 3. Query-parameter fallback — SSE routes only (deprecated — tokens leak into
+          //    logs/history; kept solely because EventSource cannot set headers, and only
+          //    the three SSE endpoints need it). Everywhere else a query token is ignored
+          //    and the request fails with 401 through the ordinary missing-token path.
           const query = request.query as Record<string, string>;
-          if (query['token']) {
+          if (query['token'] && isSseQueryTokenRoute(request.url)) {
             app.log.warn(
-              { url: request.url },
+              { path: request.url.split('?')[0] },
               'Query-parameter token auth is deprecated — migrate to cookie-based SSE auth',
             );
             return query['token'];

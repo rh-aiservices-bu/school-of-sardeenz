@@ -20,6 +20,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Dashboard BFF: the deprecated `?token=` query fallback is now accepted on the
+  three SSE routes only (issue #237).**
+  The token extractor's query-parameter fallback fired on every protected route,
+  so a JWT pasted into any URL authenticated state-changing POST/DELETE calls
+  even though the fallback exists for `EventSource`, which cannot set headers —
+  and URL tokens leak into access logs, browser history and `Referer` headers.
+  The fallback is now path-gated to `GET /api/events`, `GET /api/models/:name/logs`
+  and `GET /api/models/:name/instances/:instanceId/startup-logs`; on every other
+  route a query token is ignored and the request 401s through the ordinary
+  missing-token path. The `sardeenz_sse` HttpOnly cookie remains the SSE
+  mechanism and the deprecation warning now logs only when a query token is
+  actually accepted.
+
 - **Deployment: Valkey requires AUTH from an operator-created Secret, and the `sardeenz`
   namespace ships default-deny ingress with explicit allow NetworkPolicies (issue #230).**
   The sclorg Valkey container now receives `VALKEY_PASSWORD` (secret key `REDIS_PASSWORD` of

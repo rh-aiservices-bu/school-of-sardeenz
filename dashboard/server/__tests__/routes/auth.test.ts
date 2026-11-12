@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { authPlugin } from '../../plugins/auth.js';
 import { registerAuthRoutes, _resetRateLimiter } from '../../routes/auth.js';
 import { registerModelRoutes } from '../../routes/models.js';
+import { registerModelLogRoutes } from '../../routes/model-logs.js';
 import { BffError } from '../../errors.js';
 import type { RouteDeps } from '../../routes/deps.js';
 import type { Config } from '../../config.js';
@@ -41,11 +42,13 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   };
 }
 
+const proxyRequestFn = vi.fn();
+
 function buildDeps(config: Config): RouteDeps {
   return {
     config,
     controlPlane: {
-      proxyRequest: vi.fn(),
+      proxyRequest: proxyRequestFn,
       listModels: vi.fn().mockResolvedValue({ status: 200, data: { models: [] } }),
       getModel: vi.fn(),
       deployModel: vi.fn(),
@@ -85,7 +88,10 @@ function buildDeps(config: Config): RouteDeps {
   };
 }
 
-async function buildApp(config: Config): Promise<FastifyInstance> {
+async function buildApp(
+  config: Config,
+  decorate?: (app: FastifyInstance) => void,
+): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, trustProxy: true });
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof BffError) {
@@ -100,6 +106,8 @@ async function buildApp(config: Config): Promise<FastifyInstance> {
   const deps = buildDeps(config);
   registerAuthRoutes(app, config);
   registerModelRoutes(app, deps);
+  registerModelLogRoutes(app, deps);
+  decorate?.(app);
   await app.ready();
   return app;
 }
@@ -112,6 +120,20 @@ function parseJson<T>(res: { json: () => unknown }): T {
 /** Extract token from a login response. */
 function extractToken(res: { json: () => unknown }): string {
   return parseJson<{ token: string }>(res).token;
+}
+
+/** Builds a fake upstream `Response` whose body streams the given SSE-frame strings. */
+function makeUpstreamResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream);
 }
 
 /* ------------------------------------------------------------------ */
@@ -494,7 +516,7 @@ describe('Route protection', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('accepts token via query parameter (deprecated SSE fallback)', async () => {
+  it('rejects token via query parameter on non-SSE routes (fallback is SSE-only, #237)', async () => {
     const config = makeConfig({ authMode: 'simple' });
     const app = await buildApp(config);
 
@@ -511,7 +533,28 @@ describe('Route protection', () => {
     });
     await app.close();
 
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('rejects token via query parameter on a protected non-SSE POST (#237)', async () => {
+    const config = makeConfig({ authMode: 'simple' });
+    const app = await buildApp(config);
+
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'admin', password: 'secret123' },
+    });
+    const token = extractToken(loginRes);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/models?token=${token}`,
+      payload: { modelName: 'test-model' },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
   });
 
   it('accepts token via sardeenz_sse cookie', async () => {
@@ -555,6 +598,151 @@ describe('Route protection', () => {
     expect(cookieStr).toContain('HttpOnly');
     expect(cookieStr).toContain('Path=/api');
     expect(cookieStr).toContain('SameSite=Strict');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Query-token fallback restricted to SSE routes (issue #237)          */
+/* ------------------------------------------------------------------ */
+describe('Query-token fallback restricted to SSE routes (issue #237)', () => {
+  /**
+   * Hijack-and-end twin of the real /api/events route. The real handler
+   * (routes/events.ts:112,153-156) hijacks the socket and awaits client
+   * close, so `app.inject` never resolves while the stream is open. The
+   * unit under test is the plugin's extractToken gate, not the SSE
+   * plumbing, so the twin keeps the real route's preHandler shape
+   * ([authenticate, requireRole('admin-readonly')]) and ends immediately.
+   * NEVER register this twin alongside `registerEventRoutes` on the same
+   * app — Fastify throws on duplicate method+path.
+   * Keep in sync with the real registration at server/routes/events.ts:64-66.
+   */
+  const withEventsTwin = (app: FastifyInstance): void => {
+    app.get(
+      '/api/events',
+      { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
+      async (_request, reply) => {
+        reply.hijack();
+        reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        reply.raw.end('event: end\ndata: {}\n\n');
+      },
+    );
+  };
+
+  /** Sign directly (pattern: model-logs.test.ts:236-239) — no login round-trip, no rate limiter. */
+  const signAdminToken = (app: FastifyInstance): string =>
+    app.jwt.sign({ username: 'admin', roles: ['admin'], authMode: 'simple' }, { expiresIn: 3600 });
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('accepts ?token=<valid> on GET /api/models/:name/logs (SSE)', async () => {
+    proxyRequestFn.mockResolvedValue(makeUpstreamResponse(['event: end\ndata: {}\n\n']));
+    const app = await buildApp(makeConfig({ authMode: 'simple' }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/models/llama-3/logs?token=${signAdminToken(app)}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/event-stream');
+    expect(res.payload).toContain('event: end');
+    expect(proxyRequestFn).toHaveBeenCalledWith('GET', '/api/v1/models/llama-3/logs');
+  });
+
+  it('accepts ?token=<valid> on GET /api/models/:name/instances/:instanceId/startup-logs (SSE)', async () => {
+    proxyRequestFn.mockResolvedValue(
+      makeUpstreamResponse(['event: log\ndata: {"content":"boot"}\n\n']),
+    );
+    const app = await buildApp(makeConfig({ authMode: 'simple' }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/models/llama-3/instances/inst-b/startup-logs?token=${signAdminToken(app)}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toContain('boot');
+  });
+
+  it('accepts ?token=<valid> with percent-encoded parametric ids (segment count stable)', async () => {
+    proxyRequestFn.mockResolvedValue(makeUpstreamResponse(['event: end\ndata: {}\n\n']));
+    const app = await buildApp(makeConfig({ authMode: 'simple' }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/models/my%2Fmodel/instances/inst%2Fb/startup-logs?token=${signAdminToken(app)}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(proxyRequestFn).toHaveBeenCalledWith(
+      'GET',
+      '/api/v1/models/my%2Fmodel/instances/inst%2Fb/startup-logs',
+    );
+  });
+
+  it('accepts ?token=<valid> on GET /api/events (route-level double)', async () => {
+    const app = await buildApp(makeConfig({ authMode: 'simple' }), withEventsTwin);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/events?token=${signAdminToken(app)}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('event: end');
+  });
+
+  it('returns 401 for an invalid token on GET /api/events (gate admits, signature rejects)', async () => {
+    const app = await buildApp(makeConfig({ authMode: 'simple' }), withEventsTwin);
+
+    const res = await app.inject({ method: 'GET', url: '/api/events?token=not-a-jwt' });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 401 when no token is present on GET /api/events (fallback is opt-in per request)', async () => {
+    const app = await buildApp(makeConfig({ authMode: 'simple' }), withEventsTwin);
+
+    const res = await app.inject({ method: 'GET', url: '/api/events' });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 401 for an invalid token on a parametric SSE route', async () => {
+    const app = await buildApp(makeConfig({ authMode: 'simple' }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/models/llama-3/logs?token=not-a-jwt',
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
+    expect(proxyRequestFn).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 for a valid token on the near-miss non-SSE route /api/models/:name/startup-logs', async () => {
+    // Pins the matcher's last-segment invariant: this 4-segment JSON route
+    // (server/routes/models.ts:61) differs from the SSE `logs` pattern only in
+    // its final literal; a suffix-style widening of SSE_TOKEN_PATHS must not
+    // silently open the query fallback to it.
+    const app = await buildApp(makeConfig({ authMode: 'simple' }));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/models/llama-3/startup-logs?token=${signAdminToken(app)}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(401);
   });
 });
 
