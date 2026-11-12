@@ -36,10 +36,11 @@ mechanism but did not make the query fallback narrower.
   the matcher's one place to extend, recorded in `dashboard/AGENTS.md`.
 - Any route that "temporarily" accepts the query token outside that list re-opens the leak; the
   gate is the enforcement point, not documentation.
-- **Accepted residual risk:** Fastify's default request logger still records the full URL
-  (including `?token=`) for every request. Redacting that logger is tracked as
-  [#269](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/269); the URL-fragment
-  transit half of the problem is #136 (Parking Lot).
+- **Closed residual risk (was accepted at M15):** Fastify's default request logger recorded the
+  full URL (including `?token=`) for every request. The BFF now installs its own `req` serializer
+  (`dashboard/server/log-redaction.ts`) that writes `token=[REDACTED]` and leaves other query
+  parameters intact — [#269](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/269).
+  The URL-fragment transit half of the problem remains #136 (Parking Lot).
 - **Rejected alternatives.** Removing the fallback entirely breaks `EventSource` for authed
   browsers where third-party-cookie restrictions block the cookie; allowing it globally is the
   pre-M15 leak.

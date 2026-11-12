@@ -371,6 +371,9 @@ The BFF implements a lightweight auth system controlled by the `AUTH_MODE` envir
 1. Client authenticates and receives a JWT signed with `JWT_SECRET`.
 2. Subsequent requests include the token as `Authorization: Bearer <token>`.
 3. The `sardeenz_sse` cookie (Path=/api, HttpOnly, SameSite=Strict; set at login) is also accepted on any `/api` route; the `?token=<jwt>` query fallback is additionally restricted to the three SSE routes (`/api/events`, `/api/models/:name/logs`, `/api/models/:name/instances/:instanceId/startup-logs`). In `AUTH_MODE=none` none of this applies — the extractor is never installed.
+   Because the fallback still puts a live JWT in a URL, the BFF installs its own Fastify `req`
+   serializer (`dashboard/server/log-redaction.ts`): the automatic request log line records
+   `token=[REDACTED]` and leaves every other query parameter intact.
 4. The `authenticate` preHandler verifies the token; `requireRole('admin-readonly')` checks the `roles` claim.
 
 ### Route protection
