@@ -26,7 +26,10 @@ spec:
             - name: SARDEENZ_CONTROL_PLANE_URL
               value: http://sardeenz-control-plane:3000
             - name: SARDEENZ_REDIS_URL
-              value: redis://sardeenz-redis:6379
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-redis-credentials
+                  key: SARDEENZ_REDIS_URL
             - name: SARDEENZ_INFERENCE_URL
               value: http://sardeenz-proxy:8080
             - name: SARDEENZ_PROMETHEUS_URL

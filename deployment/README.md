@@ -54,12 +54,18 @@ API_TOKEN="$(openssl rand -hex 32)"
 WORKER_TOKEN="$(openssl rand -hex 32)"
 ADMIN_PASSWORD="$(openssl rand -hex 24)"
 JWT_SECRET="$(openssl rand -hex 32)"
+REDIS_PASSWORD="$(openssl rand -hex 24)"
 
 oc create secret generic sardeenz-postgres-credentials \
   --from-literal=POSTGRESQL_USER=sardeenz \
   --from-literal=POSTGRESQL_PASSWORD="$POSTGRES_PASSWORD" \
   --from-literal=POSTGRESQL_DATABASE=sardeenz \
   --from-literal=SARDEENZ_DATABASE_URL="postgresql://sardeenz:${POSTGRES_PASSWORD}@sardeenz-postgres:5432/sardeenz" \
+  -n "$SARDEENZ_NAMESPACE"
+
+oc create secret generic sardeenz-redis-credentials \
+  --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
+  --from-literal=SARDEENZ_REDIS_URL="redis://:${REDIS_PASSWORD}@sardeenz-redis:6379" \
   -n "$SARDEENZ_NAMESPACE"
 
 oc create secret generic sardeenz-service-tokens \
@@ -75,7 +81,7 @@ oc create secret generic sardeenz-dashboard-auth \
   -n "$SARDEENZ_NAMESPACE"
 
 # Store the generated admin password securely before clearing these shell variables.
-unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN ADMIN_PASSWORD JWT_SECRET
+unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN ADMIN_PASSWORD JWT_SECRET REDIS_PASSWORD
 ```
 
 Real registry credentials remain in `sardeenz-librarian-registry`, created as described in
@@ -159,6 +165,11 @@ DASHBOARD_URL="https://$(oc get route sardeenz-dashboard \
 oc set env deployment/sardeenz-dashboard SARDEENZ_PUBLIC_URL="$DASHBOARD_URL" \
   -n "$SARDEENZ_NAMESPACE"
 ```
+
+The shipped NetworkPolicies allow Route traffic to the dashboard and (if created) the proxy
+inference Service; the control plane, proxy admin Service, worker agent, and runner ports have
+no router/external ingress rule — they are reachable only from the in-cluster sources listed in
+[`docs/usage/deployment-security.md`](../docs/usage/deployment-security.md).
 
 See [`docs/usage/deployment-security.md`](../docs/usage/deployment-security.md) before exposing the
 stack outside a trusted evaluation environment.

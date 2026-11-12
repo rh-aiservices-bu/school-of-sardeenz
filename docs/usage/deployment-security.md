@@ -173,6 +173,42 @@ when patching an overlay; changing only one can break management or inference tr
 
 4. **No public-facing Ingress**: Do not create an Ingress or Route for the worker agent. It should only be reachable via cluster-internal DNS.
 
+## Namespace default-deny and allow policies
+
+The `sardeenz` namespace ships default-deny ingress from
+[`deployment/prereq/networkpolicy.yaml`](../../deployment/prereq/networkpolicy.yaml): a single
+policy with an empty `podSelector`, `policyTypes: [Ingress]` and no ingress rules drops every
+inbound connection to every Pod in the namespace. NetworkPolicy allows are additive, so the
+per-flow policies below supply exactly the allowed set. Egress is unrestricted.
+
+| Destination | Port | Allowed sources | Policy |
+| ----------- | ---- | --------------- | ------ |
+| redis (Valkey) | 6379 | control plane, proxy, dashboard, worker (same-namespace pod selectors) | `prereq/networkpolicy.yaml` |
+| PostgreSQL | 5432 | control plane | `prereq/networkpolicy.yaml` |
+| proxy inference | 8080 | platform router (ingress namespace) and the dashboard BFF (chat forwarding via `SARDEENZ_INFERENCE_URL`) | `proxy/networkpolicy.yaml` |
+| proxy admin | 9099 | `openshift-user-workload-monitoring` namespace | `proxy/networkpolicy.yaml` |
+| dashboard BFF | 4000 | platform router (ingress namespace) | `dashboard/networkpolicy.yaml` |
+| control plane | 3000 | proxy, dashboard, `openshift-user-workload-monitoring` namespace | existing `control-plane/networkpolicy.yaml` |
+| worker agent + shim mgmt | 9100, 9101+4n | control plane | existing `sif-runner/networkpolicy.yaml` |
+| worker engines | 9102+4n | proxy | existing `sif-runner/networkpolicy.yaml` |
+
+Network isolation is complemented by Valkey authentication: the server now requires
+`requirepass` from the `sardeenz-redis-credentials` Secret (see `deployment/prereq/README.md`).
+The default-deny plus allow policies limit *who can reach* port 6379; AUTH stops anyone who
+still can — a pod that merely carries a Sardeenz component label in the namespace is not
+sufficient by itself.
+
+The two ingress-sourced rules (proxy 8080, dashboard 4000) select the platform router with
+`policy-group.network.openshift.io/ingress: ""`, the documented "allow from the OpenShift
+Ingress Controller" form for the OVN-Kubernetes default network plugin (OpenShift/OKD 4.15+).
+On clusters whose router namespace carries the SDN-era label instead, patch the selector in an
+overlay to `network.openshift.io/policy-group: ingress`. Verify at deploy time with
+`oc get namespace openshift-ingress --show-labels` and a Route probe after apply.
+
+The same "Namespace and CNI considerations" caveats as above apply unchanged: NetworkPolicy
+labels are not workload identity, and the rules are only as strong as the CNI's enforcement of
+them.
+
 ## Module store write protection
 
 The `sardeenz-modules` PVC (the module store) is write-protected by a cluster-scoped

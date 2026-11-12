@@ -147,6 +147,10 @@ them in `.env` if you remap the host ports above:
 | Redis/Valkey | `redis://localhost:6379`                                 | `SARDEENZ_REDIS_URL`    |
 | PostgreSQL   | `postgresql://sardeenz:sardeenz@localhost:5432/sardeenz` | `SARDEENZ_DATABASE_URL` |
 
+Local development stays passwordless: the compose services are reachable only from your
+machine, while the cluster manifests carry Valkey AUTH (`sardeenz-redis-credentials`) and
+default-deny NetworkPolicies.
+
 ### Integration tests and the database
 
 The control-plane integration tests **TRUNCATE tables**, so they never touch your dev database.

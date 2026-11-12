@@ -25,7 +25,10 @@ spec:
             - name: SARDEENZ_ADMIN_ADDR
               value: 0.0.0.0:9099
             - name: SARDEENZ_REDIS_URL
-              value: redis://sardeenz-redis:6379
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-redis-credentials
+                  key: SARDEENZ_REDIS_URL
             - name: SARDEENZ_CONTROL_PLANE_URL
               value: http://sardeenz-control-plane:3000
             - name: SARDEENZ_API_TOKEN

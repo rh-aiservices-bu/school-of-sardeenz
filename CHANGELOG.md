@@ -20,6 +20,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Deployment: Valkey requires AUTH from an operator-created Secret, and the `sardeenz`
+  namespace ships default-deny ingress with explicit allow NetworkPolicies (issue #230).**
+  The sclorg Valkey container now receives `VALKEY_PASSWORD` (secret key `REDIS_PASSWORD` of
+  `sardeenz-redis-credentials`) and enables `requirepass`; its startup/readiness exec probes
+  pass the password to `valkey-cli` via `REDISCLI_AUTH` (shell form — K8s exec probes run
+  without a shell; no secret in the probe argv), and the auth-independent `tcpSocket` liveness
+  probe is unchanged. All four `SARDEENZ_REDIS_URL` consumers (control plane, proxy, dashboard
+  BFF, worker) move from an inline passwordless URL to `secretKeyRef` on that Secret; local
+  dev stays passwordless.
+  Three new NetworkPolicy manifests: `prereq/networkpolicy.yaml` (namespace default-deny
+  ingress + redis 6379 ← CP/proxy/dashboard/worker + postgres 5432 ← CP),
+  `proxy/networkpolicy.yaml` (8080 ← router + dashboard BFF chat forwarding, 9099 ←
+  `openshift-user-workload-monitoring`) and `dashboard/networkpolicy.yaml` (4000 ← router);
+  flow table in `docs/usage/deployment-security.md`, secret runbooks in the deployment and
+  prereq READMEs. **Upgrade:** create `sardeenz-redis-credentials` (runbook in
+  `deployment/prereq/README.md`) before rolling out these manifests — pods referencing the
+  missing Secret fail to create (`CreateContainerConfigError`); rotating the password requires
+  restarting all five deployments (every consumer reads `SARDEENZ_REDIS_URL` at process start).
+
 - **Deployment: module-PVC write protection ships armed — `deployment/prereq/` now renders
   a `Namespace` labelled `sardeenz.io/module-guard: enforce`, so a stock
   `oc apply -k deployment/` activates the ValidatingAdmissionPolicyBinding on first apply.**

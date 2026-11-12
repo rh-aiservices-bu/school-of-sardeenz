@@ -108,7 +108,10 @@ spec:
             - { name: SARDEENZ_SCRATCH_DIR, value: /scratch }
             - { name: SARDEENZ_VERIFY_SIF, value: 'true' }
             - name: SARDEENZ_REDIS_URL
-              value: redis://sardeenz-redis:6379
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-redis-credentials
+                  key: SARDEENZ_REDIS_URL
             - name: SARDEENZ_WORKER_TOKEN
               valueFrom:
                 secretKeyRef:

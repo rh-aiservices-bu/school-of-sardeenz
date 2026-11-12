@@ -8,6 +8,7 @@ resources:
   - rbac.yaml
   - service-ca-configmap.yaml
   - deployment.yaml
+  - networkpolicy.yaml
 
 labels:
   - pairs:

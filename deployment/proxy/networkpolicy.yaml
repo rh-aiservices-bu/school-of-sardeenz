@@ -1,0 +1,45 @@
+# Restricts ingress to the proxy to the platform router, the dashboard BFF, and OpenShift
+# user-workload monitoring (see docs/usage/deployment-security.md). The inference listener is
+# unauthenticated — network isolation (this policy) is the boundary; SARDEENZ_API_TOKEN
+# authenticates the proxy to the control plane (outbound only). Deploy behind an
+# authenticating gateway if the listener must be exposed.
+# Any other pod in the namespace is denied by the prereq default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-proxy
+  labels:
+    app.kubernetes.io/name: sardeenz-proxy
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    # Inference listener (8080): platform Route traffic (deployment/README.md "External access")
+    # and the dashboard BFF's in-cluster Playground chat forwarding via
+    # SARDEENZ_INFERENCE_URL=http://sardeenz-proxy:8080 (dashboard/server/clients/inference.ts).
+    # Without the dashboard source, chat completions 504 under the default-deny.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-dashboard
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Prometheus scrape of the unauthenticated /metrics endpoint on the admin port (see
+    # docs/usage/deployment-security.md). OpenShift user-workload monitoring's Prometheus pods
+    # run in openshift-user-workload-monitoring, outside this namespace, so this rule is scoped
+    # to that namespace rather than a pod label within it (mirrors the control-plane policy).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-user-workload-monitoring
+      ports:
+        - protocol: TCP
+          port: 9099
