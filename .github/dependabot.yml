@@ -1,0 +1,113 @@
+# Dependabot version updates: one entry per dependency surface, giving the
+# repo's dependency manifests bottom-up update PRs alongside alert-driven
+# updates.
+# Schema: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+#
+# - The npm root entry covers all workspaces via the root lockfile; the pip
+#   root entry picks up requirements-docs.txt (the python fetcher scans the
+#   configured directory plus immediate subdirectories).
+# - Containerfile directories (worker, worker-base, current runner images) are
+#   matched automatically: the docker fetcher recognizes
+#   /dockerfile|containerfile/i since dependabot-core v0.291.0.
+# - The versioned runner directories registered here are the runners.yaml
+#   catalog's current versions per the issue #233 decision comment
+#   (2026-11-11); vllm 0.21.0 and 0.24.0 are deliberately skipped. On a SIF
+#   version bump, replace the outgoing version's entry (or add the new
+#   version) so coverage keeps tracking the catalog.
+# - Minor+patch updates are grouped into one PR per entry to keep noise down;
+#   major bumps and security updates stay individual.
+version: 2
+updates:
+  # npm: root lockfile covers control-plane, dashboard, packages/* and
+  # runners/dev-worker.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  # cargo: single-member workspace rooted at proxy/.
+  - package-ecosystem: "cargo"
+    directory: "/proxy"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  # docker: the shipped proxy image (proxy/Dockerfile — rust build stage +
+  # distroless static runtime base).
+  - package-ecosystem: "docker"
+    directory: "/proxy"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  # pip: docs requirements at the root + the three runner shims.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "pip"
+    directory: "/runners/vllm"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "pip"
+    directory: "/runners/mlserver"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "pip"
+    directory: "/runners/conformance"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  # GitHub Actions: .github/workflows/*.yml plus any root action.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  # Docker base images: control-plane and dashboard use Dockerfile; worker,
+  # worker-base and the current runner images use Containerfile (matched
+  # automatically, see the header note).
+  - package-ecosystem: "docker"
+    directory: "/containers/control-plane"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "docker"
+    directory: "/containers/dashboard"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "docker"
+    directory: "/containers/worker-base"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "docker"
+    directory: "/containers/worker"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "docker"
+    directory: "/containers/runners/vllm/0.26.0"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}
+
+  - package-ecosystem: "docker"
+    directory: "/containers/runners/mlserver/1.7.1"
+    schedule: {interval: "weekly", day: "monday"}
+    open-pull-requests-limit: 10
+    groups: {minor-and-patch: {update-types: ["minor", "patch"]}}

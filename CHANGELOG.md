@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Automated dependency updates start: `.github/dependabot.yml` (issue #233).**
+  GitHub now opens weekly version-update PRs (Mondays) across 14 entries — npm
+  (root lockfile, all workspaces), cargo (`proxy/`), pip (docs requirements +
+  the three runner shims), GitHub Actions workflows, and Docker base images
+  (×7: the six Dockerfile/Containerfile directories under `containers/` plus
+  the shipped `proxy/` image; current runner versions only) — with minor+patch
+  updates grouped into one PR per entry (`open-pull-requests-limit: 10`);
+  major bumps and security updates stay individual. Complements the M14-style
+  manual alert chasing (#224–#229).
+
 ### Security
 
 - **Dashboard BFF: `@fastify/static` upgraded to v10 (10.1.10), clearing the two
