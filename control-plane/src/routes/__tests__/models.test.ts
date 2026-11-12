@@ -2574,6 +2574,40 @@ describe('modelName glob rejection (security M1: SCAN-glob boundary validation)'
   });
 });
 
+describe('instanceId validation (#236: boundary check before Redis key composition)', () => {
+  it('DELETE /api/v1/models/m/instances/foo%3Abar is rejected with 400 and nothing is deleted', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const getInstance = vi.fn(() => Promise.resolve(ACTIVE_STATE));
+    const { app } = buildApp({ removeInstance, getInstance });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m/instances/foo%3Abar' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(removeInstance).not.toHaveBeenCalled();
+    expect(getInstance).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, 'GET' | 'POST' | 'DELETE', string]>([
+    ['sleep', 'POST', '/api/v1/models/m/instances/foo%3Abar/sleep'],
+    ['wake', 'POST', '/api/v1/models/m/instances/foo%3Fbar/wake'],
+    ['move', 'POST', '/api/v1/models/m/instances/foo*bar/move'],
+    ['delete', 'DELETE', '/api/v1/models/m/instances/foo[bar'],
+    ['sleep (raw colon)', 'POST', '/api/v1/models/m/instances/foo:bar/sleep'],
+    ['wake (percent-encoded space)', 'POST', '/api/v1/models/m/instances/foo%20bar/wake'],
+  ])('%s on a malformed instanceId is rejected with 400 before touching Redis/DB', async (_op, method, url) => {
+    const getInstance = vi.fn();
+    const { app } = buildApp({ getInstance });
+
+    const res = await app.inject({ method, url });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+    expect(getInstance).not.toHaveBeenCalled();
+  });
+});
+
 describe('instance-scoped op dedup (quality L4 / security L2)', () => {
   it('rejects a concurrent second DELETE on the same instance', async () => {
     const { app } = buildApp();

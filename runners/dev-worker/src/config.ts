@@ -99,6 +99,30 @@ export function loadConfig(): DevWorkerConfig {
   const scratchDir = envStr('SARDEENZ_SCRATCH_DIR', '/scratch');
   const legacyRunnerType = envStr('SARDEENZ_RUNNER_TYPE', 'vllm');
   const runnerTypes = [...new Set(envList('SARDEENZ_RUNNER_TYPES', [legacyRunnerType]))];
+
+  // Same fail-closed gate as the control plane: the worker's routes gate on this token
+  // (server.ts), so an empty value means the bearer hook never registers.
+  const workerToken = envStr('SARDEENZ_WORKER_TOKEN', '');
+  if (!workerToken && !envBool('SARDEENZ_ALLOW_UNAUTHENTICATED_API', false)) {
+    throw new Error(
+      'SARDEENZ_WORKER_TOKEN must be set. ' +
+        'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
+    );
+  }
+  // Seeds the POST /runners entrypoint allowlist (#238) in every launch mode, so an unusable
+  // (empty) vector must fail startup loudly instead of turning every start request into a 400.
+  const runnerEntrypoint = envList('SARDEENZ_RUNNER_ENTRYPOINT', [
+    'python3',
+    '-m',
+    'sardeenz_vllm_runner',
+  ]);
+  if (runnerEntrypoint.length === 0) {
+    throw new Error(
+      'SARDEENZ_RUNNER_ENTRYPOINT must resolve to a non-empty argv — it seeds the entrypoint ' +
+        'allowlist that validates POST /runners ' +
+        '(e.g. SARDEENZ_RUNNER_ENTRYPOINT="python3,-m,sardeenz_vllm_runner").',
+    );
+  }
   return {
     mode: resolveMode(),
     redisUrl: envStr('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
@@ -127,11 +151,7 @@ export function loadConfig(): DevWorkerConfig {
       weightsDir,
       scratchDir,
       binds: envList('SARDEENZ_APPTAINER_BINDS', [weightsDir, scratchDir]),
-      runnerEntrypoint: envList('SARDEENZ_RUNNER_ENTRYPOINT', [
-        'python3',
-        '-m',
-        'sardeenz_vllm_runner',
-      ]),
+      runnerEntrypoint,
       home: envStr('SARDEENZ_APPTAINER_HOME', `${scratchDir}/home`),
       verifySif: envBool('SARDEENZ_VERIFY_SIF', true),
       // 15 min by default — a large model's weight load + KV-cache alloc can take several minutes;
@@ -146,7 +166,7 @@ export function loadConfig(): DevWorkerConfig {
       // inference pool also crashes under Python 3.12 + uvloop before it can load the model.
       mlserverParallelWorkers: envInt('SARDEENZ_MLSERVER_PARALLEL_WORKERS', 0),
     },
-    workerToken: envStr('SARDEENZ_WORKER_TOKEN', ''),
+    workerToken,
     catalogUrl: envStr('SARDEENZ_RUNNER_CATALOG_URL', ''),
   };
 }

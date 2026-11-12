@@ -10,6 +10,7 @@ import {
   assertValidModelName,
   MODEL_NAME_PATTERN,
 } from '../utils/model-name.js';
+import { assertValidInstanceId } from '../utils/instance-id.js';
 import type { ModelRecord } from '../services/model-repository.js';
 import { deriveAggregateState, type InstanceState } from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
@@ -968,6 +969,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     const { modelName, instanceId } = request.params;
     const body = request.body;
     assertValidModelName(modelName);
+    assertValidInstanceId(instanceId);
     if (
       !body ||
       typeof body.targetWorkerId !== 'string' ||
@@ -2085,6 +2087,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertValidInstanceId(instanceId);
       await assertNoMove(modelName, 'delete an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
@@ -2154,6 +2157,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertValidInstanceId(instanceId);
       await assertNoMove(modelName, 'sleep an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);
@@ -2229,6 +2233,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertValidInstanceId(instanceId);
       await assertNoMove(modelName, 'wake an instance for');
 
       const instance = await deps.lifecycle.getInstance(modelName, instanceId);

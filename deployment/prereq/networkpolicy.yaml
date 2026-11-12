@@ -1,0 +1,73 @@
+# Default-deny ingress for the whole namespace (see docs/usage/deployment-security.md): every
+# Pod in the namespace drops inbound connections unless a policy below (or a component
+# policy elsewhere in the stack) allows them. Egress is unrestricted; kubelet probes originate
+# on the node and are unaffected (network policies cannot block traffic from a Pod's own node).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-default-deny-ingress
+  labels:
+    app.kubernetes.io/name: sardeenz-default-deny-ingress
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress: []
+---
+# Only the four components that hold SARDEENZ_REDIS_URL may reach Valkey (the dashboard BFF's
+# redis client and the worker agent both connect). Any other pod in the namespace is denied by
+# the default-deny above; NetworkPolicy allows combine additively.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-redis
+  labels:
+    app.kubernetes.io/name: sardeenz-redis
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-control-plane
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-proxy
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-dashboard
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-worker
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Only the control plane talks to PostgreSQL (SARDEENZ_DATABASE_URL).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-postgres
+  labels:
+    app.kubernetes.io/name: sardeenz-postgres
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-control-plane
+      ports:
+        - protocol: TCP
+          port: 5432

@@ -65,8 +65,8 @@ spec:
   policyName: sardeenz-modules-readonly
   validationActions: ['Deny']
   matchResources:
-    # Scope to namespaces labelled for Sardeenz; label the namespace with
-    # `sardeenz.io/module-guard: enforce` to activate.
+    # Scope to namespaces labelled for Sardeenz; protection ships active via the
+    # ../prereq/ Namespace resource — removing the label is the explicit opt-out.
     namespaceSelector:
       matchLabels:
         sardeenz.io/module-guard: enforce

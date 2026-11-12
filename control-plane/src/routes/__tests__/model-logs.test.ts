@@ -346,4 +346,20 @@ describe('durable instance startup logs', () => {
     expect(response.body).toContain('startup complete');
     expect(response.body).toContain('event: end');
   });
+
+  it('rejects a malformed instanceId with 400 before any repository lookup (#236)', async () => {
+    const find = vi.fn();
+    const deps = toDeps(createMocks());
+    deps.startupLogRepository = { find } as never;
+    app = await buildTestApp(deps);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/models/test-model/instances/foo%3Abar/startup-logs',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(find).not.toHaveBeenCalled();
+  });
 });

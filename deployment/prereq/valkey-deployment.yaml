@@ -24,18 +24,33 @@ spec:
           env:
             - name: BIND_ADDRESS
               value: 0.0.0.0
+            # The sclorg image enables requirepass when VALKEY_PASSWORD is set (run-valkey
+            # appends password.conf.template to the config and unsets the var before exec'ing
+            # the server). Hex from `openssl rand -hex 24` passes the image's password regex
+            # and needs no URL-encoding in the client URLs (see README.md).
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-redis-credentials
+                  key: REDIS_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
               protocol: TCP
           startupProbe:
             exec:
-              command: [valkey-cli, -h, 127.0.0.1, ping]
+              command:
+                - /bin/sh
+                - -c
+                - REDISCLI_AUTH="$VALKEY_PASSWORD" valkey-cli ping
             periodSeconds: 5
             failureThreshold: 30
           readinessProbe:
             exec:
-              command: [valkey-cli, -h, 127.0.0.1, ping]
+              command:
+                - /bin/sh
+                - -c
+                - REDISCLI_AUTH="$VALKEY_PASSWORD" valkey-cli ping
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:

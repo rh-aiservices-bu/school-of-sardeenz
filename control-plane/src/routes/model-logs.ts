@@ -6,6 +6,7 @@ import { ModelLifecycleState } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
 import { assertValidModelName } from '../utils/model-name.js';
+import { assertValidInstanceId } from '../utils/instance-id.js';
 import { delaySafe } from '../utils.js';
 
 const POLL_INTERVAL_MS = 500;
@@ -49,6 +50,7 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
     async (request, reply) => {
       const { modelName, instanceId } = request.params;
       assertValidModelName(modelName);
+      assertValidInstanceId(instanceId);
       const repository = deps.startupLogRepository;
       const initial = await repository?.find(instanceId);
       if (!repository || !initial || initial.modelName !== modelName) {

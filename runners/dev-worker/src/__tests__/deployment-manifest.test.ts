@@ -75,16 +75,24 @@ function ruleForSource(
   );
 }
 
-function loadConfigWithDefaultPortValues() {
+/**
+ * Loads the worker config with the port env vars unset (so the manifest-asserted defaults apply)
+ * and a fixed token so the fail-closed gate passes; the saved keys also cover the token +
+ * opt-out vars loadConfig() reads beyond the ports.
+ */
+function loadConfigWithDefaultPortValuesAndToken() {
   const portEnvKeys = [
     'SARDEENZ_WORKER_PORT',
     'SARDEENZ_RUNNER_PORT_START',
     'SARDEENZ_MAX_RUNNERS',
+    'SARDEENZ_WORKER_TOKEN',
+    'SARDEENZ_ALLOW_UNAUTHENTICATED_API',
   ] as const;
   const originalValues = new Map(portEnvKeys.map((key) => [key, process.env[key]]));
 
   try {
     for (const key of portEnvKeys) delete process.env[key];
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
     return loadConfig();
   } finally {
     for (const key of portEnvKeys) {
@@ -153,7 +161,7 @@ describe('SIF runner deployment manifests (#181)', () => {
   });
 
   it('pins the policy envelope to the worker config defaults without dynamic container ports', () => {
-    const config = loadConfigWithDefaultPortValues();
+    const config = loadConfigWithDefaultPortValuesAndToken();
     expect(config.workerPort).toBe(workerPort);
     expect(config.runnerPortStart).toBe(runnerPortStart);
     expect(config.maxRunners).toBe(maxRunners);

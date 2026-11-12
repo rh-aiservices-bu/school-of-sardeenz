@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Worker Agent API
-  version: 0.1.2
+  version: 0.1.3
   description: |
     Management API exposed by each worker agent (dev or production). The control
     plane calls these endpoints to start and stop runner processes on a worker.
@@ -440,6 +440,12 @@ components:
             SARDEENZ_RUNNER_ENTRYPOINT; when absent, the global default is used. Never
             shell-interpreted. The dev-worker stub launcher ignores it (it forks a fixed
             in-process stub), exactly as it ignores runtimeModule.
+            The worker validates the argv before exec: it must be the worker's configured
+            SARDEENZ_RUNNER_ENTRYPOINT verbatim, or — when that vector has the
+            `[<exec>, "-m", <module>]` shape — a `[<exec>, "-m", <module>]` invocation whose
+            module is a known shim module (sardeenz_vllm_runner, sardeenz_mlserver_runner) or the
+            configured module; any other argv is rejected with 400 before a process is spawned.
+            Absent or empty argv is always accepted (the configured default applies).
         devices:
           type: array
           items:

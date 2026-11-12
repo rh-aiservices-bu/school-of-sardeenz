@@ -1,0 +1,24 @@
+# Restricts ingress to the dashboard to the platform router only (see
+# docs/usage/deployment-security.md). The dashboard is Route-exposed (deployment/README.md
+# "External access"); without this allow the prereq default-deny kills the UI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sardeenz-dashboard
+  labels:
+    app.kubernetes.io/name: sardeenz-dashboard
+    app.kubernetes.io/part-of: sardeenz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-dashboard
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+      ports:
+        - protocol: TCP
+          port: 4000

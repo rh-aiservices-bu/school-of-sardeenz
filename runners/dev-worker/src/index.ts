@@ -17,10 +17,13 @@ import { resolveDevices, type DeviceReport } from './gpu-detect.js';
 import { createNvmlReader } from './nvml.js';
 import { buildMeasuredSample } from './measured-sample.js';
 import { createServer } from './server.js';
+import { buildEntrypointAllowlist } from './entrypoint-allowlist.js';
 import { Redis } from 'ioredis';
 
 loadRootEnv();
 const config = loadConfig();
+// Seeds the POST /runners entrypoint allowlist (#238); loadConfig guarantees this is non-empty.
+const entrypointAllowlist = buildEntrypointAllowlist(config.apptainer.runnerEntrypoint);
 
 // Reads the runner catalog (local file path or file:// URL — remote http(s) catalogs are the
 // control plane's concern) and extracts capability fields for every runner family this generic
@@ -159,8 +162,7 @@ const runnerManager = new RunnerManager(
   probePortAvailable,
 );
 runnerManagerRef.current = runnerManager;
-
-const server = createServer(runnerManager, config.workerToken);
+const server = createServer(runnerManager, config.workerToken, entrypointAllowlist);
 
 // Human-readable one-liner for the fleet, e.g. "1x CUDA @ 8 GiB" (or a per-device list if mixed).
 function summarizeFleet(report: DeviceReport): string {
@@ -183,7 +185,7 @@ async function start(): Promise<void> {
   await server.listen({ port: config.workerPort, host: '0.0.0.0' });
   if (!config.workerToken) {
     console.warn(
-      '[dev-worker] SARDEENZ_WORKER_TOKEN is not set — worker API authentication is disabled',
+      '[dev-worker] unauthenticated mode enabled (SARDEENZ_ALLOW_UNAUTHENTICATED_API) — worker API authentication is disabled',
     );
   }
   // Be explicit about where the fleet came from so fabricated numbers aren't read as real hardware:

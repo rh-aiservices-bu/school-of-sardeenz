@@ -7,6 +7,7 @@ resources:
   - service.yaml
   - admin-service.yaml
   - deployment.yaml
+  - networkpolicy.yaml
 
 labels:
   - pairs:

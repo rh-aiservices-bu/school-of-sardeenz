@@ -33,7 +33,13 @@
 #       features:               optional map of engine-specific feature flags
 #       entrypoint:  optional verbatim argv the worker execs in the SIF to launch the runner's
 #                    management shim (e.g. [python3, -m, sardeenz_mlserver_runner]); falls back
-#                    to the worker's SARDEENZ_RUNNER_ENTRYPOINT when omitted
+#                    to the worker's SARDEENZ_RUNNER_ENTRYPOINT when omitted. Start requests
+#                    are also validated against the worker's allowlist (#238): the argv is
+#                    accepted when it equals the worker-configured SARDEENZ_RUNNER_ENTRYPOINT
+#                    verbatim (any shape — a non--m override is accepted as-is); when that
+#                    configured vector has the <exec> -m <module> shape, a <exec> -m
+#                    <known-shim or configured module> invocation is also accepted (exec
+#                    must match the configured exec0); any other argv is rejected with 400.
 apiVersion: sardeenz.io/v1
 kind: RunnerCatalog
 runners:

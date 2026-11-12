@@ -34,6 +34,9 @@ Redis fallback when the control plane is down).
   math stays in the control plane.
 - **All user-visible strings go through i18n** (`useTranslation`, namespace per page).
 - **Keep the BFF thin:** no business logic; it proxies, authenticates, and degrades gracefully.
+- **SSE query-token gate:** the deprecated `?token=` fallback is accepted only on the routes
+  listed in `SSE_TOKEN_PATHS` (`server/plugins/auth.ts`). A new SSE route must be added there or
+  `EventSource` auth breaks; everywhere else a query token is ignored → 401.
 - **Dual-React caveat (#148):** the root hoists React 19 (via Redocly) while the app is React 18.
   `vitest.config.ts` alias-pins the whole render tree; keep new test deps ESM-importable or they
   bind the wrong React.

@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { ConflictError, NotFoundError, type RunnerManager } from '../runner-manager.js';
+import { isEntrypointAllowed, type EntrypointAllowlist } from '../entrypoint-allowlist.js';
 
-export function registerRunnerRoutes(app: FastifyInstance, runnerManager: RunnerManager): void {
+export function registerRunnerRoutes(
+  app: FastifyInstance,
+  runnerManager: RunnerManager,
+  entrypointAllowlist: EntrypointAllowlist,
+): void {
   app.post<{
     Body: {
       modelName: string;
@@ -33,6 +38,20 @@ export function registerRunnerRoutes(app: FastifyInstance, runnerManager: Runner
       console.warn('[worker] POST /runners rejected: missing required fields');
       return reply.status(400).send({
         error: 'Missing required fields: modelName, runnerType, modelPath, devices',
+        code: 'BAD_REQUEST',
+      });
+    }
+
+    // Defense-in-depth at the worker's own edge (#238): the CP sources `entrypoint` from trusted
+    // catalog metadata, but anything reaching exec must be a known shim invocation. Absent/empty
+    // is accepted (the launcher falls back to the configured SARDEENZ_RUNNER_ENTRYPOINT).
+    if (!isEntrypointAllowed(entrypointAllowlist, body.entrypoint)) {
+      console.warn(
+        `[worker] POST /runners rejected: entrypoint argv not allowed: ${JSON.stringify(body.entrypoint)}`,
+      );
+      return reply.status(400).send({
+        error:
+          'entrypoint must equal the worker-configured SARDEENZ_RUNNER_ENTRYPOINT verbatim, or (when that vector has the <exec> -m <module> shape) be a <exec> -m <known-shim-module> invocation',
         code: 'BAD_REQUEST',
       });
     }

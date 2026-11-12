@@ -6,7 +6,84 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Automated dependency updates start: `.github/dependabot.yml` (issue #233).**
+  GitHub now opens weekly version-update PRs (Mondays) across 14 entries — npm
+  (root lockfile, all workspaces), cargo (`proxy/`), pip (docs requirements +
+  the three runner shims), GitHub Actions workflows, and Docker base images
+  (×7: the six Dockerfile/Containerfile directories under `containers/` plus
+  the shipped `proxy/` image; current runner versions only) — with minor+patch
+  updates grouped into one PR per entry (`open-pull-requests-limit: 10`);
+  major bumps and security updates stay individual. Complements the M14-style
+  manual alert chasing (#224–#229).
+
 ### Security
+
+- **Dashboard BFF: the deprecated `?token=` query fallback is now accepted on the
+  three SSE routes only (issue #237).**
+  The token extractor's query-parameter fallback fired on every protected route,
+  so a JWT pasted into any URL authenticated state-changing POST/DELETE calls
+  even though the fallback exists for `EventSource`, which cannot set headers —
+  and URL tokens leak into access logs, browser history and `Referer` headers.
+  The fallback is now path-gated to `GET /api/events`, `GET /api/models/:name/logs`
+  and `GET /api/models/:name/instances/:instanceId/startup-logs`; on every other
+  route a query token is ignored and the request 401s through the ordinary
+  missing-token path. The `sardeenz_sse` HttpOnly cookie remains the SSE
+  mechanism and the deprecation warning now logs only when a query token is
+  actually accepted.
+
+- **Deployment: Valkey requires AUTH from an operator-created Secret, and the `sardeenz`
+  namespace ships default-deny ingress with explicit allow NetworkPolicies (issue #230).**
+  The sclorg Valkey container now receives `VALKEY_PASSWORD` (secret key `REDIS_PASSWORD` of
+  `sardeenz-redis-credentials`) and enables `requirepass`; its startup/readiness exec probes
+  pass the password to `valkey-cli` via `REDISCLI_AUTH` (shell form — K8s exec probes run
+  without a shell; no secret in the probe argv), and the auth-independent `tcpSocket` liveness
+  probe is unchanged. All four `SARDEENZ_REDIS_URL` consumers (control plane, proxy, dashboard
+  BFF, worker) move from an inline passwordless URL to `secretKeyRef` on that Secret; local
+  dev stays passwordless.
+  Three new NetworkPolicy manifests: `prereq/networkpolicy.yaml` (namespace default-deny
+  ingress + redis 6379 ← CP/proxy/dashboard/worker + postgres 5432 ← CP),
+  `proxy/networkpolicy.yaml` (8080 ← router + dashboard BFF chat forwarding, 9099 ←
+  `openshift-user-workload-monitoring`) and `dashboard/networkpolicy.yaml` (4000 ← router);
+  flow table in `docs/usage/deployment-security.md`, secret runbooks in the deployment and
+  prereq READMEs. **Upgrade:** create `sardeenz-redis-credentials` (runbook in
+  `deployment/prereq/README.md`) before rolling out these manifests — pods referencing the
+  missing Secret fail to create (`CreateContainerConfigError`); rotating the password requires
+  restarting all five deployments (every consumer reads `SARDEENZ_REDIS_URL` at process start).
+
+- **Deployment: module-PVC write protection ships armed — `deployment/prereq/` now renders
+  a `Namespace` labelled `sardeenz.io/module-guard: enforce`, so a stock
+  `oc apply -k deployment/` activates the ValidatingAdmissionPolicyBinding on first apply.**
+  The manual `oc label namespace` step is retired from the runbooks in favor of a
+  verify-the-label step; removing the label is the explicit opt-out (#232).
+
+- **Deployment: container securityContexts hardened across the production workloads, and the
+  `sardeenz-sif-runner` SCC no longer grants `NET_BIND_SERVICE` (issue #235 — the manifest
+  half; the image/supply-chain half moved to #266 in M19).**
+  The control-plane and proxy containers gain `readOnlyRootFilesystem: true` with an
+  `emptyDir` mounted at `/tmp` (the control plane's `HOME=/tmp/sardeenz` and all temporary
+  writes land there; persistent data stays on the modules/weights PVCs). The proxy pod sets
+  `automountServiceAccountToken: false` — it never calls the Kubernetes API. The control
+  plane, dashboard, and librarian keep their ServiceAccount tokens, and the worker keeps
+  its ServiceAccount for the SCC binding without calling the Kubernetes API. The worker
+  container gains
+  `runAsNonRoot: true` (admission-level enforcement on top of the SCC's `MustRunAsRange`, so a
+  root-`USER` image fails fast). The librarian's `build-oci` init container matches the
+  `publish-sif` sibling (no privilege escalation, all capabilities dropped). The SCC drops its
+  unused `NET_BIND_SERVICE` — every runner port (9100–9228) is above 1024 — aligning it with
+  ADR-016's "no added capabilities" posture. Operator notes in
+  `docs/usage/deployment-security.md`.
+
+- **Control plane: every `:instanceId` path parameter is now validated before it reaches
+  Redis key composition (issue #236).**
+  A new `assertValidInstanceId` guard (`control-plane/src/utils/instance-id.ts`, mirroring the
+  #120 `assertValidModelName` gate) rejects ids outside `^[A-Za-z0-9._-]{1,64}$` — excluding `:`
+  (extra `redisKey` join segments), the glob metacharacters `* ? [ ]`, `/` and whitespace — with
+  a 400 `INVALID_REQUEST`. Applied beside the existing `assertValidModelName` call on all five
+  instance-scoped routes: instance delete, sleep, wake, move and startup-logs. The pattern is
+  deliberately looser than the `inst-<12hex>` mint format so legacy and manually created ids
+  keep working; valid ids see an unchanged Redis key shape.
 
 - **Dashboard BFF: `@fastify/static` upgraded to v10 (10.1.10), clearing the two
   remaining `@fastify/static` manifest alerts and the dev-tooling `glob` 13.x copy.**
@@ -292,6 +369,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain
   the authority for `npm ci`-materialized trees (`npm ci`, integration suite,
   `npm ls vitest`, `npm audit`).
+
+- **Control plane and dev worker fail closed on missing auth tokens (issue #234).**
+  `loadConfig()` now throws at startup when `SARDEENZ_API_TOKEN` or
+  `SARDEENZ_WORKER_TOKEN` (control plane, both required) or `SARDEENZ_WORKER_TOKEN`
+  (dev worker) is unset or empty, instead of booting with authentication silently
+  disabled. The startup error names the missing variable(s) so an operator with a
+  half-populated Secret can tell at a glance which key is missing. Local development
+  opts out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (truthy `1/true/yes/on`;
+  `=false` still fails) — documented in `.env.example` and the setup guide. No manifest
+  change: in-cluster tokens keep coming from `secretKeyRef`.
+- **Dev worker: `POST /runners` entrypoint argv is now allowlisted (issue #238).**
+  The worker validates the incoming `entrypoint` against its configured
+  `SARDEENZ_RUNNER_ENTRYPOINT` (verbatim match) and — only when that vector has the canonical
+  3-element `<exec> -m <module>` shape — the `-m` module family: `<exec> -m <m>` is admitted for
+  `m` in {`sardeenz_vllm_runner`, `sardeenz_mlserver_runner`, the configured module}, with the
+  exec required to match the configured exec0. Anything else is rejected with `400 BAD_REQUEST`
+  before any process is spawned. Consequences for operators: a non-`-m` configured override
+  disables the `-m` family (only the override vector itself is accepted — running both vLLM and
+  MLServer catalog entries requires a `-m` vector such as the shipped default); a brand-new shim
+  module beyond the known two needs it added to `KNOWN_SHIM_MODULES` in a worker release, and
+  entrypoint-less catalog entries inherit the configured default. Absent/empty `entrypoint`
+  still falls back to the configured default, and a `SARDEENZ_RUNNER_ENTRYPOINT` that resolves
+  to an empty argv now fails worker startup loudly instead of producing per-request 400s. The
+  worker-agent contract's `entrypoint` description gained the constraint sentence (generated
+  types regenerated — description-only, no shape change).
 
 ### Changed
 

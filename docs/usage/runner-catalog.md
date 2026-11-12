@@ -17,6 +17,24 @@ formats, model directory layout, and `model-settings.json` examples.
   engines (MLServer). `entrypoint` (optional argv) is the verbatim command the worker execs inside
   the SIF to launch the runner's management shim, falling back to the worker's
   `SARDEENZ_RUNNER_ENTRYPOINT` when absent. See [ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md).
+  The worker rejects start requests whose `entrypoint` argv fails its allowlist (issue #238),
+  derived from the worker's configured `SARDEENZ_RUNNER_ENTRYPOINT`:
+  the argv is accepted when it equals the configured vector verbatim, or — only when that
+  vector has the canonical 3-element `<exec> -m <module>` shape — when it is a
+  `<exec> -m <m>` invocation with the same exec0 and `m` one of the known shim modules
+  (`sardeenz_vllm_runner`, `sardeenz_mlserver_runner`, plus the configured module); anything
+  else gets `400`. Consequences: a non-`-m` configured override disables the `-m` family
+  entirely (only the override vector itself is accepted — an operator running both vLLM and
+  MLServer entries must keep a `-m` vector such as the shipped default); a brand-new shim
+  module beyond the known two needs a worker release to join `KNOWN_SHIM_MODULES` — configuring
+  `SARDEENZ_RUNNER_ENTRYPOINT` with the canonical `-m` shape admits the two known shims plus the
+  configured module; a non-`-m` override admits only the override vector itself, so
+  entrypoint-less catalog entries inherit it; and the shipped vLLM catalog entries carry no
+  `entrypoint`, so they inherit the configured default — swapping that default to a non-vLLM shim
+  breaks them.
+  To run a custom or newly-cataloged shim, set `SARDEENZ_RUNNER_ENTRYPOINT` on the worker so the
+  module joins the allowlist (no worker release needed, subject to the `KNOWN_SHIM_MODULES`
+  caveat above).
   The default catalog is the official
   [`school-of-sardeenz/runners.yaml`](https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml);
   point `SARDEENZ_RUNNER_CATALOG_URL` at your own to customize. The repo-root

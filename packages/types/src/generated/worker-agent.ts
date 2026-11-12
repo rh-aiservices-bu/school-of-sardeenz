@@ -282,6 +282,12 @@ export type components = {
              *     SARDEENZ_RUNNER_ENTRYPOINT; when absent, the global default is used. Never
              *     shell-interpreted. The dev-worker stub launcher ignores it (it forks a fixed
              *     in-process stub), exactly as it ignores runtimeModule.
+             *     The worker validates the argv before exec: it must be the worker's configured
+             *     SARDEENZ_RUNNER_ENTRYPOINT verbatim, or — when that vector has the
+             *     `[<exec>, "-m", <module>]` shape — a `[<exec>, "-m", <module>]` invocation whose
+             *     module is a known shim module (sardeenz_vllm_runner, sardeenz_mlserver_runner) or the
+             *     configured module; any other argv is rejected with 400 before a process is spawned.
+             *     Absent or empty argv is always accepted (the configured default applies).
              */
             entrypoint?: string[];
             /**

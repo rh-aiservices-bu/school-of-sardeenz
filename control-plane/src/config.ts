@@ -89,6 +89,21 @@ export function loadConfig(): Config {
       ]
     : [listenAddr, '3000'];
 
+  // Fail closed: an empty token means the auth hook never registers (server.ts) and WorkerClient
+  // sends no Authorization header. Booting with authentication silently disabled is the failure
+  // mode this closes; the opt-out is an explicit dev-only decision, never a default.
+  const apiToken = optionalEnv('SARDEENZ_API_TOKEN', '');
+  const workerToken = optionalEnv('SARDEENZ_WORKER_TOKEN', '');
+  const missingTokens: string[] = [];
+  if (!apiToken) missingTokens.push('SARDEENZ_API_TOKEN');
+  if (!workerToken) missingTokens.push('SARDEENZ_WORKER_TOKEN');
+  if (missingTokens.length > 0 && !boolEnv('SARDEENZ_ALLOW_UNAUTHENTICATED_API', false)) {
+    throw new Error(
+      `${missingTokens.join(' and ')} must be set. ` +
+        'Set SARDEENZ_ALLOW_UNAUTHENTICATED_API=true to run without authentication (dev only).',
+    );
+  }
+
   return {
     listenAddr: host ?? '0.0.0.0',
     listenPort: parseInt(portStr ?? '3000', 10),
@@ -123,8 +138,8 @@ export function loadConfig(): Config {
     sifImporter: sifImporterEnv(),
     apptainerBin: optionalEnv('SARDEENZ_APPTAINER_BIN', 'apptainer'),
     verifySif: boolEnv('SARDEENZ_VERIFY_SIF', true),
-    apiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
-    workerToken: optionalEnv('SARDEENZ_WORKER_TOKEN', ''),
+    apiToken,
+    workerToken,
   };
 }
 

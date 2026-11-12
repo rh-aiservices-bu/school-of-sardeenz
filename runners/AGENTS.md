@@ -35,6 +35,12 @@ SIFs, and the shared contract-conformance suite.
 - **Security posture (ADR-016):** the launch path is `apptainer exec --nv` with binds limited
   to weights + scratch (override via `SARDEENZ_APPTAINER_BINDS`). Do not widen it without an
   ADR update.
+- **Entrypoint allowlist (#238):** the worker rejects `POST /runners` `entrypoint` argv that is
+  not its configured `SARDEENZ_RUNNER_ENTRYPOINT` verbatim (or a `<exec> -m <known-shim-module>`
+  invocation when that vector has the 3-token `-m` shape). A new shim module needs either the
+  catalog entry to carry a vector the worker accepts or a worker release adding it to
+  `KNOWN_SHIM_MODULES` (`dev-worker/src/entrypoint-allowlist.ts`); an unusable configured vector
+  fails worker startup in `loadConfig`.
 
 ## Build & Test
 

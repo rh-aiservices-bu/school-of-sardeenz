@@ -276,11 +276,13 @@ async function main(): Promise<void> {
     'Control plane started',
   );
   if (!config.apiToken) {
-    app.log.warn('SARDEENZ_API_TOKEN is not set — API authentication is disabled');
+    app.log.warn(
+      'unauthenticated mode enabled (SARDEENZ_ALLOW_UNAUTHENTICATED_API) — API authentication is disabled',
+    );
   }
   if (!config.workerToken) {
     app.log.warn(
-      'SARDEENZ_WORKER_TOKEN is not set — control plane will not authenticate to worker agents',
+      'unauthenticated mode enabled (SARDEENZ_ALLOW_UNAUTHENTICATED_API) — control plane will not authenticate to worker agents',
     );
   }
 }

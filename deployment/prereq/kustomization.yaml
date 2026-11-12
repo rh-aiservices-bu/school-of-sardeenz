@@ -4,12 +4,14 @@ kind: Kustomization
 namespace: sardeenz
 
 resources:
+  - namespace.yaml
   - postgres-pvc.yaml
   - postgres-service.yaml
   - postgres-deployment.yaml
   - valkey-pvc.yaml
   - valkey-service.yaml
   - valkey-deployment.yaml
+  - networkpolicy.yaml
 
 labels:
   - pairs:

@@ -22,8 +22,8 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | `containers/worker-base/`                            | Reusable UBI + Apptainer + FUSE + Node base; no worker-agent code       |
 | `containers/runners/<engine>/<version>/`             | Version-specific engine image converted to a SIF (`vllm`, `mlserver`)   |
 | `deployment/control-plane/`                          | NetworkPolicy for the control plane                                     |
-| `deployment/prereq/`                                 | PoC PostgreSQL and Valkey backing services                              |
-| `deployment/proxy/`, `deployment/dashboard/`         | Deployable application workloads and Services                           |
+| `deployment/prereq/`                                 | Namespace + PoC PostgreSQL/Valkey; namespace default-deny + redis/postgres allow NPs |
+| `deployment/proxy/`, `deployment/dashboard/`         | Deployable application workloads, Services, and NetworkPolicies         |
 | `deployment/sif-runner/`                             | Worker SCC, RBAC, PVCs, NetworkPolicy, Deployment, PVC write-protection |
 | `deployment/librarian/`                              | Parameterized OpenShift OCI + SIF + ORAS publishing Job                 |
 | `deployment/monitoring/`                             | ServiceMonitors for OpenShift user-workload monitoring                  |
@@ -42,8 +42,10 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
   `protocol`), and a gate in `tests/gates/` if it changes the launch path.
 - **Production images are signed (ADR-017);** unsigned publishing is only for an explicitly
   verification-disabled PoC. Catalog entries remain digest-pinned even during a PoC.
-- **NetworkPolicies allow-list ingress per flow** (control plane → worker agent port, and the
-  openshift-user-workload-monitoring namespace → control plane `/metrics` port, today). Add an
-  explicit rule per new flow; the proxy → engine rule is tracked in #181.
+- **NetworkPolicies allow-list ingress per flow against a namespace default-deny**
+  (`deployment/prereq/networkpolicy.yaml` denies all ingress; component policies enumerate the
+  allowed flows — flow table in `docs/usage/deployment-security.md`). Add an explicit rule per
+  new flow; engine ports are allowed only from the proxy (`sif-runner/networkpolicy.yaml`);
+  gRPC/metrics stay closed.
 - Ports and env var names must match the code defaults (`control-plane/src/config.ts`,
   `runners/dev-worker/src/config.ts`, `proxy/src/config.rs`) — do not invent new ones here.

@@ -14,7 +14,8 @@ set here:
 - **Namespace:** set by the overlay via `kustomization.yaml` `namespace:` (bases are
   namespace-light). Default `sardeenz`.
 - **Naming:** all resources are prefixed `sardeenz-` (e.g. `sardeenz-sif-runner` SCC,
-  `sardeenz-worker` SA/Deployment, `sardeenz-modules`/`sardeenz-weights` PVCs).
+  `sardeenz-worker` SA/Deployment, `sardeenz-modules`/`sardeenz-weights` PVCs); the exception is
+  the `sardeenz` Namespace object itself (see `prereq/`).
 - **Cluster prerequisites** (self-managed OpenShift/OKD **4.15+**, tested on 4.21): `crun`
   runtime, a shared RWX StorageClass, rights to create a custom SCC, and the
   `io.kubernetes.cri-o.Devices: "/dev/fuse"` pod annotation (no device plugin on 4.15+).
@@ -27,7 +28,7 @@ deployment/
 ├── README.md               # install and configuration guide
 ├── control-plane/          # API Deployment, Service, Lease RBAC, catalog mounts, policy
 ├── dashboard/              # React frontend + BFF Deployment and Service
-├── prereq/                 # PoC PostgreSQL + Valkey backing services
+├── prereq/                 # Namespace + PoC PostgreSQL + Valkey backing services
 ├── proxy/                  # routing proxy Deployment and inference/admin Services
 ├── sif-runner/             # worker security posture + worker Deployment (Task 8)
 ├── librarian/              # SIF build/sign/convert Job + signing keys (Task 7)
@@ -53,12 +54,18 @@ API_TOKEN="$(openssl rand -hex 32)"
 WORKER_TOKEN="$(openssl rand -hex 32)"
 ADMIN_PASSWORD="$(openssl rand -hex 24)"
 JWT_SECRET="$(openssl rand -hex 32)"
+REDIS_PASSWORD="$(openssl rand -hex 24)"
 
 oc create secret generic sardeenz-postgres-credentials \
   --from-literal=POSTGRESQL_USER=sardeenz \
   --from-literal=POSTGRESQL_PASSWORD="$POSTGRES_PASSWORD" \
   --from-literal=POSTGRESQL_DATABASE=sardeenz \
   --from-literal=SARDEENZ_DATABASE_URL="postgresql://sardeenz:${POSTGRES_PASSWORD}@sardeenz-postgres:5432/sardeenz" \
+  -n "$SARDEENZ_NAMESPACE"
+
+oc create secret generic sardeenz-redis-credentials \
+  --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
+  --from-literal=SARDEENZ_REDIS_URL="redis://:${REDIS_PASSWORD}@sardeenz-redis:6379" \
   -n "$SARDEENZ_NAMESPACE"
 
 oc create secret generic sardeenz-service-tokens \
@@ -74,7 +81,7 @@ oc create secret generic sardeenz-dashboard-auth \
   -n "$SARDEENZ_NAMESPACE"
 
 # Store the generated admin password securely before clearing these shell variables.
-unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN ADMIN_PASSWORD JWT_SECRET
+unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN ADMIN_PASSWORD JWT_SECRET REDIS_PASSWORD
 ```
 
 Real registry credentials remain in `sardeenz-librarian-registry`, created as described in
@@ -101,11 +108,13 @@ resources:
   - ../../monitoring # ServiceMonitors; see deployment/dashboard/README.md
 ```
 
-Apply the full stack and activate module-PVC write protection:
+Apply the full stack:
 
 ```bash
 oc apply -k deployment/overlays/school-of-sardeenz/
-oc label namespace "$SARDEENZ_NAMESPACE" sardeenz.io/module-guard=enforce
+# Module write-protection ships active (Namespace resource in prereq/). Verify:
+oc get namespace "$SARDEENZ_NAMESPACE" -o jsonpath='{.metadata.labels.sardeenz\.io/module-guard}{"\n"}'
+# -> enforce
 
 oc rollout status deployment/sardeenz-postgres -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-redis -n "$SARDEENZ_NAMESPACE"
@@ -114,6 +123,11 @@ oc rollout status deployment/sardeenz-proxy -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-dashboard -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-worker -n "$SARDEENZ_NAMESPACE"
 ```
+If applying over a namespace that already exists fails with a field-ownership conflict on the
+Namespace's `metadata.labels`, apply the label directly
+(`oc label namespace "$SARDEENZ_NAMESPACE" sardeenz.io/module-guard=enforce --overwrite`) rather
+than retrying a whole kustomization with `--force-conflicts`, which can seize ownership of fields
+your overlay patches. The next `oc apply -k` then records the namespace cleanly.
 
 The worker requests one GPU and will remain Pending until a suitable node is available. Patch
 image tags/digests, PVC StorageClasses, capacities, replicas, and resources in the local overlay
@@ -151,6 +165,11 @@ DASHBOARD_URL="https://$(oc get route sardeenz-dashboard \
 oc set env deployment/sardeenz-dashboard SARDEENZ_PUBLIC_URL="$DASHBOARD_URL" \
   -n "$SARDEENZ_NAMESPACE"
 ```
+
+The shipped NetworkPolicies allow Route traffic to the dashboard and (if created) the proxy
+inference Service; the control plane, proxy admin Service, worker agent, and runner ports have
+no router/external ingress rule — they are reachable only from the in-cluster sources listed in
+[`docs/usage/deployment-security.md`](../docs/usage/deployment-security.md).
 
 See [`docs/usage/deployment-security.md`](../docs/usage/deployment-security.md) before exposing the
 stack outside a trusted evaluation environment.

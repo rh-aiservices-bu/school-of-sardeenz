@@ -72,7 +72,7 @@ Write operations (deploy, sleep, wake, delete) are proxied to the control plane 
 ### Real-time updates (SSE)
 
 ```
-Browser → EventSource(/api/events?token=<jwt>)
+Browser → EventSource(/api/events) — authenticated by the HttpOnly `sardeenz_sse` cookie
        → BFF creates a per-client Redis subscriber on two channels:
          ├─ {prefix}:routing-updates — model/endpoint state changes
          └─ {prefix}:cluster-events  — worker lifecycle & memory updates
@@ -143,7 +143,10 @@ Query invalidation is event-driven: the `useEventStream` hook listens for SSE ev
 
 ### SSE reconnection and degraded mode
 
-The `useEventStream` hook connects to `/api/events` via `EventSource` (JWT token passed as `?token=` since `EventSource` cannot send headers). The hook implements a two-tier failure model:
+The `useEventStream` hook connects to `/api/events` via `EventSource` with `withCredentials: true`
+(the HttpOnly `sardeenz_sse` cookie is the SSE credential — `EventSource` cannot send headers, and
+the deprecated `?token=` query fallback is only honored on SSE routes, see [JWT flow](#jwt-flow)).
+The hook implements a two-tier failure model:
 
 ```
 CONNECTED → (SSE error) → RECONNECTING → (5 failures) → DEGRADED
@@ -367,7 +370,7 @@ The BFF implements a lightweight auth system controlled by the `AUTH_MODE` envir
 
 1. Client authenticates and receives a JWT signed with `JWT_SECRET`.
 2. Subsequent requests include the token as `Authorization: Bearer <token>`.
-3. SSE routes that cannot send headers accept `?token=<jwt>` as a query-parameter fallback.
+3. The `sardeenz_sse` cookie (Path=/api, HttpOnly, SameSite=Strict; set at login) is also accepted on any `/api` route; the `?token=<jwt>` query fallback is additionally restricted to the three SSE routes (`/api/events`, `/api/models/:name/logs`, `/api/models/:name/instances/:instanceId/startup-logs`). In `AUTH_MODE=none` none of this applies — the extractor is never installed.
 4. The `authenticate` preHandler verifies the token; `requireRole('admin-readonly')` checks the `roles` claim.
 
 ### Route protection
