@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 from typing import Any
 
 import httpx
@@ -106,7 +107,10 @@ def create_app(args: RunnerArgs) -> FastAPI:
     async def get_memory_report() -> JSONResponse:
         if status().state == st.STARTING:
             return _error(409, "MEMORY_UNAVAILABLE", "Runner is still starting")
-        report = memory_report(args.device_type)
+        # Blocking torch/kvcached reads must not stall the event loop that serves /health.
+        report = await asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(memory_report, args.device_type)
+        )
         # MemoryReport.devices is minItems:1 — if no device could be introspected, fail closed
         # rather than emit a contract-invalid empty array.
         if not report["devices"]:
@@ -130,7 +134,11 @@ def create_app(args: RunnerArgs) -> FastAPI:
         if status().state == st.STARTING:
             return _error(409, "NOT_READY", "Runner is still starting")
 
-        freed = sum(d["memoryUsedBytes"] for d in memory_report(args.device_type)["devices"])
+        # Blocking torch/kvcached reads must not stall the event loop that serves /health.
+        report = await asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(memory_report, args.device_type)
+        )
+        freed = sum(d["memoryUsedBytes"] for d in report["devices"])
         try:
             await app.state.engine.sleep(app.state.client)
         except httpx.HTTPError as exc:

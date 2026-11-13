@@ -1,8 +1,10 @@
 """Best-effort device memory reporting for the vLLM runner shim.
 
-Precise per-runner attribution is impossible under kvcached co-tenancy (two runners share a
-device's pool elastically). We report this process's reserved CUDA memory as the used figure and
-the device's total capacity — enough for the control plane's utilization view. When CUDA/torch is
+The shim process owns no CUDA pool — the engine (`vllm serve`) is a child
+subprocess — so per-runner attribution is impossible from here. We report the
+whole-device used figure (`max(0, total - free)` from ``mem_get_info``) with
+``attribution: "device"``, so consumers can tell a device-scope row (never to
+be summed across co-located runners) from a per-runner one. When CUDA/torch is
 unavailable (e.g. a CPU-only worker) this returns an empty ``devices`` list; the caller
 (``app.py``) treats that as "no device memory to report" and answers 409 rather than emitting a
 ``MemoryReport`` with an empty ``devices`` array, which the contract forbids (``minItems: 1``).
@@ -69,9 +71,7 @@ def _cuda_devices(device_type: str) -> list[dict[str, Any]]:
     for index in range(torch.cuda.device_count()):
         try:
             free_bytes, total_bytes = torch.cuda.mem_get_info(index)
-            reserved = int(torch.cuda.memory_reserved(index))
-            # Prefer this process's reserved pool; fall back to whole-device usage if reserved is 0.
-            used = reserved if reserved > 0 else int(total_bytes - free_bytes)
+            used = int(total_bytes - free_bytes)
             reported_index = (
                 device_indices[index]
                 if device_indices is not None and index < len(device_indices)
@@ -83,6 +83,7 @@ def _cuda_devices(device_type: str) -> list[dict[str, Any]]:
                     "deviceType": device_type,
                     "memoryUsedBytes": max(0, used),
                     "memoryTotalBytes": int(total_bytes),
+                    "attribution": "device",
                 }
             )
         except Exception:

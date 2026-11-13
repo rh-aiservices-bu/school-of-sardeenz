@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { createServer } from 'node:http';
 import {
   ApptainerLauncher,
+  defaultHealthCheck,
   DEFAULT_APPTAINER_CONFIG,
   type ApptainerLauncherConfig,
   type ApptainerLauncherDeps,
@@ -486,7 +488,8 @@ describe('ApptainerLauncher.start', () => {
 
     await launcher.start(makeSpec());
 
-    expect(healthCheck).toHaveBeenCalledWith('http://127.0.0.1:9101/health');
+    // The runner now passes an AbortSignal as the second argument (probe budget wiring).
+    expect(healthCheck).toHaveBeenCalledWith('http://127.0.0.1:9101/health', expect.anything());
   });
 
   it('calls onStartupComplete once the runner is healthy', async () => {
@@ -626,6 +629,67 @@ describe('ApptainerLauncher.start', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     // Only polled once — it did not spin until the timeout.
     expect(healthCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects on the health timeout when a probe never settles (probe budget bounds it)', async () => {
+    // A wedged shim: the check accepts the connection and never settles. Without the per-probe
+    // budget the first probe hangs forever and the 15-minute deadline is never re-evaluated.
+    const { launcher, child } = makeLauncher(
+      { healthProbeTimeoutMs: 100, healthTimeoutMs: 300, healthIntervalMs: 50 },
+      {
+        healthCheck: () => new Promise(() => {}),
+        // Real time — the bug is a wall-clock hang, and the harness's now:() => 0 / no-op
+        // sleep would keep the deadline frozen forever. Deterministic fake timers cannot
+        // exercise the real abort/timer interplay under test.
+        now: () => Date.now(),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      },
+    );
+    // start()'s failure path SIGTERMs the still-running exec; make the fake child exit in
+    // response (same as the ERROR teardown test) so stopChild() resolves instead of waiting
+    // out the 30s grace behind the test timeout.
+    child.kill = vi.fn(() => {
+      child.exitCode = 0;
+      child.emit('exit');
+      return true;
+    });
+
+    const startedAt = Date.now();
+    await expect(launcher.start(makeSpec())).rejects.toThrow(
+      /did not become healthy within 300ms/,
+    );
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('keeps polling while a probe returns null until it reports READY', async () => {
+    let calls = 0;
+    const healthCheck = vi.fn(() => {
+      calls += 1;
+      return calls < 3 ? Promise.resolve(null) : Promise.resolve({ state: 'READY' });
+    });
+    const { launcher } = makeLauncher({}, { healthCheck });
+
+    await expect(launcher.start(makeSpec())).resolves.toBeDefined();
+    expect(healthCheck).toHaveBeenCalledTimes(3);
+  });
+
+  it('defaultHealthCheck resolves null at the signal budget against a server that never writes', async () => {
+    const server = createServer(() => {}); // accepts the connection, never writes a response
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('no port');
+    const url = `http://127.0.0.1:${address.port}/health`;
+
+    const startedAt = Date.now();
+    try {
+      await expect(defaultHealthCheck(url, AbortSignal.timeout(100))).resolves.toBeNull();
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(90);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
   });
 });
 

@@ -20,6 +20,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**
+  The 1.x CLI pins `@faker-js/faker` exactly at 7.6.0 (via `@redocly/respect-core`), inside
+  the `GHSA-qxc2-j82w-r537` / CVE-2026-73231 range `<= 10.4.0` (high; `faker.helpers.fake`
+  arbitrary code execution, alert #119). The fix is not forceable by an override: the first
+  patched version is 10.5.0, and `respect-core` 1.x calls the `faker.name` / `faker.address` /
+  `faker.datatype` namespaces that v8–v10 removed, so an override would break Redocly's
+  `respect` command. The v2 CLI instead drops the whole dependency chain — the lockfile loses
+  148 entries (faker, `handlebars`, `redocly`, `mobx`/`styled-components`, the OpenTelemetry
+  stack, `glob` 7, `undici` 6.29.1, `yaml` 1.10.x, `swagger2openapi`, …) and adds none;
+  `redocly lint` output on all four specs is byte-identical to 1.x (valid, 7 problems ignored
+  per `.redocly.lint-ignore.yaml`) and the `build-docs` renderer still produces the prerendered
+  Redoc page. `preview-docs` is gone in v2, so `docs/usage/api-reference.md` now documents the
+  `build-docs` + open-the-file recipe. `dashboard/AGENTS.md`'s dual-React caveat (#148) is
+  restated: the root still hoists React 19 (now a peer fill, no longer via Redocly).
+  **Alert bookkeeping:** Dependabot scans the default branch (`main`), which is still at
+  `34d28a0` — 142/142 open alerts match `main`'s lockfiles, 1/142 matched `dev@c0150d4` (this
+  one) and 0/142 match the new lockfile. The remaining 141 clear when `dev` is next released to
+  `main`; they are not actionable on `dev`.
+- **Dashboard BFF: the request logger redacts `token` query values (issue #269).** With the
+  SSE-only `?token=` fallback (#237) the JWT still travelled in a URL, and Fastify's default
+  `req` serializer logged that URL at info level on every request — a connect-time credential
+  in the access log, the same leak class #237 closed for routing. The BFF now installs its own
+  `req` serializer (`dashboard/server/log-redaction.ts`): the `token` parameter is written as
+  `token=[REDACTED]`, other query parameters are preserved byte for byte, and a URL without a
+  token is logged unchanged. Verified live against the built BFF: before the change
+  `"url":"/api/events?token=…"` appeared in the log, after it `"url":"/api/events?token=%5BREDACTED%5D"`.
+
 - **Dashboard BFF: the deprecated `?token=` query fallback is now accepted on the
   three SSE routes only (issue #237).**
   The token extractor's query-parameter fallback fired on every protected route,
@@ -132,9 +159,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `AppLayout.tsx` and the redirect in `OAuthCallback.tsx` adopt the `void navigate(...)`
   idiom the codebase already uses elsewhere, satisfying `no-misused-promises` /
   `no-floating-promises`. Verified in-container with the v7 runtime staged from registry
-  tarballs: dashboard client build (`vite build`) passes, and the full workspace `vitest
-  run` is 98/98 files, 1502 passed + 1 skipped; the Playwright auth/navigation e2e specs
-  run in CI.
+  tarballs: dashboard client build (`vite build`) passes, and the full workspace
+  `vitest run` is 98/98 files, 1502 passed + 1 skipped; the Playwright auth/navigation e2e
+  specs run in CI.
 - **Proxy: Rust advisory bump clears the five open Rust Dependabot alerts.** A pure
   `Cargo.lock` refresh (`cargo update -p rustls -p quinn-proto`; no manifest change — both
   crates are transitive under `reqwest` 0.12 with the `rustls-tls` feature and HTTP/3):
@@ -362,9 +389,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `spyOn` is generic over the spied property, so the resolved type is not the specific
   `MockInstance`), making `warnSpy.mockRestore()` an unsafe `any` call in memory-budget
   and worker-pool tests; those five declarations are now typed
-  `MockInstance<(...args: unknown[]) => void>` with `import type { MockInstance } from
-  'vitest'`. Verified in-container by
-  staging the vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
+  `MockInstance<(...args: unknown[]) => void>` with
+  `import type { MockInstance } from 'vitest'`. Verified in-container by staging the
+  vitest 4.1.12 type/runtime closure from registry tarballs (no npm tree
   operations): `npx tsc --build` clean for all affected suites, scoped eslint clean, and
   the full `npx vitest run` at 98/98 files, 1502 passed + 1 skipped. The host gates remain
   the authority for `npm ci`-materialized trees (`npm ci`, integration suite,
@@ -447,6 +474,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **vLLM runner shim: the active-request scrape now matches real `/metrics` text (issue #239).**
+  It matched `"vllm:num_requests_running "` with a trailing space, but vLLM exports these gauges
+  with labels (`vllm:num_requests_running{model_name="…",engine="0"} 8.0`), so the line never
+  matched: `GET /health` reported `activeRequests: 0` whenever metrics were reachable, and the
+  `POST /sleep` guard (`active > 0` → 409) never tripped — a sleep offloaded weights out from
+  under in-flight generations. A new pure parser (`metrics.py`) matches the metric name followed
+  by `{` or whitespace (never a `_`-suffixed sibling such as `_total`/`_bucket`), sums every
+  label series (TP/DP emit several), requires **both** the running and waiting series to be
+  present (a half-parsed scrape is not a drain signal), maps any non-finite sample to `None`
+  before the final `int()`, and leaves the existing fail-open rule untouched: an unreadable
+  scrape is still `None`, which skips the guard and lets the sleep proceed. Two consequences are
+  user-visible and accepted: a request that starts in the control plane's drain→sleep window now
+  turns a previously "successful" sleep into a 409 → instance ERROR (a loud failure instead of
+  destroyed generations; no CP-side drain retry is in scope), and a scrape that returns 200 with
+  an unrecognized body now behaves like a failed scrape — the control plane drains until
+  `sleepTimeoutMs` expires and the sleep then fails with a 504, landing the instance in ERROR.
+  **Release gate:** capture a live vLLM 0.26 `/metrics` body on a GPU runner and confirm the
+  parser's shape assumptions before relying on the drain behaviour in production.
+
+- **Dev worker: a runner that accepts the `/health` connection but never answers can no longer
+  hang the serialized cold-start chain (issue #243).**
+  `defaultHealthCheck` now forwards an `AbortSignal` into its `fetch`, and `waitUntilHealthy`
+  races every probe against an abortable per-probe timer (`healthProbeTimeoutMs`, default 5 s on
+  the launcher config — no new `SARDEENZ_*` env var) before treating it as a null (not-yet)
+  result, so a wedged probe can never exceed the budget and the 15-minute health deadline keeps
+  being re-evaluated (deadline granularity degrades to ≤ `healthProbeTimeoutMs` +
+  `healthIntervalMs`, ~6 s — immaterial at 15 minutes). A `hasExited()` re-check after each null
+  probe fails fast on an exit observed while a probe was wedged. Previously the first hung probe
+  bypassed both the exit check and the deadline forever, and with `serializeColdStarts = true`
+  one wedged start blocked every subsequent launch on the worker.
+- **Dev worker: `startRunner` reserves the instance slot before its first await, the fire-and-
+  forget memory-report push no longer risks an `unhandledRejection`, and multi-device
+  start/stop/exit pushes one coalesced memory report per tick (issue #257).**
+  The "reserve up-front" comment was not true: the `has()` conflict check was followed by the
+  awaited port allocation before the slot was written, so two concurrent `POST /runners` calls
+  for one `instanceId` both passed, both launched, and the second overwrote the first — leaking
+  its record, ports and ledger memory. The reservation (and the model-set registration) now
+  happens synchronously before `allocatePorts()`, inside a `try` extended to cover the
+  allocation phase, so a port-allocation failure rolls the just-reserved slot back instead of
+  stranding the `instanceId` behind a permanent `ConflictError`; the catch's `usedPorts` delete
+  is guarded on nullable pre-declared port bindings so it cannot mask the original error.
+  `allocateMemory`/`freeMemory` are ledger-only now; the publish moved to a new
+  `WorkerRegistration.pushMemoryReportOnce()` — a microtask-coalesced (never a timer, keeping
+  the staleness-check freshness) single push per tick with a logged `.catch` instead of an
+  unhandled rejection. A tensor-parallel start across N devices builds and pushes one report
+  carrying the final ledger state (per-device `floor(requiredMemory / devices.length)`
+  arithmetic unchanged) instead of N near-identical reports.
 - **Fail-closed token gate rejects whitespace-only tokens (issue #268).** The #234 startup
   checks used plain truthiness, so `SARDEENZ_API_TOKEN=" "` (a Secret created with a blank
   value) booted a service whose bearer auth was effectively a one-character guess. Both gates —
@@ -512,6 +586,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is also anchored per legend chip now — one Tooltip per chip/Other/Free entry — so the full
   VRAM breakdown appears right above the hovered chip, matching the stacked-bar tooltip
   behavior, instead of top-center of the legend row.
+
+- **Runner shims: `/memory-report` reports the whole-device used memory with a machine-readable
+  scope (issue #244).**
+  The shim process never allocates CUDA memory through torch's caching allocator (the engine is a
+  child subprocess), so `torch.cuda.memory_reserved()` was effectively always 0 and the
+  "prefer this process's reserved pool" branch was dead by construction in the two-process
+  topology — the figure was silently the whole-device read, double-counting co-located runners.
+  The dead branch is deleted; both shims report `max(0, total − free)` from `mem_get_info` with
+  the new optional `attribution: "runner" | "device"` field on `DeviceMemoryUsage`
+  (engine-runner contract), emitting `"device"`. The runner-stub emits `"runner"` for its
+  own-ledger figure. No in-repo consumer reads `attribution` yet — an absent value means unknown
+  scope (legacy images), and the per-runner display rule it enables belongs to Phase 5; the
+  worker's NVML path remains the process-attributed authority and is unchanged.
+
+- **Runner shims: blocking torch/kvcached memory reads move off the event loop (issue #253).**
+  Both shims' `GET /memory-report` and `POST /sleep` handlers called the synchronous
+  `memory_report()` inline from `async` code, so a slow `torch.cuda.mem_get_info` query under
+  device contention, or a contended kvcached shared-memory
+  `flock`, froze the event loop — stalling `/health` for the launcher probe and the shim's own
+  liveness poller (a stalled shim could read as wedged and trip restart logic). The four call
+  sites now hand it to the default executor —
+  `await loop.run_in_executor(None, functools.partial(memory_report, args.device_type))` — the
+  same pattern as the ONNX `session.run` offload. `memory_report` itself stays synchronous and is still
+  called exactly once per request; the 409 paths, response shapes and `deviceMemoryFreedBytes`
+  value are unchanged. The shims' app-level test coverage is also tightened (`tests/test_app.py`:
+  the real `create_app` over the conformance doubles, `httpx.ASGITransport` on the test's own
+  loop, no new dependency). Both shims already had app-level coverage — `runners/conformance/`
+  builds each real `create_app` over the same doubles under `TestClient` — so what is new is
+  narrower and stated as such: `ASGITransport` runs the loop on the test's own thread, where
+  `TestClient`'s anyio portal thread hides it, making the executing thread observable for the
+  first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239. The harness pins the off-loop thread
+  identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
+  read.
 
 ## [0.2.0] - 2026-09-15
 

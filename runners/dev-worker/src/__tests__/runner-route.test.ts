@@ -49,6 +49,7 @@ function makeRegistration(): WorkerRegistration {
   return {
     allocateMemory: () => {},
     freeMemory: () => {},
+    pushMemoryReportOnce: () => {},
     getDeviceMemoryUsed: () => 0,
     register: async () => {},
     deregister: async () => {},

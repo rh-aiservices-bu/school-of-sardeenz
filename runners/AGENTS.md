@@ -32,6 +32,18 @@ SIFs, and the shared contract-conformance suite.
 - **Measured memory:** the worker reports NVML-measured bytes with per-instance attribution
   (`measured-sample.ts`, `nvml.ts`). Do not fabricate memory figures in stubs beyond the
   contract-valid canned report.
+- **Shim memory scope (#244):** a shim without an NVML binding cannot attribute device memory to
+  its own process (the engine is a child), so shims report the whole-device used figure with
+  `attribution: "device"`; a runtime that can introspect no CUDA device fails closed with `409`.
+  Never re-sum device-scope rows across runners on the consumer side — the per-runner display
+  rule belongs to the consumer layers (Phase 5 owns it). Declare the scope on every device entry
+  (`runner` only for genuinely process-attributed figures, like the in-repo runner-stub).
+  Consumers treat an absent `attribution` as unknown scope.
+- **Drain signal convention (#239):** a shim derives `activeRequests` by scraping its engine's
+  Prometheus `/metrics` and reporting `None`/absent when the scrape fails or half-parses —
+  unknown is never reported as `0`, because the control plane's drain loop treats `0` as
+  "drained" but a missing field as "keep waiting". A half-parsed scrape (one of the expected
+  series absent, any non-finite sample) is unknown, not drained.
 - **Security posture (ADR-016):** the launch path is `apptainer exec --nv` with binds limited
   to weights + scratch (override via `SARDEENZ_APPTAINER_BINDS`). Do not widen it without an
   ADR update.
@@ -47,7 +59,7 @@ SIFs, and the shared contract-conformance suite.
 ```bash
 npm run typecheck -w @sardeenz/dev-worker && npm run test -w @sardeenz/dev-worker
 make test-python-deps   # once, inside a venv: installs vllm[test] + mlserver[test] (no torch/vLLM)
-make test-python        # shim unit tests + conformance suite (also a required CI job)
+make test-python        # shim unit tests (incl. the tests/test_app.py app-level harnesses) + conformance suite (also a required CI job)
 ```
 
 Local worker: `make dev-worker` (stub mode) — config in `dev-worker/src/config.ts`.

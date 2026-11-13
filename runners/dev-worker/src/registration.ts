@@ -62,6 +62,7 @@ export type LedgerInstancesProvider = () => Promise<MeasuredInstanceSample[]>;
 export type KVCacheDeviceProvider = () => Promise<Map<number, KVCacheDeviceStats> | null>;
 
 export class WorkerRegistration {
+  private pushScheduled = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly deviceMemoryUsed: number[];
   private readonly devices: DetectedDevice[];
@@ -145,7 +146,8 @@ export class WorkerRegistration {
           await this.redis.set(heartbeatKey, new Date().toISOString(), 'PX', ttlMs);
           // Refresh the memory report every tick too, in every mode — this is what keeps
           // `reportedAt` (and any measured NVML figures) fresh for the control plane's staleness
-          // checks, not just the ledger-driven allocate/free pushes below.
+          // checks, not just the coalesced pushes `pushMemoryReportOnce()` schedules after
+          // ledger changes.
           await this.pushMemoryReport();
         } catch {
           // Health check failed or Redis write failed — skip this tick and let the key age out.
@@ -169,16 +171,17 @@ export class WorkerRegistration {
     await pipeline.exec();
   }
 
+  // Ledger-only: these update the device ledger without publishing — RunnerManager calls
+  // pushMemoryReportOnce() once per operation (after each per-device loop), so a multi-device
+  // start/stop/exit builds and pushes one coalesced report per tick instead of one per device.
   allocateMemory(deviceIndex: number, bytes: number): void {
     if (deviceIndex < 0 || deviceIndex >= this.deviceMemoryUsed.length) return;
     this.deviceMemoryUsed[deviceIndex] += bytes;
-    void this.pushMemoryReport();
   }
 
   freeMemory(deviceIndex: number, bytes: number): void {
     if (deviceIndex < 0 || deviceIndex >= this.deviceMemoryUsed.length) return;
     this.deviceMemoryUsed[deviceIndex] = Math.max(0, this.deviceMemoryUsed[deviceIndex] - bytes);
-    void this.pushMemoryReport();
   }
 
   getDeviceMemoryUsed(deviceIndex: number): number {
@@ -198,7 +201,9 @@ export class WorkerRegistration {
   private async buildMemoryReport(): Promise<Record<string, unknown>> {
     const [measured, kvCache] = await Promise.all([
       this.measuredProvider ? this.measuredProvider().catch(() => null) : Promise.resolve(null),
-      this.kvCacheDeviceProvider ? this.kvCacheDeviceProvider().catch(() => null) : Promise.resolve(null),
+      this.kvCacheDeviceProvider
+        ? this.kvCacheDeviceProvider().catch(() => null)
+        : Promise.resolve(null),
     ]);
     const measuredByDevice = new Map(measured?.devices.map((d) => [d.deviceIndex, d]) ?? []);
 
@@ -242,5 +247,21 @@ export class WorkerRegistration {
       this.key('workers', this.config.workerId, 'memory'),
       JSON.stringify(await this.buildMemoryReport()),
     );
+  }
+
+  // Coalesced fire-and-forget publish for ledger changes: schedules at most one push per tick
+  // (a microtask, never a timer — the control plane's staleness check relies on a push happening
+  // right after the ledger changes, so it must not be delayed by a debounce). The rejection
+  // handler logs instead of surfacing an unhandledRejection (issue #257, #84-class).
+  pushMemoryReportOnce(): void {
+    if (this.pushScheduled) return;
+    this.pushScheduled = true;
+    queueMicrotask(() => {
+      // Cleared before the push: a rejection must never wedge future coalescing.
+      this.pushScheduled = false;
+      void this.pushMemoryReport().catch((err) =>
+        console.error('[worker] memory-report push failed', err),
+      );
+    });
   }
 }

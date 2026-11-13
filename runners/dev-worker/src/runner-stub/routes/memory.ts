@@ -31,6 +31,7 @@ export function registerMemoryRoutes(
         deviceType: d.deviceType,
         memoryUsedBytes: isSleeping ? 0 : perDeviceMemory,
         memoryTotalBytes: config.deviceMemoryTotalBytes,
+        attribution: 'runner',
       })),
     });
   });

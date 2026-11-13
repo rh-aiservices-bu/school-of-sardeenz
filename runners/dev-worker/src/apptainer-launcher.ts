@@ -55,6 +55,8 @@ export interface ApptainerLauncherConfig {
   verifySif: boolean;
   healthTimeoutMs: number;
   healthIntervalMs: number;
+  /** Per-probe request budget for the /health poll; bounds one probe, not the overall start. */
+  healthProbeTimeoutMs?: number; // default 5_000
   stopGraceMs: number;
   /** Address advertised in the launch handle's `host` (control-plane-reachable). */
   advertiseHost: string;
@@ -78,6 +80,10 @@ export const DEFAULT_APPTAINER_CONFIG: ApptainerLauncherConfig = {
   // finish before this SIGKILL backstop fires. The pod cgroup is the ultimate backstop if the
   // shim itself wedges.
   healthIntervalMs: 1_000,
+  // A wedged shim can accept the TCP connection and never answer; the per-probe budget turns
+  // that into a null probe so waitUntilHealthy regains control and keeps re-evaluating the
+  // 15-minute deadline (granularity degrades to ≤ budget + interval — fine at 15 minutes).
+  healthProbeTimeoutMs: 5_000,
   stopGraceMs: 30_000,
   advertiseHost: 'localhost',
   mlserverParallelWorkers: 0,
@@ -116,7 +122,7 @@ export interface HealthProbe {
   message?: string;
 }
 /** Probe a runner's `/health`. Resolves the reported state, or null if unreachable/not-ok yet. */
-export type HealthCheckFn = (url: string) => Promise<HealthProbe | null>;
+export type HealthCheckFn = (url: string, signal: AbortSignal) => Promise<HealthProbe | null>;
 export type SleepFn = (ms: number) => Promise<void>;
 export type NowFn = () => number;
 
@@ -145,9 +151,9 @@ const defaultRunOnce: RunOnceFn = (command, args) =>
     child.once('exit', (code) => resolve(code ?? -1));
   });
 
-const defaultHealthCheck: HealthCheckFn = async (url) => {
+const defaultHealthCheck: HealthCheckFn = async (url, signal) => {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) return null;
     const body = (await res.json()) as { state?: string; message?: string };
     return { state: body.state ?? 'UNKNOWN', message: body.message };
@@ -168,6 +174,7 @@ export class ApptainerLauncher implements RunnerLauncher {
   private readonly spawn: SpawnFn;
   private readonly runOnce: RunOnceFn;
   private readonly healthCheck: HealthCheckFn;
+  private readonly healthProbeTimeoutMs: number;
   private readonly sleep: SleepFn;
   private readonly now: NowFn;
   private readonly realpath: RealpathFn;
@@ -182,6 +189,8 @@ export class ApptainerLauncher implements RunnerLauncher {
     this.sleep = deps.sleep ?? defaultSleep;
     this.now = deps.now ?? (() => Date.now());
     this.realpath = deps.realpath ?? defaultRealpath;
+    // Resolved once: the per-probe budget is read on every poll iteration.
+    this.healthProbeTimeoutMs = this.config.healthProbeTimeoutMs ?? 5_000;
   }
 
   // Resolve which SIF to exec. Prefer the explicit runtimeModule; fall back to
@@ -469,7 +478,25 @@ export class ApptainerLauncher implements RunnerLauncher {
       if (hasExited()) {
         throw new Error(`Runner on :${port} exited before becoming healthy`);
       }
-      const probe = await this.healthCheck(url);
+      // Every probe races an abortable timer: a health check that ignores its signal (or a
+      // wedged shim that accepts the connection and never writes) can never exceed the
+      // per-probe budget, so the loop always regains control to re-check hasExited() and the
+      // 15-minute deadline instead of hanging on one probe forever.
+      const controller = new AbortController();
+      let timer: NodeJS.Timeout | undefined;
+      const probe = await Promise.race([
+        this.healthCheck(url, controller.signal),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            resolve(null);
+          }, this.healthProbeTimeoutMs);
+        }),
+      ]);
+      clearTimeout(timer);
+      // The probe won the race — release the losing fetch's socket rather than leaving the
+      // cleanup to the (already-fired) per-probe timer.
+      controller.abort();
       if (probe) {
         if (probe.state === 'READY') return;
         // Fail fast: the runner reached a terminal error state (e.g. vLLM failed to load the model)
@@ -480,6 +507,12 @@ export class ApptainerLauncher implements RunnerLauncher {
               (probe.message ? `: ${probe.message}` : ''),
           );
         }
+      }
+      // A null probe (including a timer-won one) may have masked an exit observed while the
+      // probe was wedged — re-check before sleeping so the failure is immediate instead of
+      // waiting out healthIntervalMs.
+      if (hasExited()) {
+        throw new Error(`Runner on :${port} exited before becoming healthy`);
       }
       await this.sleep(this.config.healthIntervalMs);
     }
