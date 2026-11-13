@@ -37,6 +37,9 @@ Redis fallback when the control plane is down).
 - **SSE query-token gate:** the deprecated `?token=` fallback is accepted only on the routes
   listed in `SSE_TOKEN_PATHS` (`server/plugins/auth.ts`). A new SSE route must be added there or
   `EventSource` auth breaks; everywhere else a query token is ignored → 401.
+- **Never log a raw request URL:** the BFF installs its own Fastify `req` serializer
+  (`server/log-redaction.ts`) that writes `token=[REDACTED]`. Route a new secret-bearing
+  parameter through it instead of logging `request.url` directly.
 - **Dual-React caveat (#148):** the root lockfile still hoists React 19.3.1 beside the app's
   nested React 18.3.1 (a peer fill for the hoisted PatternFly/nivo/victory stack — Redocly stopped
   depending on React when it went to v2, so it is no longer the cause).

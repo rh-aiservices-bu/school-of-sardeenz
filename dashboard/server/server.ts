@@ -24,6 +24,7 @@ import { registerEventRoutes } from './routes/events.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerWeightsRoutes } from './routes/weights.js';
+import { reqSerializer } from './log-redaction.js';
 
 export interface ServerDeps {
   config: Config;
@@ -38,6 +39,9 @@ export async function buildServer(deps: ServerDeps) {
         process.env['NODE_ENV'] !== 'production'
           ? { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z' } }
           : undefined,
+      // Fastify's default `req` serializer logs the raw URL, which puts the deprecated
+      // `?token=` SSE fallback into the access log (issue #269).
+      serializers: { req: reqSerializer },
     },
     requestIdHeader: 'x-request-id',
     genReqId: () => crypto.randomUUID(),

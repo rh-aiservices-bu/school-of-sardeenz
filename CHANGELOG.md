@@ -38,6 +38,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `34d28a0` — 142/142 open alerts match `main`'s lockfiles, 1/142 matched `dev@c0150d4` (this
   one) and 0/142 match the new lockfile. The remaining 141 clear when `dev` is next released to
   `main`; they are not actionable on `dev`.
+- **Dashboard BFF: the request logger redacts `token` query values (issue #269).** With the
+  SSE-only `?token=` fallback (#237) the JWT still travelled in a URL, and Fastify's default
+  `req` serializer logged that URL at info level on every request — a connect-time credential
+  in the access log, the same leak class #237 closed for routing. The BFF now installs its own
+  `req` serializer (`dashboard/server/log-redaction.ts`): the `token` parameter is written as
+  `token=[REDACTED]`, other query parameters are preserved byte for byte, and a URL without a
+  token is logged unchanged. Verified live against the built BFF: before the change
+  `"url":"/api/events?token=…"` appeared in the log, after it `"url":"/api/events?token=%5BREDACTED%5D"`.
 
 - **Dashboard BFF: the deprecated `?token=` query fallback is now accepted on the
   three SSE routes only (issue #237).**
