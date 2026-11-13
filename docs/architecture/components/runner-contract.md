@@ -135,8 +135,21 @@ Each `DeviceMemoryUsage` entry includes:
 
 - `deviceIndex` — zero-based index as seen by the runner (respects `CUDA_VISIBLE_DEVICES`)
 - `deviceType` — `CUDA`, `ROCM`, `CPU`, or `OTHER`
-- `memoryUsedBytes` — bytes currently consumed (weights + KV cache + graphs + overhead)
+- `memoryUsedBytes` — bytes of device memory currently in use on this device, as scoped by
+  `attribution`: `runner` means this runner's own usage (model weights, KV cache, CUDA graphs,
+  and runtime overhead); `device` means the whole device's used memory, including memory held by
+  co-located processes — a device observation, not a per-runner delta, which double-counts if
+  summed across runners
 - `memoryTotalBytes` — total device capacity
+- `attribution` (optional) — what the `memoryUsedBytes` figure on this device entry covers:
+  `runner` — the reporting runner's own usage on this device (process-attributed; safe to sum
+  across runners sharing a device); `device` — the whole device's used memory as observed by the
+  reporting runner, co-located processes included; such figures MUST NOT be summed across runners
+  or treated as a per-runner delta. Optional for compatibility with runner images that do not
+  declare a scope; consumers treat an absent value as unknown.
+- `kvCache` (optional) — per-device kvcached elastic-pool stats (#165), present only when the
+  runner participates in a pool; the four figures form the partition
+  `totalBytes = usedBytes + preallocBytes + freeBytes`.
 
 An optional `MemoryBreakdown` provides category-level detail (weights, KV cache, activations, overhead) for engines that expose this introspection. Not all runners can provide it.
 
@@ -341,7 +354,9 @@ An MLServer runner serving predictive models on CPU. Exercises the CPU-only path
 
 **Lifecycle:** STARTING → READY ↔ BUSY → stopped (worker SIGTERM).
 
-**Memory:** Single device entry with `deviceType: "CPU"`. Reports host memory usage for the model process. `memoryTotalBytes` reflects available system memory. No `MemoryBreakdown`.
+**Memory:** With no CUDA device to introspect, `GET /memory-report` answers `409` — the contract
+requires at least one device entry (`minItems: 1`), so the shim fails closed rather than report
+host memory. No `MemoryBreakdown`.
 
 **Sleep:** Not supported.
 

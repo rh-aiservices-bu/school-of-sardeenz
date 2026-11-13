@@ -77,6 +77,7 @@ export interface MemoryReportDevice {
   memoryUsedBytes: number;
   memoryTotalBytes: number;
   kvCache?: KVCacheStats;
+  attribution: 'runner' | 'device';
 }
 
 export interface MemoryReportResponse {

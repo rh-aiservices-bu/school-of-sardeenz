@@ -21,14 +21,14 @@ engine-agnostic (ADR-010, [phase4.md](../../docs/project/phase4.md) Task 5).
   through a direct Service, Ingress, or Route.
 - Serves the runner-contract management API on `--port`:
 
-  | Endpoint                             | Behaviour                                                                                                             |
-  | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies                                   |
-  | `GET /capabilities`                  | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on                                         |
-  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`); per-device `kvCache` pool block when a kvcached pool is visible |
-  | `POST /sleep`                        | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM)                                                       |
-  | `POST /wake`                         | vLLM `/wake_up`                                                                                                       |
-  | `GET /sleep-status`, `GET /progress` | State introspection                                                                                                   |
+  | Endpoint                             | Behaviour                                                                                                                                       |
+  | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once vLLM serves; `ERROR` if it dies                                                             |
+  | `GET /capabilities`                  | Static declaration; sets `features.kvCacheElasticSharing` when kvcached is on                                                                   |
+  | `GET /memory-report`                 | Whole-device memory per device, `attribution: "device"` (409 while `STARTING`); per-device `kvCache` pool block when a kvcached pool is visible |
+  | `POST /sleep`                        | Maps `L1_HOST_RAM` → vLLM `/sleep?level=1` (weights → host RAM)                                                                                 |
+  | `POST /wake`                         | vLLM `/wake_up`                                                                                                                                 |
+  | `GET /sleep-status`, `GET /progress` | State introspection                                                                                                                             |
 
   The management endpoint is unauthenticated. `SARDEENZ_WORKER_TOKEN` protects the worker agent
   only, not this shim or its engine. vLLM does not bind the gRPC or metrics ports reserved in the
@@ -53,9 +53,10 @@ sardeenz_vllm_runner/
 ## Notes
 
 - **kvcached sleep levels:** the contract defines only `L1_HOST_RAM` (v0.1) → vLLM sleep level 1.
-- **Memory attribution** is best-effort: under kvcached co-tenancy two runners share a device pool
-  elastically, so exact per-runner bytes aren't recoverable. The shim reports this process's
-  reserved CUDA memory.
+- **Memory attribution** is best-effort: the shim process owns no CUDA pool — `vllm serve` is a
+  child process — so per-runner bytes aren't recoverable. `/memory-report` reports the whole-device
+  used figure with `attribution: "device"`; consumers must not sum device-scope rows across
+  co-located runners (the display rule belongs to the consumer layers, not the shim).
 - **Dependencies** (`fastapi`, `uvicorn`, `httpx`, `vllm`, `torch`, `kvcached`) come from the
   `runner-vllm` image; `pyproject.toml` lists them for dev installs but does not pin them.
 

@@ -535,6 +535,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   VRAM breakdown appears right above the hovered chip, matching the stacked-bar tooltip
   behavior, instead of top-center of the legend row.
 
+- **Runner shims: `/memory-report` reports the whole-device used memory with a machine-readable
+  scope (issue #244).**
+  The shim process never allocates CUDA memory through torch's caching allocator (the engine is a
+  child subprocess), so `torch.cuda.memory_reserved()` was effectively always 0 and the
+  "prefer this process's reserved pool" branch was dead by construction in the two-process
+  topology — the figure was silently the whole-device read, double-counting co-located runners.
+  The dead branch is deleted; both shims report `max(0, total − free)` from `mem_get_info` with
+  the new optional `attribution: "runner" | "device"` field on `DeviceMemoryUsage`
+  (engine-runner contract), emitting `"device"`. The runner-stub emits `"runner"` for its
+  own-ledger figure. No in-repo consumer reads `attribution` yet — an absent value means unknown
+  scope (legacy images), and the per-runner display rule it enables belongs to Phase 5; the
+  worker's NVML path remains the process-attributed authority and is unchanged.
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the

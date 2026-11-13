@@ -33,7 +33,6 @@ def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) 
         is_available=lambda: True,
         device_count=lambda: device_count,
         mem_get_info=lambda index: (1_000, 10_000),
-        memory_reserved=lambda index: 2_000,
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
@@ -181,6 +180,30 @@ def test_memory_report_falls_back_to_local_index_without_env(monkeypatch: pytest
     monkeypatch.delenv("SARDEENZ_DEVICE_INDICES", raising=False)
     report = mem.memory_report()
     assert [d["deviceIndex"] for d in report["devices"]] == [0, 1]
+
+
+def test_memory_report_reports_whole_device_usage_with_device_attribution(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_fake_torch(monkeypatch, device_count=2)
+    monkeypatch.delenv("SARDEENZ_DEVICE_INDICES", raising=False)
+    report = mem.memory_report()
+    assert report["devices"] == [
+        {
+            "deviceIndex": 0,
+            "deviceType": "CUDA",
+            "memoryUsedBytes": 9_000,  # whole device: 10_000 total - 1_000 free
+            "memoryTotalBytes": 10_000,
+            "attribution": "device",
+        },
+        {
+            "deviceIndex": 1,
+            "deviceType": "CUDA",
+            "memoryUsedBytes": 9_000,
+            "memoryTotalBytes": 10_000,
+            "attribution": "device",
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +517,7 @@ def _fake_memory_report(device_type: str = "CUDA") -> dict[str, object]:
                 "deviceType": "CUDA",
                 "memoryUsedBytes": 2_000,
                 "memoryTotalBytes": 10_000,
+                "attribution": "device",
             }
         ]
     }
