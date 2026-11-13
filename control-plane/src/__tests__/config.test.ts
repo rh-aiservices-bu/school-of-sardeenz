@@ -13,6 +13,10 @@ describe('loadConfig', () => {
     'SARDEENZ_REDIS_KEY_PREFIX',
     'SARDEENZ_EVICTION_MAX_PER_CYCLE',
     'SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT',
+    'SARDEENZ_POOL_PRESSURE_ENABLED',
+    'SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT',
+    'SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT',
+    'SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS',
     'SARDEENZ_SLEEP_TIMEOUT_SECS',
     'SARDEENZ_SIF_IMPORTER',
     'SARDEENZ_API_TOKEN',
@@ -102,6 +106,81 @@ describe('loadConfig', () => {
       process.env['SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT'] = raw;
       expect(() => loadConfig()).toThrow(
         'SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT must be an integer percent between 0 and 100',
+      );
+    },
+  );
+
+  // Phase 5 (#277) shared-pool pressure knobs: defaults, overrides, and the boot-time
+  // validators (the only thing keeping a response wave from being sized against a target it
+  // can never reach, or a '0.5' from being truncated into a valid percent).
+  it('defaults the pool-pressure knobs to false/90/75/3 (#277)', () => {
+    const config = loadConfig();
+    expect(config.poolPressureEnabled).toBe(false);
+    expect(config.poolPressureThresholdPercent).toBe(90);
+    expect(config.poolPressureReleaseTargetPercent).toBe(75);
+    expect(config.poolPressureDebounceTicks).toBe(3);
+  });
+
+  it('reads the pool-pressure knobs from env (#277)', () => {
+    process.env['SARDEENZ_POOL_PRESSURE_ENABLED'] = 'true';
+    process.env['SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT'] = '80';
+    process.env['SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT'] = '50';
+    process.env['SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS'] = '5';
+    const config = loadConfig();
+    expect(config.poolPressureEnabled).toBe(true);
+    expect(config.poolPressureThresholdPercent).toBe(80);
+    expect(config.poolPressureReleaseTargetPercent).toBe(50);
+    expect(config.poolPressureDebounceTicks).toBe(5);
+  });
+
+  it.each(['0', '101', '0.5', 'fifty', ''])(
+    'rejects SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT=%s instead of silently mis-sizing the trigger (#277)',
+    (raw) => {
+      process.env['SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT'] = raw;
+      expect(() => loadConfig()).toThrow(
+        'SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT must be an integer percent between 1 and 100',
+      );
+    },
+  );
+
+  it('rejects SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT at or above THRESHOLD_PERCENT (#277)', () => {
+    process.env['SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT'] = '60';
+    process.env['SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT'] = '60';
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT (60) must be below SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT (60)',
+    );
+  });
+
+  it('rejects a release target above the threshold (#277)', () => {
+    process.env['SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT'] = '60';
+    process.env['SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT'] = '95';
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT (95) must be below SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT (60)',
+    );
+  });
+
+  it('rejects THRESHOLD below the DEFAULT release target when only THRESHOLD is set (#277 cross-check)', () => {
+    // Regression pin for the default-then-validate order: THRESHOLD=60 + unset target (75)
+    // must fail at boot, not boot with a wave that can never relieve the band it fires in.
+    process.env['SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT'] = '60';
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT (75) must be below SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT (60)',
+    );
+  });
+
+  it('rejects an out-of-domain SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT (#277)', () => {
+    process.env['SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT'] = '0';
+    expect(() => loadConfig()).toThrow(
+      'SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT must be an integer percent between 1 and 100',
+    );
+  });
+
+  it.each(['0', '61', '-1'])(
+    'rejects SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS=%s (0 acts on a single-tick spike, >60 silently disables) (#277)',
+    (raw) => {
+      process.env['SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS'] = raw;
+      expect(() => loadConfig()).toThrow(
+        'SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS must be an integer between 1 and 60',
       );
     },
   );

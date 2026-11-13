@@ -56,6 +56,20 @@ spec:
             # reported KV-pool totalBytes; 0 disables elastic headroom (plain byte-fit only).
             - name: SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT
               value: '50'
+            # Phase 5 (#277): shared-pool pressure response. Off by default until the
+            # on-cluster pressure behaviour is proven; flip ENABLED to 'true' to activate.
+            # Threshold triggers at usedBytes/totalBytes >= percent (1-100); the release
+            # target must stay below the threshold (both percents 1-100, cross-checked at
+            # boot); debounce is the count of consecutive triggering ticks (1-60) before the
+            # eviction wave fires.
+            - name: SARDEENZ_POOL_PRESSURE_ENABLED
+              value: 'false'
+            - name: SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT
+              value: '90'
+            - name: SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT
+              value: '75'
+            - name: SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS
+              value: '3'
             - name: SARDEENZ_API_TOKEN
               valueFrom:
                 secretKeyRef:

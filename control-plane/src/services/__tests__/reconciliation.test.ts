@@ -10,9 +10,14 @@ import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { ModelRepository, ModelRecord } from '../model-repository.js';
-import type { Redis } from '../../clients/redis.js';
+import type { EvictionEngine, EvictionCandidate } from '../eviction.js';
+import type { SleepWakeService } from '../sleep-wake.js';
+import type { InstanceRepository } from '../instance-repository.js';
+import type { NotificationService } from '../notification.js';
+import { ControlPlaneError } from '../../errors.js';
 import { deviceMemoryBytes } from '../../health/metrics.js';
 import { WorkerHttpError, type WorkerClient } from '../../clients/worker.js';
+import type { Redis } from '../../clients/redis.js';
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
@@ -46,11 +51,17 @@ function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
 }
 
 interface MockDeps {
+  instanceRepository: {
+    findAll: Mock;
+    delete: Mock;
+  };
   lifecycle: {
     getAllInstances: Mock;
     getInstancesForModel: Mock;
     removeInstance: Mock;
+    getInstance: Mock;
     transition: Mock;
+    getLastInferenceTimestamps: Mock;
     pruneLegacyInstanceKeys: Mock;
   };
   workerPool: {
@@ -66,6 +77,7 @@ interface MockDeps {
     getAllBudgets: Mock;
     clearWorkerReservations: Mock;
     releaseInstanceReservations: Mock;
+    getReservationHolders: Mock;
   };
   routingMap: {
     removeModel: Mock;
@@ -92,6 +104,18 @@ interface MockDeps {
     stopRunner: Mock;
     getRunner: Mock;
     getRunnerByInstance: Mock;
+  };
+  // Phase 5 (#277) pool-pressure collaborators (opt-in via createService options).
+  eviction: {
+    selectVictims: Mock;
+    recordEviction: Mock;
+    startTimer: Mock;
+  };
+  sleepWake: {
+    stopModel: Mock;
+  };
+  notifications: {
+    createNotification: Mock;
   };
 }
 
@@ -121,12 +145,26 @@ const DEFAULT_CONFIG: ReconciliationConfig = {
   deployTimeoutSecs: 600,
   sleepTimeoutSecs: 300,
   missingRunnerProbeGraceSecs: 600,
+  // Pool pressure off by default in the shared config; the #277 describe block overrides
+  // via its own config object.
+  poolPressureEnabled: false,
+  poolPressureThresholdPercent: 90,
+  poolPressureReleaseTargetPercent: 75,
+  poolPressureDebounceTicks: 3,
+  evictionMaxPerCycle: 3,
 };
 
 const KEY_PREFIX = 'sardeenz';
 
 function createMocks(): MockDeps {
   return {
+    // Phase 5 (#277): row-delete spy; only wired into the service when a test opts in via
+    // withInstanceRepository (see createService). findAll backs reconcileInstanceTable
+    // (empty table by default).
+    instanceRepository: {
+      findAll: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue(undefined),
+    },
     lifecycle: {
       getAllInstances: vi.fn().mockResolvedValue([]),
       // refreshModelRoutingState (called by handleDeadWorkers/recoverStuckInstances after
@@ -135,7 +173,12 @@ function createMocks(): MockDeps {
       // matching the pre-#120 single-instance-per-model behavior these tests assert on.
       getInstancesForModel: vi.fn().mockResolvedValue([]),
       removeInstance: vi.fn().mockResolvedValue(undefined),
+      // Default "instance readable" — the #277 per-victim state re-read succeeds unless a
+      // test simulates a concurrent-action collision with null.
+      getInstance: vi.fn().mockResolvedValue(null),
       transition: vi.fn().mockResolvedValue({}),
+      // Empty LRU map by default — the #277 wave enriches candidates from this.
+      getLastInferenceTimestamps: vi.fn().mockResolvedValue(new Map()),
       pruneLegacyInstanceKeys: vi.fn().mockResolvedValue([]),
     },
     workerPool: {
@@ -154,6 +197,9 @@ function createMocks(): MockDeps {
       getAllBudgets: vi.fn().mockReturnValue([]),
       clearWorkerReservations: vi.fn(),
       releaseInstanceReservations: vi.fn(),
+      // Empty hold ledger by default — the #277 group builder calls this per device; only a
+      // hold-membership test overrides it.
+      getReservationHolders: vi.fn().mockReturnValue(new Map()),
     },
     routingMap: {
       removeModel: vi.fn().mockResolvedValue(undefined),
@@ -185,6 +231,21 @@ function createMocks(): MockDeps {
       getRunner: vi.fn().mockResolvedValue(true),
       getRunnerByInstance: vi.fn().mockResolvedValue({ status: 'absent' }),
     },
+    // Phase 5 (#277): pool-pressure collaborators. selectVictims defaults to "no victims";
+    // individual tests override. recordEviction is a plain spy (the engine would also run its
+    // breaker, but the service never reads engine internals). startTimer backs the wave's
+    // evictionDuration instrumentation (returns a no-op stop function).
+    eviction: {
+      selectVictims: vi.fn().mockReturnValue([] as EvictionCandidate[]),
+      recordEviction: vi.fn(),
+      startTimer: vi.fn(() => () => {}),
+    },
+    sleepWake: {
+      stopModel: vi.fn().mockResolvedValue(undefined),
+    },
+    notifications: {
+      createNotification: vi.fn().mockResolvedValue({ id: 'n1' }),
+    },
   };
 }
 
@@ -193,6 +254,9 @@ function createService(
   options: {
     withModelRepository?: boolean;
     withWorkerClient?: boolean;
+    withNotifications?: boolean;
+    withEviction?: boolean;
+    withInstanceRepository?: boolean;
     config?: ReconciliationConfig;
   } = {},
 ): ReconciliationService {
@@ -206,15 +270,31 @@ function createService(
     mocks.logger,
     mocks.redis as unknown as Redis,
     KEY_PREFIX,
-    undefined,
-    undefined,
-    // Left undefined by default (matching notifications/instanceRepository's optionality above)
-    // so the many pre-existing tests in this file — which populate getAllInstances with
-    // instances but never set up modelRepository — aren't affected by the new orphan-reap step.
-    // Only the dedicated describe block below opts in.
+    // Notifications slot: undefined by default; the #277 observability tests opt in.
+    options.withNotifications
+      ? ({
+          createNotification: mocks.notifications.createNotification,
+        } as unknown as NotificationService)
+      : undefined,
+    // instanceRepository slot: left undefined by default so the many pre-existing tests in
+    // this file aren't affected; the #277 row-delete coverage opts in.
+    options.withInstanceRepository
+      ? ({
+          findAll: mocks.instanceRepository.findAll,
+          delete: mocks.instanceRepository.delete,
+        } as unknown as InstanceRepository)
+      : undefined,
+    // Left undefined by default so pre-existing tests that populate getAllInstances without
+    // modelRepository aren't affected by the orphan-reap step; only its describe opts in.
     options.withModelRepository ? (mocks.modelRepository as unknown as ModelRepository) : undefined,
     // Same rationale — only the round-3 reap-attempt tests opt in.
     options.withWorkerClient ? () => mocks.workerClient as unknown as WorkerClient : undefined,
+    // moveOrchestration / startupLogCapture slots: nothing in this file exercises them.
+    undefined,
+    undefined,
+    // Phase 5 (#277): only the pool-pressure tests wire the engine/sleep-wake collaborators.
+    options.withEviction ? (mocks.eviction as unknown as EvictionEngine) : undefined,
+    options.withEviction ? (mocks.sleepWake as unknown as SleepWakeService) : undefined,
   );
 }
 
@@ -1322,6 +1402,575 @@ describe('ReconciliationService', () => {
       service.start();
 
       expect(mocks.logger.info).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 5 (#277): shared-pool pressure response. The evaluator is off by
+  // default (DEFAULT_CONFIG.poolPressureEnabled: false) and inert without its
+  // collaborators — every test here opts in via config + withEviction.
+  // -------------------------------------------------------------------------
+  describe('tick — pool pressure eviction (#277)', () => {
+    /** One worker, one device, kvcached pool 16 GB total. */
+    function pressureBudget(
+      overrides: {
+        usedBytes?: number;
+        totalBytes?: number;
+        stale?: boolean;
+        omitKvCache?: boolean;
+        workerId?: string;
+        deviceIndex?: number;
+      } = {},
+    ) {
+      const usedBytes = overrides.usedBytes ?? 15_200_000_000;
+      const totalBytes = overrides.totalBytes ?? 16_000_000_000;
+      return {
+        workerId: overrides.workerId ?? 'w1',
+        devices: [
+          {
+            deviceIndex: overrides.deviceIndex ?? 0,
+            deviceType: 'CUDA',
+            totalBytes: 24_000_000_000,
+            usedBytes: 20_000_000_000,
+            availableBytes: 4_000_000_000,
+            ...(overrides.omitKvCache
+              ? {}
+              : {
+                  kvCache: {
+                    totalBytes,
+                    usedBytes,
+                    preallocBytes: 0,
+                    freeBytes: totalBytes - usedBytes,
+                  },
+                }),
+          },
+        ],
+        lastReportAt: new Date().toISOString(),
+        stale: overrides.stale ?? false,
+      };
+    }
+
+    function enabledConfig(overrides: Partial<ReconciliationConfig> = {}): ReconciliationConfig {
+      return { ...DEFAULT_CONFIG, poolPressureEnabled: true, ...overrides };
+    }
+
+    function createPressureService(config: ReconciliationConfig) {
+      return createService(mocks, {
+        config,
+        withEviction: true,
+        withNotifications: true,
+        // The pressure wave reads pinned/memory tables via findAll — the default mock
+        // returns [], so pinnedModels/memoryByModel stay empty in these tests.
+        withModelRepository: true,
+        // The stop-action reap reaches the worker via createWorkerClient (workerClient mock).
+        withWorkerClient: true,
+        // The teardown clears the instance's Postgres row; wired so V5/V6 can assert it.
+        withInstanceRepository: true,
+      });
+    }
+
+    function victimOf(modelName: string, overrides: Partial<InstanceState> = {}): InstanceState {
+      return makeModelState({ modelName, workerId: 'w1', deviceIndices: [0], ...overrides });
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('V1: does nothing when the feature is disabled — with collaborators wired (#277 gate itself)', async () => {
+      service = createPressureService(enabledConfig({ poolPressureEnabled: false }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victimOf('alpha'), victimOf('beta')]);
+
+      await service.tick();
+
+      expect(mocks.eviction.selectVictims).not.toHaveBeenCalled();
+      expect(mocks.sleepWake.stopModel).not.toHaveBeenCalled();
+    });
+
+    it('V1: fires only after debounceTicks consecutive triggering ticks, then resets', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 3 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        victimOf('alpha', { state: ModelLifecycleState.ACTIVE }),
+        victimOf('beta', { state: ModelLifecycleState.SLEEPING }),
+      ]);
+
+      // Tick 1 and 2: pressure but below debounce — no action.
+      await service.tick();
+      await service.tick();
+      expect(mocks.eviction.selectVictims).not.toHaveBeenCalled();
+
+      // Tick 3: debounce reached — one response wave. The default selectVictims returns no
+      // victims, so this test provides both group instances for the teardown assertions.
+      const alpha = victimOf('alpha', { state: ModelLifecycleState.ACTIVE });
+      const beta = victimOf('beta', { state: ModelLifecycleState.SLEEPING });
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: alpha.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+        {
+          instanceId: beta.instanceId,
+          modelName: 'beta',
+          state: ModelLifecycleState.SLEEPING,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+      await service.tick();
+      expect(mocks.eviction.selectVictims).toHaveBeenCalledOnce();
+      expect(mocks.sleepWake.stopModel).toHaveBeenCalledTimes(2);
+
+      // Pressure clears: counters reset, next sustained episode debounces again.
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([
+        pressureBudget({ usedBytes: 1_000_000_000 }),
+      ]);
+      mocks.eviction.selectVictims.mockClear();
+      mocks.sleepWake.stopModel.mockClear();
+      await service.tick();
+      await service.tick();
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      await service.tick();
+      expect(mocks.eviction.selectVictims).not.toHaveBeenCalled();
+    });
+
+    it('V2: telemetry tolerance — absent kvCache, zero total, and stale budgets never fire', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([
+        pressureBudget({ omitKvCache: true }),
+        pressureBudget({ totalBytes: 0 }),
+        pressureBudget({ stale: true }),
+        // A healthy non-pressured device keeps its counter at zero even beside fired ones.
+        pressureBudget({ usedBytes: 1_000, deviceIndex: 1 }),
+      ]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victimOf('alpha'), victimOf('beta')]);
+
+      await service.tick();
+      await service.tick();
+      await service.tick();
+
+      expect(mocks.eviction.selectVictims).not.toHaveBeenCalled();
+      expect(mocks.sleepWake.stopModel).not.toHaveBeenCalled();
+    });
+
+    it('V2: a stale window resets the debounce counter — it does not survive telemetry gaps', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 3 }));
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victimOf('alpha'), victimOf('beta')]);
+
+      // Two triggering ticks accumulate weight…
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      await service.tick();
+      await service.tick();
+
+      // …then telemetry goes stale: the counter must reset to zero, not freeze.
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget({ stale: true })]);
+      await service.tick();
+
+      // A single fresh over-threshold report after the gap is NOT enough to fire (debounce 3).
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      await service.tick();
+      expect(mocks.eviction.selectVictims).not.toHaveBeenCalled();
+      expect(mocks.sleepWake.stopModel).not.toHaveBeenCalled();
+
+      // Only the full consecutive run fires.
+      await service.tick();
+      await service.tick();
+      expect(mocks.eviction.selectVictims).toHaveBeenCalledOnce();
+    });
+
+    it('V3: victim selection is scoped to the pressure device co-location group', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      const colocatedA = victimOf('alpha', { state: ModelLifecycleState.ACTIVE });
+      const colocatedB = victimOf('beta', { state: ModelLifecycleState.SLEEPING });
+      const otherDevice = victimOf('gamma', {
+        state: ModelLifecycleState.ACTIVE,
+        deviceIndices: [1],
+      });
+      const otherWorker = victimOf('delta', {
+        state: ModelLifecycleState.ACTIVE,
+        workerId: 'w2',
+      });
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        colocatedA,
+        colocatedB,
+        otherDevice,
+        otherWorker,
+      ]);
+      const victims: EvictionCandidate[] = [
+        {
+          instanceId: colocatedB.instanceId,
+          modelName: 'beta',
+          state: ModelLifecycleState.SLEEPING,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ];
+      mocks.eviction.selectVictims.mockReturnValue(victims);
+
+      await service.tick();
+
+      expect(mocks.eviction.selectVictims).toHaveBeenCalledOnce();
+      const [candidates, , requiredBytes, workerScope] = mocks.eviction.selectVictims.mock
+        .calls[0] as unknown as [InstanceState[], Set<string>, number, Set<string>];
+      // Only the device-0 group on w1 reaches the engine — the device-1 and w2 residents
+      // are never candidates (single derivation via coLocationGroup).
+      expect(candidates).toHaveLength(2);
+      expect(candidates.map((c) => c.modelName).sort()).toEqual(['alpha', 'beta']);
+      expect(workerScope).toEqual(new Set(['w1']));
+      // Excess above the release target: 15.2 GB − floor(16 GB × 0.75) = 3.2 GB.
+      expect(requiredBytes).toBe(15_200_000_000 - 12_000_000_000);
+      expect(mocks.sleepWake.stopModel).toHaveBeenCalledOnce();
+      expect(mocks.sleepWake.stopModel).toHaveBeenCalledWith('beta', colocatedB.instanceId, null);
+    });
+
+    it('V4: solo-device group — pressure fires but no victims are selected', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victimOf('alpha')]);
+
+      await service.tick();
+      await service.tick();
+
+      expect(mocks.eviction.selectVictims).not.toHaveBeenCalled();
+      expect(mocks.sleepWake.stopModel).not.toHaveBeenCalled();
+      expect(mocks.logger.debug).toHaveBeenCalledWith(
+        expect.objectContaining({ workerId: 'w1', deviceIndex: 0 }),
+        'Pool pressure on a solo-device group — nothing to evict',
+      );
+    });
+
+    it('V5: engine budget respected — empty selection and breaker path skip teardown, recordEviction only on success', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victimOf('alpha'), victimOf('beta')]);
+      // Breaker open / capped / undersized all surface as an empty engine result.
+      mocks.eviction.selectVictims.mockReturnValue([]);
+
+      await service.tick();
+
+      expect(mocks.eviction.selectVictims).toHaveBeenCalledOnce();
+      expect(mocks.sleepWake.stopModel).not.toHaveBeenCalled();
+      expect(mocks.eviction.recordEviction).not.toHaveBeenCalled();
+
+      // Successful teardown records once per victim with the pressure reason.
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: 'inst-alpha',
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+      await service.tick();
+      expect(mocks.eviction.recordEviction).toHaveBeenCalledWith('pressure');
+      expect(mocks.instanceRepository.delete).toHaveBeenCalledOnce();
+    });
+
+    it('V5: recordEviction per successful teardown — two-victim wave records twice', async () => {
+      // Fresh service so the previous tick's fire consumed this device's counter; the
+      // two-victim wave pins the per-success semantics (spec V5) and the Postgres row delete.
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victimOf('alpha'), victimOf('beta')]);
+      mocks.lifecycle.getInstance.mockResolvedValue(victimOf('alpha'));
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: 'inst-alpha',
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+        {
+          instanceId: 'inst-beta',
+          modelName: 'beta',
+          state: ModelLifecycleState.SLEEPING,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+      await service.tick();
+      expect(mocks.eviction.recordEviction).toHaveBeenCalledTimes(2);
+      expect(mocks.instanceRepository.delete).toHaveBeenCalledTimes(2);
+    });
+
+    it('V6: stop action order per victim — stopModel, then runner reap (404 tolerated), then record', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      const victim = victimOf('alpha', {
+        state: ModelLifecycleState.SLEEPING,
+        runnerId: 'runner-1',
+      });
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victim, victimOf('beta')]);
+      mocks.lifecycle.getInstance.mockResolvedValue(victim);
+      mocks.workerPool.getWorker.mockReturnValue(
+        makeWorker({ workerId: 'w1', status: WorkerStatus.ONLINE }),
+      );
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: victim.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.SLEEPING,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+
+      await service.tick();
+
+      // Assert the order directly: vitest's toHaveBeenCalledBefore compares
+      // invocationCallOrder across separate vi.fn() instances and misreports here.
+      expect(mocks.sleepWake.stopModel.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.workerClient.stopRunner.mock.invocationCallOrder[0],
+      );
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-1');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('alpha', victim.instanceId);
+      expect(mocks.eviction.recordEviction).toHaveBeenCalledWith('pressure');
+      expect(mocks.notifications.createNotification).toHaveBeenCalledOnce();
+    });
+
+    it('V6: 404 from the worker reap is tolerated; non-404 fails the victim in isolation', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      const victim = victimOf('alpha', { runnerId: 'runner-1' });
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victim, victimOf('beta')]);
+      mocks.lifecycle.getInstance.mockResolvedValue(victim);
+      mocks.workerPool.getWorker.mockReturnValue(
+        makeWorker({ workerId: 'w1', status: WorkerStatus.ONLINE }),
+      );
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: victim.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+
+      mocks.workerClient.stopRunner.mockRejectedValue(
+        new WorkerHttpError('runner already gone', 404),
+      );
+      await service.tick();
+      expect(mocks.eviction.recordEviction).toHaveBeenCalledWith('pressure');
+
+      // A non-404 reap failure fails the victim — but never the step. Fresh service so the
+      // debounce starts clean (the previous tick consumed this device's counter).
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.workerClient.stopRunner.mockRejectedValue(new Error('worker unreachable'));
+      mocks.eviction.recordEviction.mockClear();
+      await service.tick();
+      expect(mocks.eviction.recordEviction).not.toHaveBeenCalled();
+      expect(mocks.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'alpha' }),
+        'Pool-pressure victim teardown failed — isolated, remaining victims continue',
+      );
+    });
+
+    it('V6: a non-404 reap failure reclassifies the stranded STOPPED record as ERROR', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      // Snapshot time: the victim is ACTIVE (so it is a group member); stopModel then
+      // settles STOPPED (holds released) before the reap fails — the reclassify re-read (a
+      // later getInstance call) finds the retained record in STOPPED and reclassifies it.
+      const victim = victimOf('alpha', { runnerId: 'runner-1' });
+      const stranded = { ...victim, state: ModelLifecycleState.STOPPED };
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victim, victimOf('beta')]);
+      mocks.lifecycle.getInstance.mockResolvedValueOnce(victim).mockResolvedValue(stranded);
+      mocks.workerPool.getWorker.mockReturnValue(
+        makeWorker({ workerId: 'w1', status: WorkerStatus.ONLINE }),
+      );
+      mocks.workerClient.stopRunner.mockRejectedValue(new Error('worker unreachable'));
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: victim.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+
+      await service.tick();
+
+      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+        'alpha',
+        victim.instanceId,
+        ModelLifecycleState.ERROR,
+        { errorMessage: 'Pool-pressure teardown could not be confirmed (runner reap failed)' },
+      );
+      expect(mocks.eviction.recordEviction).not.toHaveBeenCalled();
+      expect(mocks.instanceRepository.delete).not.toHaveBeenCalled();
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'alpha' }),
+        'Stranded pool-pressure victim reclassified STOPPED → ERROR',
+      );
+    });
+
+    it('V6: silent reap skips are observable — no runnerId / unknown worker warn', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      // runnerId null (nothing dispatched yet) → the reap block skips with a warn.
+      const victim = victimOf('alpha');
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victim, victimOf('beta')]);
+      mocks.lifecycle.getInstance.mockResolvedValue(victim);
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: victim.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+
+      await service.tick();
+
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'alpha', instanceId: victim.instanceId }),
+        'Pool-pressure reap skipped: no runnerId or worker client (nothing dispatched yet)',
+      );
+      // The stop itself still completes — the skip is a bookkeeping gap, not a teardown failure.
+      expect(mocks.eviction.recordEviction).toHaveBeenCalledWith('pressure');
+    });
+
+    it('V6: two fired devices in one tick share ONE maxPerCycle budget (#276-style union bound)', async () => {
+      service = createPressureService(
+        enabledConfig({ poolPressureDebounceTicks: 1, evictionMaxPerCycle: 2 }),
+      );
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([
+        pressureBudget({ deviceIndex: 0 }),
+        pressureBudget({ deviceIndex: 1 }),
+      ]);
+      const victims = [
+        {
+          instanceId: 'inst-a0',
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+        {
+          instanceId: 'inst-b0',
+          modelName: 'beta',
+          state: ModelLifecycleState.SLEEPING,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ];
+      mocks.eviction.selectVictims.mockReturnValue(victims);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        victimOf('alpha'),
+        victimOf('beta'),
+        victimOf('gamma', { deviceIndices: [1] }),
+        victimOf('delta', { deviceIndices: [1] }),
+      ]);
+
+      await service.tick();
+
+      // Both devices fired (two engine calls) but the total stops are sliced to the shared
+      // tick budget: device 0 spends it, device 1's wave is capped to zero stops.
+      expect(mocks.eviction.selectVictims).toHaveBeenCalledTimes(2);
+      expect(mocks.sleepWake.stopModel).toHaveBeenCalledTimes(2);
+      expect(mocks.eviction.recordEviction).toHaveBeenCalledTimes(2);
+    });
+
+    it('V7: a concurrent user action colliding on the victim is logged and isolated, not thrown', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      const victim = victimOf('alpha');
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victim, victimOf('beta')]);
+      // Instance vanished mid-wave (user stop won the race): the mocked stopModel rejects
+      // exactly as the real one does when getInstance returns null (modelNotFound), inside
+      // the per-victim try block.
+      mocks.lifecycle.getInstance.mockResolvedValue(null);
+      mocks.sleepWake.stopModel.mockRejectedValue(
+        new ControlPlaneError(404, 'MODEL_NOT_FOUND', 'alpha/inst-alpha'),
+      );
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: victim.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+
+      await expect(service.tick()).resolves.toBeUndefined();
+      expect(mocks.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'alpha', instanceId: victim.instanceId }),
+        'Pool-pressure victim teardown failed — isolated, remaining victims continue',
+      );
+    });
+
+    it('V8: one EVICTION_TRIGGERED cluster event per victim with the pool-pressure payload', async () => {
+      service = createPressureService(enabledConfig({ poolPressureDebounceTicks: 1 }));
+      mocks.memoryBudget.getAllBudgets.mockReturnValue([pressureBudget()]);
+      const victim = victimOf('alpha');
+      mocks.lifecycle.getAllInstances.mockResolvedValue([victim, victimOf('beta')]);
+      mocks.lifecycle.getInstance.mockResolvedValue(victim);
+      mocks.eviction.selectVictims.mockReturnValue([
+        {
+          instanceId: victim.instanceId,
+          modelName: 'alpha',
+          state: ModelLifecycleState.ACTIVE,
+          workerId: 'w1',
+          memoryBytes: 8_000_000_000,
+          lastInferenceAt: null,
+          pinned: false,
+        },
+      ]);
+
+      await service.tick();
+
+      const evictionCalls: [string[], string][] = (
+        mocks.redis.publish.mock.calls as unknown as [string[], string][]
+      ).filter(([, payload]) => payload.includes(ClusterEventType.EVICTION_TRIGGERED));
+      expect(evictionCalls).toHaveLength(1);
+      const firstCall = evictionCalls.at(0);
+      const event = JSON.parse(firstCall![1]) as ClusterEvent;
+      expect(event.modelName).toBe('alpha');
+      expect(event.workerId).toBe('w1');
+      expect(event.data).toMatchObject({ deviceIndex: 0, trigger: 'pool-pressure' });
+      expect(mocks.notifications.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: 'danger',
+          source: { type: 'model', name: 'alpha' },
+        }),
+      );
     });
   });
 });

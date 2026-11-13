@@ -13,6 +13,11 @@ export interface Config {
   // Phase 5 (#276): elastic co-location oversubscription cap, integer percent of the device's
   // reported KV-pool totalBytes. 0 disables elastic headroom entirely (plain byte-fit only).
   readonly colocationMaxPoolHeadroomPercent: number;
+  // Phase 5 (#277): shared-pool pressure response knobs (see poolPressure*Env below).
+  readonly poolPressureEnabled: boolean;
+  readonly poolPressureThresholdPercent: number;
+  readonly poolPressureReleaseTargetPercent: number;
+  readonly poolPressureDebounceTicks: number;
   readonly sleepTimeoutSecs: number;
   readonly wakeTimeoutSecs: number;
   readonly healthCheckIntervalSecs: number;
@@ -95,6 +100,52 @@ function colocationMaxPoolHeadroomPercentEnv(): number {
   return parsed;
 }
 
+/**
+ * Phase 5 (#277) shared-pool pressure knobs. Threshold/release-target are integer percents
+ * (both 1–100, per the spec's knob table; release target validated below threshold at load — a
+ * release target at or above the trigger threshold would leave every response wave short of
+ * relieving the pressure it just reacted to). Debounce is an integer 1–60 (0 would act on the
+ * first single-tick spike, defeating the debounce-heavy default posture; the upper bound keeps
+ * a fat-fingered value from silently disabling the response entirely). Same posture as
+ * SARDEENZ_SIF_IMPORTER / SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT: fail loudly at boot
+ * instead of silently honoring a mistyped value.
+ */
+function poolPressureThresholdPercentEnv(): number {
+  const raw = process.env['SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT'];
+  if (raw === undefined) return 90;
+  const parsed = /^-?\d+$/.test(raw.trim()) ? parseInt(raw, 10) : NaN;
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 100) {
+    throw new Error(
+      `Environment variable SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT must be an integer percent between 1 and 100, got: ${raw}`,
+    );
+  }
+  return parsed;
+}
+
+function poolPressureReleaseTargetPercentEnv(): number {
+  const raw = process.env['SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT'];
+  if (raw === undefined) return 75;
+  const parsed = /^-?\d+$/.test(raw.trim()) ? parseInt(raw, 10) : NaN;
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 100) {
+    throw new Error(
+      `Environment variable SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT must be an integer percent between 1 and 100, got: ${raw}`,
+    );
+  }
+  return parsed;
+}
+
+function poolPressureDebounceTicksEnv(): number {
+  const raw = process.env['SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS'];
+  if (raw === undefined) return 3;
+  const parsed = /^-?\d+$/.test(raw.trim()) ? parseInt(raw, 10) : NaN;
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 60) {
+    throw new Error(
+      `Environment variable SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS must be an integer between 1 and 60, got: ${raw}`,
+    );
+  }
+  return parsed;
+}
+
 const DEFAULT_CATALOG_URL =
   'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml';
 
@@ -130,6 +181,18 @@ export function loadConfig(): Config {
     );
   }
 
+  // Phase 5 (#277) shared-pool pressure response. Both percents resolve to their defaults
+  // BEFORE the cross-check so the invariant also holds when only one of the two is set
+  // (e.g. THRESHOLD=60 with the default target 75 would otherwise boot a wave that can never
+  // relieve the band it fires in).
+  const poolPressureThresholdPercent = poolPressureThresholdPercentEnv();
+  const poolPressureReleaseTargetPercent = poolPressureReleaseTargetPercentEnv();
+  if (poolPressureReleaseTargetPercent >= poolPressureThresholdPercent) {
+    throw new Error(
+      `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT (${poolPressureReleaseTargetPercent}) must be below SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT (${poolPressureThresholdPercent})`,
+    );
+  }
+
   return {
     listenAddr: host ?? '0.0.0.0',
     listenPort: parseInt(portStr ?? '3000', 10),
@@ -148,6 +211,12 @@ export function loadConfig(): Config {
     // Phase 5 (#276) oversubscription cap: percent of the device's reported KV-pool totalBytes.
     // Decision 2026-11-13: default 50; 0 disables elastic headroom entirely (plain byte-fit).
     colocationMaxPoolHeadroomPercent: colocationMaxPoolHeadroomPercentEnv(),
+    // Off by default until the on-cluster pressure behaviour is proven (the deployment
+    // manifest pins the knob so operators can see and flip it).
+    poolPressureEnabled: boolEnv('SARDEENZ_POOL_PRESSURE_ENABLED', false),
+    poolPressureThresholdPercent,
+    poolPressureReleaseTargetPercent,
+    poolPressureDebounceTicks: poolPressureDebounceTicksEnv(),
     sleepTimeoutSecs: intEnv('SARDEENZ_SLEEP_TIMEOUT_SECS', 300),
     wakeTimeoutSecs: intEnv('SARDEENZ_WAKE_TIMEOUT_SECS', 300),
     healthCheckIntervalSecs: intEnv('SARDEENZ_HEALTH_CHECK_INTERVAL_SECS', 10),

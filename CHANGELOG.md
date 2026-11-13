@@ -75,6 +75,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   close, not in this change. A description-only contract reword rides along:
   `WorkerModelInfo.memoryUsedBytes`'s absence clause now also covers a co-located device-scope
   row deliberately dropped post-#278.
+- **Phase 5: shared-pool pressure response (issue #277).** The reconciliation tick gains an
+  `evaluatePoolPressure` step (directly after `refreshMemoryBudgets`): when a device's
+  kvcached pool stays at/above `SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT` (integer percent,
+  default **90**) of `kvCache.totalBytes` for `SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS`
+  (default **3**) consecutive ticks, the control plane reclaims capacity through the existing
+  `EvictionEngine` — the system's first memory-pressure eviction trigger (eviction is
+  otherwise demand-only). Victims are drawn ONLY from the pressure device's co-location group
+  (`coLocationGroup` in `placement.ts` — the single derivation, imported; a pressure event on
+  device D never tears down a co-tenant on device E), with a solo-device guard (a device with
+  a single resident cannot be relieved by evicting it).
+  Victim action = **stop** (decision 2026-11-13): the existing reconciliation-native teardown
+  — `stopModel` (deliberately **drain-free**: the null runner client skips `waitForDrain`, so
+  pressure relief cuts in-flight requests instead of waiting on the traffic causing the
+  pressure; the shim-side stop still gives the runner its SIGTERM grace), then best-effort
+  `stopRunner` process reap (404-tolerant; a non-404 failure reclassifies the stranded STOPPED
+  record as observable ERROR), instance record removed, holds released by `stopModel` itself
+  — sized by configured `requiredMemory` (the sizing overshoot for a pool-sized problem is
+  accepted); the wave's `requiredBytes` targets the excess above
+  `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT` (integer percent, default **75**, must stay
+  below the threshold — both percents resolve to their defaults before the boot cross-check).
+  The fired devices of one tick share one `SARDEENZ_EVICTION_MAX_PER_CYCLE` budget (N fired
+  devices can no longer evict N× the cap), the wave instruments `evictionDuration` like the
+  other eviction paths, and the engine's circuit breaker is shared with the deploy/wake paths,
+  never bypassed; each stopped victim logs a wave record, sends a danger notification, and
+  publishes the first `EVICTION_TRIGGERED` cluster event (existing enum, no contract change).
+  Telemetry-tolerance is structural: stale budgets, devices without a `kvCache` block, and
+  zero pool totals never trigger. The whole evaluator is off until
+  `SARDEENZ_POOL_PRESSURE_ENABLED=true` (shipped `'false'` in `deployment/`; leader failover
+  resets the in-memory debounce counters — the conservative direction).
 
 ### Security
 
