@@ -80,9 +80,9 @@ posture, and the production worker agent's SIF-launch path.
     usage) — needed new placement logic keyed on the `kvCacheElasticSharing` capability (Task 5),
     plus a guard against _silently_ co-locating two **non**-kvcached runners that would OOM a real
     GPU. Deferring it here was the right call — Phase 4 only needed the capability flag to key on.
-    It shipped as **Phase 5** ([`phase5.md`](phase5.md)): the fail-closed elastic co-location
-    policy (#276), the shared-pool pressure response (#277) and the consumer-side attribution rule
-    (#278) deliver that guard, and the on-cluster proof is Gate 9b in `phase5.md`.
+    Phase 5 ([`phase5.md`](phase5.md)) delivers that guard (fail-closed elastic policy #276,
+    shared-pool pressure response #277, consumer-side attribution rule #278); its on-cluster
+    proof is the Gate 9b recipe in `phase5.md`.
 
 ## Dependencies
 

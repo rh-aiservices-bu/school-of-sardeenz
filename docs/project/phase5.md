@@ -21,10 +21,6 @@ gated by its own scoped suites.
 execution of the **Gate 9b** recipe below. Its run is recorded in [`status.md`](status.md)'s
 deploy-only verification list at phase close — this doc is the recipe, not the run record.
 
-This document is the phase's plan and verification record; [`status.md`](status.md) flips to
-"Phase 5 implemented" — and the Gate 9b run joins its deploy-only verification list — at phase
-close, not per-issue.
-
 ## Goal
 
 Let the control plane deliberately place several kvcached-capable models on one GPU when their
@@ -39,7 +35,8 @@ via kvcached (spike Gate 9d); this phase turns that into a control-plane placeme
 ## Design notes
 
 One short section per work item — the authoritative design lives in each issue's spec and decision
-comments; this doc records what shipped and how it fits together.
+comments; this doc records what shipped and how it fits together. Landing waves — W1: #276 ∥ #278
+→ this document (#279); W2: #277 after #276 (committed, in review, landing on this phase branch).
 
 ### #276 — Co-location placement policy
 
@@ -51,8 +48,10 @@ declaring `kvCacheElasticSharing` on the target worker, and the device reports a
 Key properties:
 
 - **Fail-closed capability guard**: an unresolvable co-resident (deleted model record, worker no
-  longer reporting the runner type, unknown placement with null/empty `deviceIndices`, an ERROR
-  instance that retains its reservation hold) counts as non-elastic and blocks co-location.
+  longer reporting the runner type, any unknown-placement (null/empty `deviceIndices`) resident —
+  including an ERROR instance that retains its reservation hold) counts as non-elastic and blocks
+  co-location; an ERROR instance **with** `deviceIndices` is an ordinary co-location-group member
+  whose runner type resolves normally (it blocks only when that type is missing or non-elastic).
 - **Oversubscription headroom** is
   `min(min(freeBytes + preallocBytes, poolTotalBytes), cap% × poolTotalBytes)` from the
   device's KV-pool telemetry, with the cap set by
@@ -109,7 +108,7 @@ without NVML can no longer render two whole-device bars on one card.
 - Dashboard: deploy-form `allowCoLocation` switch + i18n; rendering of already-deduped figures.
 - Deployment: `SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT` wired through `deployment/`; the
   `SARDEENZ_POOL_PRESSURE_*` knobs join `deployment/` with #277's merge.
-- Docs: this file (the `overall-plan.md` §Phase 5 "will be written as `phase5.md`" promise);
+- Docs: this file (linked from [`overall-plan.md`](overall-plan.md)'s Phase 5 section);
   CHANGELOG `[Unreleased]` entries per item.
 - At phase close: `status.md` flip + the Gate 9b run recorded in its deploy-only list; the
   sleep-keeps-hold-under-co-location and oversubscription-cap decisions may be ratified as an ADR
@@ -145,9 +144,10 @@ and the elastic pool is observed (`kvCache` blocks), which Gate 9 never asserts.
   `facebook/opt-125m` per the spike runbook (`phase4-apptainer-spike.md` §9b; runners stay
   offline at runtime, `HF_HUB_OFFLINE=1` is baked into the images). **Two distinct weights
   directories** (two copies of the same small model is acceptable — the recipe exercises memory
-  mechanics, not model identity; `modelPath` must be unique per model).
+  mechanics, not model identity; each model gets its own `modelPath` directory).
 - Control plane reachable with its bearer token (`SARDEENZ_API_TOKEN` → `Authorization: Bearer …`
-  on `/api/v1/*`; fail-closed — the control plane refuses to start without the token configured).
+  on `/api/v1/*`; fail-closed — the control plane refuses to start without the token configured;
+  dev opt-out: `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true`).
 - The worker runs the production (Apptainer) launcher so `SARDEENZ_DEVICE_INDICES` is set —
   without it the vLLM shim omits `kvCache` from `/memory-report`.
 
@@ -155,7 +155,9 @@ and the elastic pool is observed (`kvCache` blocks), which Gate 9 never asserts.
 
 1. **Deploy model A through the CP.** `POST /api/v1/models` with the required fields
    (`modelName`, `runnerType: "vllm"`, `modelPath`, `requiredMemory`) **and
-   `allowCoLocation: true`** → `202` with the first `instanceId`. Poll
+   `allowCoLocation: true`** → `202` with the first `instanceId`. The deploy may also carry
+   `runtimeModule` (e.g. `vllm-0.21`; optional — when omitted the production worker falls back to
+   `<runnerType>-<engineConfig.version>`). Poll
    `GET /api/v1/models/{a}` until the instance is `ACTIVE` with `deviceIndices` populated (the
    control plane's `ACTIVE` maps to the worker-side runner `READY` — the deploy path health-polls
    until `READY|BUSY`). Within byte capacity this succeeds with today's placement; nothing
@@ -248,5 +250,3 @@ and the elastic pool is observed (`kvCache` blocks), which Gate 9 never asserts.
   invariant), `packages/contracts/specs/control-plane.yaml` (`allowCoLocation`,
   `DeviceInfo.kvCache`, `MoveModelInstanceRequest`), `packages/contracts/specs/worker-agent.yaml`
   (`attribution` on `InstanceMemoryMeasurement`).
-- `status.md` flips to implemented, and the Gate 9b run joins its deploy-only verification list,
-  at phase close — deliberately not edited per-item.
