@@ -447,6 +447,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **vLLM runner shim: the active-request scrape now matches real `/metrics` text (issue #239).**
+  It matched `"vllm:num_requests_running "` with a trailing space, but vLLM exports these gauges
+  with labels (`vllm:num_requests_running{model_name="…",engine="0"} 8.0`), so the line never
+  matched: `GET /health` reported `activeRequests: 0` whenever metrics were reachable, and the
+  `POST /sleep` guard (`active > 0` → 409) never tripped — a sleep offloaded weights out from
+  under in-flight generations. A new pure parser (`metrics.py`) matches the metric name followed
+  by `{` or whitespace (never a `_`-suffixed sibling such as `_total`/`_bucket`), sums every
+  label series (TP/DP emit several), requires **both** the running and waiting series to be
+  present (a half-parsed scrape is not a drain signal), maps any non-finite sample to `None`
+  before the final `int()`, and leaves the existing fail-open rule untouched: an unreadable
+  scrape is still `None`, which skips the guard and lets the sleep proceed. Two consequences are
+  user-visible and accepted: a request that starts in the control plane's drain→sleep window now
+  turns a previously "successful" sleep into a 409 → instance ERROR (a loud failure instead of
+  destroyed generations; no CP-side drain retry is in scope), and a scrape that returns 200 with
+  an unrecognized body now behaves like a failed scrape (drain waits out `sleepTimeoutMs`).
+  **Release gate:** capture a live vLLM 0.26 `/metrics` body on a GPU runner and confirm the
+  parser's shape assumptions before relying on the drain behaviour in production.
+
 - **Dev worker: a runner that accepts the `/health` connection but never answers can no longer
   hang the serialized cold-start chain (issue #243).**
   `defaultHealthCheck` now forwards an `AbortSignal` into its `fetch`, and `waitUntilHealthy`
@@ -550,13 +568,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Runner shims: blocking torch/kvcached memory reads move off the event loop (issue #253).**
   Both shims' `GET /memory-report` and `POST /sleep` handlers called the synchronous
-  `memory_report()` inline from `async` code, so a slow `torch.cuda.mem_get_info` /
-  `memory_reserved` query under device contention, or a contended kvcached shared-memory
+  `memory_report()` inline from `async` code, so a slow `torch.cuda.mem_get_info` query under
+  device contention, or a contended kvcached shared-memory
   `flock`, froze the event loop — stalling `/health` for the launcher probe and the shim's own
   liveness poller (a stalled shim could read as wedged and trip restart logic). The four call
-  sites now await `asyncio.get_running_loop().run_in_executor(None,
-  functools.partial(memory_report, args.device_type))` — the default executor, the same pattern
-  as the ONNX `session.run` offload. `memory_report` itself stays synchronous and is still
+  sites now hand it to the default executor —
+  `await loop.run_in_executor(None, functools.partial(memory_report, args.device_type))` — the
+  same pattern as the ONNX `session.run` offload. `memory_report` itself stays synchronous and is still
   called exactly once per request; the 409 paths, response shapes and `deviceMemoryFreedBytes`
   value are unchanged. The shims' app-level test coverage is also tightened (`tests/test_app.py`:
   the real `create_app` over the conformance doubles, `httpx.ASGITransport` on the test's own

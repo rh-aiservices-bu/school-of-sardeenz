@@ -56,14 +56,15 @@ def test_memory_report_shape(shim_client):
     for device in body["devices"]:
         for key in ("deviceIndex", "deviceType", "memoryUsedBytes", "memoryTotalBytes"):
             assert key in device
-        # Optional attribution scope (#244): the contract keeps it optional for
-        # legacy images that predate the field, so this suite only validates the
-        # value when an emitter declares one; presence itself is pinned by each
-        # shim's own unit tests against its real memory.py emitter.
-        if "attribution" in device:
-            assert device["attribution"] in ("runner", "device"), (
-                f"{_name}: attribution must be 'runner' or 'device', got {device.get('attribution')!r}"
-            )
+        # Attribution scope (#244). The contract keeps the field OPTIONAL (a legacy
+        # image predating it must still validate), but both shims in this suite are
+        # current emitters, so the conformance doubles must declare one — that is
+        # what pins the emitter side of the contract here; the optionality itself is
+        # covered by the shims' unit tests over a report without the key.
+        assert device.get("attribution") in ("runner", "device"), (
+            f"{_name}: a current emitter must declare attribution 'runner' or 'device', "
+            f"got {device.get('attribution')!r}"
+        )
         # Optional kvcached pool block (#165): absent unless the runner has a
         # kvcached pool on the device; when present, it must be a full partition.
         if "kvCache" in device:
