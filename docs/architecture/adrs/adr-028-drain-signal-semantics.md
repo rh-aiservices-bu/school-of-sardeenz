@@ -27,7 +27,7 @@ sleep from the control plane, or treating a 200-but-unparsed body as drained.
 ## Decision
 
 1. **The drain signal is two-valued: a count, or unknown.** A missing, unparseable, or
-   non-finite `activeRequests` means *unknown* — never `0`. Only a successful scrape with both
+   non-finite `activeRequests` means _unknown_ — never `0`. Only a successful scrape with both
    expected metrics present yields a count (vLLM requires both `running` and `waiting`; a
    half-parsed scrape is unknown).
 2. **Fail-open on unknown, at both ends.** The shim's `POST /sleep` guard is skipped when the

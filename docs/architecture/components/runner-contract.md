@@ -135,7 +135,7 @@ MLServer: the `rest_server_requests_in_progress` gauge). An unreachable or unpar
 reported as absent, never as `0` — the same unknown-vs-drained distinction the control plane
 applies.
 
-The *worker* budgets each poll: every probe is raced against an abortable per-probe timer
+The _worker_ budgets each poll: every probe is raced against an abortable per-probe timer
 (`ApptainerLauncherConfig.healthProbeTimeoutMs`, default 5 s — deliberately a launcher-config
 field, not a `SARDEENZ_*` env var, since no operator-facing knob is warranted), so a runner that
 accepts the connection but never answers cannot hang the serialized cold-start chain: the

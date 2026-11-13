@@ -38,7 +38,7 @@ notion — the double-count was silent until #244 made it declarable.
    The conformance suite requires every current emitter to declare a scope.
 3. **Only the worker's NVML sample is process-attributed.** The worker is the sole component with
    per-process visibility; its instance measurements are the authority for per-runner usage. A
-   shim's whole-device figure is an *observation about the device*, never an attribution to the
+   shim's whole-device figure is an _observation about the device_, never an attribution to the
    reporting runner.
 4. **Consumers must branch on `attribution` before aggregating.** Device-scope figures MUST NOT
    be summed across runners sharing a device, and unknown-scope figures MUST NOT be summed as if
@@ -65,7 +65,7 @@ notion — the double-count was silent until #244 made it declarable.
 
 ## Non-goals
 
-- Per-model attribution *inside* the kvcached pool (which model owns which KV blocks) — Phase 5
+- Per-model attribution _inside_ the kvcached pool (which model owns which KV blocks) — Phase 5
   territory at the earliest; today's pool stats are per-device only.
 - Changing the worker-agent contract's `InstanceMemoryMeasurement` shape — NVML rows are already
   per-runner and correct.
