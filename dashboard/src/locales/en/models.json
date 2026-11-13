@@ -14,6 +14,7 @@
       "runtimeModule": "Runtime Module",
       "runtimeModulePlaceholder": "Select a runtime module",
       "pinned": "Pinned",
+      "allowCoLocation": "Allow Co-location",
       "engineConfig": "Engine Config (JSON)",
       "engineArgs": "Engine Arguments",
       "engineArgsPlaceholder": "--max-model-len=8192\n--gpu-memory-utilization=0.85\n--enable-prefix-caching",
@@ -30,6 +31,7 @@
       "runtimeModule": "Installed SIF the worker execs (→ /modules/<name>.sif), filtered to the selected runner.",
       "runtimeModuleNone": "No runtime modules for this runner are installed. Import one from the Runner Catalog to deploy.",
       "pinned": "Pinned models cannot be evicted by the LRU eviction engine.",
+      "allowCoLocation": "Opt in to kvcached elastic co-location: the model may share a GPU with elastic-sharing (kvcached) models past plain capacity, with headroom capped by the cluster's co-location policy. Default off — required bytes must fit.",
       "engineConfig": "Optional engine-specific configuration. Must be valid JSON if provided.",
       "engineArgs": "One engine CLI flag per line (--flag=value, --flag value, or --flag). Passed verbatim to the engine. Blank lines and # comments are ignored.",
       "runnerTypeFallback": "No worker capabilities are available yet — showing default runner types. The list will update once workers come online."

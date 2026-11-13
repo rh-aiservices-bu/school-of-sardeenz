@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
 
-import { MemoryBudgetService } from '../memory-budget.js';
+import { MemoryBudgetService, sumInstanceMeasurementsByInstance } from '../memory-budget.js';
 import type { Redis } from '../../clients/redis.js';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +62,7 @@ function workerMemoryReport(
     modelName: string;
     deviceIndex: number;
     memoryUsedBytes: number;
+    attribution?: 'runner' | 'device';
   }>,
 ): string {
   return JSON.stringify({
@@ -791,7 +792,12 @@ describe('MemoryBudgetService — optional NVML device fields', () => {
 describe('MemoryBudgetService — kvcached pool block (issue #165)', () => {
   let warnSpy: MockInstance<(...args: unknown[]) => void>;
 
-  const validKV = { totalBytes: 16_000_000_000, usedBytes: 6_000_000_000, preallocBytes: 2_000_000_000, freeBytes: 8_000_000_000 };
+  const validKV = {
+    totalBytes: 16_000_000_000,
+    usedBytes: 6_000_000_000,
+    preallocBytes: 2_000_000_000,
+    freeBytes: 8_000_000_000,
+  };
 
   beforeEach(() => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -819,7 +825,9 @@ describe('MemoryBudgetService — kvcached pool block (issue #165)', () => {
     const budget = await service.refreshWorkerBudget(workerId);
 
     expect(budget?.devices[0]?.kvCache).toEqual(validKV);
-    // Telemetry only — the kvCache block must not shift placement math.
+    // Parse-level invariant: the kvCache block must not shift usedBytes/availableBytes here —
+    // since #276 the only consumer is the placement pipeline's elastic co-location branch,
+    // which applies the headroom in placement.ts, never in this parse.
     expect(budget?.devices[0]?.usedBytes).toBe(8_000_000_000);
     expect(budget?.devices[0]?.availableBytes).toBe(8_000_000_000);
   });
@@ -943,7 +951,22 @@ describe('MemoryBudgetService — instances[] measured attribution', () => {
         },
       ],
       undefined,
-      [{ instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, memoryUsedBytes: 5e9 }],
+      [
+        {
+          instanceId: 'inst-a',
+          modelName: 'model-a',
+          deviceIndex: 0,
+          memoryUsedBytes: 5e9,
+          attribution: 'runner',
+        },
+        {
+          instanceId: 'inst-b',
+          modelName: 'model-b',
+          deviceIndex: 0,
+          memoryUsedBytes: 10e9,
+          attribution: 'device',
+        },
+      ],
     );
     const get = vi.fn().mockResolvedValue(report);
     const redis = { get } as unknown as Redis;
@@ -952,8 +975,56 @@ describe('MemoryBudgetService — instances[] measured attribution', () => {
     const budget = await service.refreshWorkerBudget(workerId);
 
     expect(budget?.instanceMeasurements).toEqual([
+      {
+        instanceId: 'inst-a',
+        modelName: 'model-a',
+        deviceIndex: 0,
+        measuredUsedBytes: 5e9,
+        attribution: 'runner',
+      },
+      {
+        instanceId: 'inst-b',
+        modelName: 'model-b',
+        deviceIndex: 0,
+        measuredUsedBytes: 10e9,
+        attribution: 'device',
+      },
+    ]);
+  });
+
+  it('drops a malformed attribution but keeps the row (#278)', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            memoryUsedBytes: 0,
+            memoryTotalBytes: 16_000_000_000,
+          },
+        ],
+        instances: [
+          {
+            instanceId: 'inst-a',
+            modelName: 'model-a',
+            deviceIndex: 0,
+            memoryUsedBytes: 5e9,
+            attribution: 5,
+          },
+        ],
+      }),
+    );
+    const redis = { get } as unknown as Redis;
+    const service = makeService(redis);
+
+    const budget = await service.refreshWorkerBudget(workerId);
+
+    expect(budget).not.toBeNull();
+    expect(budget?.instanceMeasurements).toEqual([
       { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, measuredUsedBytes: 5e9 },
     ]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('instances[0].attribution'));
   });
 
   it('drops a malformed instances entry but keeps the core report and any valid siblings', async () => {
@@ -1072,18 +1143,16 @@ describe('MemoryBudgetService — getClusterSummary (measured-only)', () => {
 
   it('never includes a reservedBytes or measuredUsedBytes key', async () => {
     const workerId = 'w1';
-    const get = vi
-      .fn()
-      .mockResolvedValue(
-        workerMemoryReport([
-          {
-            deviceIndex: 0,
-            deviceType: 'CUDA',
-            memoryUsedBytes: 0,
-            memoryTotalBytes: 16_000_000_000,
-          },
-        ]),
-      );
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport([
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
+      ]),
+    );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
@@ -1091,6 +1160,102 @@ describe('MemoryBudgetService — getClusterSummary (measured-only)', () => {
 
     const summary = service.getClusterSummary();
     expect(Object.keys(summary).sort()).toEqual(['availableBytes', 'totalBytes', 'usedBytes']);
+  });
+});
+
+describe('sumInstanceMeasurementsByInstance (attribution scope rule, ADR-027 / issue #278)', () => {
+  const m = (
+    instanceId: string,
+    deviceIndex: number,
+    measuredUsedBytes: number,
+    attribution?: 'runner' | 'device',
+  ) => ({
+    instanceId,
+    modelName: `model-${instanceId}`,
+    deviceIndex,
+    measuredUsedBytes,
+    attribution,
+  });
+
+  it('sums runner-scope rows across devices per instance', () => {
+    const byInstance = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 4e9, 'runner'),
+      m('inst-a', 1, 4e9, 'runner'),
+      m('inst-b', 0, 2e9, 'runner'),
+    ]);
+    expect(byInstance.get('inst-a')).toBe(8e9);
+    expect(byInstance.get('inst-b')).toBe(2e9);
+  });
+
+  it('keeps a device-scope row that is the only >0-byte row for its device (sole residency)', () => {
+    const byInstance = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 10e9, 'device'),
+      m('inst-a', 1, 2e9, 'runner'),
+    ]);
+    // device 0: sole >0-byte row → promoted; device 1: runner row → summed.
+    expect(byInstance.get('inst-a')).toBe(12e9);
+  });
+
+  it('drops two device-scope rows sharing a device (the #244 double-count)', () => {
+    const byInstance = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 10e9, 'device'),
+      m('inst-b', 0, 10e9, 'device'),
+    ]);
+    expect(byInstance.size).toBe(0);
+  });
+
+  it('drops a device-scope row when a runner-scope row exists for the same device, keeping the runner rows', () => {
+    const byInstance = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 4e9, 'runner'),
+      m('inst-b', 0, 10e9, 'device'),
+      m('inst-b', 1, 3e9, 'runner'),
+    ]);
+    // device 0: mixed → device row dropped, runner row kept; device 1: runner row kept.
+    expect(byInstance.get('inst-a')).toBe(4e9);
+    expect(byInstance.get('inst-b')).toBe(3e9);
+  });
+
+  it('treats an absent attribution like device-scope (fail-closed)', () => {
+    // Sole resident: promoted (same as device scope).
+    expect(sumInstanceMeasurementsByInstance([m('inst-a', 0, 10e9)]).get('inst-a')).toBe(10e9);
+    // Co-resident: dropped.
+    expect(
+      sumInstanceMeasurementsByInstance([m('inst-a', 0, 10e9), m('inst-b', 0, 10e9)]).size,
+    ).toBe(0);
+    // Mixed with a runner row: dropped, runner row kept.
+    const mixed = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 4e9, 'runner'),
+      m('inst-b', 0, 10e9),
+    ]);
+    expect(mixed.get('inst-a')).toBe(4e9);
+    expect(mixed.has('inst-b')).toBe(false);
+  });
+
+  it('ignores zero-byte rows when deciding residency and never lets devices interact', () => {
+    const byInstance = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 10e9, 'device'),
+      m('inst-b', 0, 0), // sleeping co-tenant: 0 bytes, device 0 — must NOT block promotion
+      m('inst-c', 1, 6e9, 'device'), // different device, no interaction with device 0
+    ]);
+    expect(byInstance.get('inst-a')).toBe(10e9);
+    expect(byInstance.get('inst-c')).toBe(6e9);
+    expect(byInstance.has('inst-b')).toBe(false);
+  });
+
+  it('device grouping never crosses workers (the caller splits per budget)', () => {
+    // Same deviceIndex reported by two workers: each call sees only its own worker's rows,
+    // so each worker's sole device-scope row is promoted independently.
+    const worker1 = sumInstanceMeasurementsByInstance([m('inst-a', 0, 10e9, 'device')]);
+    const worker2 = sumInstanceMeasurementsByInstance([m('inst-b', 0, 5e9, 'device')]);
+    expect(worker1.get('inst-a')).toBe(10e9);
+    expect(worker2.get('inst-b')).toBe(5e9);
+    // A single flat input mixing both workers' rows WOULD drop both — which is why
+    // getMeasuredByInstance calls the helper once per budget.
+    const flat = sumInstanceMeasurementsByInstance([
+      m('inst-a', 0, 10e9, 'device'),
+      m('inst-b', 0, 5e9, 'device'),
+    ]);
+    expect(flat.size).toBe(0);
   });
 });
 
@@ -1186,20 +1351,57 @@ describe('MemoryBudgetService — getMeasuredByInstance', () => {
     expect(service.getMeasuredByInstance().size).toBe(0);
   });
 
-  it('returns an empty map when no worker reported instance measurements', async () => {
-    const workerId = 'w1';
-    const get = vi
-      .fn()
-      .mockResolvedValue(
-        workerMemoryReport([
+  it('applies the scope rule: a co-located device-scope row is dropped, the runner row kept (#278)', async () => {
+    const { redis } = makeMockRedis({
+      [workerKey('w1')]: workerMemoryReport(
+        [
           {
             deviceIndex: 0,
             deviceType: 'CUDA',
             memoryUsedBytes: 0,
             memoryTotalBytes: 16_000_000_000,
           },
-        ]),
-      );
+        ],
+        undefined,
+        [
+          {
+            instanceId: 'inst-a',
+            modelName: 'model-a',
+            deviceIndex: 0,
+            memoryUsedBytes: 4e9,
+            attribution: 'runner',
+          },
+          {
+            instanceId: 'inst-b',
+            modelName: 'model-b',
+            deviceIndex: 0,
+            memoryUsedBytes: 10e9,
+            attribution: 'device',
+          },
+        ],
+      ),
+    });
+    const service = makeService(redis);
+
+    await service.refreshAll();
+
+    const byInstance = service.getMeasuredByInstance();
+    expect(byInstance.get('inst-a')).toBe(4e9);
+    expect(byInstance.has('inst-b')).toBe(false);
+  });
+
+  it('returns an empty map when no worker reported instance measurements', async () => {
+    const workerId = 'w1';
+    const get = vi.fn().mockResolvedValue(
+      workerMemoryReport([
+        {
+          deviceIndex: 0,
+          deviceType: 'CUDA',
+          memoryUsedBytes: 0,
+          memoryTotalBytes: 16_000_000_000,
+        },
+      ]),
+    );
     const redis = { get } as unknown as Redis;
     const service = makeService(redis);
 
@@ -1286,5 +1488,60 @@ describe('MemoryBudgetService — writeClusterMemorySnapshot content (measured-o
     expect('utilizationPercent' in device).toBe(false);
     expect('temperatureC' in device).toBe(false);
     expect('kvCache' in device).toBe(false);
+  });
+});
+
+describe('MemoryBudgetService — reservation holders accessor (#276)', () => {
+  function makeServiceWithDevice(): MemoryBudgetService {
+    const report = workerMemoryReport([
+      {
+        deviceIndex: 0,
+        deviceType: 'CUDA',
+        memoryUsedBytes: 0,
+        memoryTotalBytes: 16_000_000_000,
+      },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    return makeService({ get } as unknown as Redis);
+  }
+
+  it('returns per-instance entries with the coLocated flag', async () => {
+    const service = makeServiceWithDevice();
+    await service.refreshWorkerBudget('w1');
+
+    service.reserveCapacity('w1', 0, 'inst-a', 1000);
+    service.reserveCapacity('w1', 0, 'inst-b', 2000, { coLocated: true });
+
+    const holders = service.getReservationHolders('w1', 0);
+    expect(holders.get('inst-a')).toEqual({ bytes: 1000, coLocated: false });
+    expect(holders.get('inst-b')).toEqual({ bytes: 2000, coLocated: true });
+
+    // Read-only copy: mutating it must not touch the internal ledger.
+    holders.delete('inst-a');
+    expect(service.getReservationHolders('w1', 0).get('inst-a')).toEqual({
+      bytes: 1000,
+      coLocated: false,
+    });
+  });
+
+  it('updates after a release and returns empty for an unknown device', async () => {
+    const service = makeServiceWithDevice();
+    await service.refreshWorkerBudget('w1');
+
+    service.reserveCapacity('w1', 0, 'inst-a', 1000);
+    service.releaseInstanceReservations('inst-a');
+    expect(service.getReservationHolders('w1', 0).size).toBe(0);
+    expect(service.getReservationHolders('w1', 9).size).toBe(0);
+  });
+
+  it('reserveCapacity keeps idempotent-set semantics with the annotation', async () => {
+    const service = makeServiceWithDevice();
+    await service.refreshWorkerBudget('w1');
+
+    service.reserveCapacity('w1', 0, 'inst-a', 1000, { coLocated: true });
+    service.reserveCapacity('w1', 0, 'inst-a', 1000, { coLocated: true });
+    const holders = service.getReservationHolders('w1', 0);
+    expect(holders.size).toBe(1);
+    expect(holders.get('inst-a')).toEqual({ bytes: 1000, coLocated: true });
   });
 });

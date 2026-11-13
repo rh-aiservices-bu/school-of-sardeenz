@@ -169,7 +169,11 @@ Each `DeviceMemoryUsage` entry includes:
   declare a scope; consumers treat an absent value as unknown.
 - `kvCache` (optional) — per-device kvcached elastic-pool stats (#165), present only when the
   runner participates in a pool; the four figures form the partition
-  `totalBytes = usedBytes + preallocBytes + freeBytes`.
+  `totalBytes = usedBytes + preallocBytes + freeBytes`. Since Phase 5 the control plane reads
+  these figures in exactly two placement paths: the elastic co-location branch (headroom from
+  `freeBytes`/`preallocBytes`, capped — #276) and the shared-pool pressure evaluator
+  (`usedBytes`/`totalBytes` against the pressure threshold — #277, off by default); every
+  other consumer, and all non-elastic placement math, treats the block as telemetry.
 
 An optional `MemoryBreakdown` provides category-level detail (weights, KV cache, activations, overhead) for engines that expose this introspection. Not all runners can provide it.
 
@@ -262,13 +266,14 @@ Returns a `RunnerCapabilities` object that the control plane calls **once** afte
 
 Runners should use these keys when applicable:
 
-| Key                  | Type    | Meaning                                  |
-| -------------------- | ------- | ---------------------------------------- |
-| `kvCacheOffload`     | boolean | Supports KV cache offload to host memory |
-| `prefixCaching`      | boolean | Supports prefix caching                  |
-| `streamingInference` | boolean | Supports SSE streaming responses         |
-| `chatTemplate`       | boolean | Supports chat template formatting        |
-| `toolUse`            | boolean | Supports function/tool calling           |
+| Key                     | Type    | Meaning                                                                                                                                                  |
+| ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kvCacheOffload`        | boolean | Supports KV cache offload to host memory                                                                                                                 |
+| `kvCacheElasticSharing` | boolean | Supports elastic, reclaimable KV-cache sharing across co-located runners (kvcached); keys the Phase 5 co-location policy — see "Role in Placement" below |
+| `prefixCaching`         | boolean | Supports prefix caching                                                                                                                                  |
+| `streamingInference`    | boolean | Supports SSE streaming responses                                                                                                                         |
+| `chatTemplate`          | boolean | Supports chat template formatting                                                                                                                        |
+| `toolUse`               | boolean | Supports function/tool calling                                                                                                                           |
 
 The `features` map is intentionally open-ended. Engine-specific keys beyond the well-known set are allowed. The control plane may use them for fine-grained placement or to enable engine-specific optimizations.
 
@@ -280,6 +285,8 @@ Capabilities feed directly into the [4-level placement pipeline](../adrs/adr-011
 2. **Hardware filtering** — `supportedDeviceTypes` filters to workers with compatible accelerators
 3. **Capacity filtering** — `maxTensorParallelism` validates multi-device placement requests
 4. **Strategy selection** — `supportedSleepLevels` informs eviction strategy (sleep vs. stop/start)
+
+`kvCacheElasticSharing` (Phase 5, #276) additionally gates the **co-location policy**: a model with `allowCoLocation` may be placed past naive byte-sum capacity on a device only when every resident instance — sleeping ones included — belongs to a runner type declaring this capability and the device reports a `kvCache` pool; the guard fails closed (an unresolvable co-resident blocks the placement), so non-kvcached runners are never silently co-located. See [`phase5.md`](../../project/phase5.md).
 
 ## Error Handling
 

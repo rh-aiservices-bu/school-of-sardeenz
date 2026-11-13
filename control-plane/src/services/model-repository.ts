@@ -14,6 +14,7 @@ export interface ModelRecord {
   servedModelName: string | null;
   displayName: string | null;
   pinned: boolean;
+  allowCoLocation: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,6 +33,7 @@ interface ModelRow {
   served_model_name: string | null;
   display_name: string | null;
   pinned: boolean;
+  allow_co_location: boolean | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -51,6 +53,7 @@ function rowToRecord(row: ModelRow): ModelRecord {
     servedModelName: row.served_model_name,
     displayName: row.display_name,
     pinned: row.pinned,
+    allowCoLocation: row.allow_co_location ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -72,10 +75,11 @@ export class ModelRepository {
     servedModelName?: string;
     displayName?: string;
     pinned?: boolean;
+    allowCoLocation?: boolean;
   }): Promise<ModelRecord> {
     const result = await this.db.query<ModelRow>(
-      `INSERT INTO models (name, runner_type, model_path, required_memory, device_type, tensor_parallel, engine_config, runtime_module, pinned, engine_args, served_model_name, display_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO models (name, runner_type, model_path, required_memory, device_type, tensor_parallel, engine_config, runtime_module, pinned, engine_args, served_model_name, display_name, allow_co_location)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         params.name,
@@ -90,6 +94,7 @@ export class ModelRepository {
         params.engineArgs ?? null,
         params.servedModelName ?? null,
         params.displayName ?? null,
+        params.allowCoLocation ?? false,
       ],
     );
     return rowToRecord(result.rows[0]);
@@ -119,13 +124,15 @@ export class ModelRepository {
       servedModelName?: string;
       displayName?: string;
       pinned: boolean;
+      allowCoLocation: boolean;
     },
   ): Promise<ModelRecord | null> {
     const result = await this.db.query<ModelRow>(
       `UPDATE models
        SET runner_type = $2, model_path = $3, required_memory = $4, device_type = $5,
            tensor_parallel = $6, engine_config = $7, runtime_module = $8, pinned = $9,
-           engine_args = $10, served_model_name = $11, display_name = $12, updated_at = now()
+           engine_args = $10, served_model_name = $11, display_name = $12,
+           allow_co_location = $13, updated_at = now()
        WHERE name = $1
        RETURNING *`,
       [
@@ -141,6 +148,7 @@ export class ModelRepository {
         params.engineArgs ?? null,
         params.servedModelName ?? null,
         params.displayName ?? null,
+        params.allowCoLocation,
       ],
     );
     return result.rows[0] ? rowToRecord(result.rows[0]) : null;

@@ -1919,6 +1919,17 @@ components:
           description: |
             If true, the model cannot be evicted by the LRU eviction
             engine. It must be explicitly stopped by an operator.
+        allowCoLocation:
+          type: boolean
+          default: false
+          description: |
+            Opt-in to kvcached elastic co-location: this model's instances may
+            be placed on a device past naive byte-sum capacity when every
+            instance already resident on that device (including sleeping ones)
+            belongs to a runner type declaring kvCacheElasticSharing on the
+            target worker, and the device reports a kvcached pool. Headroom is
+            bounded by the control plane's oversubscription cap. Default
+            false: bytes must fit (unchanged placement).
 
     ModelConfigurationUpdateRequest:
       type: object
@@ -1929,6 +1940,7 @@ components:
         - requiredMemory
         - tensorParallel
         - pinned
+        - allowCoLocation
       properties:
         displayName:
           $ref: "#/components/schemas/ModelDeploymentRequest/properties/displayName"
@@ -1952,6 +1964,8 @@ components:
           $ref: "#/components/schemas/ModelDeploymentRequest/properties/runtimeModule"
         pinned:
           $ref: "#/components/schemas/ModelDeploymentRequest/properties/pinned"
+        allowCoLocation:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/allowCoLocation"
 
     ModelDeploymentResponse:
       type: object
@@ -2249,6 +2263,12 @@ components:
           deprecated: true
           description: Engine-specific configuration (deprecated — see engineArgs).
           additionalProperties: true
+        allowCoLocation:
+          type: boolean
+          description: |
+            Whether the model opted in to kvcached elastic co-location
+            (see ModelDeploymentRequest.allowCoLocation). Present in the
+            detail payload so the edit form can hydrate the switch.
         engineArgs:
           type: array
           items:
@@ -2421,7 +2441,11 @@ components:
           description: |
             Measured state of the kvcached elastic KV-cache pool on this
             device (prealloc/used/free breakdown), relayed from the worker's
-            memory report. Telemetry only — never feeds placement math.
+            memory report. Since Phase 5 (#276), the placement pipeline's
+            elastic co-location branch reads `freeBytes`/`preallocBytes` as
+            bounded headroom (see `allowCoLocation` on
+            ModelDeploymentRequest); every other consumer — and all
+            non-elastic placement math — treats it as telemetry only.
             Absent when no kvcached pool is reported for this device; absent
             means absent, not zero.
           required:
@@ -2485,7 +2509,11 @@ components:
             Measured device memory consumed by this instance, in bytes,
             from the worker's NVML process attribution (stub-simulated on
             hosts without NVML). Absent when no measurement is attributed
-            yet (e.g. the instance is still starting).
+            yet (e.g. the instance is still starting), or when a co-located
+            device-scope (or unknown-scope) memory row was deliberately
+            dropped from per-instance figures because its device has other
+            >0-byte rows — the dropped bytes surface in the dashboard's
+            Other bucket instead.
         deviceIndices:
           type: array
           items:

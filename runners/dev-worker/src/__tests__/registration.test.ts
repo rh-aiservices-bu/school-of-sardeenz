@@ -444,7 +444,10 @@ describe('WorkerRegistration', () => {
       // device stats (the ledger has no notion of utilization/temperature/name).
       expect(report.devices[1].memoryUsedBytes).toBe(0);
       expect(report.devices[1].deviceName).toBeUndefined();
-      expect(report.instances).toEqual(sample.instances);
+      // NVML instance rows are stamped runner-scope at report assembly (ADR-027, #278).
+      expect(report.instances).toEqual(
+        sample.instances.map((row) => ({ ...row, attribution: 'runner' as const })),
+      );
     });
 
     it('falls back to the ledger for devices and to [] for instances when measuredProvider resolves null (CPU/stub box, no ledgerInstancesProvider wired)', async () => {
@@ -531,6 +534,116 @@ describe('WorkerRegistration', () => {
           modelName: 'stub-model',
           deviceIndex: 0,
           memoryUsedBytes: 2_000_000,
+        },
+      ]);
+    });
+
+    it('stamps NVML instance rows with attribution "runner" (#278)', async () => {
+      const sample: MeasuredMemorySample = {
+        devices: [{ deviceIndex: 0, memoryUsedBytes: 5_000_000 }],
+        instances: [
+          {
+            instanceId: 'inst-nvml-1',
+            modelName: 'llama-3-8b',
+            deviceIndex: 0,
+            memoryUsedBytes: 4_500_000,
+          },
+        ],
+      };
+      const measuredProvider = vi.fn(() => Promise.resolve(sample));
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        measuredProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+
+      // NVML rows are process-attributed by construction — the report stamps them runner-scope
+      // at assembly time (ADR-027, #278); measured-sample.ts stays untouched.
+      expect(report.instances).toEqual([
+        {
+          instanceId: 'inst-nvml-1',
+          modelName: 'llama-3-8b',
+          deviceIndex: 0,
+          memoryUsedBytes: 4_500_000,
+          attribution: 'runner',
+        },
+      ]);
+    });
+
+    it("carries the ledger share's source attribution through to the report (#278)", async () => {
+      const ledgerInstancesProvider = vi.fn(() =>
+        Promise.resolve([
+          {
+            instanceId: 'inst-stub-1',
+            modelName: 'stub-model',
+            deviceIndex: 0,
+            memoryUsedBytes: 2_000_000,
+            attribution: 'runner' as const,
+          },
+          {
+            instanceId: 'inst-shim-2',
+            modelName: 'real-shim-model',
+            deviceIndex: 0,
+            memoryUsedBytes: 9_000_000,
+            attribution: 'device' as const,
+          },
+          {
+            instanceId: 'inst-legacy-3',
+            modelName: 'legacy-model',
+            deviceIndex: 0,
+            memoryUsedBytes: 1_000_000,
+            // legacy shim: no attribution — carried as absent (unknown scope downstream)
+          },
+        ]),
+      );
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        undefined,
+        undefined,
+        undefined, // no measuredProvider at all — stub mode
+        ledgerInstancesProvider,
+      );
+
+      await registration.register();
+
+      const memoryCall = mockRedis._pipelineCalls.find(
+        (c) => c.method === 'set' && (c.args[0] as string).endsWith(':memory'),
+      );
+      const report = JSON.parse(memoryCall!.args[1] as string) as WorkerMemoryReport;
+
+      // Shares carry their SOURCE scope verbatim — never relabeled; absence stays absent.
+      expect(report.instances).toEqual([
+        {
+          instanceId: 'inst-stub-1',
+          modelName: 'stub-model',
+          deviceIndex: 0,
+          memoryUsedBytes: 2_000_000,
+          attribution: 'runner',
+        },
+        {
+          instanceId: 'inst-shim-2',
+          modelName: 'real-shim-model',
+          deviceIndex: 0,
+          memoryUsedBytes: 9_000_000,
+          attribution: 'device',
+        },
+        {
+          instanceId: 'inst-legacy-3',
+          modelName: 'legacy-model',
+          deviceIndex: 0,
+          memoryUsedBytes: 1_000_000,
         },
       ]);
     });

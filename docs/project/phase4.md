@@ -77,10 +77,12 @@ posture, and the production worker agent's SIF-launch path.
     plane deciding to co-locate. That is sufficient for Phase 4 acceptance.
   - The **production** path — the control plane deliberately packing two kvcached-capable runners
     onto one device _past_ naive byte-sum capacity (kvcached's whole point: elastic, reclaimable
-    usage) — needs new placement logic keyed on the `kvCacheElasticSharing` capability (Task 5).
-    That, plus guarding against _silently_ co-locating two **non**-kvcached runners that would
-    OOM a real GPU, is a **Phase 5 design item**. Phase 4 only adds the capability flag so Phase 5
-    has something to key on.
+    usage) — needed new placement logic keyed on the `kvCacheElasticSharing` capability (Task 5),
+    plus a guard against _silently_ co-locating two **non**-kvcached runners that would OOM a real
+    GPU. Deferring it here was the right call — Phase 4 only needed the capability flag to key on.
+    Phase 5 ([`phase5.md`](phase5.md)) delivers that guard (fail-closed elastic policy #276,
+    shared-pool pressure response #277, consumer-side attribution rule #278); its on-cluster
+    proof is the Gate 9b recipe in `phase5.md`.
 
 ## Dependencies
 

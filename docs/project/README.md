@@ -11,6 +11,7 @@
 - [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md) — Phase 4 feasibility spike: Apptainer/SIF runners on OpenShift (verdict: GO)
 - [`phase4.md`](phase4.md) — Phase 4 implementation plan + status: SIF runner runtime (Apptainer)
 - [`phase4-perf.md`](phase4-perf.md) — Phase 4 performance record (EFS floor + CephFS target)
+- [`phase5.md`](phase5.md) — Phase 5 implementation plan + status: kvcached oversubscription & co-location policy
 - [`v1-component-mapping.md`](v1-component-mapping.md) — Mapping of Sardeenz v1 components to their v2 equivalents
 - [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) — Milestone M3 PR draft
 - [`milestone-M4-pr-draft.md`](milestone-M4-pr-draft.md) — Milestone M4 PR draft

@@ -42,7 +42,9 @@ notion — the double-count was silent until #244 made it declarable.
    reporting runner.
 4. **Consumers must branch on `attribution` before aggregating.** Device-scope figures MUST NOT
    be summed across runners sharing a device, and unknown-scope figures MUST NOT be summed as if
-   per-runner. (This rule is not yet enforced by any executable consumer — see Consequences.)
+   per-runner. (No executable consumer enforced this rule at acceptance — see Consequences. The
+   Phase 5 consumer-side rule,
+   [#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278), is the first.)
 5. **The per-runner display rule is Phase 5's.** How the control plane and dashboard dedupe
    device-scope rows for per-model display and co-location accounting is a policy decision, not
    part of this contract change; it is deliberately deferred.
@@ -54,7 +56,9 @@ notion — the double-count was silent until #244 made it declarable.
   per-runner deltas by reading `attribution`.
 - **Traps for a future engineer.** Reading `memoryUsedBytes` as "this runner's usage" without
   checking `attribution` re-introduces the exact double-count #244 deleted — and until Phase 5
-  lands the consumer-side rule, the repo gives no executable guard; this ADR is the guard.
+  landed the consumer-side rule
+  ([#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278)), the repo gave no
+  executable guard; this ADR was the guard.
   Re-adding a "reserved" figure from the shim's own process is dead by construction in the
   two-process topology and must not return. Promoting a device-scope shim figure into a
   per-instance row (as the no-NVML `getLedgerInstanceShares` path can do with real shims) is the
@@ -68,4 +72,7 @@ notion — the double-count was silent until #244 made it declarable.
 - Per-model attribution _inside_ the kvcached pool (which model owns which KV blocks) — Phase 5
   territory at the earliest; today's pool stats are per-device only.
 - Changing the worker-agent contract's `InstanceMemoryMeasurement` shape — NVML rows are already
-  per-runner and correct.
+  per-runner and correct. _(Partially implemented by Phase 5,
+  [#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278): the contract gained
+  an optional `attribution` field so a no-NVML ledger row can state its source scope; NVML rows
+  themselves are unchanged.)_
