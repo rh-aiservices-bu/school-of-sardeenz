@@ -199,13 +199,14 @@ Only `L1_HOST_RAM` is defined in v0.1 of the contract. Future levels (e.g., L2 f
 
 Sleep and wake are **synchronous** by design. The control plane controls the timeout based on the expected offload/reload duration for the model size and sleep level.
 
-**Shim-side guard:** before starting the offload, both shims re-check their engine's in-flight
-request count (the same scrape `GET /health` uses) and refuse with `409 NOT_READY` when any
-request is still running or waiting — even though the control plane has already drained and
-removed the endpoint by then, a generation that started in that drain→sleep window is protected
-(the sleep fails loudly instead of silently destroying it). A shim without a working scrape
-signals `activeRequests` as unknown and skips the guard: a metrics outage must not make sleep
-impossible.
+**Shim-side guard (vLLM only):** before starting the offload, the vLLM shim re-checks its
+engine's in-flight request count (the same scrape `GET /health` uses) and refuses with
+`409 NOT_READY` when any request is still running or waiting — so a generation that started in
+the control plane's drain→sleep window fails the sleep loudly instead of being silently
+destroyed. A shim whose scrape fails signals `activeRequests` as unknown and skips the guard: a
+metrics outage must not make sleep impossible. The MLServer shim has no equivalent guard — its
+engine exposes no request-level gauge to gate on, and its `requests_in_progress` metric is
+reported through `/health` for the control plane's drain observation instead.
 
 ### Progress Reporting
 

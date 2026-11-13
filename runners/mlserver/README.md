@@ -125,7 +125,7 @@ sardeenz_mlserver_runner/
 ## Tests
 
 `cli.py`/`settings.py`/`state.py`/`memory.py`/`onnx_support.py` are pure (or filesystem-only) and
-unit-tested without MLServer/torch/httpx/FastAPI. `tests/test_app.py` drives the real `create_app`
+unit-tested without MLServer, torch or a GPU. `tests/test_app.py` drives the real `create_app`
 over the conformance doubles through `httpx.ASGITransport` to pin where handlers execute — the
 blocking `memory_report` reads run on the default executor, off the event loop that serves
 `/health` (the conformance suite already covers the handlers' shapes under `TestClient`):

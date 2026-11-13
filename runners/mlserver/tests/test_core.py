@@ -1,8 +1,10 @@
-"""Pure-logic tests for the MLServer runner shim — no MLServer/torch/httpx/FastAPI required.
+"""Unit tests for the MLServer runner shim — no MLServer, torch or GPU required.
 
 Run via `pytest` from runners/mlserver/. These cover contract-shape correctness, CLI/served-name
-extraction, and model-repository generation; the engine + HTTP layers are exercised by the cluster
-integration gates (Unit D).
+extraction, model-repository generation, and the labelled-metrics scrape client (httpx with a
+stubbed client; a few cases use anyio's pytest plugin). The handlers themselves are driven
+app-level by `tests/test_app.py` and by the shared conformance suite; the engine + GPU layers are
+exercised by the cluster integration gates (Unit D).
 """
 
 from __future__ import annotations

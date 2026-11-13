@@ -583,8 +583,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   builds each real `create_app` over the same doubles under `TestClient` — so what is new is
   narrower and stated as such: `ASGITransport` runs the loop on the test's own thread, where
   `TestClient`'s anyio portal thread hides it, making the executing thread observable for the
-  first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239, and
-  MLServer's `test_core.py` stays pure-logic. The harness pins the off-loop thread
+  first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239. The harness pins the off-loop thread
   identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
   read.
 
