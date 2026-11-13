@@ -12,6 +12,7 @@ describe('loadConfig', () => {
     'SARDEENZ_DATABASE_URL',
     'SARDEENZ_REDIS_KEY_PREFIX',
     'SARDEENZ_EVICTION_MAX_PER_CYCLE',
+    'SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT',
     'SARDEENZ_SLEEP_TIMEOUT_SECS',
     'SARDEENZ_SIF_IMPORTER',
     'SARDEENZ_API_TOKEN',
@@ -80,6 +81,30 @@ describe('loadConfig', () => {
     const config = loadConfig();
     expect(config.evictionMaxPerCycle).toBe(10);
   });
+
+  it('defaults the co-location headroom cap to 50 percent (#276)', () => {
+    const config = loadConfig();
+    expect(config.colocationMaxPoolHeadroomPercent).toBe(50);
+  });
+
+  it.each([
+    ['0', 0],
+    ['100', 100],
+    ['75', 75],
+  ])('accepts SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT=%s as %d (#276)', (raw, expected) => {
+    process.env['SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT'] = raw;
+    expect(loadConfig().colocationMaxPoolHeadroomPercent).toBe(expected);
+  });
+
+  it.each(['101', '500', '-1', '0.5', 'fifty', ''])(
+    'rejects SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT=%s instead of silently mis-capping (#276)',
+    (raw) => {
+      process.env['SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT'] = raw;
+      expect(() => loadConfig()).toThrow(
+        'SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT must be an integer percent between 0 and 100',
+      );
+    },
+  );
 
   it('allows the placeholder importer only when explicitly requested', () => {
     process.env['SARDEENZ_SIF_IMPORTER'] = 'stub';

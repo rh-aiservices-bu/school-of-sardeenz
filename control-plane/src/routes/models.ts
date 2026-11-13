@@ -14,6 +14,8 @@ import { assertValidInstanceId } from '../utils/instance-id.js';
 import type { ModelRecord } from '../services/model-repository.js';
 import { deriveAggregateState, type InstanceState } from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
+import { coLocationGroup, type CoLocationContext } from '../services/placement.js';
+import type { EvictionCandidate } from '../services/eviction.js';
 import { WorkerHttpError, type WorkerClient } from '../clients/worker.js';
 
 interface DeployBody {
@@ -29,11 +31,13 @@ interface DeployBody {
   servedModelName?: string;
   displayName?: string;
   pinned?: boolean;
+  allowCoLocation?: boolean;
 }
 
 type UpdateModelBody = Omit<DeployBody, 'modelName' | 'tensorParallel' | 'pinned'> & {
   tensorParallel: number;
   pinned: boolean;
+  allowCoLocation: boolean;
 };
 
 interface MoveBody {
@@ -214,6 +218,120 @@ async function teardownInstance(
 }
 
 /**
+ * Assemble the CoLocationContext for one elastic opt-in placement (#276): the non-terminal
+ * instance snapshot, the modelName → runnerType map, and the retained-hold sets per
+ * (worker, device). Built only when record.allowCoLocation is true; absent context keeps
+ * placement byte-identical to pre-#276 behavior.
+ */
+async function buildCoLocationContext(deps: RouteDeps): Promise<CoLocationContext> {
+  const [instances, records] = await Promise.all([
+    deps.lifecycle.getAllInstances(),
+    deps.modelRepository.findAll(),
+  ]);
+  const runnerTypeByModel = new Map(records.map((r) => [r.name, r.runnerType]));
+  const holdsByDevice = new Map<string, Set<string>>();
+  for (const budget of deps.memoryBudget.getAllBudgets()) {
+    for (const device of budget.devices) {
+      const holders = deps.memoryBudget.getReservationHolders(budget.workerId, device.deviceIndex);
+      if (holders.size === 0) continue;
+      holdsByDevice.set(`${budget.workerId}:${device.deviceIndex}`, new Set(holders.keys()));
+    }
+  }
+  return { instances, runnerTypeByModel, holdsByDevice };
+}
+
+/**
+ * Per-device shortfall computation for the wake pre-check (#276). For each of the waking
+ * instance's devices: shortfall = requiredPerDevice − (device.availableBytes + the waker's own
+ * hold on that device). Adding the waker's hold back is the fix: sleep never released the
+ * reservation (sleep keeps holds), so availableBytes already nets it out and the old
+ * worker-wide sum compared the full requiredMemory against a figure that still contained the
+ * waker's share — a phantom shortfall that evicted an innocent co-tenant. Legacy rows without
+ * deviceIndices fall back to today's worker-wide check verbatim (deviceIndex null, full
+ * requiredMemory).
+ */
+function wakeShortfalls(
+  deps: RouteDeps,
+  instance: InstanceState,
+  requiredMemory: number,
+): { deviceIndex: number | null; requiredBytes: number }[] {
+  if (!instance.workerId) return [];
+  const budget = deps.memoryBudget.getWorkerBudget(instance.workerId);
+  const devices = budget?.devices ?? [];
+
+  if (!instance.deviceIndices || instance.deviceIndices.length === 0) {
+    const totalAvailable = devices.reduce((sum, d) => sum + d.availableBytes, 0);
+    return totalAvailable < requiredMemory
+      ? [{ deviceIndex: null, requiredBytes: requiredMemory }]
+      : [];
+  }
+
+  const perDeviceRequired = requiredMemory / instance.deviceIndices.length;
+  const shortfalls: { deviceIndex: number | null; requiredBytes: number }[] = [];
+  for (const deviceIndex of instance.deviceIndices) {
+    const device = devices.find((d) => d.deviceIndex === deviceIndex);
+    const wakerHold =
+      deps.memoryBudget
+        .getReservationHolders(instance.workerId, deviceIndex)
+        .get(instance.instanceId)?.bytes ?? 0;
+    const available = (device?.availableBytes ?? 0) + wakerHold;
+    if (available < perDeviceRequired) {
+      shortfalls.push({ deviceIndex, requiredBytes: perDeviceRequired - available });
+    }
+  }
+  return shortfalls;
+}
+
+/**
+ * Victim selection for the wake pre-check, scoped per shortfall (#276): a real shortfall on
+ * device D selects victims ONLY from the waker's device-D co-location group — worker-wide
+ * victims would tear down a healthy co-tenant on a different device for a shortfall on D (the
+ * same innocent-eviction class the per-device check exposed). ERROR instances with retained
+ * holds on D (runnerStartAmbiguous zombies) join the group via the held ids. Legacy
+ * (deviceIndex null) shortfalls keep the worker-wide scope verbatim. Victim sizing matches the
+ * shortfall's unit: a per-device shortfall is compared against per-device figures
+ * (requiredMemory / tensorParallel — a TP-T victim frees only its device share), the legacy
+ * worker-wide shortfall against whole-model figures. Victims from several short devices are
+ * unioned and deduped by instanceId, and the union is bounded by the operator's per-cycle cap
+ * (`SARDEENZ_EVICTION_MAX_PER_CYCLE`) — the bound the pre-#276 single-call path had (each
+ * per-device selectVictims call is capped internally, so without this slice a two-short-device
+ * wake could tear down 2× the cap).
+ */
+function selectWakeVictims(
+  deps: RouteDeps,
+  instance: InstanceState,
+  shortfalls: { deviceIndex: number | null; requiredBytes: number }[],
+  allInstances: InstanceState[],
+  pinnedModels: ReadonlySet<string>,
+  memoryByModel: ReadonlyMap<string, number>,
+  perDeviceMemoryByModel: ReadonlyMap<string, number>,
+): EvictionCandidate[] {
+  const workerId = instance.workerId ?? '';
+  const victims = new Map<string, EvictionCandidate>();
+  for (const shortfall of shortfalls) {
+    let candidates = allInstances;
+    if (shortfall.deviceIndex !== null) {
+      const heldIds = new Set(
+        deps.memoryBudget.getReservationHolders(workerId, shortfall.deviceIndex).keys(),
+      );
+      candidates = coLocationGroup(workerId, shortfall.deviceIndex, allInstances, heldIds);
+    }
+    const sizing = shortfall.deviceIndex === null ? memoryByModel : perDeviceMemoryByModel;
+    const selected = deps.eviction.selectVictims(
+      candidates,
+      new Set(pinnedModels),
+      shortfall.requiredBytes,
+      new Set([workerId]),
+      new Map(sizing),
+    );
+    for (const victim of selected) {
+      victims.set(victim.instanceId, victim);
+    }
+  }
+  return [...victims.values()].slice(0, deps.config.evictionMaxPerCycle);
+}
+
+/**
  * Process-local in-flight claim sets, created once per `registerModelRoutes` and shared between
  * the route handlers and `deployFromRecord`. Hoisted into one object (rather than left as closures)
  * so the launch pipeline can consult `deletingInFlight` — the model-DELETE claim — and refuse to
@@ -351,7 +469,12 @@ async function deployFromRecord(
       requiredMemory,
       deviceType: record.deviceType ?? undefined,
       tensorParallel,
+      ...(record.allowCoLocation ? { allowCoLocation: true } : {}),
     };
+    // Built only on opt-in: without a context the pipeline is byte-identical to pre-#276.
+    const coLocationContext = record.allowCoLocation
+      ? await buildCoLocationContext(deps)
+      : undefined;
 
     const result = options.fixedPlacement
       ? deps.placement.placeFixed(
@@ -360,8 +483,9 @@ async function deployFromRecord(
           options.fixedPlacement.deviceIndices,
           workers,
           budgets,
+          coLocationContext,
         )
-      : deps.placement.place(placementRequest, workers, budgets);
+      : deps.placement.place(placementRequest, workers, budgets, coLocationContext);
 
     if (result) {
       for (const device of result.devices) {
@@ -370,6 +494,7 @@ async function deployFromRecord(
           device.deviceIndex,
           instanceId,
           requiredMemory / tensorParallel,
+          { coLocated: result.coLocated === true },
         );
       }
 
@@ -527,7 +652,14 @@ async function deployFromRecord(
         const refreshedBudgets = new Map(
           deps.memoryBudget.getAllBudgets().map((b) => [b.workerId, b]),
         );
-        const reclaimed = deps.placement.place(placementRequest, workers, refreshedBudgets);
+        const reclaimed = deps.placement.place(
+          placementRequest,
+          workers,
+          refreshedBudgets,
+          // Fresh post-teardown snapshot: the victims' holds are gone, so the guard must see
+          // the current group — a stale context could keep headroom wrongly blocked (or open).
+          record.allowCoLocation ? await buildCoLocationContext(deps) : undefined,
+        );
 
         if (!reclaimed) {
           throw ControlPlaneError.placementFailed(
@@ -542,6 +674,7 @@ async function deployFromRecord(
             device.deviceIndex,
             instanceId,
             requiredMemory / tensorParallel,
+            { coLocated: reclaimed.coLocated === true },
           );
         }
 
@@ -834,6 +967,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       throw ControlPlaneError.invalidRequest('tensorParallel must be a positive integer');
     }
 
+    if (body.allowCoLocation !== undefined && typeof body.allowCoLocation !== 'boolean') {
+      throw ControlPlaneError.invalidRequest('allowCoLocation must be a boolean');
+    }
+
     if (
       body.runtimeModule !== undefined &&
       (typeof body.runtimeModule !== 'string' || !RUNTIME_MODULE_PATTERN.test(body.runtimeModule))
@@ -897,6 +1034,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         servedModelName: body.servedModelName,
         displayName: trimmedDisplayName,
         pinned: body.pinned,
+        allowCoLocation: body.allowCoLocation,
       });
     } catch (err) {
       if (err instanceof Error && err.message.includes('unique')) {
@@ -1229,6 +1367,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         runtimeModule: record?.runtimeModule ?? undefined,
         servedModelName: record?.servedModelName ?? undefined,
         pinned: record?.pinned ?? false,
+        allowCoLocation: record?.allowCoLocation ?? false,
         instances: instances.map((instance) =>
           toInstanceDetail(
             instance,
@@ -1302,6 +1441,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (typeof body.pinned !== 'boolean') {
         throw ControlPlaneError.invalidRequest('pinned must be a boolean');
       }
+      if (typeof body.allowCoLocation !== 'boolean') {
+        throw ControlPlaneError.invalidRequest('allowCoLocation must be a boolean');
+      }
       if (
         body.runtimeModule !== undefined &&
         (typeof body.runtimeModule !== 'string' || !RUNTIME_MODULE_PATTERN.test(body.runtimeModule))
@@ -1364,6 +1506,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           servedModelName: body.servedModelName,
           displayName: trimmedDisplayName,
           pinned: body.pinned,
+          allowCoLocation: body.allowCoLocation,
         });
         if (!updated) throw ControlPlaneError.modelNotFound(modelName);
         app.log.info({ modelName }, 'Stopped model configuration updated');
@@ -1811,12 +1954,13 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
 
       for (const instance of claimed) {
         if (requiredMemory > 0 && instance.workerId) {
-          const workerBudget = deps.memoryBudget.getWorkerBudget(instance.workerId);
-          const totalAvailable = workerBudget
-            ? workerBudget.devices.reduce((sum, d) => sum + d.availableBytes, 0)
-            : 0;
+          // #276: per-device shortfall check that excludes the waking instance's own hold (sleep
+          // never released it, so availableBytes already nets it out — the old worker-wide sum
+          // produced a phantom shortfall and evicted an innocent co-tenant). Legacy rows without
+          // deviceIndices fall back to the worker-wide check verbatim.
+          const shortfalls = wakeShortfalls(deps, instance, requiredMemory);
 
-          if (totalAvailable < requiredMemory) {
+          if (shortfalls.length > 0) {
             const allInstances = await deps.lifecycle.getAllInstances();
             const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
               allInstances.map((s) => s.modelName),
@@ -1832,13 +1976,28 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
                 .filter((r) => r.requiredMemory !== null)
                 .map((r) => [r.name, r.requiredMemory!]),
             );
+            // Per-device victim sizing for the per-device shortfalls (#276): the LRU strategy
+            // must compare a device shortfall against what eviction actually frees on THAT
+            // device, so each candidate's figure is requiredMemory / tensorParallel. Built
+            // from the same allRecords snapshot; the `|| 1` keeps the figure finite for a
+            // degenerate 0 record (route validation already enforces >= 1 on deploy/update).
+            const perDeviceMemoryByModel = new Map(
+              allRecords
+                .filter((r) => r.requiredMemory !== null)
+                .map((r) => [r.name, r.requiredMemory! / (r.tensorParallel || 1)]),
+            );
 
-            const victims = deps.eviction.selectVictims(
+            // Victim scope: per shortfall, only the waker's device co-location group (worker-wide
+            // victims tore down healthy co-tenants on other devices for a shortfall on one
+            // device — the same innocent-eviction class the per-device check exposed).
+            const victims = selectWakeVictims(
+              deps,
+              instance,
+              shortfalls,
               allInstances,
               pinnedModels,
-              requiredMemory,
-              new Set([instance.workerId]),
               memoryByModel,
+              perDeviceMemoryByModel,
             );
 
             // Isolated per victim, same rationale as deployFromRecord's eviction loop: one

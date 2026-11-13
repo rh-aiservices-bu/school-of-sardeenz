@@ -825,7 +825,9 @@ describe('MemoryBudgetService — kvcached pool block (issue #165)', () => {
     const budget = await service.refreshWorkerBudget(workerId);
 
     expect(budget?.devices[0]?.kvCache).toEqual(validKV);
-    // Telemetry only — the kvCache block must not shift placement math.
+    // Parse-level invariant: the kvCache block must not shift usedBytes/availableBytes here —
+    // since #276 the only consumer is the placement pipeline's elastic co-location branch,
+    // which applies the headroom in placement.ts, never in this parse.
     expect(budget?.devices[0]?.usedBytes).toBe(8_000_000_000);
     expect(budget?.devices[0]?.availableBytes).toBe(8_000_000_000);
   });
@@ -1486,5 +1488,60 @@ describe('MemoryBudgetService — writeClusterMemorySnapshot content (measured-o
     expect('utilizationPercent' in device).toBe(false);
     expect('temperatureC' in device).toBe(false);
     expect('kvCache' in device).toBe(false);
+  });
+});
+
+describe('MemoryBudgetService — reservation holders accessor (#276)', () => {
+  function makeServiceWithDevice(): MemoryBudgetService {
+    const report = workerMemoryReport([
+      {
+        deviceIndex: 0,
+        deviceType: 'CUDA',
+        memoryUsedBytes: 0,
+        memoryTotalBytes: 16_000_000_000,
+      },
+    ]);
+    const get = vi.fn().mockResolvedValue(report);
+    return makeService({ get } as unknown as Redis);
+  }
+
+  it('returns per-instance entries with the coLocated flag', async () => {
+    const service = makeServiceWithDevice();
+    await service.refreshWorkerBudget('w1');
+
+    service.reserveCapacity('w1', 0, 'inst-a', 1000);
+    service.reserveCapacity('w1', 0, 'inst-b', 2000, { coLocated: true });
+
+    const holders = service.getReservationHolders('w1', 0);
+    expect(holders.get('inst-a')).toEqual({ bytes: 1000, coLocated: false });
+    expect(holders.get('inst-b')).toEqual({ bytes: 2000, coLocated: true });
+
+    // Read-only copy: mutating it must not touch the internal ledger.
+    holders.delete('inst-a');
+    expect(service.getReservationHolders('w1', 0).get('inst-a')).toEqual({
+      bytes: 1000,
+      coLocated: false,
+    });
+  });
+
+  it('updates after a release and returns empty for an unknown device', async () => {
+    const service = makeServiceWithDevice();
+    await service.refreshWorkerBudget('w1');
+
+    service.reserveCapacity('w1', 0, 'inst-a', 1000);
+    service.releaseInstanceReservations('inst-a');
+    expect(service.getReservationHolders('w1', 0).size).toBe(0);
+    expect(service.getReservationHolders('w1', 9).size).toBe(0);
+  });
+
+  it('reserveCapacity keeps idempotent-set semantics with the annotation', async () => {
+    const service = makeServiceWithDevice();
+    await service.refreshWorkerBudget('w1');
+
+    service.reserveCapacity('w1', 0, 'inst-a', 1000, { coLocated: true });
+    service.reserveCapacity('w1', 0, 'inst-a', 1000, { coLocated: true });
+    const holders = service.getReservationHolders('w1', 0);
+    expect(holders.size).toBe(1);
+    expect(holders.get('inst-a')).toEqual({ bytes: 1000, coLocated: true });
   });
 });

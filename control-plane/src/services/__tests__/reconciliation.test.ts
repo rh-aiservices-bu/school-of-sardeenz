@@ -109,6 +109,7 @@ function makeModelRecord(overrides: Partial<ModelRecord> & { name: string }): Mo
     servedModelName: null,
     displayName: null,
     pinned: false,
+    allowCoLocation: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

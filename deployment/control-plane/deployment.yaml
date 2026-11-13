@@ -52,6 +52,10 @@ spec:
               value: /etc/sardeenz/registry/auth.json
             - name: SARDEENZ_VERIFY_SIF
               value: 'true'
+            # Phase 5 (#276): elastic co-location oversubscription cap, percent of the device's
+            # reported KV-pool totalBytes; 0 disables elastic headroom (plain byte-fit only).
+            - name: SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT
+              value: '50'
             - name: SARDEENZ_API_TOKEN
               valueFrom:
                 secretKeyRef:

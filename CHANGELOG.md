@@ -29,6 +29,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#243, `healthProbeTimeoutMs`) is documented in
   [runner-contract.md](docs/architecture/components/runner-contract.md).
 
+- **Phase 5: co-location placement policy (issue #276).** A model may now opt in to kvcached
+  elastic co-location (`allowCoLocation` on the deploy request / model configuration, dashboard
+  deploy-form switch): the placement pipeline may place its instances on a device past naive
+  byte-sum capacity when every instance already resident on that device (including sleeping
+  ones — they keep their holds) belongs to a runner type declaring `kvCacheElasticSharing` on
+  the target worker, and the device reports a kvcached pool. Headroom is
+  `min(freeBytes + preallocBytes, (SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT / 100) × poolTotal)`
+  (integer percent, default **50**, `0` disables elastic headroom; new control-plane env wired
+  through `deployment/`). The capability guard is fail-closed — an unresolvable co-resident
+  (deleted model record, worker no longer reporting the runner type) counts as non-elastic and
+  blocks co-location, so non-kvcached runners are never silently co-located (the phase-4 OOM
+  guard). `placeFixed` (move) applies the same rules and still never evicts. The wake
+  pre-check is now per-device and excludes the waking instance's own hold (sleep never
+  released it, so the old worker-wide sum produced a phantom shortfall), and wake eviction
+  victims are scoped to the waker's device co-location group (`coLocationGroup` in
+  `placement.ts` — the single derivation, also the #277 import surface), sized per device
+  (`requiredMemory / tensorParallel`) and bounded by `SARDEENZ_EVICTION_MAX_PER_CYCLE`;
+  legacy instances without `deviceIndices` keep the worker-wide fallback. The cap env is
+  validated at boot (integer percent 0–100, otherwise the control plane refuses to start —
+  `SARDEENZ_SIF_IMPORTER` posture), any unknown-placement (null/empty `deviceIndices`)
+  resident on the worker — including an ERROR instance that retains a reservation hold —
+  fails the elastic guard closed, and `freeBytes + preallocBytes` is clamped to the pool
+  `totalBytes` at consumption (belt-and-braces: unreachable while the boot validation keeps
+  the cap at ≤ 100, pinned for direct constructions with a wider cap). New migration
+  `control-plane/migrations/008-add-allow-co-location.sql`; `DeviceInfo.kvCache` telemetry now
+  documents the elastic-branch consumer (the only one) — non-elastic placement math still
+  never reads it.
+
 ### Security
 
 - **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**

@@ -10,6 +10,9 @@ export interface Config {
   readonly workerHeartbeatTimeoutSecs: number;
   readonly parkingTimeoutSecs: number;
   readonly evictionMaxPerCycle: number;
+  // Phase 5 (#276): elastic co-location oversubscription cap, integer percent of the device's
+  // reported KV-pool totalBytes. 0 disables elastic headroom entirely (plain byte-fit only).
+  readonly colocationMaxPoolHeadroomPercent: number;
   readonly sleepTimeoutSecs: number;
   readonly wakeTimeoutSecs: number;
   readonly healthCheckIntervalSecs: number;
@@ -71,6 +74,27 @@ function sifImporterEnv(): 'stub' | 'oras' {
   return value;
 }
 
+/**
+ * Phase 5 (#276) oversubscription cap: integer percent of the device's reported KV-pool
+ * totalBytes; 0 disables elastic headroom entirely (plain byte-fit). The spec's domain is
+ * 0–100 — outside it the safety cap stops bounding oversubscription (>100 grants a multiple
+ * of the pool total as headroom) or silently disables it (negative / 0.x). Same posture as
+ * SARDEENZ_SIF_IMPORTER: fail loudly at boot instead of silently honoring a mistyped value.
+ */
+function colocationMaxPoolHeadroomPercentEnv(): number {
+  const raw = process.env['SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT'];
+  if (raw === undefined) return 50;
+  // Strict integer syntax: parseInt would truncate '0.5' to 0 (silently disabling the cap),
+  // and the spec's domain is an integer percent — reject anything else loudly.
+  const parsed = /^-?\d+$/.test(raw.trim()) ? parseInt(raw, 10) : NaN;
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+    throw new Error(
+      `Environment variable SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT must be an integer percent between 0 and 100, got: ${raw}`,
+    );
+  }
+  return parsed;
+}
+
 const DEFAULT_CATALOG_URL =
   'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml';
 
@@ -121,6 +145,9 @@ export function loadConfig(): Config {
     workerHeartbeatTimeoutSecs: intEnv('SARDEENZ_WORKER_HEARTBEAT_TIMEOUT_SECS', 30),
     parkingTimeoutSecs: intEnv('SARDEENZ_PARKING_TIMEOUT_SECS', 120),
     evictionMaxPerCycle: intEnv('SARDEENZ_EVICTION_MAX_PER_CYCLE', 3),
+    // Phase 5 (#276) oversubscription cap: percent of the device's reported KV-pool totalBytes.
+    // Decision 2026-11-13: default 50; 0 disables elastic headroom entirely (plain byte-fit).
+    colocationMaxPoolHeadroomPercent: colocationMaxPoolHeadroomPercentEnv(),
     sleepTimeoutSecs: intEnv('SARDEENZ_SLEEP_TIMEOUT_SECS', 300),
     wakeTimeoutSecs: intEnv('SARDEENZ_WAKE_TIMEOUT_SECS', 300),
     healthCheckIntervalSecs: intEnv('SARDEENZ_HEALTH_CHECK_INTERVAL_SECS', 10),

@@ -27,7 +27,10 @@ export interface DeviceBudget {
   /** GPU temperature in degrees Celsius at report time. Absent when unavailable. */
   temperatureC?: number;
   /** Measured kvcached pool state for this device (prealloc/used/free partition). Absent when no
-   *  kvcached pool is reported for the device. Telemetry only — never feeds placement math. */
+   *  kvcached pool is reported for the device; absent means absent, not zero. Telemetry for the
+   *  dashboard — and, since Phase 5 (#276), the placement pipeline's elastic co-location branch
+   *  reads `freeBytes`/`preallocBytes` as bounded headroom (applied in `placement.ts`, never
+   *  here): `availableBytes` parsing in this file stays placement-free. */
   kvCache?: {
     totalBytes: number;
     usedBytes: number;
@@ -121,6 +124,14 @@ function isEnumValue<T extends string>(v: unknown, enumObj: Record<string, T>): 
   return typeof v === 'string' && values.includes(v);
 }
 
+/** One per-instance reservation entry: the held bytes plus whether the reservation was placed
+ *  under the elastic co-location policy (an annotation, never a second ledger — `bytes` remains
+ *  the only accounting figure). Exposed read-only via getReservationHolders (#276). */
+export interface ReservationEntry {
+  bytes: number;
+  coLocated: boolean;
+}
+
 /**
  * Sum instance measurements into per-instance figures under the attribution scope rule
  * (ADR-027 Decision 4, enforced as of Phase 5 — issue #278): `runner`-scope rows always sum; a
@@ -187,13 +198,13 @@ export class MemoryBudgetService {
   private readonly budgets: Map<string, WorkerBudget> = new Map();
 
   /**
-   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (instanceId -> bytes).
-   * Reservations are held per-instance (#120) so that co-located instances — including two
-   * replicas of the same model on the same device — do not clobber each other's reservation,
-   * and so one instance's reservation can be released explicitly (on stop/evict/worker loss)
-   * without affecting other instances on that device.
+   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (instanceId ->
+   * ReservationEntry). Reservations are held per-instance (#120) so that co-located instances —
+   * including two replicas of the same model on the same device — do not clobber each other's
+   * reservation, and so one instance's reservation can be released explicitly (on
+   * stop/evict/worker loss) without affecting other instances on that device.
    */
-  private readonly reservations: Map<string, Map<string, number>> = new Map();
+  private readonly reservations: Map<string, Map<string, ReservationEntry>> = new Map();
 
   constructor(
     private readonly redis: Redis,
@@ -216,8 +227,8 @@ export class MemoryBudgetService {
     const perModel = this.reservations.get(this.reservationKey(workerId, deviceIndex));
     if (!perModel) return 0;
     let total = 0;
-    for (const bytes of perModel.values()) {
-      total += bytes;
+    for (const entry of perModel.values()) {
+      total += entry.bytes;
     }
     return total;
   }
@@ -636,6 +647,19 @@ export class MemoryBudgetService {
     return { ...budget, stale: this.isStale(budget.lastReportAt) };
   }
 
+  /**
+   * Per-instance reservation entries on one device (read-only copy), keyed by instanceId.
+   * Empty when no holds exist. The one sanctioned reader of the internal hold ledger (see the
+   * doctrine note at the top of this file): wake accounting must exclude the waker's own hold
+   * (#276), and the co-location group helper needs the retained-hold set. Never surfaced on
+   * DeviceBudget or any HTTP payload.
+   */
+  getReservationHolders(workerId: string, deviceIndex: number): Map<string, ReservationEntry> {
+    const perInstance = this.reservations.get(this.reservationKey(workerId, deviceIndex));
+    if (!perInstance) return new Map();
+    return new Map(Array.from(perInstance, ([id, entry]) => [id, { ...entry }]));
+  }
+
   /** Return all in-memory budgets with staleness flags applied. */
   getAllBudgets(): WorkerBudget[] {
     return Array.from(this.budgets.values()).map((b) => ({
@@ -653,14 +677,20 @@ export class MemoryBudgetService {
    * usedBytes so that subsequent placement decisions account for in-flight
    * allocations before the worker has had a chance to report updated usage.
    */
-  reserveCapacity(workerId: string, deviceIndex: number, instanceId: string, bytes: number): void {
+  reserveCapacity(
+    workerId: string,
+    deviceIndex: number,
+    instanceId: string,
+    bytes: number,
+    opts?: { coLocated?: boolean },
+  ): void {
     const rk = this.reservationKey(workerId, deviceIndex);
     let perInstance = this.reservations.get(rk);
     if (!perInstance) {
       perInstance = new Map();
       this.reservations.set(rk, perInstance);
     }
-    perInstance.set(instanceId, bytes);
+    perInstance.set(instanceId, { bytes, coLocated: opts?.coLocated ?? false });
 
     // Recompute the in-memory device budget immediately so callers see the
     // updated availableBytes without waiting for the next refreshWorkerBudget.

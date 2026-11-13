@@ -47,6 +47,8 @@ interface Overrides {
   findByName?: Mock;
   getInstance?: Mock;
   getInstancesForModel?: Mock;
+  getAllInstances?: Mock;
+  findAll?: Mock;
   transition?: Mock;
   getWorker?: Mock;
   stopRunner?: Mock;
@@ -59,6 +61,7 @@ interface Overrides {
 
 function buildApp(over: Overrides = {}): {
   app: FastifyInstance;
+  deps: RouteDeps;
   logInfo: Mock;
   logError: Mock;
   logWarn: Mock;
@@ -93,7 +96,8 @@ function buildApp(over: Overrides = {}): {
     lifecycle: {
       getInstance,
       getInstancesForModel,
-      getAllInstances: vi.fn(() => Promise.resolve([])),
+      getAllInstances: over.getAllInstances ?? vi.fn(() => Promise.resolve([])),
+      getLastInferenceTimestamps: vi.fn(() => Promise.resolve(new Map())),
       removeInstance: over.removeInstance ?? vi.fn(() => Promise.resolve()),
       transition: over.transition ?? vi.fn(() => Promise.resolve()),
       getMoveOperation: over.getMoveOperation ?? vi.fn(() => Promise.resolve(null)),
@@ -112,6 +116,7 @@ function buildApp(over: Overrides = {}): {
       delete: over.deleteModel ?? vi.fn(() => Promise.resolve()),
       update: over.updateModel ?? vi.fn(() => Promise.resolve({ name: 'm1' })),
       findByName: over.findByName ?? vi.fn(() => Promise.resolve({ name: 'm1' })),
+      findAll: over.findAll ?? vi.fn(() => Promise.resolve([])),
     },
     instanceRepository: {
       delete: over.deleteInstance ?? vi.fn(() => Promise.resolve(true)),
@@ -128,6 +133,13 @@ function buildApp(over: Overrides = {}): {
     createWorkerClient,
     memoryBudget: {
       releaseInstanceReservations: over.releaseInstanceReservations ?? vi.fn(() => undefined),
+      getWorkerBudget: vi.fn(() => null),
+      getReservationHolders: vi.fn(() => new Map()),
+    },
+    eviction: {
+      selectVictims: vi.fn(() => []),
+      startTimer: vi.fn(() => vi.fn()),
+      recordEviction: vi.fn(),
     },
   } as unknown as RouteDeps;
 
@@ -147,7 +159,7 @@ function buildApp(over: Overrides = {}): {
     },
   );
   registerModelRoutes(app, deps);
-  return { app, logInfo, logError, logWarn, stopRunner, createWorkerClient };
+  return { app, deps, logInfo, logError, logWarn, stopRunner, createWorkerClient };
 }
 
 interface DeployOverrides {
@@ -265,6 +277,8 @@ function buildDeployApp(over: DeployOverrides = {}): {
       releaseInstanceReservations: vi.fn(),
       refreshAll: over.refreshAll ?? vi.fn(() => Promise.resolve()),
       getMeasuredByInstance: over.getMeasuredByInstance ?? vi.fn(() => new Map()),
+      getWorkerBudget: vi.fn(() => null),
+      getReservationHolders: vi.fn(() => new Map()),
     },
     placement: {
       place: over.place ?? vi.fn(() => null),
@@ -1019,6 +1033,7 @@ describe('PUT /api/v1/models/:modelName configuration update', () => {
     servedModelName: 'new-served-name',
     displayName: '  Updated model  ',
     pinned: true,
+    allowCoLocation: false,
   };
 
   it('replaces a stopped configuration and trims the display name', async () => {
@@ -2596,16 +2611,19 @@ describe('instanceId validation (#236: boundary check before Redis key compositi
     ['delete', 'DELETE', '/api/v1/models/m/instances/foo[bar'],
     ['sleep (raw colon)', 'POST', '/api/v1/models/m/instances/foo:bar/sleep'],
     ['wake (percent-encoded space)', 'POST', '/api/v1/models/m/instances/foo%20bar/wake'],
-  ])('%s on a malformed instanceId is rejected with 400 before touching Redis/DB', async (_op, method, url) => {
-    const getInstance = vi.fn();
-    const { app } = buildApp({ getInstance });
+  ])(
+    '%s on a malformed instanceId is rejected with 400 before touching Redis/DB',
+    async (_op, method, url) => {
+      const getInstance = vi.fn();
+      const { app } = buildApp({ getInstance });
 
-    const res = await app.inject({ method, url });
+      const res = await app.inject({ method, url });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
-    expect(getInstance).not.toHaveBeenCalled();
-  });
+      expect(res.statusCode).toBe(400);
+      expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+      expect(getInstance).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('instance-scoped op dedup (quality L4 / security L2)', () => {
@@ -2758,5 +2776,396 @@ describe('instance-scoped op dedup (quality L4 / security L2)', () => {
       url: `/api/v1/models/m1/instances/${INSTANCE_ID}/wake`,
     });
     expect(retry.statusCode).toBe(202);
+  });
+});
+
+describe('allowCoLocation (Phase 5 #276)', () => {
+  it('deploy passes allowCoLocation to the repository and the placement request', async () => {
+    const place: Mock = vi.fn(() => ({
+      workerId: 'w1',
+      runnerType: 'vllm',
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    }));
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve({
+        id: 'rec-1',
+        name: params.name,
+        runnerType: params.runnerType,
+        modelPath: params.modelPath,
+        requiredMemory: params.requiredMemory ?? null,
+        deviceType: (params.deviceType as string | undefined) ?? null,
+        tensorParallel: (params.tensorParallel as number | undefined) ?? 1,
+        engineConfig: null,
+        engineArgs: null,
+        runtimeModule: null,
+        pinned: false,
+        allowCoLocation: params.allowCoLocation ?? false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    const { app, deps } = buildDeployApp({ place, createModelRecord });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, allowCoLocation: true },
+    });
+    expect(res.statusCode).toBe(202);
+
+    expect(createModelRecord.mock.calls[0]?.[0]).toMatchObject({ allowCoLocation: true });
+    expect(place.mock.calls[0]?.[0]).toMatchObject({ allowCoLocation: true });
+    // Fourth argument is the CoLocationContext (instances + runnerTypeByModel + holdsByDevice).
+    const context = place.mock.calls[0]?.[3] as {
+      instances: unknown[];
+      runnerTypeByModel: Map<string, string>;
+      holdsByDevice: Map<string, Set<string>>;
+    };
+    expect(context).toBeDefined();
+    expect(context.runnerTypeByModel).toBeInstanceOf(Map);
+    expect(context.holdsByDevice).toBeInstanceOf(Map);
+    void deps;
+  });
+
+  it('deploy defaults the context to undefined when the record does not opt in', async () => {
+    const place: Mock = vi.fn(() => ({
+      workerId: 'w1',
+      runnerType: 'vllm',
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    }));
+    const { app } = buildDeployApp({ place });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+    expect(res.statusCode).toBe(202);
+    const firstCall = place.mock.calls[0] ?? [];
+    const requestArg = firstCall[0] as Record<string, unknown> | undefined;
+    expect(requestArg && 'allowCoLocation' in requestArg).toBe(false);
+    expect(firstCall[3]).toBeUndefined();
+  });
+
+  it('rejects a non-boolean allowCoLocation at deploy', async () => {
+    const { app } = buildDeployApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, allowCoLocation: 'yes' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+
+  it('requires a boolean allowCoLocation at update', async () => {
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/models/m1',
+      payload: {
+        runnerType: 'vllm',
+        modelPath: '/weights/m1',
+        requiredMemory: 8e9,
+        tensorParallel: 1,
+        pinned: false,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+
+  it('serializes allowCoLocation on ModelDetail', async () => {
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() =>
+        Promise.resolve({
+          id: 'rec-1',
+          name: 'm1',
+          runnerType: 'vllm',
+          modelPath: '/weights/m1',
+          requiredMemory: 8e9,
+          deviceType: null,
+          tensorParallel: 1,
+          engineConfig: null,
+          engineArgs: null,
+          runtimeModule: null,
+          servedModelName: null,
+          displayName: null,
+          pinned: false,
+          allowCoLocation: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+      ),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ allowCoLocation?: boolean }>().allowCoLocation).toBe(true);
+  });
+});
+
+describe('wake per-device shortfall (#276)', () => {
+  const sleepingState = { ...ACTIVE_STATE, state: ModelLifecycleState.SLEEPING };
+  const WAKER_RECORD = {
+    id: 'rec-w1',
+    name: 'm1',
+    runnerType: 'vllm',
+    modelPath: '/weights/m1',
+    requiredMemory: 12e9,
+    deviceType: null,
+    tensorParallel: 1,
+    engineConfig: null,
+    engineArgs: null,
+    runtimeModule: null,
+    servedModelName: null,
+    displayName: null,
+    pinned: false,
+    allowCoLocation: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  function budgetFor(devices: Array<{ deviceIndex: number; availableBytes: number }>) {
+    return {
+      workerId: 'worker-1',
+      stale: false,
+      devices: devices.map((d) => ({
+        deviceIndex: d.deviceIndex,
+        deviceType: 'CUDA',
+        totalBytes: 16e9,
+        usedBytes: 16e9 - d.availableBytes,
+        availableBytes: d.availableBytes,
+      })),
+      lastReportAt: new Date().toISOString(),
+    };
+  }
+
+  function coTenant(instanceId: string, deviceIndices: number[], modelName = 'other-model') {
+    return {
+      instanceId,
+      modelName,
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'worker-1',
+      runnerHost: null,
+      runnerPort: null,
+      runnerId: null,
+      deviceIndices,
+      lastInferenceAt: null,
+      stateChangedAt: '2026-01-01T00:00:00Z',
+      errorMessage: null,
+    };
+  }
+
+  it('skips eviction when the phantom shortfall is the waker own hold', async () => {
+    // requiredMemory 12e9, two devices → 6e9/device. Worker-wide available = 4+4 = 8e9
+    // (< 12e9 — the old check evicted an innocent co-tenant). Per device: 4e9 + waker hold
+    // 2e9 = 6e9 → no shortfall on either device.
+    const holds = new Map([['inst-000000000001', { bytes: 2e9, coLocated: false }]]);
+    const { app, deps } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve({ ...sleepingState, deviceIndices: [0, 1] })),
+      getInstancesForModel: vi.fn(() =>
+        Promise.resolve([{ ...sleepingState, deviceIndices: [0, 1] }]),
+      ),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+    });
+    const selectVictims: Mock = vi.fn(() => []);
+    deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([
+        { deviceIndex: 0, availableBytes: 4e9 },
+        { deviceIndex: 1, availableBytes: 4e9 },
+      ]),
+    );
+    deps.memoryBudget.getReservationHolders = vi.fn((_workerId: string, deviceIndex: number) =>
+      deviceIndex === 0 || deviceIndex === 1 ? holds : new Map(),
+    ) as never;
+    deps.eviction.selectVictims = selectVictims as never;
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(res.statusCode).toBe(202);
+    expect(selectVictims).not.toHaveBeenCalled();
+  });
+
+  it('evicts only from the waker device co-location group on a real shortfall', async () => {
+    // Device 0 really short (3e9 avail + 0 hold < 6e9); device 1 healthy (9e9 >= 6e9).
+    // A device-1 co-tenant must never enter the victim list.
+    const { app, deps } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve({ ...sleepingState, deviceIndices: [0, 1] })),
+      getInstancesForModel: vi.fn(() =>
+        Promise.resolve([{ ...sleepingState, deviceIndices: [0, 1] }]),
+      ),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+      getAllInstances: vi.fn(() =>
+        Promise.resolve([coTenant('i-dev0', [0]), coTenant('i-dev1', [1])]),
+      ),
+      findAll: vi.fn(() =>
+        Promise.resolve([
+          WAKER_RECORD,
+          { ...WAKER_RECORD, name: 'other-model', requiredMemory: 36e9, tensorParallel: 4 },
+        ]),
+      ),
+    });
+    const selectVictims: Mock = vi.fn(() => []);
+    deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([
+        { deviceIndex: 0, availableBytes: 3e9 },
+        { deviceIndex: 1, availableBytes: 9e9 },
+      ]),
+    );
+    deps.memoryBudget.getReservationHolders = vi.fn(() => new Map()) as never;
+    deps.eviction.selectVictims = selectVictims as never;
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(res.statusCode).toBe(202);
+    expect(selectVictims).toHaveBeenCalled();
+    const candidates = (selectVictims.mock.calls[0]?.[0] ?? []) as Array<{
+      instanceId: string;
+    }>;
+    expect(candidates.map((c) => c.instanceId)).toEqual(['i-dev0']);
+    // Shortfall figure is per-device: requiredPerDevice 6e9 − 3e9 available = 3e9.
+    expect(selectVictims.mock.calls[0]?.[2]).toBe(3e9);
+    // Victim sizing is per-device too: the candidate map carries requiredMemory / TP.
+    const sizing = (selectVictims.mock.calls[0]?.[4] ?? new Map()) as Map<string, number>;
+    expect(sizing.get('other-model')).toBe(9e9); // victim TP 4, requiredMemory 36e9 → 9e9/device
+  });
+
+  it('sizes per-device victims by their own tensor parallel share', async () => {
+    // Review round 1 (qual MEDIUM-1): the shortfall is a per-device figure, so a TP-4 victim
+    // must be sized at requiredMemory/4 on that device — the whole-model figure makes the LRU
+    // strategy stop after one victim that frees only a quarter of its size on this device
+    // (under-eviction → the wake proceeds short). The legacy fallback keeps whole-model sizing.
+    const victimRecord = {
+      ...WAKER_RECORD,
+      name: 'other-model',
+      requiredMemory: 36e9,
+      tensorParallel: 4,
+    };
+    const { app, deps } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve({ ...sleepingState, deviceIndices: [0] })),
+      getInstancesForModel: vi.fn(() =>
+        Promise.resolve([{ ...sleepingState, deviceIndices: [0] }]),
+      ),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+      getAllInstances: vi.fn(() => Promise.resolve([coTenant('i-victim', [0])])),
+      findAll: vi.fn(() => Promise.resolve([WAKER_RECORD, victimRecord])),
+    });
+    const selectVictims: Mock = vi.fn(() => []);
+    deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([{ deviceIndex: 0, availableBytes: 3e9 }]),
+    );
+    deps.memoryBudget.getReservationHolders = vi.fn(() => new Map()) as never;
+    deps.eviction.selectVictims = selectVictims as never;
+
+    await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    // requiredPerDevice 12e9 − 3e9 available = 9e9 shortfall; sizing map is per-device.
+    expect(selectVictims.mock.calls[0]?.[2]).toBe(9e9);
+    const sizing = (selectVictims.mock.calls[0]?.[4] ?? new Map()) as Map<string, number>;
+    expect(sizing.get('other-model')).toBe(9e9); // 36e9 / TP 4
+    expect(sizing.get('m1')).toBe(12e9); // waker record TP 1 (pinned out anyway)
+  });
+
+  it('bounds the deduped victim union at the per-cycle eviction cap', async () => {
+    // Review round 1 (conf MEDIUM-1): selectVictims caps EACH per-device call, so two short
+    // devices could union 2× maxPerCycle victims in one wake — the per-cycle bound the
+    // single-call path had. Two short devices, ≥3 evictable each, cap 3 → at most 3 teardowns.
+    const victimsOf = (instanceId: string) => {
+      const n = Number(instanceId.slice(2));
+      return {
+        instanceId,
+        modelName: n % 2 === 0 ? 'model-a' : 'model-b',
+        state: ModelLifecycleState.ACTIVE,
+        workerId: 'worker-1',
+        memoryBytes: 1e9,
+        lastInferenceAt: null,
+        pinned: false,
+      };
+    };
+    const recordA = { ...WAKER_RECORD, name: 'model-a', requiredMemory: 1e9 };
+    const recordB = { ...WAKER_RECORD, name: 'model-b', requiredMemory: 1e9 };
+    const { app, deps } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve({ ...sleepingState, deviceIndices: [0, 1] })),
+      getInstancesForModel: vi.fn(() =>
+        Promise.resolve([{ ...sleepingState, deviceIndices: [0, 1] }]),
+      ),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+      getAllInstances: vi.fn(() =>
+        Promise.resolve(
+          [0, 1, 2, 3, 4, 5].map((i) =>
+            coTenant(`i-${i}`, [i % 2], i % 2 === 0 ? 'model-a' : 'model-b'),
+          ),
+        ),
+      ),
+      findAll: vi.fn(() => Promise.resolve([WAKER_RECORD, recordA, recordB])),
+    });
+    // Echo the candidates back with distinct ids (each device group has 3 members).
+    const selectVictims: Mock = vi.fn((candidates: Array<{ instanceId: string }>) =>
+      candidates.map((c) => victimsOf(c.instanceId)),
+    );
+    deps.config = { ...deps.config, evictionMaxPerCycle: 3 };
+    deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([
+        { deviceIndex: 0, availableBytes: 0 },
+        { deviceIndex: 1, availableBytes: 0 },
+      ]),
+    );
+    deps.memoryBudget.getReservationHolders = vi.fn(() => new Map()) as never;
+    deps.eviction.selectVictims = selectVictims as never;
+
+    await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    // Both devices are short; each selectVictims call returns its 3 candidates, but the
+    // deduped union handed to teardown must be sliced to the per-cycle cap (3), not 6.
+    expect(selectVictims).toHaveBeenCalledTimes(2);
+    const { recordEviction } = deps.eviction as unknown as { recordEviction: Mock };
+    expect(recordEviction).toHaveBeenCalledTimes(3);
+  });
+
+  it('falls back to the worker-wide check for an instance without deviceIndices', async () => {
+    const legacy = { ...sleepingState, deviceIndices: null };
+    const { app, deps } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(legacy)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([legacy])),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+      findAll: vi.fn(() => Promise.resolve([WAKER_RECORD])),
+    });
+    const selectVictims: Mock = vi.fn(() => []);
+    deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([{ deviceIndex: 0, availableBytes: 4e9 }]),
+    );
+    deps.memoryBudget.getReservationHolders = vi.fn(() => new Map()) as never;
+    deps.eviction.selectVictims = selectVictims as never;
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(res.statusCode).toBe(202);
+    expect(selectVictims).toHaveBeenCalled();
+    // Legacy verbatim: requiredBytes = full requiredMemory, worker scope.
+    expect(selectVictims.mock.calls[0]?.[2]).toBe(12e9);
+    expect(selectVictims.mock.calls[0]?.[3]).toEqual(new Set(['worker-1']));
+  });
+
+  it('excludes the waker own model via pinnedModels', async () => {
+    const { app, deps } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve({ ...sleepingState, deviceIndices: [0] })),
+      getInstancesForModel: vi.fn(() =>
+        Promise.resolve([{ ...sleepingState, deviceIndices: [0] }]),
+      ),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+      getAllInstances: vi.fn(() =>
+        Promise.resolve([coTenant('i-replica', [0], 'm1'), coTenant('i-other', [0])]),
+      ),
+      findAll: vi.fn(() => Promise.resolve([WAKER_RECORD])),
+    });
+    const selectVictims: Mock = vi.fn(() => []);
+    deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([{ deviceIndex: 0, availableBytes: 2e9 }]),
+    );
+    deps.memoryBudget.getReservationHolders = vi.fn(() => new Map()) as never;
+    deps.eviction.selectVictims = selectVictims as never;
+
+    await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    const pinned = (selectVictims.mock.calls[0]?.[1] ?? new Set()) as Set<string>;
+    expect(pinned.has('m1')).toBe(true);
+    const candidates = (selectVictims.mock.calls[0]?.[0] ?? []) as Array<{
+      modelName: string;
+    }>;
+    expect(candidates.some((c) => c.modelName === 'm1')).toBe(true);
   });
 });

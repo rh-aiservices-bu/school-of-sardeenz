@@ -68,7 +68,9 @@ async function main(): Promise<void> {
   );
   const routingMap = new RoutingMapService(redis, config.redisKeyPrefix);
   const proxyProtocols = new ProxyProtocolsService(redis, config.redisKeyPrefix);
-  const placement = new PlacementPipeline();
+  const placement = new PlacementPipeline(undefined, {
+    maxPoolHeadroomPercent: config.colocationMaxPoolHeadroomPercent,
+  });
   const eviction = new EvictionEngine(undefined, {
     maxPerCycle: config.evictionMaxPerCycle,
     minActiveTimeSecs: 60,

@@ -880,6 +880,17 @@ export type components = {
              * @default false
              */
             pinned: boolean;
+            /**
+             * @description Opt-in to kvcached elastic co-location: this model's instances may
+             *     be placed on a device past naive byte-sum capacity when every
+             *     instance already resident on that device (including sleeping ones)
+             *     belongs to a runner type declaring kvCacheElasticSharing on the
+             *     target worker, and the device reports a kvcached pool. Headroom is
+             *     bounded by the control plane's oversubscription cap. Default
+             *     false: bytes must fit (unchanged placement).
+             * @default false
+             */
+            allowCoLocation: boolean;
         };
         /** @description Complete replacement for a stopped model's mutable configuration. */
         ModelConfigurationUpdateRequest: {
@@ -894,6 +905,7 @@ export type components = {
             engineArgs?: components["schemas"]["ModelDeploymentRequest"]["engineArgs"];
             runtimeModule?: components["schemas"]["ModelDeploymentRequest"]["runtimeModule"];
             pinned: components["schemas"]["ModelDeploymentRequest"]["pinned"];
+            allowCoLocation: components["schemas"]["ModelDeploymentRequest"]["allowCoLocation"];
         };
         /**
          * @description Response after a deployment request is accepted. The model is now
@@ -1096,6 +1108,12 @@ export type components = {
             engineConfig?: {
                 [key: string]: unknown;
             };
+            /**
+             * @description Whether the model opted in to kvcached elastic co-location
+             *     (see ModelDeploymentRequest.allowCoLocation). Present in the
+             *     detail payload so the edit form can hydrate the switch.
+             */
+            allowCoLocation?: boolean;
             /** @description Ordered CLI tokens passed verbatim to the engine. */
             engineArgs?: string[];
             /**
@@ -1208,7 +1226,11 @@ export type components = {
             /**
              * @description Measured state of the kvcached elastic KV-cache pool on this
              *     device (prealloc/used/free breakdown), relayed from the worker's
-             *     memory report. Telemetry only — never feeds placement math.
+             *     memory report. Since Phase 5 (#276), the placement pipeline's
+             *     elastic co-location branch reads `freeBytes`/`preallocBytes` as
+             *     bounded headroom (see `allowCoLocation` on
+             *     ModelDeploymentRequest); every other consumer — and all
+             *     non-elastic placement math — treats it as telemetry only.
              *     Absent when no kvcached pool is reported for this device; absent
              *     means absent, not zero.
              */
