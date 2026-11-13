@@ -390,8 +390,10 @@ two vLLM runners can share a GPU via kvcached (spike Gate 9); Phase 5 turns that
 policy: which models may co-locate, how much oversubscription is allowed, and how eviction reacts
 when a shared pool is under pressure.
 
-**Status:** unblocked — its two declared gates (#244 memory attribution scope, #253 executor
-offload) landed in M17. Detailed scope will be written as `phase5.md`.
+**Status:** implemented on the phase branch — #276 (co-location placement policy) and #278
+(consumer-side attribution rule) are merged; #277 (shared-pool pressure response) lands in
+parallel. The phase plan and its on-cluster verification recipe (Gate 9b, deploy-only) live in
+[`phase5.md`](phase5.md).
 
 **Dependencies:** Phase 4 complete; measured-only VRAM telemetry (#163/#164) so pool pressure is
 observed, not estimated; per-device kvcached pool reporting from the runner contract.

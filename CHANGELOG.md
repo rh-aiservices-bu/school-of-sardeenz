@@ -57,6 +57,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   documents the elastic-branch consumer (the only one) — non-elastic placement math still
   never reads it.
 
+- **Phase 5 plan document: `docs/project/phase5.md` (issue #279).** The phase doc promised by
+  `overall-plan.md` ("Detailed scope will be written as `phase5.md`"): the phase's objective and
+  design notes (#276 co-location placement policy, #277 shared-pool pressure response, #278
+  consumer-side attribution rule), and the **Gate 9b recipe** — the deploy-only,
+  control-plane-driven co-location verification procedure that complements the worker-driven
+  Gate 9 (which asserts `deviceIndex` only): deploy two `allowCoLocation: true` vLLM models
+  pinned to one device through the CP, assert both instances ACTIVE and both runners'
+  `/memory-report` carrying `kvCache` blocks satisfying the `KVCachePoolStats` partition
+  invariant (`totalBytes = usedBytes + preallocBytes + freeBytes`), an optional
+  concurrent-inference smoke, and a required NVML reality check (freeBytes is unbacked virtual
+  capacity, so the ratified headroom formula can count it twice — acceptance measures actual
+  device usage under concurrent inference, not only placement success). Also:
+  `overall-plan.md`'s Phase 5 status flips to implemented and `phase4.md`'s deferred-OOM-guard
+  sentence is closed (it shipped as Phase 5); `docs/project/status.md` flips at phase close, not
+  in this change. A description-only contract reword rides along:
+  `WorkerModelInfo.memoryUsedBytes`'s absence clause now also covers a co-located device-scope
+  row deliberately dropped post-#278.
+
 ### Security
 
 - **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**

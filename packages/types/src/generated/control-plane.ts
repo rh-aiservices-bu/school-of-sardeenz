@@ -1275,7 +1275,11 @@ export type components = {
              * @description Measured device memory consumed by this instance, in bytes,
              *     from the worker's NVML process attribution (stub-simulated on
              *     hosts without NVML). Absent when no measurement is attributed
-             *     yet (e.g. the instance is still starting).
+             *     yet (e.g. the instance is still starting), or when a co-located
+             *     device-scope (or unknown-scope) memory row was deliberately
+             *     dropped from per-instance figures because its device has other
+             *     >0-byte rows — the dropped bytes surface in the dashboard's
+             *     Other bucket instead.
              */
             memoryUsedBytes?: number;
             /**
