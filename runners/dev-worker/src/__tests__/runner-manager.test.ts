@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RunnerManager, ConflictError, NotFoundError } from '../runner-manager.js';
 import { RunnerLogBuffer, RETAIN_TTL_MS } from '../runner-log-buffer.js';
-import type { WorkerRegistration } from '../registration.js';
+import { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
 import type { LaunchHandle, LaunchSpec, RunnerLauncher } from '../launcher.js';
+import type { WorkerMemoryReport } from './response-types.js';
 
 function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
   return {
@@ -48,12 +49,49 @@ function makeRegistration(): WorkerRegistration {
   return {
     allocateMemory: () => {},
     freeMemory: () => {},
+    pushMemoryReportOnce: () => {},
     getDeviceMemoryUsed: () => 0,
     register: async () => {},
     deregister: async () => {},
     startHeartbeat: () => {},
     stopHeartbeat: () => {},
   } as unknown as WorkerRegistration;
+}
+
+// A launcher whose start() resolves immediately with a handle matching the spec's ports — no
+// real sockets, safe to run alongside every other block in this file.
+function makeFakeLauncher(): RunnerLauncher {
+  return {
+    serializeColdStarts: false,
+    start: (spec: LaunchSpec): Promise<LaunchHandle> =>
+      Promise.resolve({
+        host: 'localhost',
+        port: spec.port,
+        enginePort: spec.enginePort,
+        stop: () => Promise.resolve(),
+      }),
+  };
+}
+
+// Minimal tracking redis double for wiring a real WorkerRegistration into a RunnerManager —
+// only what pushMemoryReport()/register() touch (set + pipeline factory), plus the set history
+// the `:memory` assertions read.
+function makeTrackingRedis() {
+  const setHistory: Array<{ key: string; value: string }> = [];
+  const pipeline = {
+    set: () => pipeline,
+    del: () => pipeline,
+    exec: () => [],
+  };
+  return {
+    pipeline: () => pipeline,
+    set: vi.fn((...args: unknown[]) => {
+      const [key, value] = args as [string, string];
+      setHistory.push({ key, value });
+      return 'OK';
+    }),
+    _setHistory: setHistory,
+  };
 }
 
 // A launcher whose start() captures the onExit callback the manager wired in, so a test can fire
@@ -362,6 +400,167 @@ describe('RunnerManager', () => {
         devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
       }),
     ).rejects.toThrow('cold-start boom');
+  });
+
+  // #257 defect 1: the slot must be reserved synchronously, before the first await. Two
+  // concurrent starts of one instanceId must race to exactly one ConflictError (pre-fix, both
+  // passed the has() check while allocatePorts was suspended and both launched), and exactly one
+  // port block must be consumed.
+  it('concurrent same-instanceId starts race to exactly one ConflictError and one port block', async () => {
+    // A shared deferred probePort: every allocatePorts probe suspends on it until released, so
+    // whichever starts are in flight are held in the port-probe window the fix guards.
+    let releaseProbe!: (value: boolean) => void;
+    const gate = new Promise<boolean>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const slowProbe = (): Promise<boolean> => gate;
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeFakeLauncher(),
+      undefined,
+      slowProbe,
+    );
+
+    const startParams = {
+      modelName: 'raced-model',
+      instanceId: 'inst-raced',
+      runnerType: 'vllm',
+      modelPath: '/models/raced',
+      requiredMemory: 1,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    };
+    // Fire both, release the gate, then settle. Pre-fix both pass the has() check (the
+    // reservation only happens after allocatePorts) and both fulfill; post-fix the second
+    // start hits the synchronous reservation and rejects with ConflictError before probing.
+    const first = mgr.startRunner(startParams);
+    const second = mgr.startRunner(startParams);
+    releaseProbe(true);
+    const settled = await Promise.allSettled([first, second]);
+
+    const fulfilled = settled.filter((s) => s.status === 'fulfilled');
+    const conflictErrors = settled.filter(
+      (s) => s.status === 'rejected' && s.reason instanceof ConflictError,
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(conflictErrors).toHaveLength(1);
+
+    // Exactly one 4-port block was consumed: a third, unrelated start lands on 19305
+    // (runnerPortStart + PORTS_PER_RUNNER), not 19309.
+    const third = await mgr.startRunner({
+      ...startParams,
+      modelName: 'other-model',
+      instanceId: 'inst-other',
+    });
+    expect(third.port).toBe(19305);
+  });
+
+  // #257 defect 1, rollback half: with the reservation moved above allocatePorts, an allocation
+  // failure lands inside the extended try, whose catch rolls the reserved slot back — a retry of
+  // the same instanceId must fail with the allocation error again, never ConflictError.
+  it('a failed port allocation rolls back the reserved slot so the same instanceId can retry', async () => {
+    // One-slot range whose only block always fails its probe: allocatePorts throws exhausted.
+    const mgr = new RunnerManager(
+      makeConfig({ maxRunners: 1 }),
+      makeRegistration(),
+      makeFakeLauncher(),
+      undefined,
+      async () => false,
+    );
+    const startParams = {
+      modelName: 'alloc-fail-model',
+      instanceId: 'inst-alloc-fail',
+      runnerType: 'vllm' as const,
+      modelPath: '/models/alloc-fail',
+      requiredMemory: 1,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    };
+
+    await expect(mgr.startRunner(startParams)).rejects.toThrow(/port range exhausted/i);
+    // The same instanceId is not stranded behind a stale reservation — the allocation error
+    // again, NOT ConflictError.
+    await expect(mgr.startRunner(startParams)).rejects.toThrow(/port range exhausted/i);
+  });
+
+  // #257 defect 3: a tensor-parallel start across N devices updates all ledgers but pushes one
+  // coalesced memory report per tick, with the per-device floor arithmetic preserved.
+  it('a 2-device start calls redis.set once with a report containing both devices', async () => {
+    const trackingRedis = makeTrackingRedis();
+    const registration = new WorkerRegistration(trackingRedis as never, makeConfig(), [
+      { deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 24 * 1024 * 1024 * 1024 },
+      { deviceIndex: 1, deviceType: 'CUDA', memoryTotalBytes: 24 * 1024 * 1024 * 1024 },
+    ]);
+    const mgr = new RunnerManager(makeConfig(), registration, makeFakeLauncher());
+
+    await mgr.startRunner({
+      modelName: 'tp-model',
+      instanceId: 'inst-tp',
+      runnerType: 'vllm',
+      modelPath: '/models/tp',
+      requiredMemory: 1000,
+      tensorParallel: 2,
+      devices: [
+        { deviceIndex: 0, deviceType: 'CUDA' },
+        { deviceIndex: 1, deviceType: 'CUDA' },
+      ],
+    });
+    // Drain the coalesced (microtask-scheduled) push: two deterministic macrotask turns cover
+    // the microtask and the redis.set promise. No wall-clock waits.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const memCalls = trackingRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
+    expect(memCalls.length).toBe(1);
+    const report = JSON.parse(memCalls[0].value) as WorkerMemoryReport;
+    expect(report.devices[0].memoryUsedBytes).toBe(500);
+    expect(report.devices[1].memoryUsedBytes).toBe(500);
+    expect(report.reportedAt).toBeDefined();
+  });
+  // #257 review r1: startRunner's coalesced push is pinned by the 2-device test above; the two
+  // rollback paths (deliberate stop, unexpected exit) must each still schedule one coalesced
+  // push after freeing memory, or the control plane sees the freed VRAM only on the next
+  // heartbeat tick.
+  it('stopRunner schedules one coalesced memory-report push', async () => {
+    const registration = makeRegistration();
+    const pushSpy = vi.spyOn(registration, 'pushMemoryReportOnce');
+    const mgr = new RunnerManager(makeConfig(), registration, makeFakeLauncher());
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'stop-push',
+      instanceId: 'inst-stop-push',
+      runnerType: 'vllm',
+      modelPath: '/models/stop-push',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+
+    await mgr.stopRunner(runnerId);
+    expect(pushSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('unexpected exit schedules one coalesced memory-report push', async () => {
+    const { launcher, fireExit } = makeSupervisedLauncher();
+    const registration = makeRegistration();
+    const pushSpy = vi.spyOn(registration, 'pushMemoryReportOnce');
+    const mgr = new RunnerManager(makeConfig(), registration, launcher);
+
+    const { runnerId } = await mgr.startRunner({
+      modelName: 'exit-push',
+      instanceId: 'inst-exit-push',
+      runnerType: 'vllm',
+      modelPath: '/models/exit-push',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+
+    fireExit(runnerId);
+    expect(pushSpy).toHaveBeenCalledTimes(2);
   });
 
   it('serializes cold-starts when the launcher requires it', async () => {

@@ -458,6 +458,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   probe fails fast on an exit observed while a probe was wedged. Previously the first hung probe
   bypassed both the exit check and the deadline forever, and with `serializeColdStarts = true`
   one wedged start blocked every subsequent launch on the worker.
+- **Dev worker: `startRunner` reserves the instance slot before its first await, the fire-and-
+  forget memory-report push no longer risks an `unhandledRejection`, and multi-device
+  start/stop/exit pushes one coalesced memory report per tick (issue #257).**
+  The "reserve up-front" comment was not true: the `has()` conflict check was followed by the
+  awaited port allocation before the slot was written, so two concurrent `POST /runners` calls
+  for one `instanceId` both passed, both launched, and the second overwrote the first — leaking
+  its record, ports and ledger memory. The reservation (and the model-set registration) now
+  happens synchronously before `allocatePorts()`, inside a `try` extended to cover the
+  allocation phase, so a port-allocation failure rolls the just-reserved slot back instead of
+  stranding the `instanceId` behind a permanent `ConflictError`; the catch's `usedPorts` delete
+  is guarded on nullable pre-declared port bindings so it cannot mask the original error.
+  `allocateMemory`/`freeMemory` are ledger-only now; the publish moved to a new
+  `WorkerRegistration.pushMemoryReportOnce()` — a microtask-coalesced (never a timer, keeping
+  the staleness-check freshness) single push per tick with a logged `.catch` instead of an
+  unhandled rejection. A tensor-parallel start across N devices builds and pushes one report
+  carrying the final ledger state (per-device `floor(requiredMemory / devices.length)`
+  arithmetic unchanged) instead of N near-identical reports.
 
 - **Dashboard: models placement — single model list per GPU card.** The card previously
   listed every model twice: once as the legend chips under the stacked bar, again as the

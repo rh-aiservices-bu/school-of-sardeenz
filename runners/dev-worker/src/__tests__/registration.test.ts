@@ -624,7 +624,12 @@ describe('WorkerRegistration', () => {
         instances: [],
       };
       const measuredProvider = vi.fn(() => Promise.resolve(sample));
-      const kvCacheDeviceProvider = kvProvider(new Map([[0, kvStats], [1, kvStats]]));
+      const kvCacheDeviceProvider = kvProvider(
+        new Map([
+          [0, kvStats],
+          [1, kvStats],
+        ]),
+      );
       registration = new WorkerRegistration(
         mockRedis as never,
         config,
@@ -740,16 +745,100 @@ describe('WorkerRegistration', () => {
   });
 
   describe('memory tracking', () => {
-    it('allocateMemory updates tracked usage and pushes report', async () => {
+    it('allocateMemory updates tracked usage without pushing (ledger-only, #257)', async () => {
       const bytes = 4 * 1024 * 1024 * 1024;
       registration.allocateMemory(0, bytes);
 
       expect(registration.getDeviceMemoryUsed(0)).toBe(bytes);
       expect(registration.getDeviceMemoryUsed(1)).toBe(0);
 
-      await new Promise((r) => setTimeout(r, 50));
+      // Ledger-only: nothing publishes until RunnerManager calls pushMemoryReportOnce().
+      // The coalesced push is microtask-scheduled: two deterministic macrotask turns drain the
+      // microtask, the redis.set promise and its .catch — no wall-clock wait.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
       const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
-      expect(memCalls.length).toBeGreaterThanOrEqual(1);
+      expect(memCalls.length).toBe(0);
+    });
+
+    it('coalesces N ledger updates in one tick into a single report push', async () => {
+      registration.allocateMemory(0, 1000);
+      registration.allocateMemory(1, 2000);
+      registration.freeMemory(0, 400);
+      registration.freeMemory(1, 500);
+      registration.pushMemoryReportOnce();
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
+      expect(memCalls.length).toBe(1);
+      const report = JSON.parse(memCalls[0].value) as WorkerMemoryReport;
+      expect(report.devices[0].memoryUsedBytes).toBe(600);
+      expect(report.devices[1].memoryUsedBytes).toBe(1500);
+    });
+
+    it('concurrent pushMemoryReportOnce calls within one tick schedule only one push', async () => {
+      registration.allocateMemory(0, 1000);
+      registration.pushMemoryReportOnce();
+      registration.pushMemoryReportOnce();
+      registration.pushMemoryReportOnce();
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
+      expect(memCalls.length).toBe(1);
+    });
+
+    it('a later tick can push again after a coalesced push (flag resets)', async () => {
+      registration.allocateMemory(0, 1000);
+      registration.pushMemoryReportOnce();
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      registration.allocateMemory(0, 1000);
+      registration.pushMemoryReportOnce();
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
+      expect(memCalls.length).toBe(2);
+      expect(JSON.parse(memCalls[1].value as string)).toMatchObject({
+        devices: [{ memoryUsedBytes: 2000 }, { memoryUsedBytes: 0 }],
+      });
+    });
+
+    it('a failed ledger push is logged and never surfaces as an unhandled rejection', async () => {
+      const pushError = new Error('redis connection lost');
+      mockRedis.set.mockRejectedValueOnce(pushError);
+      const unhandled: unknown[] = [];
+      const onUnhandled = (err: unknown): void => {
+        unhandled.push(err);
+      };
+      process.on('unhandledRejection', onUnhandled);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        registration.allocateMemory(0, 1000);
+        registration.pushMemoryReportOnce();
+
+        // Drain microtasks plus macrotask turns: the scheduled microtask runs, the rejected
+        // redis.set settles, and the logged .catch lands.
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        // The rejected set never reaches _setHistory (the once-implementation replaces the
+        // recording default) — assert on the redis.set mock's call list instead.
+        const memSets = mockRedis.set.mock.calls.filter((c) =>
+          (c[0] as string).endsWith(':memory'),
+        );
+        expect(memSets).toHaveLength(1);
+        expect(errorSpy).toHaveBeenCalledWith('[worker] memory-report push failed', pushError);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+        errorSpy.mockRestore();
+      }
     });
 
     it('freeMemory decreases tracked usage', () => {
