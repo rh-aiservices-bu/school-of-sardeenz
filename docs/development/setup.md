@@ -64,8 +64,8 @@ connect to whatever host ports you configured.
 
 > **Tokens fail closed.** The control plane requires both `SARDEENZ_API_TOKEN` and
 > `SARDEENZ_WORKER_TOKEN` at startup (the dev worker needs only `SARDEENZ_WORKER_TOKEN`);
-> missing or empty values fail the start. Set `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` in
-> `.env` for local unauthenticated runs (dev only).
+> missing, empty or whitespace-only values fail the start. Set
+> `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` in `.env` for local unauthenticated runs (dev only).
 
 ## Project Structure
 

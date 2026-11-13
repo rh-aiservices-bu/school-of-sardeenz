@@ -128,6 +128,28 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('SARDEENZ_WORKER_TOKEN must be set.');
   });
 
+  it('throws when SARDEENZ_API_TOKEN is whitespace-only (#268)', () => {
+    process.env['SARDEENZ_API_TOKEN'] = ' \t ';
+    expect(() => loadConfig()).toThrow('SARDEENZ_API_TOKEN must be set.');
+  });
+
+  it('throws when SARDEENZ_WORKER_TOKEN is whitespace-only (#268)', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = '   ';
+    expect(() => loadConfig()).toThrow('SARDEENZ_WORKER_TOKEN must be set.');
+  });
+
+  it('starts on a whitespace-only token with the dev opt-out (#268)', () => {
+    process.env['SARDEENZ_API_TOKEN'] = '   ';
+    process.env['SARDEENZ_WORKER_TOKEN'] = '   ';
+    process.env['SARDEENZ_ALLOW_UNAUTHENTICATED_API'] = 'true';
+    expect(loadConfig().apiToken).toBe('   ');
+  });
+
+  it('keeps a token with surrounding whitespace byte-exact (#268)', () => {
+    process.env['SARDEENZ_API_TOKEN'] = ' padded-token ';
+    expect(loadConfig().apiToken).toBe(' padded-token ');
+  });
+
   it('starts when both tokens are set without the opt-out', () => {
     const config = loadConfig();
     expect(config.apiToken).toBe('test-api-token');

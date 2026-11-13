@@ -19,10 +19,12 @@ a correctly populated Secret.
 ## Decision
 
 1. **Fail closed at config load.** `loadConfig()` throws, before any server is built, when
-   `SARDEENZ_API_TOKEN` **or** `SARDEENZ_WORKER_TOKEN` is unset or empty (control plane — both
+   `SARDEENZ_API_TOKEN` **or** `SARDEENZ_WORKER_TOKEN` is unset or blank (control plane — both
    required: an empty worker token makes `WorkerClient` send unauthenticated requests and 401
    every runner op at runtime, far from the config error) or when the worker's own
-   `SARDEENZ_WORKER_TOKEN` is unset or empty. The throw names exactly the missing variable(s) and
+   `SARDEENZ_WORKER_TOKEN` is unset or blank. "Blank" includes whitespace-only values, which
+   are rejected as missing; the stored value is never trimmed, so the constant-time bearer
+   comparison stays byte-exact. The throw names exactly the missing variable(s) and
    the escape hatch, mirroring the `SARDEENZ_SINGLE_INSTANCE` fail-closed pattern. The process
    exits with a fatal startup error.
 2. **One dev-only opt-out.** `SARDEENZ_ALLOW_UNAUTHENTICATED_API` (truthy `1/true/yes/on`,
