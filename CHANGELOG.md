@@ -461,7 +461,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   user-visible and accepted: a request that starts in the control plane's drain→sleep window now
   turns a previously "successful" sleep into a 409 → instance ERROR (a loud failure instead of
   destroyed generations; no CP-side drain retry is in scope), and a scrape that returns 200 with
-  an unrecognized body now behaves like a failed scrape (drain waits out `sleepTimeoutMs`).
+  an unrecognized body now behaves like a failed scrape — the control plane drains until
+  `sleepTimeoutMs` expires and the sleep then fails with a 504, landing the instance in ERROR.
   **Release gate:** capture a live vLLM 0.26 `/metrics` body on a GPU runner and confirm the
   parser's shape assumptions before relying on the drain behaviour in production.
 

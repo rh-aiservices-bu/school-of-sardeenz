@@ -59,8 +59,8 @@ def test_memory_report_shape(shim_client):
         # Attribution scope (#244). The contract keeps the field OPTIONAL (a legacy
         # image predating it must still validate), but both shims in this suite are
         # current emitters, so the conformance doubles must declare one — that is
-        # what pins the emitter side of the contract here; the optionality itself is
-        # covered by the shims' unit tests over a report without the key.
+        # what pins the emitter side of the contract here. Optionality is a contract
+        # property (`required` omits the key), not something this suite constrains.
         assert device.get("attribution") in ("runner", "device"), (
             f"{_name}: a current emitter must declare attribution 'runner' or 'device', "
             f"got {device.get('attribution')!r}"
