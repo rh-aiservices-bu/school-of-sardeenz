@@ -207,6 +207,68 @@ describe('GET /api/v1/workers/:workerId — per-instance models (#163 doctrine)'
     expect(model?.memoryUsedBytes).toBe(8 * 1024 ** 3);
   });
 
+  it('excludes co-located device-scope measurements from models[].memoryUsedBytes (#278)', async () => {
+    const { app } = buildDetailApp({
+      instances: [
+        {
+          instanceId: 'inst-a',
+          workerId: 'w1',
+          modelName: 'llama-3-8b',
+          state: ModelLifecycleState.ACTIVE,
+          deviceIndices: [0],
+        },
+        {
+          instanceId: 'inst-b',
+          workerId: 'w1',
+          modelName: 'mistral-7b',
+          state: ModelLifecycleState.ACTIVE,
+          deviceIndices: [0],
+        },
+      ],
+      getWorkerBudget: vi.fn(() => ({
+        workerId: 'w1',
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            totalBytes: 16 * 1024 ** 3,
+            usedBytes: 14 * 1024 ** 3,
+            availableBytes: 2 * 1024 ** 3,
+          },
+        ],
+        lastReportAt: new Date().toISOString(),
+        stale: false,
+        instanceMeasurements: [
+          {
+            instanceId: 'inst-a',
+            modelName: 'llama-3-8b',
+            deviceIndex: 0,
+            measuredUsedBytes: 4 * 1024 ** 3,
+            attribution: 'runner',
+          },
+          {
+            instanceId: 'inst-b',
+            modelName: 'mistral-7b',
+            deviceIndex: 0,
+            measuredUsedBytes: 10 * 1024 ** 3,
+            attribution: 'device',
+          },
+        ],
+      })),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/workers/w1' });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json<{
+      models: Array<{ instanceId?: string; memoryUsedBytes?: number }>;
+    }>();
+    const runnerRow = body.models.find((m) => m.instanceId === 'inst-a');
+    const deviceRow = body.models.find((m) => m.instanceId === 'inst-b');
+    expect(runnerRow?.memoryUsedBytes).toBe(4 * 1024 ** 3);
+    expect(deviceRow?.memoryUsedBytes).toBeUndefined();
+  });
+
   it('omits memoryUsedBytes when nothing has been attributed to the instance yet', async () => {
     const { app } = buildDetailApp({
       instances: [

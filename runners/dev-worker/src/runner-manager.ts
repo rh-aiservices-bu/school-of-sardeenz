@@ -12,6 +12,10 @@ export interface LedgerInstanceShare {
   modelName: string;
   deviceIndex: number;
   bytes: number;
+  /** The source row's scope from the runner's /memory-report (ADR-027); absent when the
+   * source declared none — an absent value is unknown scope and every consumer treats it
+   * conservatively, like `device`. Never relabeled on the way out. */
+  attribution?: 'runner' | 'device';
 }
 
 /** One kvcached pool block as relayed from a runner's /memory-report (engine-runner contract
@@ -29,6 +33,7 @@ interface RunnerMemoryReportDevice {
   deviceIndex: number;
   memoryUsedBytes: number;
   kvCache?: KVCacheDeviceStats;
+  attribution?: 'runner' | 'device';
 }
 
 // Tries to bind 127.0.0.1:port; resolves true if the port is free, false if already in use.
@@ -427,17 +432,58 @@ export class RunnerManager {
   // own /memory-report already reports 0 while SLEEPING (runner-stub/routes/memory.ts). A runner
   // whose query fails (unreachable, still starting, in ERROR state, non-2xx) contributes no
   // entries rather than a stale guess — this method never rejects.
+  //
+  // Scope rule (ADR-027, issue #278): a `runner`-scope row is genuinely per-runner and is emitted
+  // as-is (the stub's own-ledger figure). A `device`-scope or unknown-scope row is a WHOLE-device
+  // observation — promoting it into an instance row while any other runner record claims the same
+  // device would double-count every co-located instance, so it is promoted only while its runner
+  // is the device's SOLE record among this worker's runner records, and dropped otherwise (its
+  // bytes surface in the dashboard's Other bucket downstream). Residency is decided from runner
+  // records (`RunnerRecord.devices`), never from reported bytes: a sleeping or ERROR co-tenant's
+  // record persists until stopRunner() and its residual CUDA context can still hold bytes, so it
+  // blocks promotion. A promoted row carries the source scope verbatim — never relabeled to
+  // `runner`, which would overclaim (device rows include processes outside Sardeenz).
   async getLedgerInstanceShares(): Promise<LedgerInstanceShare[]> {
     const reports = await this.fetchMemoryReports();
+    // deviceIndex -> every runner record claiming the device (this.runners, not the fetched
+    // reports — a co-tenant whose query failed still holds its record and its bytes).
+    const claimantsByDevice = new Map<number, Set<string>>();
+    for (const record of this.runners.values()) {
+      for (const device of record.devices) {
+        let claimants = claimantsByDevice.get(device.deviceIndex);
+        if (!claimants) {
+          claimants = new Set();
+          claimantsByDevice.set(device.deviceIndex, claimants);
+        }
+        claimants.add(record.runnerId);
+      }
+    }
     return reports.flatMap(({ record, body }) =>
       (body.devices ?? [])
         .filter((d) => d.memoryUsedBytes > 0) // sleeping (or otherwise idle) runners hold nothing
-        .map((d) => ({
-          instanceId: record.instanceId,
-          modelName: record.modelName,
-          deviceIndex: d.deviceIndex,
-          bytes: d.memoryUsedBytes,
-        })),
+        .flatMap((d): LedgerInstanceShare[] => {
+          // The report body is untyped JSON cast at the fetch boundary, so a runner-supplied
+          // attribution can be any value; only the contract's two enum values may reach a
+          // LedgerInstanceShare — and the worker's outbound report. Anything else clamps to
+          // absent: unknown scope, treated conservatively like `device` below.
+          const attribution =
+            d.attribution === 'runner' || d.attribution === 'device' ? d.attribution : undefined;
+          if (attribution !== 'runner') {
+            // Device- or unknown-scope row: promote only while this runner is the device's sole
+            // record (sole-residency exception); otherwise drop — never a per-instance figure.
+            const claimants = claimantsByDevice.get(d.deviceIndex);
+            if (claimants && [...claimants].some((id) => id !== record.runnerId)) return [];
+          }
+          return [
+            {
+              instanceId: record.instanceId,
+              modelName: record.modelName,
+              deviceIndex: d.deviceIndex,
+              bytes: d.memoryUsedBytes,
+              ...(attribution !== undefined ? { attribution } : {}),
+            },
+          ];
+        }),
     );
   }
 

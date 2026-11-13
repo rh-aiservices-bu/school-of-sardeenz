@@ -1259,6 +1259,351 @@ describe('getLedgerInstanceShares', () => {
     const mgr = new RunnerManager(makeConfig(), makeRegistration());
     expect(await mgr.getLedgerInstanceShares()).toEqual([]);
   });
+
+  // --- Scope rule (ADR-027, issue #278) ---
+
+  it('promotes a runner-scope row unchanged', async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            devices: [{ deviceIndex: 0, memoryUsedBytes: 500, attribution: 'runner' }],
+          }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(await mgr.getLedgerInstanceShares()).toEqual([
+      {
+        instanceId: 'inst-a',
+        modelName: 'model-a',
+        deviceIndex: 0,
+        bytes: 500,
+        attribution: 'runner',
+      },
+    ]);
+  });
+
+  it("promotes a device-scope row only while the runner is the device's sole record", async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            devices: [{ deviceIndex: 0, memoryUsedBytes: 900, attribution: 'device' }],
+          }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    // Sole record on device 0: the whole-device observation is attributed to the lone
+    // resident, carrying its SOURCE scope verbatim — never relabeled to 'runner'.
+    expect(await mgr.getLedgerInstanceShares()).toEqual([
+      {
+        instanceId: 'inst-a',
+        modelName: 'model-a',
+        deviceIndex: 0,
+        bytes: 900,
+        attribution: 'device',
+      },
+    ]);
+  });
+
+  it('drops device-scope rows when two records claim the same device', async () => {
+    // Two co-located runners on device 0, both real-shim style (device-scope rows).
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            devices: [{ deviceIndex: 0, memoryUsedBytes: 900, attribution: 'device' }],
+          }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    // Both rows are whole-device observations on a shared device: summing them would
+    // double-count, so neither becomes an instance row. The double-count can no longer
+    // be built; the bytes surface in the dashboard's Other bucket downstream.
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it('treats an absent attribution as device-scope (sole record promoted, co-tenant dropped)', async () => {
+    const legacyBody = { devices: [{ deviceIndex: 0, memoryUsedBytes: 700 }] }; // no attribution field
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve(legacyBody) }),
+    );
+
+    // Sole record: unknown-scope row is promoted conservatively.
+    const sole = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await sole.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(await sole.getLedgerInstanceShares()).toEqual([
+      { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 700 },
+    ]);
+
+    // Co-tenant record on the same device: unknown-scope row is dropped.
+    const shared = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await shared.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await shared.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    expect(await shared.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it("a sleeping co-tenant's record still blocks promotion (residency is record-based, not byte-based)", async () => {
+    // Record A on device 0 reports device-scope bytes; record B (sleeping, same device)
+    // reports 0 — filtered by the >0 guard — but its RECORD still claims the device.
+    const fetchFn = makeFetchFn((url) =>
+      url.includes('19305')
+        ? Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ devices: [{ deviceIndex: 0, memoryUsedBytes: 0 }] }),
+          })
+        : Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                devices: [{ deviceIndex: 0, memoryUsedBytes: 900, attribution: 'device' }],
+              }),
+          }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+    await mgr.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    // A's device-scope row is dropped: a sleeping co-tenant's residual CUDA context can
+    // still hold bytes, so the whole-device figure must not become A's instance row.
+    expect(await mgr.getLedgerInstanceShares()).toEqual([]);
+  });
+
+  it("TP instance with a co-tenant on one device keeps only its unshared device's row", async () => {
+    // Record A (inst-a, port 19301) spans devices 0+1 (device-scope rows); record B
+    // (inst-b, port 19305) sits on device 1 only, runner-scope (stub-style ledger share).
+    const fetchFn = makeFetchFn((url) =>
+      url.includes('19305')
+        ? Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                devices: [{ deviceIndex: 1, memoryUsedBytes: 300, attribution: 'runner' }],
+              }),
+          })
+        : Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                devices: [
+                  { deviceIndex: 0, memoryUsedBytes: 900, attribution: 'device' },
+                  { deviceIndex: 1, memoryUsedBytes: 900, attribution: 'device' },
+                ],
+              }),
+          }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1800,
+      tensorParallel: 2,
+      devices: [
+        { deviceIndex: 0, deviceType: 'CUDA' },
+        { deviceIndex: 1, deviceType: 'CUDA' },
+      ],
+    });
+    await mgr.startRunner({
+      modelName: 'model-b',
+      instanceId: 'inst-b',
+      runnerType: 'vllm',
+      modelPath: '/models/b',
+      requiredMemory: 300,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 1, deviceType: 'CUDA' }],
+    });
+
+    // Device 0: A is the sole record → its device-scope row is promoted.
+    // Device 1: A and B both claim it → A's device-scope row is dropped (B's runner-scope
+    // row is kept — honest per-runner delta, summed freely). Row order follows the flatMap
+    // over fetchMemoryReports' records (A first — it started first), devices in body order.
+    expect(await mgr.getLedgerInstanceShares()).toEqual([
+      {
+        instanceId: 'inst-a',
+        modelName: 'model-a',
+        deviceIndex: 0,
+        bytes: 900,
+        attribution: 'device',
+      },
+      {
+        instanceId: 'inst-b',
+        modelName: 'model-b',
+        deviceIndex: 1,
+        bytes: 300,
+        attribution: 'runner',
+      },
+    ]);
+  });
+
+  it('clamps a malformed runner-supplied attribution to absent (outbound report stays schema-valid)', async () => {
+    const fetchFn = makeFetchFn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            devices: [{ deviceIndex: 0, memoryUsedBytes: 800, attribution: 'RUNNER' }],
+          }),
+      }),
+    );
+    const mgr = new RunnerManager(
+      makeConfig(),
+      makeRegistration(),
+      makeLauncher(),
+      undefined,
+      undefined,
+      fetchFn,
+    );
+    await mgr.startRunner({
+      modelName: 'model-a',
+      instanceId: 'inst-a',
+      runnerType: 'vllm',
+      modelPath: '/models/a',
+      requiredMemory: 1000,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    // 'RUNNER' is not a contract enum value, but the fetch boundary casts the body untyped.
+    // It is clamped to absent — unknown scope, device-conservative — so the sole record is
+    // still promoted while the emitted row carries NO attribution field: the worker's
+    // outbound report stays schema-valid whatever a runner emits.
+    expect(await mgr.getLedgerInstanceShares()).toEqual([
+      { instanceId: 'inst-a', modelName: 'model-a', deviceIndex: 0, bytes: 800 },
+    ]);
+  });
 });
 
 describe('getKvCacheDeviceStats', () => {

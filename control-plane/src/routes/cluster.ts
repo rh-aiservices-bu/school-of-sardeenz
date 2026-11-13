@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
 
+import { sumInstanceMeasurementsByInstance } from '../services/memory-budget.js';
 import type { RouteDeps } from './deps.js';
 
 export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): void {
@@ -68,13 +69,13 @@ export function registerClusterRoutes(app: FastifyInstance, deps: RouteDeps): vo
       // Attributed measured bytes per instance, scoped to this worker's own report (a worker
       // only ever attributes usage for instances it hosts) — supersedes the old #123/#151
       // requiredMemory seam now that genuine per-instance NVML attribution exists (#163).
-      const measuredByInstance = new Map<string, number>();
-      for (const m of budget?.instanceMeasurements ?? []) {
-        measuredByInstance.set(
-          m.instanceId,
-          (measuredByInstance.get(m.instanceId) ?? 0) + m.measuredUsedBytes,
-        );
-      }
+      // Sums under the attribution scope rule (ADR-027 Decision 4, #278): device- or
+      // unknown-scope rows are dropped from per-instance figures unless they are their
+      // device's sole >0-byte row, so co-located whole-device observations can never be
+      // double-counted into per-model bars.
+      const measuredByInstance = sumInstanceMeasurementsByInstance(
+        budget?.instanceMeasurements ?? [],
+      );
 
       const workerModels = allInstances
         .filter(

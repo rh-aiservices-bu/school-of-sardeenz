@@ -55,6 +55,7 @@ export interface WorkerMemoryReportInstance {
   modelName: string;
   deviceIndex: number;
   memoryUsedBytes: number;
+  attribution?: 'runner' | 'device';
 }
 
 export interface WorkerMemoryReport {

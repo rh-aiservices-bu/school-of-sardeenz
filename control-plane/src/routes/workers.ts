@@ -3,6 +3,7 @@ import { ModelLifecycleState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
 import { ControlPlaneError } from '../errors.js';
+import { sumInstanceMeasurementsByInstance } from '../services/memory-budget.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
 import type { WorkerCapability } from '../services/worker-pool.js';
 
@@ -92,14 +93,13 @@ export function registerWorkerRoutes(app: FastifyInstance, deps: RouteDeps): voi
 
     // Attributed measured bytes per instance, scoped to this worker's own report — supersedes
     // the old #123/#151 requiredMemory seam now that genuine per-instance NVML attribution
-    // exists (#163).
-    const measuredByInstance = new Map<string, number>();
-    for (const m of budget?.instanceMeasurements ?? []) {
-      measuredByInstance.set(
-        m.instanceId,
-        (measuredByInstance.get(m.instanceId) ?? 0) + m.measuredUsedBytes,
-      );
-    }
+    // exists (#163). Sums under the attribution scope rule (ADR-027 Decision 4, #278): device-
+    // or unknown-scope rows are dropped from per-instance figures unless they are their
+    // device's sole >0-byte row, so co-located whole-device observations can never be
+    // double-counted into per-model bars.
+    const measuredByInstance = sumInstanceMeasurementsByInstance(
+      budget?.instanceMeasurements ?? [],
+    );
 
     const workerModels = allInstances
       .filter(

@@ -128,6 +128,7 @@ function ledgerInstancesProvider(): Promise<MeasuredInstanceSample[]> {
       modelName: s.modelName,
       deviceIndex: s.deviceIndex,
       memoryUsedBytes: s.bytes,
+      attribution: s.attribution,
     })),
   );
 }

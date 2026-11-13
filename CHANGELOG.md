@@ -631,6 +631,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
   read.
 
+- **Per-model VRAM display no longer double-counts device-scope memory under co-location
+  (issue #278 — closes the #244 residual).** `attribution` (M17, ADR-027) gains its first
+  executable consumers, and none of them sums a device-scope memory row into a per-instance
+  figure. The worker-agent contract's `InstanceMemoryMeasurement` gains the same optional
+  `attribution: "runner" | "device"` field the engine-runner contract has had since M17, so a
+  per-instance row can state its own scope; the worker's no-NVML ledger path
+  (`getLedgerInstanceShares`) promotes a whole-device figure into an instance row only while its
+  runner is the device's sole record and drops it once anything co-resident claims the device
+  (residency decided from runner records, never bytes — a sleeping co-tenant still blocks
+  promotion), and NVML rows are stamped `"runner"` at report assembly. The control plane
+  scope-checks every per-instance summation site through one shared helper
+  (`sumInstanceMeasurementsByInstance`): `runner`-scope rows sum; a `device`- or unknown-scope
+  row is kept only while it is its device's sole >0-byte row, else dropped — so the two route
+  loops (`/api/v1/cluster/memory`, `/api/v1/workers/:workerId`) and `getMeasuredByInstance`
+  (which feeds the models routes' `currentMemory`) emit figures that can never double-count, and
+  a malformed `attribution` drops the field (row kept, treated unknown → device-conservative)
+  instead of rejecting the report, and the worker clamps a malformed runner-supplied
+  `attribution` to absent so its outbound report stays schema-valid. The dashboard renders the
+  already-deduped figures: dropped
+  bytes surface in "Other", whose clamp keeps the bar honest. User-visible effect: two
+  co-located models on a worker without NVML used to render two ~whole-device bars on one card
+  (e.g. 20 GB of "model" on a 16 GB GPU with Other clamped to 0); the shared device now shows
+  only the genuinely per-runner figures plus the residual in "Other". Legacy workers that do not
+  label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
+  conservative direction); unlabeled sole-resident rows keep displaying.
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the

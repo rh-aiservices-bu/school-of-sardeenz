@@ -35,6 +35,9 @@ export interface MeasuredInstanceSample {
   modelName: string;
   deviceIndex: number;
   memoryUsedBytes: number;
+  /** Row scope (ADR-027): NVML rows are stamped 'runner' at report assembly; ledger rows carry
+   * their source share's scope (absent when the source declared none — unknown, device-like). */
+  attribution?: 'runner' | 'device';
 }
 
 export interface MeasuredMemorySample {
@@ -235,8 +238,12 @@ export class WorkerRegistration {
       return out;
     });
 
+    // NVML rows are process-attributed by construction (see the doctrine comment above), so the
+    // report stamps them runner-scope here at assembly time; measured-sample.ts stays untouched.
+    // Ledger rows (no-NVML fallback) already carry their source share's attribution through
+    // ledgerInstancesProvider — carried verbatim, never relabeled (ADR-027, issue #278).
     const instances = measured
-      ? measured.instances
+      ? measured.instances.map((row) => ({ ...row, attribution: 'runner' as const }))
       : ((await this.ledgerInstancesProvider?.().catch(() => [])) ?? []);
 
     return { devices, instances, reportedAt: new Date().toISOString() };

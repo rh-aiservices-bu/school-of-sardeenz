@@ -523,7 +523,9 @@ export type components = {
          *     device, from the device's NVML process list. Under kvcached elastic
          *     sharing the pooled allocation is attributed to the process that owns
          *     it, so co-located instances' figures are honest per-process numbers,
-         *     not a split of the shared pool.
+         *     not a split of the shared pool. Rows may also originate from the
+         *     worker's no-NVML ledger fallback, in which case `attribution` states
+         *     the source row's scope.
          */
         InstanceMemoryMeasurement: {
             /** @description Control-plane instance identifier (`inst-<hex>`). */
@@ -534,10 +536,29 @@ export type components = {
             deviceIndex: number;
             /**
              * Format: int64
-             * @description Measured bytes used by this instance's process tree on this
-             *     device (stub-simulated on hosts without NVML).
+             * @description Measured bytes used on this device, as scoped by `attribution`:
+             *     `runner` means this instance's own usage on the device (its
+             *     process tree, process-attributed from NVML; on hosts without
+             *     NVML, the stub's own-ledger share); `device` means the whole
+             *     device's used memory as observed by the reporting runner,
+             *     co-located instances included — a device observation, not a
+             *     per-instance delta, which double-counts if summed across
+             *     instances.
              */
             memoryUsedBytes: number;
+            /**
+             * @description What the `memoryUsedBytes` figure on this row covers.
+             *     `runner` — this instance's own usage on the device
+             *     (process-attributed or the stub's own-ledger share; safe to sum
+             *     across instances sharing a device). `device` — the whole device's
+             *     used memory as observed by the reporting runner, co-located
+             *     instances included; such rows MUST NOT be summed across instances
+             *     or treated as a per-instance delta. Optional for compatibility
+             *     with workers that do not declare a scope; consumers treat an
+             *     absent value as unknown (conservatively, like `device`).
+             * @enum {string}
+             */
+            attribution?: InstanceMemoryMeasurementAttribution;
         };
         /** @description Error response returned on failure. */
         ErrorResponse: {
@@ -894,6 +915,10 @@ export enum RunnerLogLineStream {
 export enum RunnerByInstanceResponseState {
     STARTING = "STARTING",
     READY = "READY"
+}
+export enum InstanceMemoryMeasurementAttribution {
+    runner = "runner",
+    device = "device"
 }
 export enum DeviceType {
     CUDA = "CUDA",
