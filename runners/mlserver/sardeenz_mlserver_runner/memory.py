@@ -3,7 +3,9 @@
 CPU-only sklearn models have no CUDA device to introspect; this returns an empty ``devices`` list
 in that case. The caller (``app.py``) treats that as "no device memory to report" and answers 409
 rather than emitting a ``MemoryReport`` with an empty ``devices`` array, which the contract
-forbids (``minItems: 1``) — the same fail-closed pattern the vLLM shim uses.
+forbids (``minItems: 1``) — the same fail-closed pattern the vLLM shim uses. The shim process owns
+no CUDA pool (the engine is a child; onnxruntime also allocates outside torch's pool), so each
+device row carries the whole-device used figure with ``attribution: "device"``.
 """
 
 from __future__ import annotations
@@ -48,9 +50,7 @@ def _cuda_devices(device_type: str) -> list[dict[str, Any]]:
     for index in range(torch.cuda.device_count()):
         try:
             free_bytes, total_bytes = torch.cuda.mem_get_info(index)
-            reserved = int(torch.cuda.memory_reserved(index))
-            # Prefer this process's reserved pool; fall back to whole-device usage if reserved is 0.
-            used = reserved if reserved > 0 else int(total_bytes - free_bytes)
+            used = int(total_bytes - free_bytes)
             reported_index = (
                 device_indices[index]
                 if device_indices is not None and index < len(device_indices)
@@ -62,6 +62,7 @@ def _cuda_devices(device_type: str) -> list[dict[str, Any]]:
                     "deviceType": device_type,
                     "memoryUsedBytes": max(0, used),
                     "memoryTotalBytes": int(total_bytes),
+                    "attribution": "device",
                 }
             )
         except Exception:

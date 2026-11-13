@@ -152,6 +152,9 @@ Each worker runs a three-layer process architecture:
    - Executes its engine **SIF** in place — `apptainer exec --nv /modules/<engine>-<version>.sif <serve cmd>` — from the shared RWX module store (no per-host copy)
    - Runs the actual engine as the exec'd process
    - Exposes the runner contract HTTP API (`/health`, `/sleep`, `/wake`, `/memory-report`) on its own port
+   - Reports device memory via `GET /memory-report` — for the shipped shims this is a
+     whole-device observation (`attribution: "device"`; the shim process owns no CUDA pool), not
+     a per-runner figure; the worker's NVML path remains the process-attributed authority.
 
 3. **Engine** (vLLM, Triton, etc.) — the unmodified inference engine, packaged in the SIF and run by `apptainer exec`. The engine has no knowledge of Sardeenz.
 

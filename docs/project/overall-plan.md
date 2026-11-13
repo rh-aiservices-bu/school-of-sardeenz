@@ -30,7 +30,7 @@ Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5     
 Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners ──►  kvcached
 (spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)      co-location
                                                                                                           │
-                                                                                          Milestones M2 … M15 (backlog track)
+                                                                                          Milestones M2 … M17 (backlog track)
 ```
 
 Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while the runtime work starts), but the critical path runs through Phases 0 → 1 → 2.
@@ -390,8 +390,8 @@ two vLLM runners can share a GPU via kvcached (spike Gate 9); Phase 5 turns that
 policy: which models may co-locate, how much oversubscription is allowed, and how eviction reacts
 when a shared pool is under pressure.
 
-**Status:** not started. Detailed scope will be written as `phase5.md` when the milestone backlog
-in front of it (M13) is closed.
+**Status:** unblocked — its two declared gates (#244 memory attribution scope, #253 executor
+offload) landed in M17. Detailed scope will be written as `phase5.md`.
 
 **Dependencies:** Phase 4 complete; measured-only VRAM telemetry (#163/#164) so pool pressure is
 observed, not estimated; per-device kvcached pool reporting from the runner contract.
@@ -401,9 +401,10 @@ observed, not estimated; per-device kvcached pool reporting from the runner cont
 ## Milestone Track
 
 Alongside the phases, issues from the full audit (August 2026) are grouped into GitHub milestones
-and executed one milestone per branch, merged to `dev`. M2 through M14 are merged; M15 (Security
-Hardening — Cluster & Auth) is implemented on its milestone branch awaiting PR. The list of
-themes and what each delivered is maintained in [`status.md`](status.md).
+and executed one milestone per branch, merged to `dev`. M2 through M15 are merged (M15 — Security
+Hardening — Cluster & Auth — via #270/#271); M17 (Runner & Shim Correctness) is implemented on its
+milestone branch awaiting PR; M16 stays parked and M19 collects the follow-ups. The list of themes
+and what each delivered is maintained in [`status.md`](status.md).
 
 ---
 

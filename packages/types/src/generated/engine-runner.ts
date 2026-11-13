@@ -285,8 +285,12 @@ export type components = {
             deviceType: components["schemas"]["DeviceType"];
             /**
              * Format: int64
-             * @description Bytes of device memory currently used by this runner on this device.
-             *     Includes model weights, KV cache, CUDA graphs, and runtime overhead.
+             * @description Bytes of device memory currently in use on this device, as scoped
+             *     by `attribution`: `runner` means this runner's own usage (model
+             *     weights, KV cache, CUDA graphs, and runtime overhead); `device`
+             *     means the whole device's used memory, including memory held by
+             *     co-located processes — a device observation, not a per-runner
+             *     delta, which double-counts if summed across runners.
              */
             memoryUsedBytes: number;
             /**
@@ -295,6 +299,18 @@ export type components = {
              *     plane uses this alongside `memoryUsedBytes` to compute utilization.
              */
             memoryTotalBytes: number;
+            /**
+             * @description What the `memoryUsedBytes` figure on this device entry covers.
+             *     `runner` — the reporting runner's own usage on this device
+             *     (process-attributed; safe to sum across runners sharing a device).
+             *     `device` — the whole device's used memory as observed by the
+             *     reporting runner, co-located processes included; such figures
+             *     MUST NOT be summed across runners or treated as a per-runner
+             *     delta. Optional for compatibility with runner images that do not
+             *     declare a scope; consumers treat an absent value as unknown.
+             * @enum {string}
+             */
+            attribution?: DeviceMemoryUsageAttribution;
             kvCache?: components["schemas"]["KVCachePoolStats"];
         };
         /**
@@ -843,4 +859,8 @@ export enum LoadingPhase {
     CAPTURING_GRAPHS = "CAPTURING_GRAPHS",
     WARMING_UP = "WARMING_UP",
     READY = "READY"
+}
+export enum DeviceMemoryUsageAttribution {
+    runner = "runner",
+    device = "device"
 }

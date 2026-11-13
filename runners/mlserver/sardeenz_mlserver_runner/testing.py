@@ -43,9 +43,9 @@ class _FakeEngine:  # mirrors the MLServerEngine(args, repo_dir) surface app.py 
 
 
 def _fake_memory_report(device_type: str = "CUDA") -> dict[str, Any]:
-    # Only the fields the contract actually requires (engine-runner.yaml DeviceMemoryUsage) —
-    # matches what the real MLServer memory.py emits (no memoryFreeBytes; that field does not
-    # exist in the contract).
+    # The contract's four required fields (engine-runner.yaml DeviceMemoryUsage) plus the
+    # optional attribution scope (#244 — device: the fake mirrors what the real MLServer
+    # memory.py emits). No memoryFreeBytes — that field does not exist in the contract.
     return {
         "devices": [
             {
@@ -53,6 +53,7 @@ def _fake_memory_report(device_type: str = "CUDA") -> dict[str, Any]:
                 "deviceType": device_type,
                 "memoryUsedBytes": 2_000,
                 "memoryTotalBytes": 10_000,
+                "attribution": "device",
             }
         ]
     }

@@ -174,22 +174,22 @@ name doesn't end in `_test`**.
 
 ## Common Commands
 
-| Command              | Description                                                                     |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `make` / `make help` | List all targets with descriptions                                              |
-| `make all`           | Type-check and lint everything                                                  |
-| `make lint`          | ESLint + clippy + OpenAPI spec validation                                       |
-| `make lint-specs`    | Validate OpenAPI specs only (Redocly)                                           |
-| `make format`        | Auto-format all files                                                           |
-| `make format-check`  | Check formatting (CI-safe)                                                      |
-| `make typecheck`     | TypeScript `tsc --build` + `cargo check`                                        |
-| `make test`          | Run all test suites (Vitest + cargo test)                                       |
-| `make test-python`   | Run the Python runner-shim + conformance suites (after `make test-python-deps`) |
-| `make test-coverage` | Run tests with V8 coverage                                                      |
-| `make codegen`       | Regenerate types from OpenAPI specs                                             |
-| `make services`      | Start dev services (Redis + Postgres)                                           |
-| `make services-stop` | Stop dev services                                                               |
-| `make clean`         | Remove all build artifacts                                                      |
+| Command              | Description                                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `make` / `make help` | List all targets with descriptions                                                                                                                                       |
+| `make all`           | Type-check and lint everything                                                                                                                                           |
+| `make lint`          | ESLint + clippy + OpenAPI spec validation                                                                                                                                |
+| `make lint-specs`    | Validate OpenAPI specs only (Redocly)                                                                                                                                    |
+| `make format`        | Auto-format all files                                                                                                                                                    |
+| `make format-check`  | Check formatting (CI-safe)                                                                                                                                               |
+| `make typecheck`     | TypeScript `tsc --build` + `cargo check`                                                                                                                                 |
+| `make test`          | Run all test suites (Vitest + cargo test)                                                                                                                                |
+| `make test-python`   | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
+| `make test-coverage` | Run tests with V8 coverage                                                                                                                                               |
+| `make codegen`       | Regenerate types from OpenAPI specs                                                                                                                                      |
+| `make services`      | Start dev services (Redis + Postgres)                                                                                                                                    |
+| `make services-stop` | Stop dev services                                                                                                                                                        |
+| `make clean`         | Remove all build artifacts                                                                                                                                               |
 
 ## Logs
 

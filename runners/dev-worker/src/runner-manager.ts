@@ -137,53 +137,65 @@ export class RunnerManager {
     }
 
     const runnerId = `runner-${randomUUID().slice(0, 8)}`;
-    const { port, enginePort, grpcPort, metricsPort } = await this.allocatePorts();
-
-    // Reserve the instance slot up-front so concurrent starts of the same instance race to
-    // ConflictError rather than both proceeding. Also register under modelName — a Set now
-    // (#120), since several instances of the same model may run concurrently on this worker.
-    this.instanceRunners.set(params.instanceId, runnerId);
-    let modelRunnerIds = this.modelRunners.get(params.modelName);
-    if (!modelRunnerIds) {
-      modelRunnerIds = new Set();
-      this.modelRunners.set(params.modelName, modelRunnerIds);
-    }
-    modelRunnerIds.add(runnerId);
-    const pending: {
-      instanceId: string;
-      modelName: string;
-      handle?: LaunchHandle;
-      cancelRequested: boolean;
-    } = { instanceId: params.instanceId, modelName: params.modelName, cancelRequested: false };
-    this.pendingRunners.set(runnerId, pending);
-
-    // Post-startup supervision: if the runner's process exits on its own (crash, OOM-kill, etc.)
-    // rather than via a deliberate stopRunner(), reap its record and free its device memory so a
-    // dead runner doesn't leave a phantom VRAM reservation. Guarded on `this.runners.has` so this
-    // no-ops when stopRunner() has already removed the record before calling handle.stop() (see
-    // stopRunner's ordering below) — otherwise a deliberate stop would double-free memory.
-    const handleUnexpectedExit = (): void => {
-      if (!this.runners.has(runnerId)) return;
-      const record = this.runners.get(runnerId)!;
-      for (const device of record.devices) {
-        const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
-        this.registration.freeMemory(device.deviceIndex, perDeviceMemory);
-      }
-      this.runners.delete(runnerId);
-      this.usedPorts.delete(record.port);
-      this.instanceRunners.delete(record.instanceId);
-      this.modelRunners.get(record.modelName)?.delete(runnerId);
-      if (this.modelRunners.get(record.modelName)?.size === 0) {
-        this.modelRunners.delete(record.modelName);
-      }
-      this.logBuffer.markEnded(runnerId);
-      this.logBuffer.retain(runnerId);
-      console.log(
-        `[worker] Runner ${runnerId} (${params.modelName}/${params.instanceId}) exited unexpectedly — cleaned up`,
-      );
-    };
-
+    // Pre-declared nullable port bindings: the catch below deletes the block base from
+    // usedPorts, so the binding must exist (not be destructured inside the try) — otherwise an
+    // allocation failure that throws before the destructure would make the catch's delete hit
+    // an unset binding and mask the original error. Safety only: allocatePorts never leaves
+    // usedPorts residue on its exhausted-range throw (every add is paired with a delete unless
+    // it returned a block).
+    let port: number | undefined;
+    let enginePort: number | undefined;
+    let grpcPort: number | undefined;
+    let metricsPort: number | undefined;
     try {
+      // Reserve the instance slot up-front — synchronously, before the first await — so
+      // concurrent starts of the same instance race to ConflictError rather than both
+      // proceeding. Also register under modelName — a Set now (#120), since several instances
+      // of the same model may run concurrently on this worker.
+      this.instanceRunners.set(params.instanceId, runnerId);
+      let modelRunnerIds = this.modelRunners.get(params.modelName);
+      if (!modelRunnerIds) {
+        modelRunnerIds = new Set();
+        this.modelRunners.set(params.modelName, modelRunnerIds);
+      }
+      modelRunnerIds.add(runnerId);
+
+      ({ port, enginePort, grpcPort, metricsPort } = await this.allocatePorts());
+      const pending: {
+        instanceId: string;
+        modelName: string;
+        handle?: LaunchHandle;
+        cancelRequested: boolean;
+      } = { instanceId: params.instanceId, modelName: params.modelName, cancelRequested: false };
+      this.pendingRunners.set(runnerId, pending);
+
+      // Post-startup supervision: if the runner's process exits on its own (crash, OOM-kill, etc.)
+      // rather than via a deliberate stopRunner(), reap its record and free its device memory so a
+      // dead runner doesn't leave a phantom VRAM reservation. Guarded on `this.runners.has` so this
+      // no-ops when stopRunner() has already removed the record before calling handle.stop() (see
+      // stopRunner's ordering below) — otherwise a deliberate stop would double-free memory.
+      const handleUnexpectedExit = (): void => {
+        if (!this.runners.has(runnerId)) return;
+        const record = this.runners.get(runnerId)!;
+        for (const device of record.devices) {
+          const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
+          this.registration.freeMemory(device.deviceIndex, perDeviceMemory);
+        }
+        this.registration.pushMemoryReportOnce();
+        this.runners.delete(runnerId);
+        this.usedPorts.delete(record.port);
+        this.instanceRunners.delete(record.instanceId);
+        this.modelRunners.get(record.modelName)?.delete(runnerId);
+        if (this.modelRunners.get(record.modelName)?.size === 0) {
+          this.modelRunners.delete(record.modelName);
+        }
+        this.logBuffer.markEnded(runnerId);
+        this.logBuffer.retain(runnerId);
+        console.log(
+          `[worker] Runner ${runnerId} (${params.modelName}/${params.instanceId}) exited unexpectedly — cleaned up`,
+        );
+      };
+
       const handle = await this.launch(
         {
           runnerId,
@@ -242,6 +254,7 @@ export class RunnerManager {
         const perDeviceMemory = Math.floor(params.requiredMemory / params.devices.length);
         this.registration.allocateMemory(device.deviceIndex, perDeviceMemory);
       }
+      this.registration.pushMemoryReportOnce();
 
       console.log(
         `[worker] Started runner ${runnerId} for ${params.modelName}/${params.instanceId} on ${handle.host}:${handle.port}` +
@@ -251,8 +264,10 @@ export class RunnerManager {
       return { runnerId, host: handle.host, port: handle.port, enginePort: handle.enginePort };
     } catch (err) {
       // Roll back the reserved instance/model slots so a failed start doesn't permanently block
-      // either the instance id or (transitively) the model.
-      this.usedPorts.delete(port);
+      // either the instance id or (transitively) the model. Covers allocation-phase failures too:
+      // the try opens before the reservation and the allocatePorts await, so an exhausted port
+      // range rolls the just-reserved slot back instead of stranding it behind ConflictError.
+      if (port !== undefined) this.usedPorts.delete(port);
       this.instanceRunners.delete(params.instanceId);
       this.modelRunners.get(params.modelName)?.delete(runnerId);
       if (this.modelRunners.get(params.modelName)?.size === 0) {
@@ -331,6 +346,7 @@ export class RunnerManager {
       const perDeviceMemory = Math.floor(record.requiredMemory / record.devices.length);
       this.registration.freeMemory(device.deviceIndex, perDeviceMemory);
     }
+    this.registration.pushMemoryReportOnce();
 
     await record.handle.stop();
 

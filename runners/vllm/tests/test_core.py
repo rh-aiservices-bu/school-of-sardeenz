@@ -2,7 +2,11 @@
 
 Run in-SIF (or any env with pytest) via `pytest` from runners/vllm/. These cover contract-shape
 correctness and CLI/command construction; the engine + HTTP layers are exercised by the cluster
-integration gates (Phase 4 Task 9).
+integration gates (Phase 4 Task 9). The `test_sum_metric_*` tests also drive the pure parser —
+including its skip surface (`#` comments; `_total`/`_bucket`/`_created` suffix names are distinct
+metrics, never summed) — while the `test_scrape_*` and `test_sleep_*` tests drive the /metrics
+scrape and the app-level /sleep guard (issue #239); those scrape and app-level ones need FastAPI
+and skip where it is absent.
 """
 
 from __future__ import annotations
@@ -12,12 +16,14 @@ import sys
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 
 from sardeenz_vllm_runner import kvcached_pools as kp
 from sardeenz_vllm_runner import memory as mem
 from sardeenz_vllm_runner import state as st
 from sardeenz_vllm_runner.cli import build_vllm_command, parse_args
+from sardeenz_vllm_runner.metrics import sum_metric
 
 
 def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) -> None:
@@ -27,7 +33,6 @@ def _install_fake_torch(monkeypatch: pytest.MonkeyPatch, device_count: int = 2) 
         is_available=lambda: True,
         device_count=lambda: device_count,
         mem_get_info=lambda index: (1_000, 10_000),
-        memory_reserved=lambda index: 2_000,
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
@@ -177,6 +182,30 @@ def test_memory_report_falls_back_to_local_index_without_env(monkeypatch: pytest
     assert [d["deviceIndex"] for d in report["devices"]] == [0, 1]
 
 
+def test_memory_report_reports_whole_device_usage_with_device_attribution(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_fake_torch(monkeypatch, device_count=2)
+    monkeypatch.delenv("SARDEENZ_DEVICE_INDICES", raising=False)
+    report = mem.memory_report()
+    assert report["devices"] == [
+        {
+            "deviceIndex": 0,
+            "deviceType": "CUDA",
+            "memoryUsedBytes": 9_000,  # whole device: 10_000 total - 1_000 free
+            "memoryTotalBytes": 10_000,
+            "attribution": "device",
+        },
+        {
+            "deviceIndex": 1,
+            "deviceType": "CUDA",
+            "memoryUsedBytes": 9_000,
+            "memoryTotalBytes": 10_000,
+            "attribution": "device",
+        },
+    ]
+
+
 # ---------------------------------------------------------------------------
 # kvcached pool stats (issue #165)
 # ---------------------------------------------------------------------------
@@ -305,3 +334,242 @@ def test_memory_report_no_kvcache_without_device_indices(monkeypatch: pytest.Mon
     monkeypatch.setattr(kp, "SHM_DIR", str(tmp_path))
     report = mem.memory_report()
     assert "kvCache" not in report["devices"][0]
+
+
+# ---------------------------------------------------------------------------
+# metrics.py + _scrape_active_requests + /sleep guard (issue #239)
+# ---------------------------------------------------------------------------
+
+
+_app: object = None  # set lazily by _get_app(); app.py needs FastAPI, so tests resolve it lazily
+
+
+def _get_app():
+    """Resolve the app module lazily — app.py pulls in FastAPI, which the pure-logic
+    convention keeps optional here (skips where it is absent)."""
+    global _app
+    if _app is None:
+        pytest.importorskip("fastapi")
+        from sardeenz_vllm_runner import app as app_module
+
+        _app = app_module
+    return _app
+
+
+class _FakeResp:
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeClient:
+    def __init__(self, resp: object) -> None:
+        self._resp = resp
+
+    async def get(self, url: str, timeout: float) -> object:
+        del url, timeout
+        if isinstance(self._resp, Exception):
+            raise self._resp
+        return self._resp
+
+
+def test_sum_metric_parses_labeled_vllm_series():
+    # vLLM 0.26 emits every metric with a model_name label — the trailing-space
+    # prefix match the old scrape used never hit these lines (the bug in #239).
+    body = (
+        "# HELP vllm:num_requests_running Number of requests in model execution batches.\n"
+        "# TYPE vllm:num_requests_running gauge\n"
+        'vllm:num_requests_running{model_name="meta-llama/Llama-3.1-8B-Instruct"} 8.0\n'
+    )
+    assert sum_metric(body, "vllm:num_requests_running") == 8.0
+
+
+def test_sum_metric_sums_multiple_series():
+    # Under TP/DP several series exist per metric (model_name, plus engine); all
+    # engine ranks belong to this runner, so their sum is the signal.
+    body = (
+        'vllm:num_requests_running{model_name="m",engine="0"} 2.0\n'
+        'vllm:num_requests_running{model_name="m",engine="1"} 1.5\n'
+    )
+    assert sum_metric(body, "vllm:num_requests_running") == 3.5
+
+
+def test_sum_metric_ignores_suffix_names():
+    # Histogram/counter suffixes (_bucket/_count/_sum/_total/_created) are distinct
+    # metrics — a vllm:num_requests_running_total line must never be summed.
+    body = (
+        'vllm:num_requests_running_total{model_name="m"} 5.0\n'
+        'vllm:num_requests_running_bucket{model_name="m",le="1.0"} 3.0\n'
+        'vllm:num_requests_running_created{model_name="m"} 1.0\n'
+    )
+    assert sum_metric(body, "vllm:num_requests_running") is None
+
+
+def test_sum_metric_skips_comment_lines():
+    # # HELP / # TYPE lines are never data — and neither is a commented-out sample; the
+    # identical line uncommented IS counted, so comment-skipping is pinned as real
+    # behaviour. (The explicit startswith("#") guard in metrics.py is belt-and-braces:
+    # a comment's fields[0] is "#", which the name-prefix match already excludes.)
+    body = (
+        "# HELP vllm:num_requests_running Number of requests in model execution batches.\n"
+        "# TYPE vllm:num_requests_running gauge\n"
+        '# vllm:num_requests_running{model_name="m"} 9.0\n'
+    )
+    assert sum_metric(body, "vllm:num_requests_running") is None
+    uncommented = 'vllm:num_requests_running{model_name="m"} 9.0\n'
+    assert sum_metric(uncommented, "vllm:num_requests_running") == 9.0
+
+
+def test_sum_metric_none_when_absent():
+    # Absent ≠ zero: "unknown" must stay distinct from "drained".
+    assert sum_metric("", "vllm:num_requests_running") is None
+    other = 'vllm:request_success_total{model_name="m"} 1.0\n'
+    assert sum_metric(other, "vllm:num_requests_running") is None
+
+
+def test_sum_metric_none_on_non_finite():
+    # A NaN/±Inf sample is neither a contract integer nor valid JSON — the whole
+    # call is None (checked before any int() in the caller).
+    nan_body = 'vllm:num_requests_running{model_name="m"} NaN\n'
+    assert sum_metric(nan_body, "vllm:num_requests_running") is None
+    inf_body = 'vllm:num_requests_running{model_name="m"} +Inf\n'
+    assert sum_metric(inf_body, "vllm:num_requests_running") is None
+    mixed = (
+        'vllm:num_requests_running{model_name="m",engine="0"} 2.0\n'
+        'vllm:num_requests_running{model_name="m",engine="1"} NaN\n'
+    )
+    assert sum_metric(mixed, "vllm:num_requests_running") is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_sums_running_and_waiting():
+    body = (
+        "# HELP vllm:num_requests_running Number of requests in model execution batches.\n"
+        "# TYPE vllm:num_requests_running gauge\n"
+        'vllm:num_requests_running{model_name="meta-llama/Llama-3.1-8B-Instruct"} 8.0\n'
+        "# HELP vllm:num_requests_waiting Number of requests waiting to be processed.\n"
+        "# TYPE vllm:num_requests_waiting gauge\n"
+        'vllm:num_requests_waiting{model_name="meta-llama/Llama-3.1-8B-Instruct"} 2.0\n'
+    )
+    active = await _get_app()._scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x")
+    assert active == 10
+    assert isinstance(active, int)  # contract types activeRequests as integer
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_when_one_name_missing():
+    # A half-parsed scrape is not a drain signal — both gauges or nothing.
+    body = 'vllm:num_requests_running{model_name="m"} 8.0\n'
+    active = await _get_app()._scrape_active_requests(_FakeClient(_FakeResp(200, body)), "http://x")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_on_non_200():
+    active = await _get_app()._scrape_active_requests(_FakeClient(_FakeResp(503, "")), "http://x")
+    assert active is None
+
+
+@pytest.mark.anyio
+async def test_scrape_active_requests_none_when_unreachable():
+    # Fail-open on scrape failure is the documented contract — None, not 0.
+    active = await _get_app()._scrape_active_requests(
+        _FakeClient(httpx.ConnectError("refused")), "http://x"
+    )
+    assert active is None
+
+
+# --- app-level /sleep guard (through create_app, mirroring testing.py's seams) ----
+
+
+class _FakeEngine:
+    def __init__(self, args: object) -> None:
+        del args
+        self.base_url = "http://127.0.0.1:0"
+        self.sleep_calls = 0
+
+    def start(self) -> None: ...
+
+    def is_alive(self) -> bool:
+        return True
+
+    async def poll_ready(self, client: object) -> bool:
+        del client
+        return True
+
+    async def sleep(self, client: object, vllm_level: int) -> None:
+        del client, vllm_level
+        self.sleep_calls += 1
+
+    async def wake(self, client: object) -> None:
+        del client
+
+    def stop(self, grace_seconds: float = 15.0) -> None:
+        del grace_seconds
+
+
+def _fake_memory_report(device_type: str = "CUDA") -> dict[str, object]:
+    del device_type
+    return {
+        "devices": [
+            {
+                "deviceIndex": 0,
+                "deviceType": "CUDA",
+                "memoryUsedBytes": 2_000,
+                "memoryTotalBytes": 10_000,
+                "attribution": "device",
+            }
+        ]
+    }
+
+
+def _test_app(monkeypatch: pytest.MonkeyPatch, scrape_value: int | None):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    app_module = _get_app()
+    engine = _FakeEngine(None)
+    monkeypatch.setattr(app_module, "VllmEngine", lambda args: engine)
+    monkeypatch.setattr(app_module, "memory_report", _fake_memory_report)
+    monkeypatch.setattr(
+        app_module, "_scrape_active_requests", _scrape_returning(scrape_value)
+    )
+    app = app_module.create_app(parse_args(["--model", "/tmp/test-shim", "--port", "9101"]))
+    return TestClient(app), engine
+
+
+def _scrape_returning(value: int | None):
+    async def _scrape(client: object, engine_base_url: str) -> int | None:
+        del client, engine_base_url
+        return value
+
+    return _scrape
+
+
+def test_sleep_guard_409_when_active_above_zero(monkeypatch: pytest.MonkeyPatch):
+    client, engine = _test_app(monkeypatch, scrape_value=2)
+    with client:
+        resp = client.post("/sleep", json={"level": st.L1_HOST_RAM})
+    assert resp.status_code == 409
+    assert resp.json() == {"error": "Runner has active requests", "code": "NOT_READY"}
+    assert engine.sleep_calls == 0
+
+
+def test_sleep_proceeds_when_active_zero(monkeypatch: pytest.MonkeyPatch):
+    client, engine = _test_app(monkeypatch, scrape_value=0)
+    with client:
+        resp = client.post("/sleep", json={"level": st.L1_HOST_RAM})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == st.SLEEPING
+    assert body["deviceMemoryFreedBytes"] == 2_000
+    assert engine.sleep_calls == 1
+
+
+def test_sleep_proceeds_when_scrape_unknown(monkeypatch: pytest.MonkeyPatch):
+    # Fail-open policy: a None (failed/unknown) scrape must not block the sleep.
+    client, engine = _test_app(monkeypatch, scrape_value=None)
+    with client:
+        resp = client.post("/sleep", json={"level": st.L1_HOST_RAM})
+    assert resp.status_code == 200
+    assert engine.sleep_calls == 1

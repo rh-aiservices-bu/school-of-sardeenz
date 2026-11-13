@@ -77,10 +77,10 @@ sardeenz/
 
 ## Project Status
 
-Phases 0–4 and milestones M2–M14 are complete and merged to `dev`; M15 (Security Hardening —
-Cluster & Auth) is implemented on `milestone/m15-security-hardening` awaiting its PR to `dev`.
-Next: **M17** (Runner & Shim Correctness), then **Phase 5** (kvcached oversubscription /
-co-location policy). Details and history:
+Phases 0–4 and milestones M2–M15 are complete and merged to `dev`; M17 (Runner & Shim
+Correctness) is implemented on `milestone/m17-runner-shim-correctness` awaiting its PR to `dev`.
+Next: **Phase 5** (kvcached oversubscription / co-location policy — unblocked by M17's #244 +
+#253), then M19 (image/supply-chain backlog). M16 stays parked. Details and history:
 [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
