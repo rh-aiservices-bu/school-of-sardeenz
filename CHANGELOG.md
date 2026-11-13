@@ -54,8 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `totalBytes` at consumption (belt-and-braces: unreachable while the boot validation keeps
   the cap at ≤ 100, pinned for direct constructions with a wider cap). New migration
   `control-plane/migrations/008-add-allow-co-location.sql`; `DeviceInfo.kvCache` telemetry now
-  documents the elastic-branch consumer (the only one) — non-elastic placement math still
-  never reads it.
+  documents its two placement consumers (the #276 elastic co-location headroom branch and the
+  #277 shared-pool pressure evaluator) — all other consumers, and all non-elastic placement
+  math, still treat it as telemetry only.
 
 - **Phase 5 plan document: `docs/project/phase5.md` (issue #279).** The phase doc linked from
   `overall-plan.md`'s Phase 5 section: the phase's objective and
@@ -71,8 +72,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   device usage under concurrent inference, not only placement success). Also:
   `overall-plan.md`'s Phase 5 section now points at the phase doc, and `phase4.md`'s
   deferred-OOM-guard sentence is closed (the guard lands as Phase 5: #276, #277 and #278 are
-  all merged onto this phase branch); `docs/project/status.md` flips at phase
-  close, not in this change. A description-only contract reword rides along:
+  all merged onto this phase branch); `docs/project/status.md` is synchronized by the phase
+  docs commit (Phase 5 flips from Next to implemented-on-branch, the deploy-only list gains the
+  Gate 9b run + live pool-pressure + migration-008 entries, and the #244 residual follow-up is
+  closed). A description-only contract reword rides along:
   `WorkerModelInfo.memoryUsedBytes`'s absence clause now also covers a co-located device-scope
   row deliberately dropped post-#278.
 - **Phase 5: shared-pool pressure response (issue #277).** The reconciliation tick gains an
