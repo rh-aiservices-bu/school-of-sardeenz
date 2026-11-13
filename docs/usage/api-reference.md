@@ -25,10 +25,8 @@ relay) for the frontend only; it is documented in
 ## Browsing the specs
 
 ```bash
-# Render one spec as interactive docs (Redocly is a dev dependency of the repo)
-npx redocly preview-docs packages/contracts/specs/control-plane.yaml
-
-# Or produce a static HTML page
+# Render one spec as a prerendered Redoc page, then open the file in a browser
+# (Redocly is a dev dependency of the repo; `preview-docs` was removed in Redocly v2)
 npx redocly build-docs packages/contracts/specs/control-plane.yaml -o /tmp/control-plane.html
 
 # Validate all specs
