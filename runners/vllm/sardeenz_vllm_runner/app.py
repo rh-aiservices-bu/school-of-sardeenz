@@ -14,6 +14,7 @@ from . import state as st
 from .cli import RunnerArgs
 from .engine import VllmEngine
 from .memory import memory_report
+from .metrics import sum_metric
 
 
 def _engine_version() -> str:
@@ -41,14 +42,11 @@ async def _scrape_active_requests(client: httpx.AsyncClient, engine_base_url: st
         resp = await client.get(f"{engine_base_url}/metrics", timeout=2.0)
         if resp.status_code != 200:
             return None
-        running = 0
-        waiting = 0
-        for line in resp.text.splitlines():
-            if line.startswith("vllm:num_requests_running "):
-                running = int(float(line.split()[-1]))
-            elif line.startswith("vllm:num_requests_waiting "):
-                waiting = int(float(line.split()[-1]))
-        return running + waiting
+        running = sum_metric(resp.text, "vllm:num_requests_running")
+        waiting = sum_metric(resp.text, "vllm:num_requests_waiting")
+        if running is None or waiting is None:
+            return None  # half-parsed scrape is not a drain signal
+        return int(running + waiting)  # non-finite samples already excluded above
     except Exception:
         return None
 
