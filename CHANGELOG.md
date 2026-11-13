@@ -548,6 +548,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   scope (legacy images), and the per-runner display rule it enables belongs to Phase 5; the
   worker's NVML path remains the process-attributed authority and is unchanged.
 
+- **Runner shims: blocking torch/kvcached memory reads move off the event loop (issue #253).**
+  Both shims' `GET /memory-report` and `POST /sleep` handlers called the synchronous
+  `memory_report()` inline from `async` code, so a slow `torch.cuda.mem_get_info` /
+  `memory_reserved` query under device contention, or a contended kvcached shared-memory
+  `flock`, froze the event loop — stalling `/health` for the launcher probe and the shim's own
+  liveness poller (a stalled shim could read as wedged and trip restart logic). The four call
+  sites now await `asyncio.get_running_loop().run_in_executor(None,
+  functools.partial(memory_report, args.device_type))` — the default executor, the same pattern
+  as the ONNX `session.run` offload. `memory_report` itself stays synchronous and is still
+  called exactly once per request; the 409 paths, response shapes and `deviceMemoryFreedBytes`
+  value are unchanged. The shims' app-level test coverage is also tightened (`tests/test_app.py`:
+  the real `create_app` over the conformance doubles, `httpx.ASGITransport` on the test's own
+  loop, no new dependency). Both shims already had app-level coverage — `runners/conformance/`
+  builds each real `create_app` over the same doubles under `TestClient` — so what is new is
+  narrower and stated as such: `ASGITransport` runs the loop on the test's own thread, where
+  `TestClient`'s anyio portal thread hides it, making the executing thread observable for the
+  first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239, and
+  MLServer's `test_core.py` stays pure-logic. The harness pins the off-loop thread
+  identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
+  read.
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the
