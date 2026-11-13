@@ -447,6 +447,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Dev worker: a runner that accepts the `/health` connection but never answers can no longer
+  hang the serialized cold-start chain (issue #243).**
+  `defaultHealthCheck` now forwards an `AbortSignal` into its `fetch`, and `waitUntilHealthy`
+  races every probe against an abortable per-probe timer (`healthProbeTimeoutMs`, default 5 s on
+  the launcher config — no new `SARDEENZ_*` env var) before treating it as a null (not-yet)
+  result, so a wedged probe can never exceed the budget and the 15-minute health deadline keeps
+  being re-evaluated (deadline granularity degrades to ≤ `healthProbeTimeoutMs` +
+  `healthIntervalMs`, ~6 s — immaterial at 15 minutes). A `hasExited()` re-check after each null
+  probe fails fast on an exit observed while a probe was wedged. Previously the first hung probe
+  bypassed both the exit check and the deadline forever, and with `serializeColdStarts = true`
+  one wedged start blocked every subsequent launch on the worker.
+
 - **Dashboard: models placement — single model list per GPU card.** The card previously
   listed every model twice: once as the legend chips under the stacked bar, again as the
   per-model action rows. The legend chips row is removed; the action-row list is the single
