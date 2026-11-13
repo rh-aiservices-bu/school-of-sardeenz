@@ -61,7 +61,8 @@ export type LedgerInstancesProvider = () => Promise<MeasuredInstanceSample[]>;
 // /memory-report kvCache blocks. Owned by src/index.ts, which composes
 // RunnerManager.getKvCacheDeviceStats(). Returns null when nothing is available (no running
 // runners, every query failed); a device missing from the Map simply gets no kvCache field.
-// Telemetry only — never feeds the ledger or placement math.
+// Relayed to the control plane verbatim; since Phase 5 (#276) its elastic co-location branch
+// reads freeBytes/preallocBytes as bounded headroom — never feeds this worker's own ledger.
 export type KVCacheDeviceProvider = () => Promise<Map<number, KVCacheDeviceStats> | null>;
 
 export class WorkerRegistration {

@@ -756,10 +756,14 @@ components:
             Measured state of the kvcached elastic KV-cache pool on this
             device, relayed verbatim from this device's runner's
             `GET /memory-report` `kvCache` block (engine-runner contract).
-            Telemetry only — never feeds placement math. Absent when no
-            runner on this device reports a kvcached pool (kvcached disabled,
-            CPU-only host, or the runner query failed); absent means absent,
-            not zero.
+            Since Phase 5 (#276), the control plane's elastic co-location
+            branch reads `freeBytes`/`preallocBytes` as bounded headroom
+            (see `allowCoLocation` on ModelDeploymentRequest in the
+            control-plane contract); every other consumer — and all
+            non-elastic placement math — treats it as telemetry only.
+            Absent when no runner on this device reports a kvcached pool
+            (kvcached disabled, CPU-only host, or the runner query failed);
+            absent means absent, not zero.
           required:
             - totalBytes
             - usedBytes
