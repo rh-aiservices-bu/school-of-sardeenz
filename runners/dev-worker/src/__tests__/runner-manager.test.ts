@@ -466,7 +466,7 @@ describe('RunnerManager', () => {
       makeRegistration(),
       makeFakeLauncher(),
       undefined,
-      async () => false,
+      () => Promise.resolve(false),
     );
     const startParams = {
       modelName: 'alloc-fail-model',

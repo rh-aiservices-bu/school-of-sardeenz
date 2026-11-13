@@ -804,7 +804,7 @@ describe('WorkerRegistration', () => {
 
       const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
       expect(memCalls.length).toBe(2);
-      expect(JSON.parse(memCalls[1].value as string)).toMatchObject({
+      expect(JSON.parse(String(memCalls[1].value))).toMatchObject({
         devices: [{ memoryUsedBytes: 2000 }, { memoryUsedBytes: 0 }],
       });
     });
