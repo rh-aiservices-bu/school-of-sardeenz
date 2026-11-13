@@ -86,6 +86,8 @@ describe('Runner Stub Contract Endpoints', () => {
       expect(device.memoryTotalBytes).toBe(24_000_000_000);
       // Should be using memory when READY (not sleeping)
       expect(device.memoryUsedBytes).toBeGreaterThan(0);
+      // Stub figure is the runner's own ledger share (#244): runner-scope, not device-scope.
+      expect(device.attribution).toBe('runner');
     });
   });
 
@@ -163,6 +165,10 @@ describe('Runner Stub Contract Endpoints', () => {
       const data = (await response.json()) as MemoryReportResponse;
       expect(data.devices[0].memoryUsedBytes).toBe(0);
       expect(data.devices[1].memoryUsedBytes).toBe(0);
+      // Attribution sits outside the sleeping ternary, so sleeping rows keep the
+      // runner-scope label alongside the zeros (#244).
+      expect(data.devices[0].attribution).toBe('runner');
+      expect(data.devices[1].attribution).toBe('runner');
     });
 
     it('should transition back to READY on POST /wake', async () => {

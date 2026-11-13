@@ -42,14 +42,14 @@ identity out of the `--served-model-name` passthrough instead of forwarding it.
   before forwarding) — it is **not** part of this contract.
 - Serves the runner-contract management API on `--port`:
 
-  | Endpoint                             | Behaviour                                                                               |
-  | ------------------------------------ | --------------------------------------------------------------------------------------- |
-  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once MLServer serves; `ERROR` if it dies |
-  | `GET /capabilities`                  | Static declaration (`PREDICTIVE`, `LLM`, `EMBEDDING`; `kvCacheElasticSharing: false`)   |
-  | `GET /memory-report`                 | Best-effort per-device memory (409 while `STARTING`; 409 for CPU-only sklearn models)   |
-  | `POST /sleep`                        | `L1_HOST_RAM` → KServe V2 `POST /v2/repository/models/{name}/unload`                    |
-  | `POST /wake`                         | KServe V2 `POST /v2/repository/models/{name}/load`                                      |
-  | `GET /sleep-status`, `GET /progress` | State introspection                                                                     |
+  | Endpoint                             | Behaviour                                                                                                       |
+  | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+  | `GET /health`                        | `STARTING` (with loading `progress`) → `READY` once MLServer serves; `ERROR` if it dies                         |
+  | `GET /capabilities`                  | Static declaration (`PREDICTIVE`, `LLM`, `EMBEDDING`; `kvCacheElasticSharing: false`)                           |
+  | `GET /memory-report`                 | Whole-device memory per device, `attribution: "device"` (409 while `STARTING`; 409 for CPU-only sklearn models) |
+  | `POST /sleep`                        | `L1_HOST_RAM` → KServe V2 `POST /v2/repository/models/{name}/unload`                                            |
+  | `POST /wake`                         | KServe V2 `POST /v2/repository/models/{name}/load`                                                              |
+  | `GET /sleep-status`, `GET /progress` | State introspection                                                                                             |
 
   The management endpoint is unauthenticated. `SARDEENZ_WORKER_TOKEN` protects the worker agent
   only, not this shim, the MLServer engine, or its auxiliary listeners.
@@ -102,23 +102,33 @@ sardeenz_mlserver_runner/
 ├── memory.py     # best-effort device memory report (verbatim from the vLLM shim)
 ├── onnx_runtime.py  # MLServer MLModel for *.onnx graphs (imports mlserver + onnxruntime; SIF-only)
 ├── onnx_support.py  # pure helpers behind it: artifact/provider selection, dtype/shape fitting
-└── state.py      # RunnerState machine + contract-shape response builders + V2 path builders (pure)
+├── state.py      # RunnerState machine + contract-shape response builders + V2 path builders (pure)
+└── testing.py    # test-only adapter: fakes the engine/memory seams for the conformance suite
 ```
 
 ## Notes
 
 - **Sleep level:** the contract defines only `L1_HOST_RAM` (v0.1) — see the semantic-difference
   note above.
-- **Memory attribution** is best-effort, identical to the vLLM shim's `memory.py`. CPU-only
-  sklearn models introspect no CUDA device, so `/memory-report` answers 409.
+- **Memory attribution** is best-effort, identical to the vLLM shim's `memory.py`: the shim owns no
+  CUDA pool (the engine is a child; onnxruntime allocates outside torch's pool), so the figure is
+  the whole-device used memory, `attribution: "device"`. CPU-only sklearn models introspect no CUDA
+  device, so `/memory-report` answers 409.
 - **Dependencies** (`fastapi`, `uvicorn`, `httpx`, `mlserver`, `mlserver-sklearn`,
   `mlserver-huggingface`, `onnxruntime-gpu`, `torch`) come from the `runner-mlserver` image;
   `pyproject.toml` lists them for dev installs but does not pin them.
+- **Handler concurrency:** the blocking `memory_report()` read (torch `mem_get_info`) runs on the
+  default executor — `run_in_executor` in both the `/memory-report` and `/sleep` handlers — so a
+  contended device read cannot stall the event loop that serves `/health` and the liveness
+  poller. `memory_report` itself stays synchronous.
 
 ## Tests
 
 `cli.py`/`settings.py`/`state.py`/`memory.py`/`onnx_support.py` are pure (or filesystem-only) and
-unit-tested without MLServer/torch/httpx/FastAPI:
+unit-tested without MLServer, torch or a GPU. `tests/test_app.py` drives the real `create_app`
+over the conformance doubles through `httpx.ASGITransport` to pin where handlers execute — the
+blocking `memory_report` reads run on the default executor, off the event loop that serves
+`/health` (the conformance suite already covers the handlers' shapes under `TestClient`):
 
 ```bash
 cd runners/mlserver && python3 -m pytest

@@ -5,6 +5,7 @@ export {
   DeviceType,
   ModelType,
   LoadingPhase,
+  DeviceMemoryUsageAttribution,
 } from './generated/engine-runner.js';
 
 export type {

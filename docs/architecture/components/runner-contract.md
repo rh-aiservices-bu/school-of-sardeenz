@@ -71,7 +71,11 @@ stateDiagram-v2
 
 - **READY ↔ BUSY:** Self-reported by the runner based on its own capacity assessment (e.g., request queue depth, KV cache pressure). The control plane does not command this transition. Currently, the control plane treats `BUSY` as equivalent to `READY` and does not adjust routing (see [ADR-014](../adrs/adr-014-inference-recency-tracking.md)).
 - **READY → SLEEPING:** The control plane sends `POST /sleep` with a level. Only valid from `READY` — a `BUSY` runner must return to `READY` (no in-flight requests) before it can be slept. The call is synchronous — the response returns after the offload completes. The control plane sets an appropriate HTTP timeout based on the model size.
-- **→ [*] (stopped):** The control plane removes the runner from the routing map (stopping new traffic), monitors `activeRequests` in `GET /health` until in-flight work completes, then tells the worker to send SIGTERM. The runner does not receive an HTTP command to stop — process lifecycle is a worker concern.
+  The drain check reads the runner's `activeRequests` (see below for what the shims report);
+  when the runner's guard still sees in-flight generations, the `POST /sleep` itself answers
+  `409` and the sleep fails — landing the instance in `ERROR` rather than offloading weights
+  out from under live requests. No control-plane-side retry of a refused sleep is implemented.
+- **→ [\*] (stopped):** The control plane removes the runner from the routing map (stopping new traffic), monitors `activeRequests` in `GET /health` until in-flight work completes, then tells the worker to send SIGTERM. The runner does not receive an HTTP command to stop — process lifecycle is a worker concern.
 - **→ ERROR:** Self-reported by the runner. Can occur from any active state. The control plane detects it via health polling and decides whether to restart or escalate.
 
 ### Runner State to Routing Map Mapping
@@ -115,13 +119,21 @@ The `DRAINING` model state is set explicitly by the control plane before sleep o
 **Endpoint:** `GET /health`
 
 Returns a `HealthStatus` with the current `RunnerState`, an optional human-readable `message`, loading `progress` (when `STARTING`), and `activeRequests` count.
-
 The control plane polls this endpoint during deploy and wake operations (`SARDEENZ_HEALTH_CHECK_INTERVAL_SECS`, default 10s) to:
 
 - Detect when a `STARTING` runner becomes `READY`
 - Monitor `BUSY` ↔ `READY` transitions for routing updates _(target design — not implemented)_
 - Track in-flight request count before stopping a runner
 - Detect `ERROR` states
+
+A runner that cannot answer this honestly reports no `activeRequests` at all (the field is
+optional): the control plane then treats the count as _unknown_ and keeps waiting — it never
+reads a missing field as "drained". Both shims derive the count by scraping the engine's own
+Prometheus `/metrics` (vLLM: `vllm:num_requests_running` + `vllm:num_requests_waiting`,
+summed across label series via the pure parser in `runners/vllm/sardeenz_vllm_runner/metrics.py`;
+MLServer: the `rest_server_requests_in_progress` gauge). An unreachable or unparseable scrape is
+reported as absent, never as `0` — the same unknown-vs-drained distinction the control plane
+applies.
 
 **HTTP semantics:** A `200` response means the runner is in a known state — check the `state` field to determine which. A `503` means the runner process is alive but hasn't initialized its HTTP server yet.
 
@@ -135,14 +147,35 @@ Each `DeviceMemoryUsage` entry includes:
 
 - `deviceIndex` — zero-based index as seen by the runner (respects `CUDA_VISIBLE_DEVICES`)
 - `deviceType` — `CUDA`, `ROCM`, `CPU`, or `OTHER`
-- `memoryUsedBytes` — bytes currently consumed (weights + KV cache + graphs + overhead)
+- `memoryUsedBytes` — bytes of device memory currently in use on this device, as scoped by
+  `attribution`: `runner` means this runner's own usage (model weights, KV cache, CUDA graphs,
+  and runtime overhead); `device` means the whole device's used memory, including memory held by
+  co-located processes — a device observation, not a per-runner delta, which double-counts if
+  summed across runners
 - `memoryTotalBytes` — total device capacity
+- `attribution` (optional) — what the `memoryUsedBytes` figure on this device entry covers:
+  `runner` — the reporting runner's own usage on this device (process-attributed; safe to sum
+  across runners sharing a device); `device` — the whole device's used memory as observed by the
+  reporting runner, co-located processes included; such figures MUST NOT be summed across runners
+  or treated as a per-runner delta. Optional for compatibility with runner images that do not
+  declare a scope; consumers treat an absent value as unknown.
+- `kvCache` (optional) — per-device kvcached elastic-pool stats (#165), present only when the
+  runner participates in a pool; the four figures form the partition
+  `totalBytes = usedBytes + preallocBytes + freeBytes`.
 
 An optional `MemoryBreakdown` provides category-level detail (weights, KV cache, activations, overhead) for engines that expose this introspection. Not all runners can provide it.
 
 All memory values are in **bytes** for precision. Display layers convert to human-readable units (GiB, MiB).
 
 **Relationship to Redis push:** Workers push periodic memory snapshots to Redis/Valkey for the control plane's global view. The `/memory-report` endpoint is for on-demand queries — the control plane may call it during placement decisions or after sleep/wake operations to get a fresh reading.
+
+**What the shims actually report:** in the two-process topology (engine child process, shim
+without an NVML binding) a shim cannot attribute device memory to itself, so both the vLLM and
+MLServer shims report the whole-device used figure from `torch.cuda.mem_get_info` with
+`attribution: "device"`; a CPU-only runtime that can introspect no CUDA device fails closed with
+`409`. The runner-stub emits `attribution: "runner"` for its own-ledger figure. Consumers must
+check the scope before aggregating — device-scope rows are not per-runner deltas (see the
+`attribution` bullet above).
 
 ### Sleep/Wake
 
@@ -165,6 +198,15 @@ Only `L1_HOST_RAM` is defined in v0.1 of the contract. Future levels (e.g., L2 f
 3. **Status:** `GET /sleep-status` returns whether the runner is sleeping and at which level. The control plane uses this for verification and eviction strategy decisions.
 
 Sleep and wake are **synchronous** by design. The control plane controls the timeout based on the expected offload/reload duration for the model size and sleep level.
+
+**Shim-side guard (vLLM only):** before starting the offload, the vLLM shim re-checks its
+engine's in-flight request count (the same scrape `GET /health` uses) and refuses with
+`409 NOT_READY` when any request is still running or waiting — so a generation that started in
+the control plane's drain→sleep window fails the sleep loudly instead of being silently
+destroyed. A shim whose scrape fails signals `activeRequests` as unknown and skips the guard: a
+metrics outage must not make sleep impossible. The MLServer shim has no equivalent guard — its
+engine exposes no request-level gauge to gate on, and its `requests_in_progress` metric is
+reported through `/health` for the control plane's drain observation instead.
 
 ### Progress Reporting
 
@@ -341,7 +383,9 @@ An MLServer runner serving predictive models on CPU. Exercises the CPU-only path
 
 **Lifecycle:** STARTING → READY ↔ BUSY → stopped (worker SIGTERM).
 
-**Memory:** Single device entry with `deviceType: "CPU"`. Reports host memory usage for the model process. `memoryTotalBytes` reflects available system memory. No `MemoryBreakdown`.
+**Memory:** With no CUDA device to introspect, `GET /memory-report` answers `409` — the contract
+requires at least one device entry (`minItems: 1`), so the shim fails closed rather than report
+host memory. No `MemoryBreakdown`.
 
 **Sleep:** Not supported.
 
@@ -353,7 +397,7 @@ An MLServer runner serving predictive models on CPU. Exercises the CPU-only path
 | ------------------------ | ----------------------------- | ------------------------------------ | ------------------------------------ |
 | All 5 states reachable   | Yes                           | 4/5 (no SLEEPING)                    | 4/5 (no SLEEPING)                    |
 | Health meaningful        | Yes                           | Yes                                  | Yes                                  |
-| Memory reporting useful  | Full (per-device + breakdown) | Per-device only                      | CPU memory only                      |
+| Memory reporting useful  | Full (per-device + breakdown) | Per-device only                      | N/A (no CUDA device → 409)           |
 | Sleep/wake               | L1_HOST_RAM                   | N/A (409)                            | N/A (409)                            |
 | Progress granular        | All 6 phases                  | 3 phases                             | 2 phases                             |
 | Capabilities distinguish | Yes                           | Yes                                  | Yes                                  |
@@ -375,6 +419,14 @@ All other endpoints are functionally optional. The control plane adapts:
 - No sleep support → worker stops and restarts the runner for eviction
 - No progress → control plane waits for READY state in health polling
 - No memory breakdown → uses device-level totals only
+- No `/memory-report` (or a CPU-only runtime) → the worker's no-NVML ledger fallback loses that
+  runner's rows; sleep/wake still work
+
+When you do implement `GET /memory-report`, declare the figure's scope honestly: emit
+`attribution: "runner"` only if the figure is process-attributed for this runner, and
+`attribution: "device"` when it is a whole-device observation (co-located runners included).
+Omitting the field is contract-valid but leaves consumers treating the scope as unknown. The
+shared conformance suite asserts that every current emitter declares one of the two values.
 
 Process lifecycle (start, stop) is always handled by the worker, not by the runner contract.
 
