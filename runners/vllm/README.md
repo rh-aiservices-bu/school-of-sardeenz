@@ -46,8 +46,10 @@ sardeenz_vllm_runner/
 ├── cli.py        # arg parsing + `vllm serve` command construction (pure)
 ├── engine.py     # vLLM subprocess lifecycle + dev-endpoint (/sleep, /wake_up) client
 ├── memory.py     # best-effort device memory report
+├── metrics.py    # pure Prometheus text-exposition parser (drain signal)
 ├── kvcached_pools.py  # kvcached pool stats from the pool's shm segment (#165)
-└── state.py      # RunnerState machine + contract-shape response builders (pure)
+├── state.py      # RunnerState machine + contract-shape response builders (pure)
+└── testing.py    # test-only adapter: fakes the engine/memory seams for the conformance suite
 ```
 
 ## Notes
@@ -57,12 +59,19 @@ sardeenz_vllm_runner/
   child process — so per-runner bytes aren't recoverable. `/memory-report` reports the whole-device
   used figure with `attribution: "device"`; consumers must not sum device-scope rows across
   co-located runners (the display rule belongs to the consumer layers, not the shim).
+- **Handler concurrency:** the blocking `memory_report()` reads (torch `mem_get_info`, kvcached
+  shared-memory) run on the default executor — `run_in_executor` in both the `/memory-report` and
+  `/sleep` handlers — so a contended device read cannot stall the event loop that serves
+  `/health` and the liveness poller. `memory_report` itself stays synchronous.
 - **Dependencies** (`fastapi`, `uvicorn`, `httpx`, `vllm`, `torch`, `kvcached`) come from the
   `runner-vllm` image; `pyproject.toml` lists them for dev installs but does not pin them.
 
 ## Tests
 
-`cli.py`/`state.py` are pure and unit-tested without vLLM/torch:
+`cli.py`/`state.py`/`metrics.py` are pure and unit-tested without vLLM/torch; `tests/test_app.py`
+drives the real `create_app` over the conformance doubles through `httpx.ASGITransport` to pin
+where handlers execute — the blocking `memory_report` reads run on the default executor, off the
+event loop that serves `/health` — and the `/sleep` active-request guard's behaviour:
 
 ```bash
 cd runners/vllm && python3 -m pytest
@@ -71,4 +80,4 @@ cd runners/vllm && python3 -m pytest
 This suite plus the MLServer shim's and the shared `runners/conformance` suite run together in CI
 (the `python` job) and via `make test-python` (after `make test-python-deps`).
 
-The engine + HTTP layers are exercised by the Phase 4 cluster integration gates (Task 9).
+The engine subprocess itself is exercised by the Phase 4 cluster integration gates (Task 9).

@@ -1,7 +1,7 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-12.
+Last update: 2026-11-12 (M17 wrap-up).
 
 ## Phases (complete)
 
@@ -25,21 +25,23 @@ CephFS perf) is tracked in [`phase4.md`](phase4.md) and [`phase4-perf.md`](phase
 
 ## Milestones merged to `dev`
 
-| Milestone | Theme                                                                                                                                    |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| M2        | Reliable Wake-on-Request                                                                                                                 |
-| M3        | Orchestration Correctness                                                                                                                |
-| M4        | Worker & Runner Lifecycle                                                                                                                |
-| M5        | Security & Trust Boundaries                                                                                                              |
-| M6        | Contracts & Docs Accuracy                                                                                                                |
-| M7        | Multi-Instance & Move Foundations ([ADR-019](../architecture/adrs/adr-019-logical-model-vs-instance-split.md))                           |
-| M8        | Dashboard v1 Parity                                                                                                                      |
-| M9        | Engine Expansion — MLServer, `/openai` and `/oip` proxy split ([ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md)) |
-| M10       | Control-Plane Orchestration Correctness — delete/stop/instance-op claims, 409 `details.reason`                                           |
-| M11       | Dashboard Stability & Test Infrastructure — Playwright e2e green and enforced in CI                                                      |
-| M12       | Runner & Engine Hardening — configurable vLLM bind host, per-runner 4-port blocks, Python suites gated in CI                             |
-| M13       | Feature & Resilience Backlog — move-model action (#146), playground stream cap (#149), dashboard notification/e2e follow-ups (#178/#179), proxy→engine NetworkPolicy rule (#181), CI container-image builds (#187) |
-| M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261) |
+| Milestone | Theme                                                                                                                                                                                                                                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M2        | Reliable Wake-on-Request                                                                                                                                                                                                                                                                                                       |
+| M3        | Orchestration Correctness                                                                                                                                                                                                                                                                                                      |
+| M4        | Worker & Runner Lifecycle                                                                                                                                                                                                                                                                                                      |
+| M5        | Security & Trust Boundaries                                                                                                                                                                                                                                                                                                    |
+| M6        | Contracts & Docs Accuracy                                                                                                                                                                                                                                                                                                      |
+| M7        | Multi-Instance & Move Foundations ([ADR-019](../architecture/adrs/adr-019-logical-model-vs-instance-split.md))                                                                                                                                                                                                                 |
+| M8        | Dashboard v1 Parity                                                                                                                                                                                                                                                                                                            |
+| M9        | Engine Expansion — MLServer, `/openai` and `/oip` proxy split ([ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md))                                                                                                                                                                                       |
+| M10       | Control-Plane Orchestration Correctness — delete/stop/instance-op claims, 409 `details.reason`                                                                                                                                                                                                                                 |
+| M11       | Dashboard Stability & Test Infrastructure — Playwright e2e green and enforced in CI                                                                                                                                                                                                                                            |
+| M12       | Runner & Engine Hardening — configurable vLLM bind host, per-runner 4-port blocks, Python suites gated in CI                                                                                                                                                                                                                   |
+| M13       | Feature & Resilience Backlog — move-model action (#146), playground stream cap (#149), dashboard notification/e2e follow-ups (#178/#179), proxy→engine NetworkPolicy rule (#181), CI container-image builds (#187)                                                                                                             |
+| M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                     |
+| M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238) |
+| M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257) — see below                                                                                                  |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -48,69 +50,67 @@ measured-only VRAM telemetry doctrine (#163/#164, ts-nvml).
 Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) through
 [`milestone-M9-pr-draft.md`](milestone-M9-pr-draft.md).
 
-## Current milestone — M15 Security Hardening (implemented, awaiting PR)
+## Current milestone — M17 Runner & Shim Correctness (implemented, awaiting PR)
 
-All 8 milestone issues are implemented on `milestone/m15-security-hardening` (squash commits per
-issue over `dev@9a277ea`, plus type-fix and doc-sync follow-ups); opening the PR to `dev` is the
-remaining tracker step.
+All 5 milestone issues are implemented on `milestone/m17-runner-shim-correctness` (squash commits
+per issue over `dev@c0150d4`, plus three docs/changelog follow-ups); opening the PR to `dev` is
+the remaining tracker step.
 In progress: nothing else.
 
-| Issue  | Delivered                                                                                                                                                                                                                              |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #233   | `.github/dependabot.yml`: 14 weekly update entries (npm root, cargo `/proxy`, pip ×4, GitHub Actions, docker ×7 — current runner versions only), minor+patch grouped per entry, `open-pull-requests-limit: 10`.                         |
-| #232   | `deployment/prereq/` renders `Namespace/sardeenz` labelled `sardeenz.io/module-guard: enforce`, so the module-PVC write-protection ValidatingAdmissionPolicyBinding self-activates on a stock apply; the manual `oc label` runbook step is retired (verify-the-label + `--overwrite` conflict remedy documented). |
-| #230   | Valkey requires AUTH: `sardeenz-redis-credentials` Secret (`REDIS_PASSWORD` → image `VALKEY_PASSWORD`; `REDISCLI_AUTH` exec probes, `tcpSocket` liveness unchanged), all four `SARDEENZ_REDIS_URL` consumers moved to `secretKeyRef`; namespace ships default-deny ingress plus allow NPs for redis 6379, postgres 5432, proxy 8080 (router + dashboard-BFF chat forwarding) and 9099 (monitoring), dashboard 4000 (router). |
-| #235   | Manifest half only: `readOnlyRootFilesystem: true` + `/tmp` emptyDir on control plane and proxy, `automountServiceAccountToken: false` on the proxy, `runAsNonRoot: true` on the worker, librarian `build-oci` init container hardened, SCC `NET_BIND_SERVICE` dropped. Image/supply-chain half split out to #266 (M19). |
-| #236   | `assertValidInstanceId` (`^[A-Za-z0-9._-]{1,64}$`, deliberately looser than the `inst-<12hex>` mint format) guards all five `:instanceId` routes (delete, sleep, wake, move, startup-logs) before any Redis key composition.           |
-| #234   | Control plane and dev worker fail closed at startup when `SARDEENZ_API_TOKEN`/`SARDEENZ_WORKER_TOKEN` are unset or empty; dev opt-out `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (truthy `1/true/yes/on`), documented in `.env.example` and the setup guide, never set in `deployment/**`. |
-| #237   | Dashboard BFF `?token=` query auth restricted to the three SSE routes (`/api/events`, `/api/models/:name/logs`, `/api/models/:name/instances/:id/startup-logs`); everywhere else a query token is ignored → 401. The `sardeenz_sse` HttpOnly cookie remains the SSE mechanism. |
-| #238   | Worker `POST /runners` validates `entrypoint` against an allowlist seeded from the configured `SARDEENZ_RUNNER_ENTRYPOINT` (verbatim match; `-m` module family only when that vector has the 3-token `<exec> -m <module>` shape); empty configured vector fails worker startup loudly. Worker-agent contract 0.1.2 → 0.1.3, generated types regenerated. |
+| Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #239  | The vLLM shim's `activeRequests` is real: a pure labeled-metrics parser (`metrics.py`) reads `vllm:num_requests_running` + `vllm:num_requests_waiting` (name followed by `{` or whitespace, never a `_`-suffixed sibling; every label series summed for TP/DP), requires **both** series (a half-parsed scrape is not a drain signal), maps non-finite samples to `None` before the `int()`. The `/sleep` guard now trips mid-generation: a request that starts in the control plane's drain→sleep window gets a 409 → instance ERROR (loud failure instead of destroyed generations; no CP-side drain retry in scope). A 200-but-unrecognized `/metrics` body now behaves like a failed scrape: the drain waits out `sleepTimeoutMs` → 504 → instance ERROR. Fail-open rule untouched: an unreadable scrape is still `None`, which skips the guard. **Release gate:** capture a live vLLM 0.26 `/metrics` body before relying on the drain behaviour in production. |
+| #243  | A runner that accepts the `/health` connection but never answers can no longer hang the serialized cold-start chain: `HealthCheckFn` takes an `AbortSignal` (`defaultHealthCheck` forwards it into `fetch`), and `waitUntilHealthy` races every probe against an abortable per-probe timer (`healthProbeTimeoutMs`, default 5 s, optional launcher-config field — no new `SARDEENZ_*` env var), with a `hasExited()` re-check after each null probe. The 15-minute health deadline keeps being re-evaluated (granularity degrades to ≤ probe budget + interval, ~6 s — immaterial at 15 minutes).                                                                                                                                                                                                                                                                                                                                                                    |
+| #244  | The shims' `/memory-report` `torch.cuda.memory_reserved()` branch was dead by construction (the shim owns no CUDA pool — the engine is a child), so the figure silently degraded to the whole-device read and double-counted co-located runners. The dead branch is deleted; both shims emit `max(0, total − free)` with the new optional `attribution: "runner" \| "device"` field on `DeviceMemoryUsage` (engine-runner contract 0.1.1, generated types regenerated; consumers deliberately untouched), reporting `attribution: "device"`; the runner-stub emits `"runner"`. The conformance suite asserts every current emitter declares a scope. The consumer-side display rule (not summing device-scope rows) is Phase 5's, named-not-fixed.                                                                                                                                                                                                                   |
+| #253  | Blocking torch/kvcached memory reads (`mem_get_info` under device contention, contended kvcached shm `flock`) no longer run on the shim event loop: all four `/memory-report` and `/sleep` call sites hand `memory_report` to the default executor (`run_in_executor`, the ONNX `session.run` pattern). Same 409 paths, shapes, and `deviceMemoryFreedBytes`; no background refresh loop. New app-level harnesses (`tests/test_app.py` in both shims: `httpx.ASGITransport` over the conformance doubles, thread-observable; no new test dependency) pin the off-loop execution, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report read.                                                                                                                                                                                                                                                                                             |
+| #257  | `startRunner` reserves the instance slot (and registers the model set) synchronously before its first `await` (`allocatePorts`), inside a `try` extended to cover the allocation phase — a port-allocation failure rolls the slot back instead of stranding the `instanceId` behind a permanent `ConflictError`; the catch's `usedPorts` delete is guarded on nullable pre-declared port bindings. `allocateMemory`/`freeMemory` are ledger-only; the publish moved to `pushMemoryReportOnce()` — a microtask-coalesced (never a timer, preserving the staleness-check freshness) single push per tick with a logged `.catch` instead of a possible unhandled rejection. Ledger arithmetic (`floor(requiredMemory / devices.length)`) unchanged.                                                                                                                                                                                                                     |
 
 Review/verification ran per issue (blueprint → implement → 2× review → fix → verify → accept);
-cumulative reports in `.omp/reports/` (agent scratchpad, not committed).
+cumulative reports in `.omp/reports/` (agent scratchpad, not committed). Cumulative gate:
+tsc (dev-worker + control-plane) clean, full vitest 1569 passed + 1 skipped, dev-worker 310 + 1,
+Python shims + conformance 117 passed + 1 skipped, contracts validate + codegen reproducibility.
 
 ## Next
 
-- **M17 — Runner & Shim Correctness** (GitHub milestone #23): P1 anchor #239 (vLLM shim
-  active-request scrape never matches — `/sleep` guard never trips mid-generation), plus #243
-  (launcher health-probe timeout), #244 (shim `/memory-report` reserved branch dead in the
-  two-process topology), #253 (blocking torch/kvcached calls on the event loop), #257 (startRunner
-  slot reservation after await / unhandled rejection).
-- **Phase 5** (kvcached oversubscription / co-location policy): #244 + #253 are its gate and are
-  sequenced inside M17, so Phase 5 is unblocked at M17 close.
-- M16 (Orchestration Resilience) stays parked; revisit after M17.
+- **Phase 5** (kvcached oversubscription / co-location policy) — unblocked: #244 + #253, its
+  declared gate, both shipped in M17. Its placement policy consumes #244's `attribution`
+  semantics (the rule for not summing device-scope rows, and the dashboard's per-model bars
+  under co-location, are still open consumer work).
+- **M19** (Runner & Image backlog) — owns the image/supply-chain half split out of M15's #235
+  (#266: non-root `USER`, digest pins, cosign sign + scan) and the ADR-016 wording reconciliation
+  (#267); a per-PID NVML follow-up to #244 (option A from its decision) would also belong there.
+- M16 (Orchestration Resilience) stays parked.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
 
 ## Limitations and deploy-only verification
 
-Several M15 behaviors are structurally not provable in the dev container (no cluster); they are
-recorded per issue and must be exercised on first post-merge deployment:
+Several M17 behaviors are structurally not provable in the dev container (no GPU, no vLLM/MLServer
+runtimes, no Apptainer node, no cluster); they are recorded per issue and must be exercised on
+first post-merge deployment:
 
-- **#230**: Secret resolution at pod creation (absent `sardeenz-redis-credentials` →
-  `CreateContainerConfigError` on all five workloads), the AUTH handshake itself, CNI admission and
-  enforcement of the default-deny + allows, the router-namespace label form
-  (`policy-group.network.openshift.io/ingress: ""` vs the SDN-era `network.openshift.io/policy-group: ingress`
-  overlay patch), Route → dashboard/proxy traffic, dashboard-BFF → proxy chat forwarding, and the
-  Prometheus scrape of proxy 9099. Operator sequencing: apply component bases together with the
-  prereq base so no flow is dropped in the default-deny window; password rotation requires
-  restarting all five deployments.
-- **#232**: cluster admission of the two VAP documents (OpenShift 4.17+ / k8s 1.30+; older clusters
-  reject the binding at apply), actual enforcement semantics, binding-on-stock-apply with
-  pre-existing namespaces (`oc label … --overwrite` remedy), and the `oc delete -k deployment/prereq/`
-  cascade to the PostgreSQL/Valkey PVC data.
-- **#235**: SCC admission/rebinding on rollout, `readOnlyRootFilesystem` runtime behavior (any
-  unmapped write path surfaces as a crash-loop), `runAsNonRoot` fail-fast bite (no-op admission check
-  on OpenShift UID ranges; observable on vanilla overlays), leader election unaffected.
-- **#234**: in-cluster empty-string Secret key now crash-loops the control plane/worker at startup
-  instead of serving unauthenticated.
-- **#237**: the Playwright e2e suite runs `AUTH_MODE=none` and never installs the extractor, so the
-  plugin unit tests are the meaningful gate; live SSE streaming through a real browser against an
-  authed BFF was not exercised.
-- **#238**: whole-worker-process run was blocked by the declared `node_modules` drift below; the
-  production wiring was exercised via a real-HTTP probe (11/11 checks) instead.
+- **#239**: a live `curl <runner>:<engine-port>/metrics` capture on a GPU runner (the CHANGELOG's
+  stated release gate) — confirming the parser's assumptions about real vLLM 0.26 metric text
+  (names, label set, float-string values); and the drain-window behaviour on-cluster: 409 →
+  instance ERROR with an in-flight generation, and 200-but-unparsed → 504 → instance ERROR.
+- **#244**: a real two-runner co-location observation showing both shims reporting the same
+  whole-device figure with `attribution: "device"`; the consumer-side double-count it makes
+  visible (CP per-instance aggregation, dashboard placement bars) is Phase 5 work.
+- **#253**: `/health` staying responsive while a real `mem_get_info`/kvcached read stalls under
+  GPU contention (locally proven only with a 150 ms fake).
+- **#243**: a real wedged shim inside a real SIF on an Apptainer node (locally proven with a
+  never-settling injected probe and a never-writing `node:http` server).
 
-## Follow-ups filed during M15
+M15 items still pending first deployment exercise (merged to `dev` via #270/#271): Secret
+resolution at pod creation and the Valkey AUTH handshake (#230), CNI admission and enforcement of
+the default-deny + allow NetworkPolicies and the Prometheus scrape of proxy 9099 (#230), VAP
+admission and enforcement (#232), SCC/`readOnlyRootFilesystem`/`runAsNonRoot` runtime behavior
+(#235), and the empty-string-Secret crash-loop (#234). Full list in the M15 entries of the
+previous revision of this file and in `.omp/plans/m15-notes.md` (agent scratchpad, not committed).
+
+## Open follow-ups
+
+From M15 (first two are M19-owned):
 
 - **#266** (M19): image/supply-chain hardening — non-root `USER` in worker images, base-image
   digest pins, cosign sign + scan for platform images (the #235 split).
@@ -119,7 +119,34 @@ recorded per issue and must be exercised on first post-merge deployment:
 - **#268**: fail-closed token gate accepts whitespace-only tokens.
 - **#269**: BFF request logger writes `?token=` SSE URLs (including JWTs) into access logs.
 
+From M17 (reviewer-recorded, non-blocking):
+
+- **#244 residual**: the consumer-side rule for `attribution` (per-runner display/dedup, the
+  `getKvCacheDeviceStats` first-wins precedent) — deliberately Phase 5's, not an issue yet.
+- **#253 carried low**: the `test_health_responds_while_memory_report_blocks` retry leaves the
+  first attempt's `report_task` unawaited (harmless under `asyncio.run` teardown).
+- **#243 pre-existing**: TDZ latent bug in `ApptainerLauncher.stopChild` — a child emitting
+  `exit` synchronously inside `kill` throws before the timer declarations; invisible today
+  (start swallows it, real children exit async). Worth an issue.
+
 ## Notable changes
+
+M17:
+
+- Engine-runner contract gains the optional `attribution: "runner" | "device"` field on
+  `DeviceMemoryUsage` (#244); generated TypeScript types committed (spec stays 0.1.1 — an
+  additive optional field). No in-repo consumer reads it yet by design.
+- New user-visible behaviour in the vLLM shim (#239): a sleep attempted while generations are
+  in flight answers 409 and lands the instance in ERROR (previously it silently offloaded
+  weights out from under them); a 200-but-unrecognized `/metrics` body stalls the drain to its
+  504 deadline instead of reporting a fake `0`.
+- The launcher's health probe is budgeted per attempt (#243) and the worker's memory-report
+  publish is coalesced to one push per tick with a logged failure handler (#257) — neither adds
+  an operator-facing knob.
+- Python shims gained app-level test harnesses (`tests/test_app.py`) built on
+  `httpx.ASGITransport` — no new test dependency (`pytest-asyncio` remains absent by design).
+
+M15 (merged to `dev` via #270/#271):
 
 - Five ADRs record M15's decisions: [ADR-022](../architecture/adrs/adr-022-fail-closed-service-tokens.md)
   (tokens fail closed; dev-only opt-out — resolves ADR-013's inter-component-auth deferral),
@@ -136,17 +163,15 @@ recorded per issue and must be exercised on first post-merge deployment:
 - New secret-scaffolding pattern: `sardeenz-redis-credentials` mirrors the
   `sardeenz-postgres-credentials` operator pattern (runbook in `deployment/prereq/README.md`);
   local dev stays passwordless.
-- Docs synchronized with the code in this milestone's docs commit: deployment-security.md flow
+- Docs synchronized with the code in the M15 docs commit: deployment-security.md flow
   table, deployment/prereq runbooks, setup.md fail-closed notes, runner-catalog allowlist
   semantics, dashboard.md JWT-flow/SSE claims.
 
 ## Environment note (dev container)
 
-This checkout's `node_modules` is stale relative to the lockfiles (`dotenv` 16 vs `^17`,
-`@rh-ai-bu/ts-nvml` absent, `yaml` 1.x vs `^2.9`): dev-worker/control-plane typecheck and a
-whole-process worker start fail on exactly those imports, in files no M15 commit touched
-(0 files changed under `runners/` by #230/#235). Scoped suites are the reliable local gate
-(`npm test -w @sardeenz/dev-worker`, `npm test -w @sardeenz/control-plane`); recreate with
-`rm -rf node_modules && npm ci` if full-workspace gates are needed. The Python-side venv has a
-bespoke pinned set — if `make test-python` hits import errors, recreate with
-`rm -rf .venv && python3 -m venv .venv && make test-python-deps`.
+The Python-side venv is bespoke — if `make test-python` hits import errors, recreate with
+`rm -rf .venv && python3 -m venv .venv && make test-python-deps` (or run the suite as
+`.venv/bin/python -m pytest`; system python3 lacks fastapi). The earlier `node_modules` staleness
+warning is resolved: a root `npm install --no-audit --no-fund` reconciles `node_modules` to the
+lockfiles, after which `tsc --build` for dev-worker/control-plane and the full `npx vitest run`
+work locally.

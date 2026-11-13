@@ -29,7 +29,10 @@ existing two adapters, then add it to `_BUILDERS` in `conftest.py`.
 The 8 named cases in `test_engine_runner_contract.py` cover `/health`, `/capabilities`,
 `/memory-report`, `/progress`, `/sleep-status`, `/sleep` (bad level, bad/missing body), and the
 `/sleep` → `/sleep-status` → `/wake` → `/sleep-status` state-machine transition — the same
-transition both shims' `state.py` response builders must produce identically.
+transition both shims' `state.py` response builders must produce identically. The
+`/memory-report` shape case also asserts that every **current emitter declares** a memory
+`attribution` scope (`runner` or `device`, #244) — the field stays optional in the contract for
+legacy images, but the shims under this suite must declare one.
 
 ## Run
 

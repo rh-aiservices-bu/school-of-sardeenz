@@ -102,7 +102,8 @@ sardeenz_mlserver_runner/
 ├── memory.py     # best-effort device memory report (verbatim from the vLLM shim)
 ├── onnx_runtime.py  # MLServer MLModel for *.onnx graphs (imports mlserver + onnxruntime; SIF-only)
 ├── onnx_support.py  # pure helpers behind it: artifact/provider selection, dtype/shape fitting
-└── state.py      # RunnerState machine + contract-shape response builders + V2 path builders (pure)
+├── state.py      # RunnerState machine + contract-shape response builders + V2 path builders (pure)
+└── testing.py    # test-only adapter: fakes the engine/memory seams for the conformance suite
 ```
 
 ## Notes
@@ -116,11 +117,18 @@ sardeenz_mlserver_runner/
 - **Dependencies** (`fastapi`, `uvicorn`, `httpx`, `mlserver`, `mlserver-sklearn`,
   `mlserver-huggingface`, `onnxruntime-gpu`, `torch`) come from the `runner-mlserver` image;
   `pyproject.toml` lists them for dev installs but does not pin them.
+- **Handler concurrency:** the blocking `memory_report()` read (torch `mem_get_info`) runs on the
+  default executor — `run_in_executor` in both the `/memory-report` and `/sleep` handlers — so a
+  contended device read cannot stall the event loop that serves `/health` and the liveness
+  poller. `memory_report` itself stays synchronous.
 
 ## Tests
 
 `cli.py`/`settings.py`/`state.py`/`memory.py`/`onnx_support.py` are pure (or filesystem-only) and
-unit-tested without MLServer/torch/httpx/FastAPI:
+unit-tested without MLServer/torch/httpx/FastAPI. `tests/test_app.py` drives the real `create_app`
+over the conformance doubles through `httpx.ASGITransport` to pin where handlers execute — the
+blocking `memory_report` reads run on the default executor, off the event loop that serves
+`/health` (the conformance suite already covers the handlers' shapes under `TestClient`):
 
 ```bash
 cd runners/mlserver && python3 -m pytest
