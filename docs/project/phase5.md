@@ -12,10 +12,11 @@ consumer-side attribution rule (worker-agent contract gains `attribution` on
 contract's description-only `WorkerModelInfo.memoryUsedBytes` rewording below is
 type-regenerated and contract-validated.
 
-#277 (shared-pool pressure response) is ratified — spec plus decision (victims STOPPED) — and
-lands on this phase branch in parallel with this document; its `SARDEENZ_POOL_PRESSURE_*`
-knobs, the reconciliation pressure step and the `deployment/` wiring all arrive with its merge,
-gated by its own scoped suites.
+#277 (shared-pool pressure response) is **implemented and merged onto this phase branch** —
+its `SARDEENZ_POOL_PRESSURE_*` knobs (shipped defaults: `ENABLED=false`, `THRESHOLD_PERCENT=90`,
+`RELEASE_TARGET_PERCENT=75`, `DEBOUNCE_TICKS=3`), the reconciliation pressure step and the
+`deployment/` wiring are all present, gated by its own scoped suites. The evaluator stays **off
+by default** (`ENABLED=false`), so on-cluster pressure behavior remains a deploy-gated item.
 
 **Cluster-gated** (written + statically validated, runnable only on a GPU node): the on-cluster
 execution of the **Gate 9b** recipe below. Its run is recorded in [`status.md`](status.md)'s
@@ -36,7 +37,7 @@ via kvcached (spike Gate 9d); this phase turns that into a control-plane placeme
 
 One short section per work item — the authoritative design lives in each issue's spec and decision
 comments; this doc records what shipped and how it fits together. Landing waves — W1: #276 ∥ #278
-→ this document (#279); W2: #277 after #276 (committed, in review, landing on this phase branch).
+→ this document (#279); W2: #277 after #276 (all four items are merged onto this phase branch).
 
 ### #276 — Co-location placement policy
 
@@ -106,8 +107,8 @@ without NVML can no longer render two whole-device bars on one card.
   eviction, config knobs — plus the #277 pool-pressure reconciliation step.
 - Worker: attribution stamping/promotion in the memory-report assembly.
 - Dashboard: deploy-form `allowCoLocation` switch + i18n; rendering of already-deduped figures.
-- Deployment: `SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT` wired through `deployment/`; the
-  `SARDEENZ_POOL_PRESSURE_*` knobs join `deployment/` with #277's merge.
+- Deployment: `SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT` and the `SARDEENZ_POOL_PRESSURE_*`
+  knobs wired through `deployment/` (both merged with their items).
 - Docs: this file (linked from [`overall-plan.md`](overall-plan.md)'s Phase 5 section);
   CHANGELOG `[Unreleased]` entries per item.
 - At phase close: `status.md` flip + the Gate 9b run recorded in its deploy-only list; the

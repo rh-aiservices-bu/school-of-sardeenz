@@ -70,8 +70,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   capacity, so the ratified headroom formula can count it twice — acceptance measures actual
   device usage under concurrent inference, not only placement success). Also:
   `overall-plan.md`'s Phase 5 section now points at the phase doc, and `phase4.md`'s
-  deferred-OOM-guard sentence is closed (the guard lands as Phase 5: #276 and #278 are merged,
-  #277 is in review, landing on this phase branch); `docs/project/status.md` flips at phase
+  deferred-OOM-guard sentence is closed (the guard lands as Phase 5: #276, #277 and #278 are
+  all merged onto this phase branch); `docs/project/status.md` flips at phase
   close, not in this change. A description-only contract reword rides along:
   `WorkerModelInfo.memoryUsedBytes`'s absence clause now also covers a co-located device-scope
   row deliberately dropped post-#278.
