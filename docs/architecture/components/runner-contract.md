@@ -368,7 +368,7 @@ host memory. No `MemoryBreakdown`.
 | ------------------------ | ----------------------------- | ------------------------------------ | ------------------------------------ |
 | All 5 states reachable   | Yes                           | 4/5 (no SLEEPING)                    | 4/5 (no SLEEPING)                    |
 | Health meaningful        | Yes                           | Yes                                  | Yes                                  |
-| Memory reporting useful  | Full (per-device + breakdown) | Per-device only                      | CPU memory only                      |
+| Memory reporting useful  | Full (per-device + breakdown) | Per-device only                      | N/A (no CUDA device → 409)           |
 | Sleep/wake               | L1_HOST_RAM                   | N/A (409)                            | N/A (409)                            |
 | Progress granular        | All 6 phases                  | 3 phases                             | 2 phases                             |
 | Capabilities distinguish | Yes                           | Yes                                  | Yes                                  |
