@@ -18,6 +18,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   major bumps and security updates stay individual. Complements the M14-style
   manual alert chasing (#224–#229).
 
+- **M17's architecture decisions are recorded as ADR-027 and ADR-028.**
+  [ADR-027](docs/architecture/adrs/adr-027-shim-memory-device-scope.md): shim
+  `/memory-report` figures are device-scope observations, not attributions — consumers must
+  branch on `attribution` before aggregating (implements #244's decision; the per-runner
+  display rule is Phase 5's). [ADR-028](docs/architecture/adrs/adr-028-drain-signal-semantics.md):
+  the drain signal is two-valued (count | unknown), fail-open on unknown at the shim guard and
+  the control-plane drain loop, and the 409-in-the-drain-window ERROR landing is deliberate
+  (implements #239's recorded semantics). The launcher's per-probe health budget
+  (#243, `healthProbeTimeoutMs`) is documented in
+  [runner-contract.md](docs/architecture/components/runner-contract.md).
+
 ### Security
 
 - **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**

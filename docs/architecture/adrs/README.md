@@ -26,3 +26,5 @@
 - [ADR-024](adr-024-worker-entrypoint-allowlist.md) — Worker Entrypoint Allowlist Seeds from the Configured Argv
 - [ADR-025](adr-025-namespace-default-deny-ingress.md) — The Namespace Ships Default-Deny Ingress; Every Flow Needs an Explicit Allow
 - [ADR-026](adr-026-vap-activation-labeled-namespace.md) — The VAP Module-Guard Activates by Shipping the Labeled Namespace _(completes ADR-017's deferred mechanism choice)_
+- [ADR-027](adr-027-shim-memory-device-scope.md) — Shim Memory Figures Are Device-Scope Observations, Not Attributions _(extends ADR-010/ADR-011)_
+- [ADR-028](adr-028-drain-signal-semantics.md) — The Drain Signal Is Two-Valued: Unknown Never Means Drained _(extends ADR-010)_

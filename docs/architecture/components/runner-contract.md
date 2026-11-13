@@ -135,6 +135,14 @@ MLServer: the `rest_server_requests_in_progress` gauge). An unreachable or unpar
 reported as absent, never as `0` — the same unknown-vs-drained distinction the control plane
 applies.
 
+The _worker_ budgets each poll: every probe is raced against an abortable per-probe timer
+(`ApptainerLauncherConfig.healthProbeTimeoutMs`, default 5 s — deliberately a launcher-config
+field, not a `SARDEENZ_*` env var, since no operator-facing knob is warranted), so a runner that
+accepts the connection but never answers cannot hang the serialized cold-start chain: the
+launcher regains control after every probe regardless of the probe's cooperation
+(`waitUntilHealthy`, runners/dev-worker). The probe budget and its interval are independent of
+the overall health deadline, which is re-checked per probe.
+
 **HTTP semantics:** A `200` response means the runner is in a known state — check the `state` field to determine which. A `503` means the runner process is alive but hasn't initialized its HTTP server yet.
 
 ### Memory Reporting
