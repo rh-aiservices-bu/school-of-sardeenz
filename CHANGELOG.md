@@ -28,6 +28,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (implements #239's recorded semantics). The launcher's per-probe health budget
   (#243, `healthProbeTimeoutMs`) is documented in
   [runner-contract.md](docs/architecture/components/runner-contract.md).
+- **Phase 5's architecture decisions are recorded as ADR-029, with ADR-027/ADR-011 follow-ups.**
+  [ADR-029](docs/architecture/adrs/adr-029-colocation-hold-and-pressure-stop.md): co-location
+  never changes the sleep contract — sleeping instances keep their VRAM holds and stay full
+  members of their device's co-location group, the wake pre-check is per-device and excludes
+  the waker's own hold, oversubscription is capped as a percent of the device's KV-pool total
+  (`SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT`, default 50, `0` disables) with the
+  `freeBytes`-is-virtual-capacity residual gated on the Gate 9b NVML reality check, and
+  pool-pressure victims are **STOPPED — never slept** — via a deliberately drain-free stop
+  (sleep keeps holds, so it cannot relieve pressure; ADR-028's drain semantics untouched,
+  operator-initiated stops still drain). The pressure trigger is the system's first non-demand
+  eviction trigger and ships disabled. ADR-027's Status/Decision 5 now record the #278 display
+  rule as shipped (no longer deferred); ADR-011's Status notes the ADR-029 amendment and its
+  Decision section documents the elastic co-location branch inside step 3's capacity filter.
 
 - **Phase 5: co-location placement policy (issue #276).** A model may now opt in to kvcached
   elastic co-location (`allowCoLocation` on the deploy request / model configuration, dashboard

@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR-029](adr-029-colocation-hold-and-pressure-stop.md) — Phase 5 adds a
+conditional elastic co-location branch to the capacity filter (see below).
 
 ## Context
 
@@ -33,6 +34,19 @@ The control plane maintains a **capability registry** built from these reports. 
 2. **Hardware filtering.** Based on the runner's hardware requirements, filter to workers with compatible accelerators (or CPU capacity).
 3. **Capacity filtering.** Among compatible workers, filter to those with sufficient available device memory (or CPU/RAM headroom).
 4. **Placement strategy.** Among candidates, apply a placement policy to select the target. The initial strategy is simple (e.g., most available capacity), but the interface is designed for future strategies (balanced distribution, affinity/anti-affinity, cost-weighted).
+
+**Phase 5 amendment — elastic co-location
+([ADR-029](adr-029-colocation-hold-and-pressure-stop.md)).** Step 3's capacity filter gains one
+conditional branch: when a deploy request or move opts in with `allowCoLocation` and every
+instance already resident on the target device — sleeping ones included, they keep their holds —
+belongs to a runner type declaring `kvCacheElasticSharing` on that worker, placement may draw
+bounded headroom from the device's kvcached pool
+(`min(freeBytes + preallocBytes, cap% × poolTotalBytes)`, capped by
+`SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT`, default 50, `0` disables). The branch fails
+closed: an unresolvable co-resident capability, or any unknown-placement resident (null/empty
+`deviceIndices`), yields zero headroom — so non-kvcached runners are never silently co-located
+past byte-sum capacity. The strategy interface and the four-step pipeline are unchanged; the
+branch lives inside step 3.
 
 Worker capabilities are treated as dynamic — a worker can come online with different hardware configurations, and the control plane adapts without requiring manual registration or static configuration.
 
