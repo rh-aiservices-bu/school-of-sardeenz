@@ -18,6 +18,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   major bumps and security updates stay individual. Complements the M14-style
   manual alert chasing (#224–#229).
 
+### Fixed
+
+- **Worker image build fails on the (now always-empty) nested `node_modules`
+  COPY.** `npm ci --omit=dev --include-workspace-root=false` hoists every prod
+  dependency of `@sardeenz/dev-worker` into root `node_modules` under the
+  current lockfile, leaving `runners/dev-worker/node_modules` empty; BuildKit
+  refuses a `COPY` of an empty stage directory, which broke the first worker
+  image build since 2026-09-08 (dependency-tree drift from #229/#231/#272
+  removed the last nesting conflict). The dead `COPY` line is dropped — the
+  runtime resolves `@sardeenz/types` through root `node_modules`' workspace
+  symlink plus the copied `package.runtime.json`.
+
 - **M17's architecture decisions are recorded as ADR-027 and ADR-028.**
   [ADR-027](docs/architecture/adrs/adr-027-shim-memory-device-scope.md): shim
   `/memory-report` figures are device-scope observations, not attributions — consumers must
