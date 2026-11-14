@@ -110,9 +110,9 @@ The control plane is the brain of the system. It does not serve inference traffi
 
 Key responsibilities:
 
-- **Device memory budget tracking.** Maintains a global view of device memory allocation across all workers, built from worker self-reports in Redis/Valkey. Reports carry two distinct figures per device: the _allocation ledger_ (sum of running runners' configured `requiredMemory` — the basis for placement and eviction) and, where the worker can measure (NVML via ts-nvml, #163), the _measured_ usage including per-instance attribution — surfaced as telemetry (`currentMemory`, per-device measured bytes) but never fed into budget math.
+- **Device memory budget tracking.** Maintains a global view of device memory allocation across all workers, built from worker self-reports in Redis/Valkey. Reports carry two distinct figures per device: the _allocation ledger_ (sum of running runners' configured `requiredMemory` — the basis for placement and eviction) and, where the worker can measure (NVML via ts-nvml, #163), the _measured_ usage including per-instance attribution — surfaced as telemetry (`currentMemory`, per-device measured bytes) and never fed into non-elastic budget math. Two placement consumers may read the kvcached pool telemetry since Phase 5: the elastic co-location branch (an `allowCoLocation` model may be placed past naive byte-sum capacity against the device's reported KV-pool headroom, fail-closed and capped — see [`phase5.md`](../project/phase5.md)) and the shared-pool pressure evaluator (a reconciliation step that stops victims from the pressured device's co-location group when the pool stays near-full, off by default).
 - **Model lifecycle state machine.** Manages model states (starting, active, sleeping, stopping) and transitions.
-- **Eviction.** When device memory is constrained, applies an eviction strategy (initially LRU, behind a pluggable interface) to free capacity by sleeping or stopping models.
+- **Eviction.** When device memory is constrained, applies an eviction strategy (LRU by default, behind a pluggable interface) to free capacity by sleeping or stopping models. Eviction is demand-driven (deploy shortfall, wake shortfall); since Phase 5 a shared-kvcached-pool pressure condition can also trigger it (stop-based relief scoped to the pressured device's co-location group, off by default — see [`phase5.md`](../project/phase5.md)).
 - **Sleep/wake coordination.** Sends sleep and wake commands to runners through the runner contract.
 - **Workload placement.** Matches model requirements → compatible runner type → capable worker → best candidate (see [Worker and Runner Model](#worker-and-runner-model)). Operators can also move one active instance to an explicit compatible worker and device set. A durable transaction creates a healthy replacement, atomically sets the old endpoint's weight to zero, waits for every serving proxy to apply and quiesce the old routing generation, then drains and stops the source; leader reconciliation resumes any interrupted phase.
 - **Routing map management.** Writes the routing map to Redis/Valkey, which the proxy consumes.
@@ -323,7 +323,7 @@ flowchart TD
     S2[2. Hardware Filtering<br/>Which workers have compatible GPUs?] --> S2R[Worker 1 ✓ Ampere GPU<br/>Worker 2 ✓ Ada GPU<br/>Worker 3 ✗ CPU only]
     S2R --> S3
 
-    S3[3. Capacity Filtering<br/>Which have enough device memory?] --> S3R[Worker 1 ✓ 52GB free<br/>Worker 2 ✗ 3GB free]
+    S3[3. Capacity Filtering<br/>Which have enough device memory?] --> S3R[Worker 1 ✓ 52GB free<br/>Worker 2 ✗ 3GB free<br/>Worker 2 ✓ if elastic +<br/>KV-pool headroom (Phase 5)]
     S3R --> S4
 
     S4[4. Placement Strategy<br/>Select best candidate] --> S4R[Worker 1 selected<br/>Most available capacity]
@@ -331,6 +331,8 @@ flowchart TD
 ```
 
 Workers self-report their capabilities and device memory usage to Redis/Valkey. The control plane reads this data to build its placement decisions — it does not poll workers directly.
+
+Step 3 has one deliberate exception (Phase 5, #276): a model that opts in with `allowCoLocation` may be placed on a device **past** naive byte-sum capacity when every instance already resident on that device (sleeping ones included — they keep their VRAM holds) belongs to a runner type declaring `kvCacheElasticSharing` and the device reports a kvcached pool. The headroom it may consume is the device's reported KV-pool `freeBytes + preallocBytes`, clamped to the pool total and to `SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT` (default 50; 0 disables). The guard is fail-closed — any unresolvable co-resident blocks the placement, so non-kvcached runners are never silently co-located. See [`phase5.md`](../project/phase5.md) for the full policy and its Gate 9b verification recipe.
 
 > See [ADR-011](adrs/adr-011-worker-capabilities-and-placement.md) for the full placement design, including its relationship to infrastructure-level schedulers.
 
@@ -440,6 +442,8 @@ sequenceDiagram
     RunnerA-->>CP: Ready
     CP->>Redis: Update routing map<br/>+ Runner A state: ACTIVE
 ```
+
+The diagram shows the demand-driven path (a deployment that does not fit). Since Phase 5 (#277), a second, opt-in trigger exists: when a device's kvcached pool stays at/above `SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT` (default 90) of its total for several consecutive reconciliation ticks, the control plane **stops** (not sleeps — pressure relief is deliberately drain-free) victims drawn only from that device's co-location group until usage falls toward `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT` (default 75). The evaluator ships disabled (`SARDEENZ_POOL_PRESSURE_ENABLED=false`); see [`phase5.md`](../project/phase5.md).
 
 ## Runtime Delivery — Apptainer SIF
 

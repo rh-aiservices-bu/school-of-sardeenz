@@ -160,12 +160,16 @@ describe('GET /api/v1/cluster/memory — per-instance models (#163 doctrine)', (
             modelName: 'llama-3-8b',
             deviceIndex: 0,
             measuredUsedBytes: 8 * 1024 ** 3,
+            // Two same-device replicas are only honest per-instance deltas when they are
+            // runner-scope — unlabeled rows would be dropped by the scope rule (#278).
+            attribution: 'runner',
           },
           {
             instanceId: 'inst-a2',
             modelName: 'llama-3-8b',
             deviceIndex: 0,
             measuredUsedBytes: 8 * 1024 ** 3,
+            attribution: 'runner',
           },
         ],
       })),
@@ -209,6 +213,66 @@ describe('GET /api/v1/cluster/memory — per-instance models (#163 doctrine)', (
     const res = await app.inject({ method: 'GET', url: '/api/v1/cluster/memory' });
     const body = res.json<{ workers: Array<{ models: Array<{ displayName?: string }> }> }>();
     expect(body.workers[0]?.models[0]?.displayName).toBe('Llama 3 8B');
+  });
+
+  it('excludes co-located device-scope measurements from models[].memoryUsedBytes (#278)', async () => {
+    const coTenant = {
+      instanceId: 'inst-b',
+      workerId: 'w1',
+      modelName: 'mistral-7b',
+      state: ModelLifecycleState.ACTIVE,
+      deviceIndices: [0],
+    };
+    const { app } = buildApp({
+      instances: [instanceActive, coTenant],
+      getWorkerBudget: vi.fn(() => ({
+        workerId: 'w1',
+        devices: [
+          {
+            deviceIndex: 0,
+            deviceType: 'CUDA',
+            totalBytes: 16 * 1024 ** 3,
+            usedBytes: 14 * 1024 ** 3,
+            availableBytes: 2 * 1024 ** 3,
+          },
+        ],
+        lastReportAt: new Date().toISOString(),
+        stale: false,
+        instanceMeasurements: [
+          {
+            instanceId: 'inst-a',
+            modelName: 'llama-3-8b',
+            deviceIndex: 0,
+            measuredUsedBytes: 4 * 1024 ** 3,
+            attribution: 'runner',
+          },
+          {
+            instanceId: 'inst-b',
+            modelName: 'mistral-7b',
+            deviceIndex: 0,
+            measuredUsedBytes: 10 * 1024 ** 3,
+            attribution: 'device',
+          },
+        ],
+      })),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/cluster/memory' });
+    expect(res.statusCode).toBe(200);
+
+    const body = res.json<{
+      workers: Array<{
+        models: Array<{ instanceId?: string; memoryUsedBytes?: number }>;
+      }>;
+    }>();
+    const models = body.workers[0]?.models ?? [];
+    const runnerRow = models.find((m) => m.instanceId === 'inst-a');
+    const deviceRow = models.find((m) => m.instanceId === 'inst-b');
+    // The runner-scope row sums honestly; the device-scope row is dropped (whole-device
+    // observation on a shared device — summing it would double-count) and its bytes surface
+    // in the dashboard's Other bucket.
+    expect(runnerRow?.memoryUsedBytes).toBe(4 * 1024 ** 3);
+    expect(deviceRow?.memoryUsedBytes).toBeUndefined();
   });
 
   it('excludes PENDING and STOPPED instances from models even when the PENDING instance carries a measurement', async () => {

@@ -35,6 +35,9 @@ export interface MeasuredInstanceSample {
   modelName: string;
   deviceIndex: number;
   memoryUsedBytes: number;
+  /** Row scope (ADR-027): NVML rows are stamped 'runner' at report assembly; ledger rows carry
+   * their source share's scope (absent when the source declared none — unknown, device-like). */
+  attribution?: 'runner' | 'device';
 }
 
 export interface MeasuredMemorySample {
@@ -58,7 +61,8 @@ export type LedgerInstancesProvider = () => Promise<MeasuredInstanceSample[]>;
 // /memory-report kvCache blocks. Owned by src/index.ts, which composes
 // RunnerManager.getKvCacheDeviceStats(). Returns null when nothing is available (no running
 // runners, every query failed); a device missing from the Map simply gets no kvCache field.
-// Telemetry only — never feeds the ledger or placement math.
+// Relayed to the control plane verbatim; since Phase 5 (#276) its elastic co-location branch
+// reads freeBytes/preallocBytes as bounded headroom — never feeds this worker's own ledger.
 export type KVCacheDeviceProvider = () => Promise<Map<number, KVCacheDeviceStats> | null>;
 
 export class WorkerRegistration {
@@ -235,8 +239,12 @@ export class WorkerRegistration {
       return out;
     });
 
+    // NVML rows are process-attributed by construction (see the doctrine comment above), so the
+    // report stamps them runner-scope here at assembly time; measured-sample.ts stays untouched.
+    // Ledger rows (no-NVML fallback) already carry their source share's attribution through
+    // ledgerInstancesProvider — carried verbatim, never relabeled (ADR-027, issue #278).
     const instances = measured
-      ? measured.instances
+      ? measured.instances.map((row) => ({ ...row, attribution: 'runner' as const }))
       : ((await this.ledgerInstancesProvider?.().catch(() => [])) ?? []);
 
     return { devices, instances, reportedAt: new Date().toISOString() };

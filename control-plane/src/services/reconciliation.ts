@@ -1,11 +1,13 @@
 import { ClusterEventType, ModelLifecycleState, WorkerStatus } from '@sardeenz/types';
 import type { ControlPlaneComponents } from '@sardeenz/types';
-
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 import type { ModelLifecycleService } from './model-lifecycle.js';
+import type { EvictionEngine } from './eviction.js';
+import type { SleepWakeService } from './sleep-wake.js';
+import { coLocationGroup } from './placement.js';
 import type { WorkerPoolService } from './worker-pool.js';
-import type { MemoryBudgetService } from './memory-budget.js';
+import type { DeviceBudget, MemoryBudgetService } from './memory-budget.js';
 import type { RoutingMapService } from './routing-map.js';
 import type { NotificationService } from './notification.js';
 import type { InstanceRepository } from './instance-repository.js';
@@ -48,6 +50,27 @@ export interface ReconciliationConfig {
    * (sleep-wake) already treats an unreachable runner as a one-poll-interval failure.
    */
   readonly missingRunnerProbeGraceSecs: number;
+  // Phase 5 (#277) shared-pool pressure response. The evaluator is inert unless `enabled` is
+  // true AND the eviction/sleep-wake collaborators are wired; every knob mirrors the
+  // SARDEENZ_POOL_PRESSURE_* env (config.ts). Telemetry tolerance is structural: a device
+  // without a usable kvCache block can never satisfy the predicate.
+  readonly poolPressureEnabled: boolean;
+  /** Trigger: kvCache.usedBytes / kvCache.totalBytes ≥ thresholdPercent / 100. Integer 1–100. */
+  readonly poolPressureThresholdPercent: number;
+  /**
+   * Post-action target the response wave sizes its excess against (integer 0–100, < threshold,
+   * validated at load). requiredBytes = usedBytes − min(usedBytes, floor(totalBytes × pct/100)).
+   */
+  readonly poolPressureReleaseTargetPercent: number;
+  /** Consecutive triggering ticks before acting (integer ≥ 1). */
+  readonly poolPressureDebounceTicks: number;
+  /**
+   * Per-tick victim budget for the pool-pressure wave (#277). The engine's own `maxPerCycle`
+   * caps ONE selectVictims call; N fired devices in one tick would otherwise evict up to N×
+   * this operator cap (the same per-tick bounding #276 gave the wake path's union), so the
+   * evaluator threads the remaining budget across the tick's fired devices.
+   */
+  readonly evictionMaxPerCycle: number;
 }
 
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
@@ -66,6 +89,10 @@ export class ReconciliationService {
   private running = false;
   private legacyPruneDone = false;
   private readonly clusterEventsChannel: string;
+  /** Phase 5 (#277): `${workerId}:${deviceIndex}` → consecutive triggering ticks. Leader
+   * failover naturally resets it (new service instance) — the conservative direction: it can
+   * only delay action, never skip telemetry. */
+  private readonly poolPressureTicks = new Map<string, number>();
 
   constructor(
     private readonly lifecycle: ModelLifecycleService,
@@ -87,6 +114,12 @@ export class ReconciliationService {
     private readonly createWorkerClient?: (baseUrl: string) => WorkerClient,
     private readonly moveOrchestration?: MoveOrchestrationService,
     private readonly startupLogCapture?: StartupLogCaptureService,
+    // Phase 5 (#277) pool-pressure response collaborators. Optional (like the params above) so
+    // existing tests that don't wire them are unaffected — evaluatePoolPressure itself no-ops
+    // unless both are present. The engine is the same wired EvictionEngine the routes use, so
+    // the circuit breaker and maxPerCycle budget are shared, never bypassed.
+    private readonly eviction?: EvictionEngine,
+    private readonly sleepWake?: SleepWakeService,
   ) {
     this.clusterEventsChannel = redisKey(keyPrefix, CLUSTER_EVENTS_CHANNEL);
   }
@@ -163,6 +196,10 @@ export class ReconciliationService {
       }
       await this.safeStep('refreshMemoryBudgets', () => this.memoryBudget.refreshAll());
 
+      // Phase 5 (#277): the pool-pressure evaluator reads the budgets refreshed above, so it
+      // runs directly after refreshMemoryBudgets and before the update event publishes them.
+      await this.safeStep('evaluatePoolPressure', () => this.evaluatePoolPressure());
+
       await this.safeStep('publishMemoryUpdateEvent', async () => {
         const budgets = this.memoryBudget.getAllBudgets();
         if (budgets.length > 0) {
@@ -203,6 +240,365 @@ export class ReconciliationService {
       this.logger.error(
         { step: name, err: err instanceof Error ? err.message : String(err) },
         'Reconciliation step failed',
+      );
+    }
+  }
+
+  /**
+   * Shared-pool pressure response (#277) — the system's first memory-pressure eviction trigger
+   * (eviction is otherwise demand-only: deploy-fail and wake-shortfall). For each device whose
+   * kvcached pool stays at/above the threshold for `poolPressureDebounceTicks` consecutive
+   * ticks, reclaim capacity through the existing EvictionEngine, scoped to that device's
+   * co-location group — a pressure event on device D never tears down a co-tenant on device E.
+   *
+   * Decision 2026-11-13 (issue comment 6855447351): victim action = STOP (the existing
+   * teardown, stopModel + best-effort stopRunner). No sleep variant ships: stop frees
+   * everything deterministically and needs no new accounting; victims are still sized by their
+   * configured requiredMemory — the sizing overshoot it implies is accepted for a stop-based
+   * response. The stop is deliberately DRAIN-FREE: stopModel receives a null runner client, so
+   * waitForDrain never runs and in-flight requests are cut when the process is reaped —
+   * pressure relief must not wait on the traffic causing the pressure (shim-side SIGTERM grace
+   * still applies), so ADR-028's drain semantics are not engaged by this step.
+   *
+   * Telemetry tolerance is structural (never throws on absent stats): stale budgets, devices
+   * without a kvCache block, and zero/negative pool totals are skipped — absent pool stats
+   * never trigger anything. Malformed blocks are already dropped at ingestion
+   * (memory-budget.ts validateKVCacheBlock), so a present block may be assumed well-formed.
+   *
+   * Single derivation of the group: #276's coLocationGroup (imported, never re-derived).
+   * Sleeping members stay candidates (their kvcached segment keeps counting toward
+   * usedBytes, and under a stop action both ACTIVE and SLEEPING are valid victims); ERROR
+   * members join via their retained holds (getReservationHolders). The engine's own filters
+   * (state, pinned, minActiveTimeSecs, zero-size) and budget (maxPerCycle, circuit breaker —
+   * the same shared instance the deploy/wake paths use) all apply unchanged.
+   */
+  private async evaluatePoolPressure(): Promise<void> {
+    const {
+      poolPressureEnabled,
+      poolPressureThresholdPercent,
+      poolPressureReleaseTargetPercent,
+      poolPressureDebounceTicks,
+      evictionMaxPerCycle,
+    } = this.config;
+    if (!poolPressureEnabled || !this.eviction || !this.sleepWake) return;
+    const eviction = this.eviction;
+    const sleepWake = this.sleepWake;
+
+    // A device that drops out of the sweep (removed report, decommissioned worker) must not
+    // keep its counter: keys surviving this tick unobserved are pruned below.
+    const observed = new Set<string>();
+
+    // Per-tick victim budget: the fired devices of one tick share ONE `evictionMaxPerCycle`
+    // allowance — the engine's maxPerCycle only caps a single selectVictims call, so N fired
+    // devices would otherwise evict up to N× the operator cap (the same per-tick bounding
+    // #276 gave the wake path's unioned victims).
+    let tickBudget = evictionMaxPerCycle;
+
+    for (const budget of this.memoryBudget.getAllBudgets()) {
+      // Stale worker report: the figures may be minutes old — never act on them, and never
+      // let trigger weight accumulate across the stale window (spec: increment on trigger,
+      // reset to 0 otherwise — stale is treated exactly like absent telemetry).
+      if (budget.stale) {
+        for (const device of budget.devices) {
+          this.poolPressureTicks.delete(`${budget.workerId}:${device.deviceIndex}`);
+        }
+        continue;
+      }
+      for (const device of budget.devices) {
+        const key = `${budget.workerId}:${device.deviceIndex}`;
+        observed.add(key);
+        const kv = device.kvCache;
+        // Absent pool stats never trigger (absent means absent, not zero); a non-positive
+        // pool total has no meaningful ratio.
+        if (!kv || kv.totalBytes <= 0) {
+          this.poolPressureTicks.delete(key);
+          continue;
+        }
+
+        const triggering = kv.usedBytes / kv.totalBytes >= poolPressureThresholdPercent / 100;
+        const ticks = triggering ? (this.poolPressureTicks.get(key) ?? 0) + 1 : 0;
+        if (triggering) {
+          this.poolPressureTicks.set(key, ticks);
+        } else {
+          this.poolPressureTicks.delete(key);
+        }
+        if (!triggering || ticks < poolPressureDebounceTicks) continue;
+
+        const fired = await this.respondToPoolPressure(
+          budget.workerId,
+          device.deviceIndex,
+          kv,
+          poolPressureThresholdPercent,
+          poolPressureReleaseTargetPercent,
+          tickBudget,
+          eviction,
+          sleepWake,
+        );
+        tickBudget -= fired;
+        // One response per device per tick regardless of how much it relieved; the next tick
+        // re-evaluates from the freshly refreshed budgets.
+        this.poolPressureTicks.delete(key);
+      }
+    }
+    for (const key of this.poolPressureTicks.keys()) {
+      if (!observed.has(key)) this.poolPressureTicks.delete(key);
+    }
+  }
+  /**
+   * One pressure response wave for a fired (workerId, deviceIndex): scope victims to the
+   * device's co-location group, select through the shared engine, and stop each victim via
+   * the reconciliation-native teardown sequence (stopModel, then best-effort process reap via
+   * the worker management API — NOT the routes-layer teardownInstance, which is not
+   * importable into a service; reapOrphanedInstances is the in-service exemplar). Isolated
+   * per victim: one failure never strands the others, and never throws out of the step.
+   * Returns the number of victims actually stopped so the caller's per-tick budget can
+   * account for them.
+   *
+   * Deliberately drain-free: `stopModel(..., null)` skips `waitForDrain` (sleep-wake.ts only
+   * drains with a non-null runner client), so an ACTIVE victim's in-flight requests are cut
+   * when the process is reaped. That is the intended pressure-relief posture — relief must
+   * not wait on the very traffic causing the pressure (every other teardown path drains
+   * first; this is the one deliberate asymmetry). The shim-side stop still gives the runner
+   * its SIGTERM grace. Documented as a deviation in build-277.md.
+   */
+  private async respondToPoolPressure(
+    workerId: string,
+    deviceIndex: number,
+    kv: NonNullable<DeviceBudget['kvCache']>,
+    thresholdPercent: number,
+    releaseTargetPercent: number,
+    tickBudget: number,
+    eviction: EvictionEngine,
+    sleepWake: SleepWakeService,
+  ): Promise<number> {
+    const allInstances = await this.lifecycle.getAllInstances();
+    // Enrich LRU ordering exactly like the existing eviction callers do (lastInferenceAt is
+    // tracked per logical model, ADR-014) — BEFORE the group is built, so the group's members
+    // carry fresh timestamps whatever coLocationGroup returns (references or copies).
+    const inferenceTs = await this.lifecycle.getLastInferenceTimestamps(
+      allInstances.map((s) => s.modelName),
+    );
+    for (const s of allInstances) {
+      s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+    }
+
+    // ERROR members that retain a reservation hold on this device join the group (the
+    // runnerStartAmbiguous zombies); everyone else's membership is state-based.
+    const heldIds = new Set(this.memoryBudget.getReservationHolders(workerId, deviceIndex).keys());
+    const group = coLocationGroup(workerId, deviceIndex, allInstances, heldIds);
+
+    // Solo-device guard: with a single resident, its pool usage IS the demand — evicting it
+    // relieves nothing another tenant claims, so pressure on a solo device is not acted on.
+    // The guard counts group members as-is (spec §3.3 pins it): a DRAINING member (a user
+    // stop/sleep already in flight) passes the guard while not itself evictable — accepted,
+    // since the engine then simply finds nothing to select.
+    if (group.length < 2) {
+      this.logger.debug(
+        { workerId, deviceIndex, usedBytes: kv.usedBytes, totalBytes: kv.totalBytes },
+        'Pool pressure on a solo-device group — nothing to evict',
+      );
+      return 0;
+    }
+
+    // Excess above the release target — the bytes the wave aims to free. Victims are credited
+    // their FULL configured requiredMemory (engine semantics — the wake path's per-device
+    // division is deliberately NOT applied here): a TP victim still frees its whole footprint
+    // when stopped, and per-device overstatement was accepted by the decision comment
+    // (6855447351 — stop frees everything anyway). Do not "fix" this to requiredMemory /
+    // tensorParallel without revisiting that decision.
+    const releaseTargetBytes = Math.min(
+      kv.usedBytes,
+      Math.floor((kv.totalBytes * releaseTargetPercent) / 100),
+    );
+    const requiredBytes = kv.usedBytes - releaseTargetBytes;
+
+    const allRecords = (await this.modelRepository?.findAll()) ?? [];
+    const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
+    const memoryByModel = new Map(
+      allRecords.filter((r) => r.requiredMemory !== null).map((r) => [r.name, r.requiredMemory!]),
+    );
+
+    // Belt-and-braces worker scope mirrors the wake path (routes/models.ts): the group is
+    // already worker-filtered, the engine filter makes it explicit. `tickBudget` bounds this
+    // device's slice of the tick-wide allowance (engine maxPerCycle caps the call too).
+    const selected = eviction.selectVictims(
+      group,
+      pinnedModels,
+      requiredBytes,
+      new Set([workerId]),
+      memoryByModel,
+    );
+    const victims = selected.slice(0, Math.max(0, tickBudget));
+    if (victims.length === 0) {
+      this.logger.debug(
+        {
+          workerId,
+          deviceIndex,
+          requiredBytes,
+          selected: selected.length,
+          tickBudget,
+        },
+        'Pool pressure fired but the engine selected no victims (breaker open, pinned, undersized, capped, or tick budget spent)',
+      );
+      return 0;
+    }
+
+    this.logger.warn(
+      {
+        workerId,
+        deviceIndex,
+        usedBytes: kv.usedBytes,
+        totalBytes: kv.totalBytes,
+        thresholdPercent,
+        releaseTargetPercent,
+        requiredBytes,
+        tickBudget,
+        victims: victims.map((v) => `${v.modelName}/${v.instanceId}`),
+      },
+      'Shared-pool pressure threshold sustained — evicting co-location group victims',
+    );
+
+    // Duration instrumentation matches the deploy/wake waves (routes/models.ts): without it
+    // the Operations panel's eviction average silently skips pressure evictions while
+    // evictions_total{reason="pressure"} counts them.
+    const stopTimer = eviction.startTimer();
+    const results = await Promise.allSettled(
+      victims.map(async (victim): Promise<boolean> => {
+        let stopped = false;
+        try {
+          // Teardown order per the spec's stop-action sequence: stopModel first (endpoint
+          // removal → STOPPED → holds released — no CP-side drain, see the docblock), then
+          // the best-effort process reap via the worker management API. The pre-stop state
+          // read supplies the reap coordinates; it does not fence anything — the fencing is
+          // the transition guards inside stopModel throwing on a stale snapshot, isolated
+          // below.
+          const state = await this.lifecycle.getInstance(victim.modelName, victim.instanceId);
+          await sleepWake.stopModel(victim.modelName, victim.instanceId, null);
+          if (state?.workerId && state.runnerId && this.createWorkerClient) {
+            const worker = this.workerPool.getWorker(state.workerId);
+            if (worker) {
+              try {
+                await this.createWorkerClient(worker.managementUrl).stopRunner(state.runnerId);
+              } catch (stopErr) {
+                // 404 = already gone (the reapOrphanedInstances tolerance); anything else
+                // fails this victim's teardown, handled below.
+                if (!(stopErr instanceof WorkerHttpError && stopErr.status === 404)) {
+                  throw stopErr;
+                }
+              }
+            } else {
+              this.logger.warn(
+                {
+                  modelName: victim.modelName,
+                  instanceId: victim.instanceId,
+                  workerId: state.workerId,
+                },
+                'Pool-pressure reap skipped: worker unknown',
+              );
+            }
+          } else {
+            this.logger.warn(
+              { modelName: victim.modelName, instanceId: victim.instanceId },
+              'Pool-pressure reap skipped: no runnerId or worker client (nothing dispatched yet)',
+            );
+          }
+          // Registry semantics (matches the route-layer evictions): the DB row for the model
+          // is kept; the victim instance's Redis state and Postgres row are cleared, and its
+          // placement holds are released by stopModel itself.
+          await this.lifecycle.removeInstance(victim.modelName, victim.instanceId);
+          await this.instanceRepository?.delete(victim.instanceId).catch(() => {});
+          eviction.recordEviction('pressure');
+          this.logger.info(
+            {
+              workerId,
+              deviceIndex,
+              modelName: victim.modelName,
+              instanceId: victim.instanceId,
+            },
+            'Pool-pressure eviction stopped instance',
+          );
+          this.notifications
+            ?.createNotification({
+              title: 'Model evicted — shared-pool pressure',
+              description: `${victim.modelName} (${victim.instanceId}) stopped to relieve pressure on ${workerId} device ${deviceIndex}`,
+              variant: 'danger',
+              source: { type: 'model', name: victim.modelName },
+            })
+            .catch(() => {});
+          stopped = true;
+        } catch (err) {
+          // Per-victim isolation (deploy/wake-path semantics): a transition guard collision
+          // with a concurrent user action, a failed stopRunner, or a Redis error is logged and
+          // reclassified if possible — the next tick re-evaluates from fresh telemetry.
+          await this.reclassifyStrandedVictim(victim, err);
+        }
+        if (stopped) {
+          // Outside the teardown try: a Redis publish failure must not log "teardown failed"
+          // for a victim that was in fact stopped (publishClusterEvent logs its own errors).
+          await this.publishClusterEvent({
+            type: ClusterEventType.EVICTION_TRIGGERED,
+            modelName: victim.modelName,
+            workerId,
+            timestamp: new Date().toISOString(),
+            message: `Pool-pressure eviction on device ${deviceIndex}`,
+            data: { deviceIndex, trigger: 'pool-pressure' },
+          });
+        }
+        return stopped;
+      }),
+    );
+    stopTimer();
+    const failures = results.filter((r) => r.status === 'rejected' || r.value === false).length;
+    if (failures > 0) {
+      this.logger.error(
+        { workerId, deviceIndex, failures, totalVictims: victims.length },
+        'Some pool-pressure victims failed teardown',
+      );
+    }
+    return victims.length - failures;
+  }
+
+  /**
+   * A non-404 reap failure (or any teardown error after stopModel settled STOPPED) leaves a
+   * retained record no tick step can recover: /start rejects STOPPED forever, and the live
+   * process keeps VRAM the budget already counts free. Mirror teardownInstance
+   * (routes/models.ts): reclassify the stranded STOPPED record as observable ERROR so the
+   * operator sees it and a restart/stop cycle can reclaim it. Best-effort — a failure here is
+   * logged, never thrown (the per-victim isolation above holds).
+   */
+  private async reclassifyStrandedVictim(
+    victim: { modelName: string; instanceId: string },
+    teardownErr: unknown,
+  ): Promise<void> {
+    this.logger.error(
+      {
+        modelName: victim.modelName,
+        instanceId: victim.instanceId,
+        err: teardownErr instanceof Error ? teardownErr.message : String(teardownErr),
+      },
+      'Pool-pressure victim teardown failed — isolated, remaining victims continue',
+    );
+    try {
+      const retained = await this.lifecycle.getInstance(victim.modelName, victim.instanceId);
+      if (retained?.state === ModelLifecycleState.STOPPED) {
+        await this.lifecycle.transition(
+          victim.modelName,
+          victim.instanceId,
+          ModelLifecycleState.ERROR,
+          {
+            errorMessage: 'Pool-pressure teardown could not be confirmed (runner reap failed)',
+          },
+        );
+        await refreshModelRoutingState(this.lifecycle, this.routingMap, victim.modelName);
+        this.logger.warn(
+          { modelName: victim.modelName, instanceId: victim.instanceId },
+          'Stranded pool-pressure victim reclassified STOPPED → ERROR',
+        );
+      }
+    } catch (stateErr) {
+      this.logger.warn(
+        { err: stateErr, modelName: victim.modelName, instanceId: victim.instanceId },
+        'Could not persist retained pool-pressure teardown error state',
       );
     }
   }

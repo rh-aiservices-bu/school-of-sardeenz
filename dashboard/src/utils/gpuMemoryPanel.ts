@@ -87,7 +87,10 @@ export interface AttributedModelBytes {
   displayName?: string;
   instanceId?: string;
   state: WorkerModelInfo['state'];
-  /** Measured bytes attributed to this device (tensor-parallel models split evenly). */
+  /** Measured bytes attributed to this device (tensor-parallel models split evenly). Figures
+   * arrive already scope-deduped by the control plane (ADR-027 summation rule, #278): device-
+   * or unknown-scope memory rows never reach `WorkerModelInfo.memoryUsedBytes` when anything
+   * co-resident reports, so no panel-side dedupe exists — the dropped bytes surface in Other. */
   bytes: number;
   sleeping: boolean;
 }
@@ -102,6 +105,11 @@ export interface AttributedModelBytes {
  * every model is attributed to the device only when the worker has exactly one — with more than
  * one device there's no way to say which GPU holds what, so nothing is attributed and the whole
  * used amount falls through to the "Other" bucket in buildDeviceBarData.
+ *
+ * The per-instance figures are already scope-deduped upstream: the control plane's summation
+ * (ADR-027 Decision 4, issue #278) drops device-/unknown-scope memory rows from
+ * `WorkerModelInfo.memoryUsedBytes` whenever anything co-resident reports on the same device,
+ * so a co-located whole-device observation can never be summed into these per-model bars.
  */
 export function attributeModelsToDevice(
   device: DeviceInfo,

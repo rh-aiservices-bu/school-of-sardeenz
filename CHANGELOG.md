@@ -29,6 +29,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#243, `healthProbeTimeoutMs`) is documented in
   [runner-contract.md](docs/architecture/components/runner-contract.md).
 
+- **Phase 5: co-location placement policy (issue #276).** A model may now opt in to kvcached
+  elastic co-location (`allowCoLocation` on the deploy request / model configuration, dashboard
+  deploy-form switch): the placement pipeline may place its instances on a device past naive
+  byte-sum capacity when every instance already resident on that device (including sleeping
+  ones — they keep their holds) belongs to a runner type declaring `kvCacheElasticSharing` on
+  the target worker, and the device reports a kvcached pool. Headroom is
+  `min(freeBytes + preallocBytes, (SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT / 100) × poolTotal)`
+  (integer percent, default **50**, `0` disables elastic headroom; new control-plane env wired
+  through `deployment/`). The capability guard is fail-closed — an unresolvable co-resident
+  (deleted model record, worker no longer reporting the runner type) counts as non-elastic and
+  blocks co-location, so non-kvcached runners are never silently co-located (the phase-4 OOM
+  guard). `placeFixed` (move) applies the same rules and still never evicts. The wake
+  pre-check is now per-device and excludes the waking instance's own hold (sleep never
+  released it, so the old worker-wide sum produced a phantom shortfall), and wake eviction
+  victims are scoped to the waker's device co-location group (`coLocationGroup` in
+  `placement.ts` — the single derivation, also the #277 import surface), sized per device
+  (`requiredMemory / tensorParallel`) and bounded by `SARDEENZ_EVICTION_MAX_PER_CYCLE`;
+  legacy instances without `deviceIndices` keep the worker-wide fallback. The cap env is
+  validated at boot (integer percent 0–100, otherwise the control plane refuses to start —
+  `SARDEENZ_SIF_IMPORTER` posture), any unknown-placement (null/empty `deviceIndices`)
+  resident on the worker — including an ERROR instance that retains a reservation hold —
+  fails the elastic guard closed, and `freeBytes + preallocBytes` is clamped to the pool
+  `totalBytes` at consumption (belt-and-braces: unreachable while the boot validation keeps
+  the cap at ≤ 100, pinned for direct constructions with a wider cap). New migration
+  `control-plane/migrations/008-add-allow-co-location.sql`; `DeviceInfo.kvCache` telemetry now
+  documents its two placement consumers (the #276 elastic co-location headroom branch and the
+  #277 shared-pool pressure evaluator) — all other consumers, and all non-elastic placement
+  math, still treat it as telemetry only.
+
+- **Phase 5 plan document: `docs/project/phase5.md` (issue #279).** The phase doc linked from
+  `overall-plan.md`'s Phase 5 section: the phase's objective and
+  design notes (#276 co-location placement policy, #277 shared-pool pressure response, #278
+  consumer-side attribution rule), and the **Gate 9b recipe** — the deploy-only,
+  control-plane-driven co-location verification procedure that complements the worker-driven
+  Gate 9 (which asserts `deviceIndex` only): deploy two `allowCoLocation: true` vLLM models
+  pinned to one device through the CP, assert both instances ACTIVE and both runners'
+  `/memory-report` carrying `kvCache` blocks satisfying the `KVCachePoolStats` partition
+  invariant (`totalBytes = usedBytes + preallocBytes + freeBytes`), an optional
+  concurrent-inference smoke, and a required NVML reality check (freeBytes is unbacked virtual
+  capacity, so the ratified headroom formula can count it twice — acceptance measures actual
+  device usage under concurrent inference, not only placement success). Also:
+  `overall-plan.md`'s Phase 5 section now points at the phase doc, and `phase4.md`'s
+  deferred-OOM-guard sentence is closed (the guard lands as Phase 5: #276, #277 and #278 are
+  all merged onto this phase branch); `docs/project/status.md` is synchronized by the phase
+  docs commit (Phase 5 flips from Next to implemented-on-branch, the deploy-only list gains the
+  Gate 9b run + live pool-pressure + migration-008 entries, and the #244 residual follow-up is
+  closed). A description-only contract reword rides along:
+  `WorkerModelInfo.memoryUsedBytes`'s absence clause now also covers a co-located device-scope
+  row deliberately dropped post-#278.
+- **Phase 5: shared-pool pressure response (issue #277).** The reconciliation tick gains an
+  `evaluatePoolPressure` step (directly after `refreshMemoryBudgets`): when a device's
+  kvcached pool stays at/above `SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT` (integer percent,
+  default **90**) of `kvCache.totalBytes` for `SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS`
+  (default **3**) consecutive ticks, the control plane reclaims capacity through the existing
+  `EvictionEngine` — the system's first memory-pressure eviction trigger (eviction is
+  otherwise demand-only). Victims are drawn ONLY from the pressure device's co-location group
+  (`coLocationGroup` in `placement.ts` — the single derivation, imported; a pressure event on
+  device D never tears down a co-tenant on device E), with a solo-device guard (a device with
+  a single resident cannot be relieved by evicting it).
+  Victim action = **stop** (decision 2026-11-13): the existing reconciliation-native teardown
+  — `stopModel` (deliberately **drain-free**: the null runner client skips `waitForDrain`, so
+  pressure relief cuts in-flight requests instead of waiting on the traffic causing the
+  pressure; the shim-side stop still gives the runner its SIGTERM grace), then best-effort
+  `stopRunner` process reap (404-tolerant; a non-404 failure reclassifies the stranded STOPPED
+  record as observable ERROR), instance record removed, holds released by `stopModel` itself
+  — sized by configured `requiredMemory` (the sizing overshoot for a pool-sized problem is
+  accepted); the wave's `requiredBytes` targets the excess above
+  `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT` (integer percent, default **75**, must stay
+  below the threshold — both percents resolve to their defaults before the boot cross-check).
+  The fired devices of one tick share one `SARDEENZ_EVICTION_MAX_PER_CYCLE` budget (N fired
+  devices can no longer evict N× the cap), the wave instruments `evictionDuration` like the
+  other eviction paths, and the engine's circuit breaker is shared with the deploy/wake paths,
+  never bypassed; each stopped victim logs a wave record, sends a danger notification, and
+  publishes the first `EVICTION_TRIGGERED` cluster event (existing enum, no contract change).
+  Telemetry-tolerance is structural: stale budgets, devices without a `kvCache` block, and
+  zero pool totals never trigger. The whole evaluator is off until
+  `SARDEENZ_POOL_PRESSURE_ENABLED=true` (shipped `'false'` in `deployment/`; leader failover
+  resets the in-memory debounce counters — the conservative direction).
+
 ### Security
 
 - **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**
@@ -630,6 +709,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239. The harness pins the off-loop thread
   identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
   read.
+
+- **Per-model VRAM display no longer double-counts device-scope memory under co-location
+  (issue #278 — closes the #244 residual).** `attribution` (M17, ADR-027) gains its first
+  executable consumers, and none of them sums a device-scope memory row into a per-instance
+  figure. The worker-agent contract's `InstanceMemoryMeasurement` gains the same optional
+  `attribution: "runner" | "device"` field the engine-runner contract has had since M17, so a
+  per-instance row can state its own scope; the worker's no-NVML ledger path
+  (`getLedgerInstanceShares`) promotes a whole-device figure into an instance row only while its
+  runner is the device's sole record and drops it once anything co-resident claims the device
+  (residency decided from runner records, never bytes — a sleeping co-tenant still blocks
+  promotion), and NVML rows are stamped `"runner"` at report assembly. The control plane
+  scope-checks every per-instance summation site through one shared helper
+  (`sumInstanceMeasurementsByInstance`): `runner`-scope rows sum; a `device`- or unknown-scope
+  row is kept only while it is its device's sole >0-byte row, else dropped — so the two route
+  loops (`/api/v1/cluster/memory`, `/api/v1/workers/:workerId`) and `getMeasuredByInstance`
+  (which feeds the models routes' `currentMemory`) emit figures that can never double-count, and
+  a malformed `attribution` drops the field (row kept, treated unknown → device-conservative)
+  instead of rejecting the report, and the worker clamps a malformed runner-supplied
+  `attribution` to absent so its outbound report stays schema-valid. The dashboard renders the
+  already-deduped figures: dropped
+  bytes surface in "Other", whose clamp keeps the bar honest. User-visible effect: two
+  co-located models on a worker without NVML used to render two ~whole-device bars on one card
+  (e.g. 20 GB of "model" on a 16 GB GPU with Other clamped to 0); the shared device now shows
+  only the genuinely per-runner figures plus the residual in "Other". Legacy workers that do not
+  label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
+  conservative direction); unlabeled sole-resident rows keep displaying.
 
 ## [0.2.0] - 2026-09-15
 

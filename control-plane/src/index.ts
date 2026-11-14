@@ -68,7 +68,9 @@ async function main(): Promise<void> {
   );
   const routingMap = new RoutingMapService(redis, config.redisKeyPrefix);
   const proxyProtocols = new ProxyProtocolsService(redis, config.redisKeyPrefix);
-  const placement = new PlacementPipeline();
+  const placement = new PlacementPipeline(undefined, {
+    maxPoolHeadroomPercent: config.colocationMaxPoolHeadroomPercent,
+  });
   const eviction = new EvictionEngine(undefined, {
     maxPerCycle: config.evictionMaxPerCycle,
     minActiveTimeSecs: 60,
@@ -206,6 +208,14 @@ async function main(): Promise<void> {
       // start has had its full deploy budget to be a problem; ACTIVE misses are confirmed
       // immediately (see ReconciliationConfig).
       missingRunnerProbeGraceSecs: config.deployTimeoutSecs,
+      // Phase 5 (#277): shared-pool pressure response knobs (env: SARDEENZ_POOL_PRESSURE_*).
+      poolPressureEnabled: config.poolPressureEnabled,
+      poolPressureThresholdPercent: config.poolPressureThresholdPercent,
+      poolPressureReleaseTargetPercent: config.poolPressureReleaseTargetPercent,
+      poolPressureDebounceTicks: config.poolPressureDebounceTicks,
+      // Bounds one tick's total pressure-eviction victims (all fired devices share it; the
+      // engine's maxPerCycle caps each selectVictims call).
+      evictionMaxPerCycle: config.evictionMaxPerCycle,
     },
     app.log,
     redis,
@@ -216,6 +226,10 @@ async function main(): Promise<void> {
     createWorkerClient,
     moveOrchestration,
     startupLogCapture,
+    // Phase 5 (#277): the same wired engine the routes use — breaker + maxPerCycle shared,
+    // never a second engine; sleepWake gives the stop action its proven teardown path.
+    eviction,
+    sleepWake,
   );
 
   // Leader election runs before the one-shot startup tick below so `isLeader` already reflects

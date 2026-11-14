@@ -1,5 +1,5 @@
 import type { WorkerAgentComponents } from '@sardeenz/types';
-import { DeviceType } from '@sardeenz/types';
+import { DeviceType, InstanceMemoryMeasurementAttribution } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 
@@ -27,7 +27,10 @@ export interface DeviceBudget {
   /** GPU temperature in degrees Celsius at report time. Absent when unavailable. */
   temperatureC?: number;
   /** Measured kvcached pool state for this device (prealloc/used/free partition). Absent when no
-   *  kvcached pool is reported for the device. Telemetry only — never feeds placement math. */
+   *  kvcached pool is reported for the device; absent means absent, not zero. Telemetry for the
+   *  dashboard — and, since Phase 5 (#276), the placement pipeline's elastic co-location branch
+   *  reads `freeBytes`/`preallocBytes` as bounded headroom (applied in `placement.ts`, never
+   *  here): `availableBytes` parsing in this file stays placement-free. */
   kvCache?: {
     totalBytes: number;
     usedBytes: number;
@@ -36,12 +39,16 @@ export interface DeviceBudget {
   };
 }
 
-/** Measured bytes attributed to one instance on one device (NVML process-list attribution). */
+/** Measured bytes attributed to one instance on one device (NVML process-list attribution).
+ * `attribution` is the row's scope per ADR-027: `runner` rows are safe to sum, `device` rows are
+ * whole-device observations, and an absent value is unknown — treated conservatively like
+ * `device` everywhere the scope rule is applied (issue #278). */
 export interface InstanceMeasurement {
   instanceId: string;
   modelName: string;
   deviceIndex: number;
   measuredUsedBytes: number;
+  attribution?: 'runner' | 'device';
 }
 
 export interface WorkerBudget {
@@ -117,6 +124,68 @@ function isEnumValue<T extends string>(v: unknown, enumObj: Record<string, T>): 
   return typeof v === 'string' && values.includes(v);
 }
 
+/** One per-instance reservation entry: the held bytes plus whether the reservation was placed
+ *  under the elastic co-location policy (an annotation, never a second ledger — `bytes` remains
+ *  the only accounting figure). Exposed read-only via getReservationHolders (#276). */
+export interface ReservationEntry {
+  bytes: number;
+  coLocated: boolean;
+}
+
+/**
+ * Sum instance measurements into per-instance figures under the attribution scope rule
+ * (ADR-027 Decision 4, enforced as of Phase 5 — issue #278): `runner`-scope rows always sum; a
+ * `device`- or unknown-scope row is kept only when it is the ONLY row with measuredUsedBytes > 0
+ * for its deviceIndex in the input set — otherwise it is dropped, because summing it alongside
+ * any co-resident row would double-count the whole device. Rows for different devices never
+ * interact. Input must be one worker's report (device grouping is worker-scoped).
+ *
+ * The keep-condition for a lone device-scope row is the worker's sole-residency rule
+ * (getLedgerInstanceShares), but evaluated over the rows the worker emitted — row-based, not
+ * record-based: a co-tenant whose record claims the device blocks the worker's promotion at
+ * report-build time, while a co-tenant that reports 0 bytes does not block here (its row is
+ * filtered out before grouping). A stale promoted row still self-heals: once a co-resident's
+ * >0-byte row appears in a later report, the device has two rows and the device-scope row is
+ * dropped here.
+ */
+export function sumInstanceMeasurementsByInstance(
+  measurements: InstanceMeasurement[],
+): Map<string, number> {
+  // deviceIndex -> the >0-byte rows reporting that device.
+  const rowsByDevice = new Map<number, InstanceMeasurement[]>();
+  for (const m of measurements) {
+    if (m.measuredUsedBytes <= 0) continue;
+    const rows = rowsByDevice.get(m.deviceIndex);
+    if (rows) rows.push(m);
+    else rowsByDevice.set(m.deviceIndex, [m]);
+  }
+
+  const byInstance = new Map<string, number>();
+  const add = (instanceId: string, bytes: number): void => {
+    byInstance.set(instanceId, (byInstance.get(instanceId) ?? 0) + bytes);
+  };
+
+  for (const rows of rowsByDevice.values()) {
+    // Unknown scope (absent attribution) is treated exactly like `device` — fail-closed.
+    const runnerRows = rows.filter((m) => m.attribution === 'runner');
+    const deviceRows = rows.filter((m) => m.attribution !== 'runner');
+    if (deviceRows.length === 0) {
+      // Every >0-byte row is runner-scope: honest per-instance deltas, sum freely.
+      for (const m of runnerRows) add(m.instanceId, m.measuredUsedBytes);
+    } else if (rows.length === 1) {
+      // Sole resident: the single device-scope row is the device's only measured usage —
+      // attribute it to its instance (the sole-residency promotion, mirrored from the worker).
+      add(rows[0].instanceId, rows[0].measuredUsedBytes);
+    } else {
+      // Device-scope rows coexist with other rows on this device — drop every
+      // device/unknown-scope row (their bytes surface in the dashboard's Other bucket) and keep
+      // only the runner-scope ones. Never a mix, never two device rows per (worker, device).
+      for (const m of runnerRows) add(m.instanceId, m.measuredUsedBytes);
+    }
+  }
+  return byInstance;
+}
+
 /**
  * Tracks per-worker, per-device VRAM budgets.
  *
@@ -129,13 +198,13 @@ export class MemoryBudgetService {
   private readonly budgets: Map<string, WorkerBudget> = new Map();
 
   /**
-   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (instanceId -> bytes).
-   * Reservations are held per-instance (#120) so that co-located instances — including two
-   * replicas of the same model on the same device — do not clobber each other's reservation,
-   * and so one instance's reservation can be released explicitly (on stop/evict/worker loss)
-   * without affecting other instances on that device.
+   * per-device reservations, keyed as `${workerId}:${deviceIndex}` -> (instanceId ->
+   * ReservationEntry). Reservations are held per-instance (#120) so that co-located instances —
+   * including two replicas of the same model on the same device — do not clobber each other's
+   * reservation, and so one instance's reservation can be released explicitly (on
+   * stop/evict/worker loss) without affecting other instances on that device.
    */
-  private readonly reservations: Map<string, Map<string, number>> = new Map();
+  private readonly reservations: Map<string, Map<string, ReservationEntry>> = new Map();
 
   constructor(
     private readonly redis: Redis,
@@ -158,8 +227,8 @@ export class MemoryBudgetService {
     const perModel = this.reservations.get(this.reservationKey(workerId, deviceIndex));
     if (!perModel) return 0;
     let total = 0;
-    for (const bytes of perModel.values()) {
-      total += bytes;
+    for (const entry of perModel.values()) {
+      total += entry.bytes;
     }
     return total;
   }
@@ -180,9 +249,11 @@ export class MemoryBudgetService {
     }
     const d = raw as Record<string, unknown>;
 
-    if (
-      !(typeof d.deviceIndex === 'number' && Number.isInteger(d.deviceIndex) && d.deviceIndex >= 0)
-    ) {
+    if (!(
+      typeof d.deviceIndex === 'number' &&
+      Number.isInteger(d.deviceIndex) &&
+      d.deviceIndex >= 0
+    )) {
       console.warn(
         `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.deviceIndex — must be an integer >= 0`,
       );
@@ -194,25 +265,21 @@ export class MemoryBudgetService {
       );
       return null;
     }
-    if (
-      !(
-        typeof d.memoryUsedBytes === 'number' &&
-        Number.isInteger(d.memoryUsedBytes) &&
-        d.memoryUsedBytes >= 0
-      )
-    ) {
+    if (!(
+      typeof d.memoryUsedBytes === 'number' &&
+      Number.isInteger(d.memoryUsedBytes) &&
+      d.memoryUsedBytes >= 0
+    )) {
       console.warn(
         `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.memoryUsedBytes — must be an integer >= 0`,
       );
       return null;
     }
-    if (
-      !(
-        typeof d.memoryTotalBytes === 'number' &&
-        Number.isInteger(d.memoryTotalBytes) &&
-        d.memoryTotalBytes >= 0
-      )
-    ) {
+    if (!(
+      typeof d.memoryTotalBytes === 'number' &&
+      Number.isInteger(d.memoryTotalBytes) &&
+      d.memoryTotalBytes >= 0
+    )) {
       console.warn(
         `[memory-budget] parseReport rejected workerId=${workerId}: ${field}.memoryTotalBytes — must be an integer >= 0`,
       );
@@ -267,7 +334,10 @@ export class MemoryBudgetService {
     const kvCache =
       d.kvCache === undefined
         ? undefined
-        : validateKVCacheBlock(d.kvCache, `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.kvCache`);
+        : validateKVCacheBlock(
+            d.kvCache,
+            `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.kvCache`,
+          );
 
     return {
       deviceIndex: d.deviceIndex,
@@ -312,25 +382,39 @@ export class MemoryBudgetService {
       );
       return null;
     }
-    if (
-      !(typeof m.deviceIndex === 'number' && Number.isInteger(m.deviceIndex) && m.deviceIndex >= 0)
-    ) {
+    if (!(
+      typeof m.deviceIndex === 'number' &&
+      Number.isInteger(m.deviceIndex) &&
+      m.deviceIndex >= 0
+    )) {
       console.warn(
         `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.deviceIndex — must be an integer >= 0`,
       );
       return null;
     }
-    if (
-      !(
-        typeof m.memoryUsedBytes === 'number' &&
-        Number.isInteger(m.memoryUsedBytes) &&
-        m.memoryUsedBytes >= 0
-      )
-    ) {
+    if (!(
+      typeof m.memoryUsedBytes === 'number' &&
+      Number.isInteger(m.memoryUsedBytes) &&
+      m.memoryUsedBytes >= 0
+    )) {
       console.warn(
         `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.memoryUsedBytes — must be an integer >= 0`,
       );
       return null;
+    }
+
+    // Telemetry-tolerant optional extra, like the device fields above: a malformed attribution
+    // drops the FIELD (with a warning) and keeps the row — which then behaves as unknown scope,
+    // i.e. conservatively device-like under the summation rule (issue #278).
+    let attribution: InstanceMemoryMeasurementAttribution | undefined;
+    if (m.attribution !== undefined) {
+      if (isEnumValue(m.attribution, InstanceMemoryMeasurementAttribution)) {
+        attribution = m.attribution;
+      } else {
+        console.warn(
+          `[memory-budget] parseReport dropped workerId=${workerId}: ${field}.attribution — must be 'runner' or 'device', row kept without it`,
+        );
+      }
     }
 
     return {
@@ -338,6 +422,7 @@ export class MemoryBudgetService {
       modelName: m.modelName,
       deviceIndex: m.deviceIndex,
       memoryUsedBytes: m.memoryUsedBytes,
+      ...(attribution !== undefined ? { attribution } : {}),
     };
   }
 
@@ -427,6 +512,7 @@ export class MemoryBudgetService {
               modelName: m.modelName,
               deviceIndex: m.deviceIndex,
               measuredUsedBytes: m.memoryUsedBytes,
+              ...(m.attribution !== undefined ? { attribution: m.attribution } : {}),
             })),
           }
         : {}),
@@ -561,6 +647,19 @@ export class MemoryBudgetService {
     return { ...budget, stale: this.isStale(budget.lastReportAt) };
   }
 
+  /**
+   * Per-instance reservation entries on one device (read-only copy), keyed by instanceId.
+   * Empty when no holds exist. The one sanctioned reader of the internal hold ledger (see the
+   * doctrine note at the top of this file): wake accounting must exclude the waker's own hold
+   * (#276), and the co-location group helper needs the retained-hold set. Never surfaced on
+   * DeviceBudget or any HTTP payload.
+   */
+  getReservationHolders(workerId: string, deviceIndex: number): Map<string, ReservationEntry> {
+    const perInstance = this.reservations.get(this.reservationKey(workerId, deviceIndex));
+    if (!perInstance) return new Map();
+    return new Map(Array.from(perInstance, ([id, entry]) => [id, { ...entry }]));
+  }
+
   /** Return all in-memory budgets with staleness flags applied. */
   getAllBudgets(): WorkerBudget[] {
     return Array.from(this.budgets.values()).map((b) => ({
@@ -578,14 +677,20 @@ export class MemoryBudgetService {
    * usedBytes so that subsequent placement decisions account for in-flight
    * allocations before the worker has had a chance to report updated usage.
    */
-  reserveCapacity(workerId: string, deviceIndex: number, instanceId: string, bytes: number): void {
+  reserveCapacity(
+    workerId: string,
+    deviceIndex: number,
+    instanceId: string,
+    bytes: number,
+    opts?: { coLocated?: boolean },
+  ): void {
     const rk = this.reservationKey(workerId, deviceIndex);
     let perInstance = this.reservations.get(rk);
     if (!perInstance) {
       perInstance = new Map();
       this.reservations.set(rk, perInstance);
     }
-    perInstance.set(instanceId, bytes);
+    perInstance.set(instanceId, { bytes, coLocated: opts?.coLocated ?? false });
 
     // Recompute the in-memory device budget immediately so callers see the
     // updated availableBytes without waiting for the next refreshWorkerBudget.
@@ -637,16 +742,22 @@ export class MemoryBudgetService {
   /**
    * Aggregate measured bytes by instanceId across every non-stale worker/device. Telemetry only
    * — used by the models routes to populate `currentMemory`, never by placement/eviction.
+   *
+   * Applies the attribution scope rule (ADR-027 Decision 4, issue #278) per worker budget via
+   * sumInstanceMeasurementsByInstance: runner-scope rows sum; a device- or unknown-scope row is
+   * kept only while it is its device's sole >0-byte row, and dropped once anything co-resident
+   * reports — so per-model display figures can never double-count a whole-device observation.
+   * Device grouping must not cross workers; an instance's rows live in exactly one worker's
+   * budget, so merging the per-budget maps is safe.
    */
   getMeasuredByInstance(): Map<string, number> {
     const byInstance = new Map<string, number>();
     for (const budget of this.getAllBudgets()) {
       if (budget.stale) continue;
-      for (const measurement of budget.instanceMeasurements ?? []) {
-        byInstance.set(
-          measurement.instanceId,
-          (byInstance.get(measurement.instanceId) ?? 0) + measurement.measuredUsedBytes,
-        );
+      for (const [instanceId, bytes] of sumInstanceMeasurementsByInstance(
+        budget.instanceMeasurements ?? [],
+      )) {
+        byInstance.set(instanceId, (byInstance.get(instanceId) ?? 0) + bytes);
       }
     }
     return byInstance;

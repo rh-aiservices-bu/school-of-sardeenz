@@ -1,19 +1,18 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-12 (M17 wrap-up).
+Last update: 2026-11-13 (Phase 5 implemented on the phase branch; M19 Phase-5 line).
 
 ## Phases (complete)
 
-| Phase | Scope                                                         | Plan                                                                                                                   |
-| ----- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 0     | Engine runner contract (spec only)                            | [`phase0.md`](phase0.md)                                                                                               |
-| 1     | Rust proxy with connection parking                            | [`phase1.md`](phase1.md)                                                                                               |
-| 2     | Control plane sleep/wake orchestration                        | [`phase2.md`](phase2.md)                                                                                               |
-| 3     | Admin dashboard (fresh build)                                 | [`phase3.md`](phase3.md)                                                                                               |
-| 3.5   | Admin UI finalization — notifications, theme toggle, masthead | [`phase3.5.md`](phase3.5.md)                                                                                           |
-| 3.6   | Dev worker agent — local-process worker with runner stubs     | [`phase3.6.md`](phase3.6.md)                                                                                           |
-| 4     | SIF runner runtime (Apptainer) — spike verdict GO             | [`phase4.md`](phase4.md), [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md), [`phase4-perf.md`](phase4-perf.md) |
+| Phase | Scope                                                     | Plan                                                                                                                   |
+| ----- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 0     | Engine runner contract (spec only)                        | [`phase0.md`](phase0.md)                                                                                               |
+| 1     | Rust proxy with connection parking                        | [`phase1.md`](phase1.md)                                                                                               |
+| 2     | Control plane sleep/wake orchestration                    | [`phase2.md`](phase2.md)                                                                                               |
+| 3     | Admin dashboard (fresh build)                             | [`phase3.md`](phase3.md)                                                                                               |
+| 3.6   | Dev worker agent — local-process worker with runner stubs | [`phase3.6.md`](phase3.6.md)                                                                                           |
+| 4     | SIF runner runtime (Apptainer) — spike verdict GO         | [`phase4.md`](phase4.md), [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md), [`phase4-perf.md`](phase4-perf.md) |
 
 Phase 4 delivered the `containers/` runner images, the `RunnerLauncher`/`ApptainerLauncher`
 worker-agent abstraction, the vLLM runner shim (`runners/vllm/`), the
@@ -22,6 +21,21 @@ worker-agent abstraction, the vLLM runner shim (`runners/vllm/`), the
 (`deployment/sif-runner/`), and the spike-gate integration suite (`tests/gates/`).
 Cluster/GPU-gated acceptance (live image builds, SIF conversion, SCC admission, kvcached Gate 9,
 CephFS perf) is tracked in [`phase4.md`](phase4.md) and [`phase4-perf.md`](phase4-perf.md).
+
+## Phases (implemented on a branch)
+
+| Phase | Scope                                                                                                          | Plan                     |
+| ----- | -------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| 5     | kvcached oversubscription & co-location policy — implemented on `milestone/m19-phase5-colocation`, awaiting PR | [`phase5.md`](phase5.md) |
+
+Phase 5 delivered the co-location placement policy (#276: `allowCoLocation` opt-in, fail-closed
+capability guard, capped KV-pool headroom, per-device wake pre-check with group-scoped wake
+eviction), the consumer-side attribution rule (#278: `attribution` on
+`InstanceMemoryMeasurement` with the shared control-plane summation helper — closing the #244
+per-model double-count residual), the shared-pool pressure response (#277: reconciliation
+pressure step, stop-based relief from the device's co-location group, off by default), and
+[`phase5.md`](phase5.md) with the Gate 9b recipe (#279). All four issues are merged onto the
+phase branch; the tracker steps (PR to `dev`, then per-issue closes) ride the merge.
 
 ## Milestones merged to `dev`
 
@@ -41,7 +55,8 @@ CephFS perf) is tracked in [`phase4.md`](phase4.md) and [`phase4-perf.md`](phase
 | M13       | Feature & Resilience Backlog — move-model action (#146), playground stream cap (#149), dashboard notification/e2e follow-ups (#178/#179), proxy→engine NetworkPolicy rule (#181), CI container-image builds (#187)                                                                                                             |
 | M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                     |
 | M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238) |
-| M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257) — see below                                                                                                  |
+| M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                              |
+| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) implemented on the milestone branch awaiting PR; image/supply-chain half (#266/#267) still open.                                                                 |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -50,56 +65,73 @@ measured-only VRAM telemetry doctrine (#163/#164, ts-nvml).
 Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) through
 [`milestone-M9-pr-draft.md`](milestone-M9-pr-draft.md).
 
-## Current milestone — M17 Runner & Shim Correctness (implemented, awaiting PR)
+## Current milestone — Phase 5 on M19 (implemented, awaiting PR)
 
-All 5 milestone issues are implemented on `milestone/m17-runner-shim-correctness` (squash commits
-per issue over `dev@c0150d4`, plus three docs/changelog follow-ups); opening the PR to `dev` is
-the remaining tracker step.
+Phase 5 (kvcached oversubscription & co-location policy) is fully implemented on
+`milestone/m19-phase5-colocation` (7 commits over `dev@876ead7`); opening the PR to `dev` is the
+remaining tracker step, with the four phase issues (#276/#277/#278/#279) closed on merge.
 In progress: nothing else.
 
-| Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #239  | The vLLM shim's `activeRequests` is real: a pure labeled-metrics parser (`metrics.py`) reads `vllm:num_requests_running` + `vllm:num_requests_waiting` (name followed by `{` or whitespace, never a `_`-suffixed sibling; every label series summed for TP/DP), requires **both** series (a half-parsed scrape is not a drain signal), maps non-finite samples to `None` before the `int()`. The `/sleep` guard now trips mid-generation: a request that starts in the control plane's drain→sleep window gets a 409 → instance ERROR (loud failure instead of destroyed generations; no CP-side drain retry in scope). A 200-but-unrecognized `/metrics` body now behaves like a failed scrape: the drain waits out `sleepTimeoutMs` → 504 → instance ERROR. Fail-open rule untouched: an unreadable scrape is still `None`, which skips the guard. **Release gate:** capture a live vLLM 0.26 `/metrics` body before relying on the drain behaviour in production. |
-| #243  | A runner that accepts the `/health` connection but never answers can no longer hang the serialized cold-start chain: `HealthCheckFn` takes an `AbortSignal` (`defaultHealthCheck` forwards it into `fetch`), and `waitUntilHealthy` races every probe against an abortable per-probe timer (`healthProbeTimeoutMs`, default 5 s, optional launcher-config field — no new `SARDEENZ_*` env var), with a `hasExited()` re-check after each null probe. The 15-minute health deadline keeps being re-evaluated (granularity degrades to ≤ probe budget + interval, ~6 s — immaterial at 15 minutes).                                                                                                                                                                                                                                                                                                                                                                    |
-| #244  | The shims' `/memory-report` `torch.cuda.memory_reserved()` branch was dead by construction (the shim owns no CUDA pool — the engine is a child), so the figure silently degraded to the whole-device read and double-counted co-located runners. The dead branch is deleted; both shims emit `max(0, total − free)` with the new optional `attribution: "runner" \| "device"` field on `DeviceMemoryUsage` (engine-runner contract 0.1.1, generated types regenerated; consumers deliberately untouched), reporting `attribution: "device"`; the runner-stub emits `"runner"`. The conformance suite asserts every current emitter declares a scope. The consumer-side display rule (not summing device-scope rows) is Phase 5's, named-not-fixed.                                                                                                                                                                                                                   |
-| #253  | Blocking torch/kvcached memory reads (`mem_get_info` under device contention, contended kvcached shm `flock`) no longer run on the shim event loop: all four `/memory-report` and `/sleep` call sites hand `memory_report` to the default executor (`run_in_executor`, the ONNX `session.run` pattern). Same 409 paths, shapes, and `deviceMemoryFreedBytes`; no background refresh loop. New app-level harnesses (`tests/test_app.py` in both shims: `httpx.ASGITransport` over the conformance doubles, thread-observable; no new test dependency) pin the off-loop execution, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report read.                                                                                                                                                                                                                                                                                             |
-| #257  | `startRunner` reserves the instance slot (and registers the model set) synchronously before its first `await` (`allocatePorts`), inside a `try` extended to cover the allocation phase — a port-allocation failure rolls the slot back instead of stranding the `instanceId` behind a permanent `ConflictError`; the catch's `usedPorts` delete is guarded on nullable pre-declared port bindings. `allocateMemory`/`freeMemory` are ledger-only; the publish moved to `pushMemoryReportOnce()` — a microtask-coalesced (never a timer, preserving the staleness-check freshness) single push per tick with a logged `.catch` instead of a possible unhandled rejection. Ledger arithmetic (`floor(requiredMemory / devices.length)`) unchanged.                                                                                                                                                                                                                     |
+| Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| #276  | Co-location placement policy: a model opts in with `allowCoLocation` on the deploy request (migration `008-add-allow-co-location.sql`, dashboard deploy-form switch); the placement pipeline may then place past naive byte-sum capacity iff every resident instance on the device — including sleeping ones (sleep never releases the VRAM hold) — belongs to a runner type declaring `kvCacheElasticSharing` and the device reports a kvcached pool. Fail-closed capability guard: an unresolvable co-resident (deleted model record, dropped runner-type report, any unknown-placement resident — including an ERROR instance retaining its hold) blocks co-location, so non-kvcached runners are never silently co-located (the phase-4 OOM guard). Headroom is `min(min(freeBytes + preallocBytes, poolTotal), cap% × poolTotal)` with `SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT` (integer 0–100, default 50, 0 disables; boot-validated — the control plane refuses to start on a bad value). `placeFixed` (move) applies the same rules and still never evicts. The wake pre-check is per-device and excludes the waking instance's own hold (the old worker-wide sum produced a phantom shortfall); wake-eviction victims are scoped to the waker's device co-location group (`coLocationGroup` in `placement.ts` — the single derivation #277 imports), sized per device, bounded by `SARDEENZ_EVICTION_MAX_PER_CYCLE`; legacy instances without `deviceIndices` keep the worker-wide fallback.                                                                                                                                                                                                                                                                                                            |
+| #278  | Consumer-side attribution rule (closes the #244 residual): the worker-agent contract's `InstanceMemoryMeasurement` gains the optional `attribution: "runner" \| "device"` field — the worker stamps NVML rows `"runner"` and promotes a no-NVML ledger row only while its runner is the device's sole record — and the control plane scope-checks every per-instance summation site through one shared helper (`sumInstanceMeasurementsByInstance`): `runner`-scope rows sum; a `device`- or unknown-scope row is kept only while it is its device's sole >0-byte row, else dropped, so `/api/v1/cluster/memory`, `/api/v1/workers/:workerId`, and the models' `currentMemory` can never double-count a co-located whole-device figure. Two co-located models on a worker without NVML no longer render two whole-device bars; dropped bytes surface in the dashboard's "Other" bucket. Legacy workers not labeling a scope lose per-model display for unlabeled co-located rows until they upgrade (the conservative direction); unlabeled sole-resident rows keep displaying.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| #277  | Shared-pool pressure response: the reconciliation tick gains `evaluatePoolPressure` (directly after `refreshMemoryBudgets`) — when a device's kvcached pool stays at/above `SARDEENZ_POOL_PRESSURE_THRESHOLD_PERCENT` (default 90) of `totalBytes` for `SARDEENZ_POOL_PRESSURE_DEBOUNCE_TICKS` (default 3) consecutive ticks, the control plane reclaims capacity through the existing `EvictionEngine`, the system's first memory-pressure eviction trigger (eviction is otherwise demand-only). Victims come only from the pressure device's co-location group (a pressure event on device D never tears down a co-tenant on device E; solo-device guard) and are **stopped** — `stopModel` deliberately drain-free (the null runner client skips `waitForDrain`: pressure relief cuts in-flight requests instead of waiting on the traffic causing the pressure), then a best-effort `stopRunner` reap whose non-404 failure reclassifies the stranded STOPPED record as observable ERROR; holds release in `stopModel`; sizing by configured `requiredMemory` (the overshoot for a pool-sized problem is accepted). The wave's `requiredBytes` targets `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT` (default 75, must stay below the threshold — boot cross-check); one tick's fired devices share one `SARDEENZ_EVICTION_MAX_PER_CYCLE` budget; each stopped victim logs a wave record, sends a danger notification, and publishes the first `EVICTION_TRIGGERED` cluster event (existing enum, no contract change). Stale budgets, missing `kvCache` blocks, and zero pool totals never trigger (telemetry tolerance is structural). Off until `SARDEENZ_POOL_PRESSURE_ENABLED=true` (shipped `'false'` in `deployment/`); leader failover resets the in-memory debounce counters (the conservative direction). |
+| #279  | [`phase5.md`](phase5.md): the phase document (goal, per-issue design notes, deliverables) plus the **Gate 9b recipe** — the deploy-only, control-plane-driven co-location verification complementing worker-driven Gate 9 (which asserts `deviceIndex` only): deploy two `allowCoLocation: true` vLLM models pinned to one device through the CP, assert both ACTIVE with both runners' `/memory-report` `kvCache` blocks satisfying the `KVCachePoolStats` partition invariant (`totalBytes = usedBytes + preallocBytes + freeBytes`), an optional concurrent-inference smoke, and a required NVML reality check (see the deploy-only list below). Also: `overall-plan.md`'s Phase 5 section points at the phase doc, and `phase4.md`'s deferred-OOM-guard sentence is closed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-Review/verification ran per issue (blueprint → implement → 2× review → fix → verify → accept);
+Review/verification ran per issue (blueprint/implement → 2× review → fix → verify → accept);
 cumulative reports in `.omp/reports/` (agent scratchpad, not committed). Cumulative gate:
-tsc (dev-worker + control-plane) clean, full vitest 1569 passed + 1 skipped, dev-worker 310 + 1,
-Python shims + conformance 117 passed + 1 skipped, contracts validate + codegen reproducibility.
+typecheck (dev-worker + control-plane) clean, full vitest + the scoped new suites green, Python
+shims + conformance green, contracts validate + codegen reproducibility; per-issue numbers in
+the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
 
 ## Next
 
-- **Phase 5** (kvcached oversubscription / co-location policy) — unblocked: #244 + #253, its
-  declared gate, both shipped in M17. Its placement policy consumes #244's `attribution`
-  semantics (the rule for not summing device-scope rows, and the dashboard's per-model bars
-  under co-location, are still open consumer work).
-- **M19** (Runner & Image backlog) — owns the image/supply-chain half split out of M15's #235
-  (#266: non-root `USER`, digest pins, cosign sign + scan) and the ADR-016 wording reconciliation
-  (#267); a per-PID NVML follow-up to #244 (option A from its decision) would also belong there.
+- **M19** (Runner & Image backlog) — Phase 5 (#276/#277/#278/#279) is implemented on
+  `milestone/m19-phase5-colocation` (see the current-milestone section); the remainder of the
+  M19 theme owns the image/supply-chain half split out of M15's #235 (#266: non-root `USER`,
+  digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
+  NVML follow-up to #244 (option A from its decision) would also belong there.
 - M16 (Orchestration Resilience) stays parked.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
 
 ## Limitations and deploy-only verification
 
-Several M17 behaviors are structurally not provable in the dev container (no GPU, no vLLM/MLServer
-runtimes, no Apptainer node, no cluster); they are recorded per issue and must be exercised on
-first post-merge deployment:
+Several M17 and Phase 5 behaviors are structurally not provable in the dev container (no GPU, no
+vLLM/MLServer runtimes, no Apptainer node, no cluster); they are recorded per issue or per phase
+and must be exercised on first post-merge deployment. The M17 list is unchanged from the last
+revision except where #278 changed the follow-through:
 
 - **#239**: a live `curl <runner>:<engine-port>/metrics` capture on a GPU runner (the CHANGELOG's
   stated release gate) — confirming the parser's assumptions about real vLLM 0.26 metric text
   (names, label set, float-string values); and the drain-window behaviour on-cluster: 409 →
   instance ERROR with an in-flight generation, and 200-but-unparsed → 504 → instance ERROR.
 - **#244**: a real two-runner co-location observation showing both shims reporting the same
-  whole-device figure with `attribution: "device"`; the consumer-side double-count it makes
-  visible (CP per-instance aggregation, dashboard placement bars) is Phase 5 work.
+  whole-device figure with `attribution: "device"` — with #278's consumer-side rule now shipped,
+  the observation doubles as the check that the CP/dashboard render deduped figures (only the
+  genuinely per-runner bars plus the residual in "Other"), not two whole-device bars.
 - **#253**: `/health` staying responsive while a real `mem_get_info`/kvcached read stalls under
   GPU contention (locally proven only with a 150 ms fake).
 - **#243**: a real wedged shim inside a real SIF on an Apptainer node (locally proven with a
   never-settling injected probe and a never-writing `node:http` server).
+- **Phase 5 — Gate 9b run (required, [#279](phase5.md) recipe)**: on a GPU worker, deploy two
+  `allowCoLocation: true` vLLM models through the control plane onto one device, assert both
+  instances ACTIVE, both runners' `/memory-report` carrying `kvCache` blocks satisfying the
+  `KVCachePoolStats` partition invariant, the optional concurrent-inference smoke, and the
+  required NVML reality check (actual device usage under concurrent inference stays within
+  physical capacity — `freeBytes` is unbacked virtual capacity, so the headroom formula can
+  count it twice; placement success alone is not acceptance evidence). Paste the run into a
+  linked note and extend this list with the outcome.
+- **Phase 5 — live pool-pressure behavior (#277)**: the evaluator ships off
+  (`SARDEENZ_POOL_PRESSURE_ENABLED=false`); first on-cluster exercise needs a device whose
+  kvcached pool is driven to the threshold (≥90% of `totalBytes`) for 3 consecutive ticks, then
+  observes the stop-based relief wave: victims drawn only from that device's co-location group,
+  the drain-free stop cutting in-flight requests, the `EVICTION_TRIGGERED` cluster event, and
+  the release target measured against `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT`.
+- **Phase 5 — migration `008-add-allow-co-location.sql` on a live database**: the dev suites
+  cover the store mapping; a real Postgres upgrade path (existing `models` rows surviving with
+  `allow_co_location` defaulting false) must be exercised once against a populated database.
 
 M15 items still pending first deployment exercise (merged to `dev` via #270/#271): Secret
 resolution at pod creation and the Valkey AUTH handshake (#230), CNI admission and enforcement of
@@ -121,8 +153,10 @@ From M15 (first two are M19-owned):
 
 From M17 (reviewer-recorded, non-blocking):
 
-- **#244 residual**: the consumer-side rule for `attribution` (per-runner display/dedup, the
-  `getKvCacheDeviceStats` first-wins precedent) — deliberately Phase 5's, not an issue yet.
+- **#244 residual**: ~~the consumer-side rule for `attribution`~~ — closed by Phase 5 (#278,
+  shipped on the phase branch): the shared `sumInstanceMeasurementsByInstance` helper and the
+  dashboard's "Other" bucket now own the dedup; the `getKvCacheDeviceStats` first-wins precedent
+  remains the pool-stats analogue.
 - **#253 carried low**: the `test_health_responds_while_memory_report_blocks` retry leaves the
   first attempt's `report_task` unawaited (harmless under `asyncio.run` teardown).
 - **#243 pre-existing**: TDZ latent bug in `ApptainerLauncher.stopChild` — a child emitting
@@ -131,11 +165,26 @@ From M17 (reviewer-recorded, non-blocking):
 
 ## Notable changes
 
+Phase 5 (on `milestone/m19-phase5-colocation`, awaiting PR):
+
+- Two contract surfaces moved: `control-plane.yaml` gains `allowCoLocation` on the deploy/config
+  request and response plumbing plus the elastic-branch `DeviceInfo.kvCache` description;
+  `worker-agent.yaml` gains `attribution` on `InstanceMemoryMeasurement` — with the
+  description-only reword naming both placement consumers of `kvCache` (elastic co-location
+  headroom and the #277 pool-pressure evaluator; everything else stays telemetry). Generated
+  types committed.
+- Five operator-facing knobs land, all boot-validated: `SARDEENZ_COLOCATION_MAX_POOL_HEADROOM_PERCENT`
+  (default 50, 0 disables), `SARDEENZ_POOL_PRESSURE_ENABLED` (`'false'`),
+  `_THRESHOLD_PERCENT` (90), `_RELEASE_TARGET_PERCENT` (75, must stay below the threshold),
+  `_DEBOUNCE_TICKS` (3) — all wired through `deployment/`.
+- New migration `control-plane/migrations/008-add-allow-co-location.sql` (see the deploy-only
+  list: needs one live-DB exercise).
+
 M17:
 
 - Engine-runner contract gains the optional `attribution: "runner" | "device"` field on
   `DeviceMemoryUsage` (#244); generated TypeScript types committed (spec stays 0.1.1 — an
-  additive optional field). No in-repo consumer reads it yet by design.
+  additive optional field). Phase 5 (#278) supplies its first worker-agent-side consumer rule.
 - New user-visible behaviour in the vLLM shim (#239): a sleep attempted while generations are
   in flight answers 409 and lands the instance in ERROR (previously it silently offloaded
   weights out from under them); a 200-but-unrecognized `/metrics` body stalls the drain to its

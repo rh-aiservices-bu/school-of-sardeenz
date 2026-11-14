@@ -60,6 +60,7 @@ interface FormState {
   tensorParallel: string;
   runtimeModule: string;
   pinned: boolean;
+  allowCoLocation: boolean;
   engineArgs: string;
   servedModelName: string;
 }
@@ -186,6 +187,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
     tensorParallel: '1',
     runtimeModule: '',
     pinned: false,
+    allowCoLocation: false,
     engineArgs: '',
     servedModelName: '',
   });
@@ -261,6 +263,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
       tensorParallel: String(model.tensorParallel ?? 1),
       runtimeModule: model.runtimeModule ?? '',
       pinned: model.pinned ?? false,
+      allowCoLocation: model.allowCoLocation ?? false,
       engineArgs: model.engineArgs?.join('\n') ?? '',
       servedModelName: model.servedModelName ?? '',
     });
@@ -298,6 +301,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
       modelPath: form.modelPath.trim(),
       requiredMemory: Math.round(parseFloat(form.requiredMemoryGib) * GIB),
       tensorParallel: parseInt(form.tensorParallel, 10),
+      allowCoLocation: form.allowCoLocation,
       pinned: form.pinned,
     };
 
@@ -525,6 +529,20 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
                 onChange={(_ev, checked) => set('pinned', checked)}
               />
               <FieldHelper hint={t('deploy.hints.pinned')} showError={false} fieldId="pinned" />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.allowCoLocation')} fieldId="allow-co-location">
+              <Switch
+                id="allow-co-location"
+                label={t('deploy.fields.allowCoLocation')}
+                isChecked={form.allowCoLocation}
+                onChange={(_ev, checked) => set('allowCoLocation', checked)}
+              />
+              <FieldHelper
+                hint={t('deploy.hints.allowCoLocation')}
+                showError={false}
+                fieldId="allow-co-location"
+              />
             </FormGroup>
 
             {/* Runner section: runner type, then runner-specific fields. */}

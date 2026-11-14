@@ -211,7 +211,11 @@ describe('buildWorkerBarData (compact view)', () => {
   it('marks a segment sleeping when any replica sleeps and omits zero-byte models', () => {
     const devices = [makeDevice()];
     const models = [
-      makeModel({ instanceId: 'sleepy', state: ModelLifecycleState.SLEEPING, memoryUsedBytes: 1024 }),
+      makeModel({
+        instanceId: 'sleepy',
+        state: ModelLifecycleState.SLEEPING,
+        memoryUsedBytes: 1024,
+      }),
       makeModel({ modelName: 'zero-model', memoryUsedBytes: 0 }),
     ];
     const bar = buildWorkerBarData(devices, models);
@@ -229,6 +233,46 @@ describe('buildWorkerBarData (compact view)', () => {
   });
 });
 
+describe('deduped route figures (CP scope rule, issue #278)', () => {
+  it('renders deduped figures without double-counting: a co-located instance absent from models[] surfaces in Other', () => {
+    // Post-fix route output: the CP dropped the device-scope co-tenant row, so models[]
+    // holds only the runner-scope instance; the device's usedBytes is the whole 14 GiB.
+    const device = makeDevice({
+      memoryTotalBytes: 16 * 1024 ** 3,
+      memoryUsedBytes: 14 * 1024 ** 3,
+    });
+    const models = [makeModel({ instanceId: 'inst-a', memoryUsedBytes: 4 * 1024 ** 3 })];
+
+    const deviceBar = buildDeviceBarData(device, attributeModelsToDevice(device, 1, models));
+    expect(deviceBar.entries.map((e) => e.instanceId)).toEqual(['inst-a']);
+    expect(deviceBar.otherBytes).toBe(10 * 1024 ** 3); // the dropped co-tenant's bytes
+    expect(deviceBar.freeBytes).toBe(2 * 1024 ** 3);
+
+    const workerBar = buildWorkerBarData([device], models);
+    expect(workerBar.segments.map((s) => s.bytes)).toEqual([4 * 1024 ** 3]);
+    expect(workerBar.otherBytes).toBe(10 * 1024 ** 3);
+  });
+
+  it('sole-resident promoted figure attributes cleanly and Other clamps to 0', () => {
+    // The CP promoted the sole resident's device-scope row: memoryUsedBytes equals the
+    // device's used bytes — attributed total covers everything, Other clamps to 0.
+    const device = makeDevice({
+      memoryTotalBytes: 16 * 1024 ** 3,
+      memoryUsedBytes: 14 * 1024 ** 3,
+    });
+    const models = [makeModel({ instanceId: 'inst-a', memoryUsedBytes: 14 * 1024 ** 3 })];
+
+    const deviceBar = buildDeviceBarData(device, attributeModelsToDevice(device, 1, models));
+    expect(deviceBar.entries[0].bytes).toBe(14 * 1024 ** 3);
+    expect(deviceBar.otherBytes).toBe(0);
+    expect(deviceBar.keys).not.toContain('Other');
+
+    const workerBar = buildWorkerBarData([device], models);
+    expect(workerBar.segments[0].bytes).toBe(14 * 1024 ** 3);
+    expect(workerBar.otherBytes).toBe(0);
+  });
+});
+
 describe('buildKvcacheData (issue #165)', () => {
   const kvCache = {
     totalBytes: 12 * 1024 ** 3,
@@ -241,7 +285,12 @@ describe('buildKvcacheData (issue #165)', () => {
     const bar = buildKvcacheData(makeDevice({ kvCache }), true);
     expect(bar).not.toBeNull();
     expect(bar!.data).toEqual([
-      { id: 'KVCache', Prealloc: kvCache.preallocBytes, Used: kvCache.usedBytes, Free: kvCache.freeBytes },
+      {
+        id: 'KVCache',
+        Prealloc: kvCache.preallocBytes,
+        Used: kvCache.usedBytes,
+        Free: kvCache.freeBytes,
+      },
     ]);
     expect(bar!.keys).toEqual(['Prealloc', 'Used', 'Free']);
     expect(bar!.totalBytes).toBe(kvCache.totalBytes);
@@ -252,7 +301,9 @@ describe('buildKvcacheData (issue #165)', () => {
   });
 
   it('returns null when the pool has no capacity (totalBytes 0)', () => {
-    expect(buildKvcacheData(makeDevice({ kvCache: { ...kvCache, totalBytes: 0 } }), true)).toBeNull();
+    expect(
+      buildKvcacheData(makeDevice({ kvCache: { ...kvCache, totalBytes: 0 } }), true),
+    ).toBeNull();
   });
 
   it('returns null when the worker has no models (v1 guard: a pool with nothing serving is not rendered)', () => {
