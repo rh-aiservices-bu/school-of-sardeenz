@@ -39,7 +39,6 @@ WORKDIR /opt/sardeenz
 
 # Preserve the npm workspace layout so its @sardeenz/* links resolve normally.
 COPY --from=production-dependencies /build/node_modules ./node_modules
-COPY --from=production-dependencies /build/runners/dev-worker/node_modules ./runners/dev-worker/node_modules
 COPY --from=build /build/packages/types/dist ./packages/types/dist
 COPY --from=build /build/packages/types/package.runtime.json ./packages/types/package.json
 COPY --from=build /build/runners/dev-worker/dist ./runners/dev-worker/dist
