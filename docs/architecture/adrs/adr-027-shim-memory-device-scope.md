@@ -3,7 +3,10 @@
 ## Status
 
 Accepted. Implemented in M17 ([#244](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/244),
-merged `337e0ae`). Extends [ADR-010](adr-010-engine-runners.md) (runner contract: memory
+merged `337e0ae`); its first executable consumer rule — the per-instance display/aggregation
+rule — shipped in Phase 5
+([#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278), merged `06ff80a`,
+see Decision 5). Extends [ADR-010](adr-010-engine-runners.md) (runner contract: memory
 reporting) and [ADR-011](adr-011-worker-capabilities-and-placement.md) (worker capabilities and
 placement); leaves the measured-only doctrine (#163/#164) untouched.
 
@@ -45,9 +48,13 @@ notion — the double-count was silent until #244 made it declarable.
    per-runner. (No executable consumer enforced this rule at acceptance — see Consequences. The
    Phase 5 consumer-side rule,
    [#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278), is the first.)
-5. **The per-runner display rule is Phase 5's.** How the control plane and dashboard dedupe
-   device-scope rows for per-model display and co-location accounting is a policy decision, not
-   part of this contract change; it is deliberately deferred.
+5. **The per-runner display rule is Phase 5's — and it has shipped.** How the control plane and
+   dashboard dedupe device-scope rows for per-model display and co-location accounting was a
+   policy decision, deliberately deferred at M17 acceptance; Phase 5's
+   [#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278) executed it
+   (`sumInstanceMeasurementsByInstance` scope-checks every per-instance summation site; a
+   device/unknown-scope row is kept only while it is its device's sole >0-byte row, else its
+   bytes surface in the dashboard's "Other" bucket).
 
 ## Consequences
 
