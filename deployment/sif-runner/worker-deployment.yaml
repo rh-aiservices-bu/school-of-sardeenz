@@ -11,6 +11,12 @@ metadata:
     app.kubernetes.io/part-of: sardeenz
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: the worker requests an exclusive GPU; a surge pod can never
+  # schedule while the old pod holds the device, so RollingUpdate deadlocks (and a crash-looping
+  # old pod keeps its reservation). Recreate frees the GPU first. The 60s termination grace in the
+  # pod template still drains in-flight runners before the pod exits.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: sardeenz-worker

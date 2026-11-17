@@ -4,6 +4,12 @@ metadata:
   name: sardeenz-control-plane
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: /readyz gates on leader election (health/probes.ts — a follower
+  # intentionally reports 503), so with a single replica a surge pod can never become Ready while
+  # the old pod holds the Lease and the rollout wedges until an operator kills the old pod.
+  # Recreate releases the Lease first; the new pod acquires it and turns Ready.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: sardeenz-control-plane
