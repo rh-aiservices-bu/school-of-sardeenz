@@ -18,6 +18,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   major bumps and security updates stay individual. Complements the M14-style
   manual alert chasing (#224–#229).
 
+- **Phase 5 Gate 9b run recorded on-cluster (2026-11-17) —
+  `docs/project/phase5-gate9b-run.md`.** Two `allowCoLocation: true` vLLM models were placed on
+  one L4 by the control plane: both ACTIVE on device 0, both `/memory-report` `kvCache` blocks
+  satisfying the `KVCachePoolStats` partition invariant with the same pool, elastic admission of
+  a 20 GiB requirement against 18.01 GiB of available device memory, the same requirement
+  refused (`503`) with the opt-in off, and NVML peaking at 5,934 of 23,034 MiB while both models
+  served. The note states what the run does _not_ prove (the virtual `freeBytes` headroom was
+  never pressured) and records four defects it surfaced: #286 (instance record dropped without
+  stopping its runner), #287 (published runner modules predate #275 — no `attribution`), #288
+  (duplicate `POST /runners` per instance), #289 (stock `deployment/` cannot advertise
+  `kvCacheElasticSharing`). `docs/project/status.md` flips its Gate 9b and migration-008
+  deploy-only entries accordingly.
+
 ### Fixed
 
 - **Single-replica rollouts deadlock for `sardeenz-control-plane` (leader

@@ -1,18 +1,19 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-13 (Phase 5 implemented on the phase branch; M19 Phase-5 line).
+Last update: 2026-11-17 (Phase 5 merged; Gate 9b run recorded).
 
 ## Phases (complete)
 
-| Phase | Scope                                                     | Plan                                                                                                                   |
-| ----- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 0     | Engine runner contract (spec only)                        | [`phase0.md`](phase0.md)                                                                                               |
-| 1     | Rust proxy with connection parking                        | [`phase1.md`](phase1.md)                                                                                               |
-| 2     | Control plane sleep/wake orchestration                    | [`phase2.md`](phase2.md)                                                                                               |
-| 3     | Admin dashboard (fresh build)                             | [`phase3.md`](phase3.md)                                                                                               |
-| 3.6   | Dev worker agent — local-process worker with runner stubs | [`phase3.6.md`](phase3.6.md)                                                                                           |
-| 4     | SIF runner runtime (Apptainer) — spike verdict GO         | [`phase4.md`](phase4.md), [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md), [`phase4-perf.md`](phase4-perf.md) |
+| Phase | Scope                                                                    | Plan                                                                                                                   |
+| ----- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| 0     | Engine runner contract (spec only)                                       | [`phase0.md`](phase0.md)                                                                                               |
+| 1     | Rust proxy with connection parking                                       | [`phase1.md`](phase1.md)                                                                                               |
+| 2     | Control plane sleep/wake orchestration                                   | [`phase2.md`](phase2.md)                                                                                               |
+| 3     | Admin dashboard (fresh build)                                            | [`phase3.md`](phase3.md)                                                                                               |
+| 3.6   | Dev worker agent — local-process worker with runner stubs                | [`phase3.6.md`](phase3.6.md)                                                                                           |
+| 4     | SIF runner runtime (Apptainer) — spike verdict GO                        | [`phase4.md`](phase4.md), [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md), [`phase4-perf.md`](phase4-perf.md) |
+| 5     | kvcached oversubscription & co-location policy — Gate 9b PASS on-cluster | [`phase5.md`](phase5.md), [`phase5-gate9b-run.md`](phase5-gate9b-run.md)                                               |
 
 Phase 4 delivered the `containers/` runner images, the `RunnerLauncher`/`ApptainerLauncher`
 worker-agent abstraction, the vLLM runner shim (`runners/vllm/`), the
@@ -22,20 +23,25 @@ worker-agent abstraction, the vLLM runner shim (`runners/vllm/`), the
 Cluster/GPU-gated acceptance (live image builds, SIF conversion, SCC admission, kvcached Gate 9,
 CephFS perf) is tracked in [`phase4.md`](phase4.md) and [`phase4-perf.md`](phase4-perf.md).
 
-## Phases (implemented on a branch)
+## Phase 5 delivered (merged to `dev`)
 
-| Phase | Scope                                                                                                          | Plan                     |
-| ----- | -------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| 5     | kvcached oversubscription & co-location policy — implemented on `milestone/m19-phase5-colocation`, awaiting PR | [`phase5.md`](phase5.md) |
-
-Phase 5 delivered the co-location placement policy (#276: `allowCoLocation` opt-in, fail-closed
-capability guard, capped KV-pool headroom, per-device wake pre-check with group-scoped wake
-eviction), the consumer-side attribution rule (#278: `attribution` on
-`InstanceMemoryMeasurement` with the shared control-plane summation helper — closing the #244
-per-model double-count residual), the shared-pool pressure response (#277: reconciliation
-pressure step, stop-based relief from the device's co-location group, off by default), and
-[`phase5.md`](phase5.md) with the Gate 9b recipe (#279). All four issues are merged onto the
-phase branch; the tracker steps (PR to `dev`, then per-issue closes) ride the merge.
+Phase 5 merged via PR #281 (`06ff80a`), with the decisions ratified as
+[ADR-029](../architecture/adrs/adr-029-colocation-hold-and-pressure-stop.md) (#283). It delivered the
+co-location placement policy (#276: `allowCoLocation` opt-in, fail-closed capability guard,
+capped KV-pool headroom, per-device wake pre-check with group-scoped wake eviction), the
+consumer-side attribution rule (#278: `attribution` on `InstanceMemoryMeasurement` with the
+shared control-plane summation helper — closing the #244 per-model double-count residual), the
+shared-pool pressure response (#277: reconciliation pressure step, stop-based relief from the
+device's co-location group, off by default), and [`phase5.md`](phase5.md) with the Gate 9b
+recipe (#279). Gate 9b ran on-cluster on 2026-11-17 —
+[`phase5-gate9b-run.md`](phase5-gate9b-run.md) — and passed: the control plane admitted a 20 GiB
+requirement against 18.01 GiB of available device memory (elastic headroom), refused the same
+requirement with the opt-in off, and NVML under concurrent inference on two co-located models
+stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
+([#286](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/286),
+[#287](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/287),
+[#288](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/288),
+[#289](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/289)).
 
 ## Milestones merged to `dev`
 
@@ -56,7 +62,7 @@ phase branch; the tracker steps (PR to `dev`, then per-issue closes) ride the me
 | M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                     |
 | M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238) |
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                              |
-| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) implemented on the milestone branch awaiting PR; image/supply-chain half (#266/#267) still open.                                                                 |
+| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; image/supply-chain half (#266/#267) still open.                                                                           |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -65,12 +71,12 @@ measured-only VRAM telemetry doctrine (#163/#164, ts-nvml).
 Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) through
 [`milestone-M9-pr-draft.md`](milestone-M9-pr-draft.md).
 
-## Current milestone — Phase 5 on M19 (implemented, awaiting PR)
+## M19 — Phase 5 (merged) and the image/supply-chain half
 
-Phase 5 (kvcached oversubscription & co-location policy) is fully implemented on
-`milestone/m19-phase5-colocation` (7 commits over `dev@876ead7`); opening the PR to `dev` is the
-remaining tracker step, with the four phase issues (#276/#277/#278/#279) closed on merge.
-In progress: nothing else.
+Phase 5 (kvcached oversubscription & co-location policy) merged via PR #281 and its deploy-only
+verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)). The remainder of
+M19 owns the image/supply-chain half (#266/#267) plus the four defects the Gate 9b run raised
+(#286–#289). In progress: nothing else.
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -87,11 +93,13 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
 
 ## Next
 
-- **M19** (Runner & Image backlog) — Phase 5 (#276/#277/#278/#279) is implemented on
-  `milestone/m19-phase5-colocation` (see the current-milestone section); the remainder of the
-  M19 theme owns the image/supply-chain half split out of M15's #235 (#266: non-root `USER`,
+- **M19** (Runner & Image backlog) — Phase 5 is merged and verified on-cluster; the remainder of
+  the M19 theme owns the image/supply-chain half split out of M15's #235 (#266: non-root `USER`,
   digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
   NVML follow-up to #244 (option A from its decision) would also belong there.
+- **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
+  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 and
+  #287 gate any future co-location deployment; #286 is the highest-severity one.
 - M16 (Orchestration Resilience) stays parked.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
@@ -115,23 +123,23 @@ revision except where #278 changed the follow-through:
   GPU contention (locally proven only with a 150 ms fake).
 - **#243**: a real wedged shim inside a real SIF on an Apptainer node (locally proven with a
   never-settling injected probe and a never-writing `node:http` server).
-- **Phase 5 — Gate 9b run (required, [#279](phase5.md) recipe)**: on a GPU worker, deploy two
-  `allowCoLocation: true` vLLM models through the control plane onto one device, assert both
-  instances ACTIVE, both runners' `/memory-report` carrying `kvCache` blocks satisfying the
-  `KVCachePoolStats` partition invariant, the optional concurrent-inference smoke, and the
-  required NVML reality check (actual device usage under concurrent inference stays within
-  physical capacity — `freeBytes` is unbacked virtual capacity, so the headroom formula can
-  count it twice; placement success alone is not acceptance evidence). Paste the run into a
-  linked note and extend this list with the outcome.
+- ~~**Phase 5 — Gate 9b run (required, [#279](phase5.md) recipe)**~~ — **run 2026-11-17, PASS**:
+  two `allowCoLocation: true` vLLM models on one L4 through the control plane, both ACTIVE on
+  device 0, both `/memory-report` `kvCache` blocks satisfying the `KVCachePoolStats` partition
+  invariant with the same pool, elastic admission of 20 GiB against 18.01 GiB available, the
+  same requirement refused with the opt-in off, and NVML peaking at 5,934 of 23,034 MiB under
+  concurrent inference. Record: [`phase5-gate9b-run.md`](phase5-gate9b-run.md). The run also
+  showed `attribution` absent from the published modules (#287) and could not stress the
+  virtual headroom — see that note's "What this run does not prove".
 - **Phase 5 — live pool-pressure behavior (#277)**: the evaluator ships off
   (`SARDEENZ_POOL_PRESSURE_ENABLED=false`); first on-cluster exercise needs a device whose
   kvcached pool is driven to the threshold (≥90% of `totalBytes`) for 3 consecutive ticks, then
   observes the stop-based relief wave: victims drawn only from that device's co-location group,
   the drain-free stop cutting in-flight requests, the `EVICTION_TRIGGERED` cluster event, and
   the release target measured against `SARDEENZ_POOL_PRESSURE_RELEASE_TARGET_PERCENT`.
-- **Phase 5 — migration `008-add-allow-co-location.sql` on a live database**: the dev suites
-  cover the store mapping; a real Postgres upgrade path (existing `models` rows surviving with
-  `allow_co_location` defaulting false) must be exercised once against a populated database.
+- ~~**Phase 5 — migration `008-add-allow-co-location.sql` on a live database**~~ — **exercised
+  2026-11-17**: pre-existing `models` rows survived the upgrade with `allow_co_location`
+  defaulting to false, and the flag round-tripped through stop → config-edit → start cycles.
 
 M15 items still pending first deployment exercise (merged to `dev` via #270/#271): Secret
 resolution at pod creation and the Valkey AUTH handshake (#230), CNI admission and enforcement of
@@ -141,6 +149,15 @@ admission and enforcement (#232), SCC/`readOnlyRootFilesystem`/`runAsNonRoot` ru
 previous revision of this file and in `.omp/plans/m15-notes.md` (agent scratchpad, not committed).
 
 ## Open follow-ups
+
+From the Phase 5 Gate 9b run (2026-11-17, see [`phase5-gate9b-run.md`](phase5-gate9b-run.md)):
+
+- **#286**: instance records can be dropped without stopping the runner — a failed start left a
+  live `READY` runner holding 5.0 GB that the control plane no longer knew about.
+- **#287**: published vLLM runner modules predate #275 (no `attribution` in `/memory-report`).
+- **#288**: the deploy path issued `POST /runners` twice for one instanceId.
+- **#289**: a stock `deployment/` cannot advertise `kvCacheElasticSharing` (worker catalog URL
+  unset; loader accepts local paths only), which makes Phase 5 co-location unreachable.
 
 From M15 (first two are M19-owned):
 
@@ -154,9 +171,10 @@ From M15 (first two are M19-owned):
 From M17 (reviewer-recorded, non-blocking):
 
 - **#244 residual**: ~~the consumer-side rule for `attribution`~~ — closed by Phase 5 (#278,
-  shipped on the phase branch): the shared `sumInstanceMeasurementsByInstance` helper and the
+  merged via #281): the shared `sumInstanceMeasurementsByInstance` helper and the
   dashboard's "Other" bucket now own the dedup; the `getKvCacheDeviceStats` first-wins precedent
-  remains the pool-stats analogue.
+  remains the pool-stats analogue. The on-cluster run showed the rule is only as good as the
+  shim inside the published modules — see #287 (attribution absent).
 - **#253 carried low**: the `test_health_responds_while_memory_report_blocks` retry leaves the
   first attempt's `report_task` unawaited (harmless under `asyncio.run` teardown).
 - **#243 pre-existing**: TDZ latent bug in `ApptainerLauncher.stopChild` — a child emitting
@@ -165,7 +183,8 @@ From M17 (reviewer-recorded, non-blocking):
 
 ## Notable changes
 
-Phase 5 (on `milestone/m19-phase5-colocation`, awaiting PR):
+Phase 5 (merged via #281; decisions ratified as
+[ADR-029](../architecture/adrs/adr-029-colocation-hold-and-pressure-stop.md) in #283):
 
 - Two contract surfaces moved: `control-plane.yaml` gains `allowCoLocation` on the deploy/config
   request and response plumbing plus the elastic-branch `DeviceInfo.kvCache` description;
@@ -177,8 +196,12 @@ Phase 5 (on `milestone/m19-phase5-colocation`, awaiting PR):
   (default 50, 0 disables), `SARDEENZ_POOL_PRESSURE_ENABLED` (`'false'`),
   `_THRESHOLD_PERCENT` (90), `_RELEASE_TARGET_PERCENT` (75, must stay below the threshold),
   `_DEBOUNCE_TICKS` (3) — all wired through `deployment/`.
-- New migration `control-plane/migrations/008-add-allow-co-location.sql` (see the deploy-only
-  list: needs one live-DB exercise).
+- New migration `control-plane/migrations/008-add-allow-co-location.sql` — exercised against the
+  live database on 2026-11-17 (existing rows default to false; the flag round-trips through
+  stop → edit → start).
+- Worker caveat for operators: the co-location capability is worker-declared and needs the runner
+  catalog on the worker (`SARDEENZ_RUNNER_CATALOG_URL`); a stock `deployment/` does not set it
+  yet — see #289.
 
 M17:
 

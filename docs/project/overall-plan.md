@@ -402,8 +402,9 @@ observed, not estimated; per-device kvcached pool reporting from the runner cont
 
 Alongside the phases, issues from the full audit (August 2026) are grouped into GitHub milestones
 and executed one milestone per branch, merged to `dev`. M2 through M15 are merged (M15 — Security
-Hardening — Cluster & Auth — via #270/#271); M17 (Runner & Shim Correctness) is implemented on its
-milestone branch awaiting PR; M16 stays parked and M19 collects the follow-ups. The list of themes
+Hardening — Cluster & Auth — via #270/#271), M17 merged via #275, and M19's Phase 5 via #281 with
+its on-cluster Gate 9b run recorded; M16 stays parked and M19 carries the image/supply-chain
+remainder plus the four Gate 9b follow-ups (#286–#289). The list of themes
 and what each delivered is maintained in [`status.md`](status.md).
 
 ---
