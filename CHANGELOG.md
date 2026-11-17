@@ -20,6 +20,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Single-replica rollouts deadlock for `sardeenz-control-plane` (leader
+  election) and `sardeenz-worker` (exclusive GPU).** `/readyz` intentionally
+  reports 503 for a follower (`control-plane/src/health/probes.ts`), so with
+  the default `RollingUpdate` the surge pod can never become Ready while the
+  old pod holds the Lease and the rollout wedges until an operator kills the
+  old ReplicaSet; the worker deadlocks the same way on its GPU reservation
+  (a crash-looping old pod keeps holding the device). Both Deployments now use
+  `strategy: Recreate` (like PostgreSQL/Valkey); the worker keeps its 60s
+  termination grace, so in-flight runners still drain before the pod exits.
+  Deployments applying these manifests should expect one Recreate-style
+  rollout (brief availability gap per update, instead of a wedged rollout).
+
 - **Worker image build fails on the (now always-empty) nested `node_modules`
   COPY.** `npm ci --omit=dev --include-workspace-root=false` hoists every prod
   dependency of `@sardeenz/dev-worker` into root `node_modules` under the
