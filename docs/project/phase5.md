@@ -12,15 +12,16 @@ consumer-side attribution rule (worker-agent contract gains `attribution` on
 contract's description-only `WorkerModelInfo.memoryUsedBytes` rewording below is
 type-regenerated and contract-validated.
 
-#277 (shared-pool pressure response) is **implemented and merged onto this phase branch** —
+#277 (shared-pool pressure response) is **implemented and merged to `dev`** (all four work items
+landed via #281) —
 its `SARDEENZ_POOL_PRESSURE_*` knobs (shipped defaults: `ENABLED=false`, `THRESHOLD_PERCENT=90`,
 `RELEASE_TARGET_PERCENT=75`, `DEBOUNCE_TICKS=3`), the reconciliation pressure step and the
 `deployment/` wiring are all present, gated by its own scoped suites. The evaluator stays **off
 by default** (`ENABLED=false`), so on-cluster pressure behavior remains a deploy-gated item.
 
 **Cluster-gated** (written + statically validated, runnable only on a GPU node): the on-cluster
-execution of the **Gate 9b** recipe below. Its run is recorded in [`status.md`](status.md)'s
-deploy-only verification list at phase close — this doc is the recipe, not the run record.
+execution of the **Gate 9b** recipe below — **run on 2026-11-17 and passed**, recorded in
+[`phase5-gate9b-run.md`](phase5-gate9b-run.md); this doc is the recipe, not the run record.
 
 ## Goal
 
@@ -37,7 +38,7 @@ via kvcached (spike Gate 9d); this phase turns that into a control-plane placeme
 
 One short section per work item — the authoritative design lives in each issue's spec and decision
 comments; this doc records what shipped and how it fits together. Landing waves — W1: #276 ∥ #278
-→ this document (#279); W2: #277 after #276 (all four items are merged onto this phase branch).
+→ this document (#279); W2: #277 after #276 (all four items merged to `dev` via #281).
 
 ### #276 — Co-location placement policy
 
@@ -237,10 +238,19 @@ and the elastic pool is observed (`kvCache` blocks), which Gate 9 never asserts.
   [#278](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/278) (consumer-side
   attribution rule), [#279](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/279)
   (this document + the Gate 9b recipe).
+- [`phase5-gate9b-run.md`](phase5-gate9b-run.md) — the 2026-11-17 on-cluster Gate 9b run record
+  (pass, with its stated limits) and the four defects it surfaced
+  ([#286](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/286),
+  [#287](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/287),
+  [#288](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/288),
+  [#289](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/289)).
 - [ADR-027](../architecture/adrs/adr-027-shim-memory-device-scope.md) — shim memory figures are
   device-scope observations; #278 is its first executable consumer rule.
 - [ADR-028](../architecture/adrs/adr-028-drain-signal-semantics.md) — drain-signal semantics the
   recipe's optional sleep/wake wording must respect.
+- [ADR-029](../architecture/adrs/adr-029-colocation-hold-and-pressure-stop.md) — the ratified
+  decisions behind this phase (sleep keeps its hold under co-location, oversubscription cap,
+  STOP-not-SLEEP pressure victims, drain-free pressure stop).
 - [`phase4.md`](phase4.md) — the phase-doc exemplar and the §Out-of-scope item that defined this
   phase's mandate; [`phase4-apptainer-spike.md`](phase4-apptainer-spike.md) — the Gate 9c/9d
   evidence Gate 9b makes repeatable.
