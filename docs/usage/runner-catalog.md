@@ -38,7 +38,12 @@ formats, model directory layout, and `model-settings.json` examples.
   The default catalog is the official
   [`school-of-sardeenz/runners.yaml`](https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml);
   point `SARDEENZ_RUNNER_CATALOG_URL` at your own to customize. The repo-root
-  [`runners.yaml`](../../runners.yaml) is the dev source and the schema reference.
+  [`runners.yaml`](../../runners.yaml) is the dev source and the schema reference. The **worker**
+  reads the same variable with the same default and the same `https`-only gate as the control
+  plane, loads it once at startup (restart the worker after changing it), and logs a warning for
+  every advertised runner type it cannot resolve.
+  The worker's fetch follows no redirects and refuses a response over 1 MiB, so point it at the
+  catalog's final URL (the official raw URL does not redirect).
 - The **control plane** loads the catalog, cross-references the module store, and serves a merged
   view (which entries are imported, whether an update is available, and any module-store SIFs not
   in the catalog). Manual **Refresh** bypasses HTTP and intermediary caches so a mutable catalog URL
@@ -55,14 +60,20 @@ formats, model directory layout, and `model-settings.json` examples.
 
 ## Configuration
 
-| Var                               | Purpose                                                                                                                                                                               | Default                               |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `SARDEENZ_RUNNER_CATALOG_URL`     | Catalog source — http(s) URL, local path, or `file://`                                                                                                                                | official `school-of-sardeenz` raw URL |
-| `SARDEENZ_ALLOW_INSECURE_CATALOG` | Allow an `http://` (plaintext) catalog source. Off by default — a plaintext catalog can be rewritten in transit. Prefer `https://` or a local path/`file://` instead of enabling this | `false`                               |
-| `SARDEENZ_MODULES_DIR`            | Shared module store path                                                                                                                                                              | `/modules`                            |
-| `SARDEENZ_SIF_IMPORTER`           | `oras` (real OCI SIF stream + verification) or `stub` (explicit dev/test placeholder that cannot execute)                                                                             | `oras`                                |
-| `SARDEENZ_VERIFY_SIF`             | `apptainer verify` SIFs — at catalog import (control plane) and at exec (worker). Set `false` for unsigned experimentation only (see below)                                           | `true`                                |
-| `APPTAINER_AUTH_FILE`             | Docker-format registry credential file used by OCI imports; credentials are sent only after an HTTPS registry authentication challenge                                                | unset (public registries only)        |
+| Var                               | Purpose                                                                                                                                                                                                          | Default                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `SARDEENZ_RUNNER_CATALOG_URL`     | Catalog source — http(s) URL, local path, or `file://` (control plane and worker)                                                                                                                                | official `school-of-sardeenz` raw URL |
+| `SARDEENZ_ALLOW_INSECURE_CATALOG` | Allow an `http://` (plaintext) catalog source (control plane and worker). Off by default — a plaintext catalog can be rewritten in transit. Prefer `https://` or a local path/`file://` instead of enabling this | `false`                               |
+| `SARDEENZ_MODULES_DIR`            | Shared module store path                                                                                                                                                                                         | `/modules`                            |
+| `SARDEENZ_SIF_IMPORTER`           | `oras` (real OCI SIF stream + verification) or `stub` (explicit dev/test placeholder that cannot execute)                                                                                                        | `oras`                                |
+| `SARDEENZ_VERIFY_SIF`             | `apptainer verify` SIFs — at catalog import (control plane) and at exec (worker). Set `false` for unsigned experimentation only (see below)                                                                      | `true`                                |
+| `APPTAINER_AUTH_FILE`             | Docker-format registry credential file used by OCI imports; credentials are sent only after an HTTPS registry authentication challenge                                                                           | unset (public registries only)        |
+
+Air-gapped clusters: mount `runners.yaml` on the worker's weights volume and set
+`SARDEENZ_RUNNER_CATALOG_URL=file:///weights/runners.yaml` (a plain path works too). A worker
+that cannot reach its catalog still starts, but advertises `kvCacheElasticSharing: false` for
+every runner type and logs one `[dev-worker] … catalog …` warning per unresolved type — which
+means Phase 5 co-location never engages for that worker.
 
 ORAS image references (`image: oras://...`) in the catalog must be digest-pinned
 (`oras://<registry>/<repo>:<tag>@sha256:<digest>`). A mutable tag can be repointed after a catalog
@@ -136,7 +147,7 @@ are covered in the [MLServer model deployment guide](mlserver-models.md).
 ## Authoring your own catalog
 
 Copy `runners.yaml`, host it anywhere reachable (an internal URL, a Git raw URL, or a file mounted
-into the control plane), and set `SARDEENZ_RUNNER_CATALOG_URL`.
+into the control plane or the worker), and set `SARDEENZ_RUNNER_CATALOG_URL`.
 
 Entries that fail validation are skipped, but a missing or invalid `protocol` is now a **loud,
 surfaced** validation error — such entries are excluded from the imported list, reported in

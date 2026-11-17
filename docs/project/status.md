@@ -98,8 +98,9 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
   NVML follow-up to #244 (option A from its decision) would also belong there.
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
-  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 and
-  #287 gate any future co-location deployment; #286 is the highest-severity one.
+  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 is
+  fixed in the worker (official catalog default, http(s) fetch, startup warnings), so only #286
+  and #287 remain co-location gates; #286 is the highest-severity one.
 - M16 (Orchestration Resilience) stays parked.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
@@ -131,6 +132,9 @@ revision except where #278 changed the follow-through:
   concurrent inference. Record: [`phase5-gate9b-run.md`](phase5-gate9b-run.md). The run also
   showed `attribution` absent from the published modules (#287) and could not stress the
   virtual headroom — see that note's "What this run does not prove".
+- **#289**: a fresh `deployment/` apply on a GPU node must show
+  `vllm: kvCacheElasticSharing: true` in `GET /api/v1/workers` with no manual patch, and the
+  worker log must carry no `[dev-worker] … catalog …` warning.
 - **Phase 5 — live pool-pressure behavior (#277)**: the evaluator ships off
   (`SARDEENZ_POOL_PRESSURE_ENABLED=false`); first on-cluster exercise needs a device whose
   kvcached pool is driven to the threshold (≥90% of `totalBytes`) for 3 consecutive ticks, then
@@ -156,8 +160,10 @@ From the Phase 5 Gate 9b run (2026-11-17, see [`phase5-gate9b-run.md`](phase5-ga
   live `READY` runner holding 5.0 GB that the control plane no longer knew about.
 - **#287**: published vLLM runner modules predate #275 (no `attribution` in `/memory-report`).
 - **#288**: the deploy path issued `POST /runners` twice for one instanceId.
-- **#289**: a stock `deployment/` cannot advertise `kvCacheElasticSharing` (worker catalog URL
-  unset; loader accepts local paths only), which makes Phase 5 co-location unreachable.
+- ~~**#289**: a stock `deployment/` cannot advertise `kvCacheElasticSharing` (worker catalog URL
+  unset; loader accepts local paths only), which makes Phase 5 co-location unreachable.~~ —
+  fixed: the worker shares the control plane's catalog default and fetches http(s) catalogs, with
+  a startup warning naming any unresolved runner type.
 
 From M15 (first two are M19-owned):
 
@@ -199,9 +205,12 @@ Phase 5 (merged via #281; decisions ratified as
 - New migration `control-plane/migrations/008-add-allow-co-location.sql` — exercised against the
   live database on 2026-11-17 (existing rows default to false; the flag round-trips through
   stop → edit → start).
-- Worker caveat for operators: the co-location capability is worker-declared and needs the runner
-  catalog on the worker (`SARDEENZ_RUNNER_CATALOG_URL`); a stock `deployment/` does not set it
-  yet — see #289.
+- Worker catalog behaviour for operators (#289): the co-location capability is worker-declared
+  and read from the runner catalog, which the worker now loads from `SARDEENZ_RUNNER_CATALOG_URL`
+  — defaulting to the same official `runners.yaml` as the control plane, with the same
+  `https`-only gate and a 10 s fetch timeout. A local path or `file://` catalog still works for
+  air-gapped clusters; load failures are non-fatal and each unresolved runner type gets a
+  `[dev-worker] … catalog …` warning instead of a silent `kvCacheElasticSharing: false`.
 
 M17:
 

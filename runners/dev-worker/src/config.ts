@@ -41,6 +41,8 @@ export interface DevWorkerConfig {
   apptainer: ApptainerConfig;
   workerToken: string;
   catalogUrl: string;
+  /** Opt-in for a plaintext http:// catalog (SARDEENZ_ALLOW_INSECURE_CATALOG, default false). */
+  allowInsecureCatalog: boolean;
 }
 
 function envInt(key: string, fallback: number): number {
@@ -89,6 +91,13 @@ function resolveMode(argv: string[] = process.argv.slice(2)): WorkerMode {
 }
 
 const GIB = 1024 * 1024 * 1024;
+
+// Same source the control plane defaults to (control-plane/src/config.ts, DEFAULT_CATALOG_URL).
+// The literal is duplicated on purpose: packages/utils is type-only by design, so there is no
+// shared runtime constant to import. A stock deployment/ apply then gives the worker a catalog
+// with no extra env (Phase 5 co-location needs the catalog's kvCacheElasticSharing flag, #289).
+const DEFAULT_CATALOG_URL =
+  'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml';
 
 export function loadConfig(): DevWorkerConfig {
   // The apptainer bind mounts, cache dir, and HOME all live under the weights/scratch dirs, so
@@ -168,6 +177,7 @@ export function loadConfig(): DevWorkerConfig {
       mlserverParallelWorkers: envInt('SARDEENZ_MLSERVER_PARALLEL_WORKERS', 0),
     },
     workerToken,
-    catalogUrl: envStr('SARDEENZ_RUNNER_CATALOG_URL', ''),
+    catalogUrl: envStr('SARDEENZ_RUNNER_CATALOG_URL', DEFAULT_CATALOG_URL),
+    allowInsecureCatalog: envBool('SARDEENZ_ALLOW_INSECURE_CATALOG', false),
   };
 }

@@ -8,6 +8,8 @@ describe('loadConfig', () => {
     'SARDEENZ_WORKER_TOKEN',
     'SARDEENZ_ALLOW_UNAUTHENTICATED_API',
     'SARDEENZ_RUNNER_ENTRYPOINT',
+    'SARDEENZ_RUNNER_CATALOG_URL',
+    'SARDEENZ_ALLOW_INSECURE_CATALOG',
   ];
 
   beforeEach(() => {
@@ -85,5 +87,31 @@ describe('loadConfig', () => {
     process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
     process.env['SARDEENZ_RUNNER_ENTRYPOINT'] = 'python3,sardeenz_vllm_runner.py';
     expect(loadConfig().apptainer.runnerEntrypoint).toEqual(['python3', 'sardeenz_vllm_runner.py']);
+  });
+
+  it('defaults SARDEENZ_RUNNER_CATALOG_URL to the official catalog (#289)', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
+    expect(loadConfig().catalogUrl).toBe(
+      'https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml',
+    );
+  });
+
+  it('honours an explicit SARDEENZ_RUNNER_CATALOG_URL', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
+    process.env['SARDEENZ_RUNNER_CATALOG_URL'] = '/weights/runners.yaml';
+    expect(loadConfig().catalogUrl).toBe('/weights/runners.yaml');
+  });
+
+  it('defaults SARDEENZ_ALLOW_INSECURE_CATALOG to false', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
+    expect(loadConfig().allowInsecureCatalog).toBe(false);
+  });
+
+  it('parses SARDEENZ_ALLOW_INSECURE_CATALOG=true', () => {
+    process.env['SARDEENZ_WORKER_TOKEN'] = 'test-worker-token';
+    process.env['SARDEENZ_ALLOW_INSECURE_CATALOG'] = 'true';
+    expect(loadConfig().allowInsecureCatalog).toBe(true);
+    process.env['SARDEENZ_ALLOW_INSECURE_CATALOG'] = '0';
+    expect(loadConfig().allowInsecureCatalog).toBe(false);
   });
 });
