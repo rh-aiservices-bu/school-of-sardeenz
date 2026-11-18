@@ -42,6 +42,7 @@ function makeConfig(): DevWorkerConfig {
     },
     workerToken: '',
     catalogUrl: '',
+    allowInsecureCatalog: false,
   };
 }
 

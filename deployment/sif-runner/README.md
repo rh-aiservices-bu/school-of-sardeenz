@@ -37,6 +37,18 @@ worker may launch. The base advertises `vllm,mlserver`; overlays can extend this
 another compatible SIF family. The older singular `SARDEENZ_RUNNER_TYPE` remains supported as a
 fallback for existing deployments.
 
+The worker reads the runner catalog once at startup from `SARDEENZ_RUNNER_CATALOG_URL` — an
+http(s) URL, a local path, or a `file://` URL. Its default is the official `school-of-sardeenz`
+raw `runners.yaml`, the same variable, default and `https`-only gate the control plane uses, so a
+stock apply needs no catalog env. The catalog is where the worker's `kvCacheElasticSharing`
+capability comes from; without a reachable catalog the worker still starts but advertises
+`kvCacheElasticSharing: false`, which makes Phase 5 co-location unreachable for its runners (the
+worker logs a `[dev-worker] … catalog …` warning naming each unresolved runner type). Air-gapped
+clusters: mount a catalog file on the weights PVC and point the variable at
+`file:///weights/runners.yaml` (a plain path works too; a plaintext `http://` URL additionally
+requires `SARDEENZ_ALLOW_INSECURE_CATALOG=true`). The catalog is read once — restart the worker
+after changing it.
+
 ## Runner port policy
 
 The Deployment pins `SARDEENZ_WORKER_PORT=9100`, `SARDEENZ_RUNNER_PORT_START=9101`, and

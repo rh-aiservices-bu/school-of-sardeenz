@@ -40,6 +40,7 @@ function makeConfig(overrides: Partial<DevWorkerConfig> = {}): DevWorkerConfig {
     },
     workerToken: '',
     catalogUrl: '',
+    allowInsecureCatalog: false,
     ...overrides,
   };
 }

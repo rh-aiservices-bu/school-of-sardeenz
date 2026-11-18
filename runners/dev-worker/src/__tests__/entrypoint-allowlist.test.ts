@@ -43,6 +43,7 @@ function makeConfig(runnerEntrypoint: string[]): DevWorkerConfig {
     },
     workerToken: '',
     catalogUrl: '',
+    allowInsecureCatalog: false,
   };
 }
 

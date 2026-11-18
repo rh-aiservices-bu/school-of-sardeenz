@@ -33,6 +33,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Worker honors `SARDEENZ_RUNNER_CATALOG_URL` (#289).** A stock `deployment/` worker could
+  never advertise `kvCacheElasticSharing: true` — the env var was unset and the loader accepted
+  local paths only — so Phase 5 co-location was unreachable on a fresh install, silently. The
+  worker now shares the control plane's catalog semantics: the same variable, the same official
+  `runners.yaml` default, http(s) fetch with the `https`-only gate
+  (`SARDEENZ_ALLOW_INSECURE_CATALOG`, default `false`), a 10 s timeout, no redirect following,
+  and a 1 MiB response cap; local paths and `file://` are unchanged. Load failures stay
+  non-fatal, and startup now warns once per unresolved runner type (empty URL, catalog without
+  an entry, or a catalog that did not load) instead of failing quiet. The loader moved to
+  `runners/dev-worker/src/runner-catalog.ts` so it is unit-tested. Docs:
+  `docs/usage/runner-catalog.md`, `deployment/sif-runner/README.md`.
+
 - **Single-replica rollouts deadlock for `sardeenz-control-plane` (leader
   election) and `sardeenz-worker` (exclusive GPU).** `/readyz` intentionally
   reports 503 for a follower (`control-plane/src/health/probes.ts`), so with

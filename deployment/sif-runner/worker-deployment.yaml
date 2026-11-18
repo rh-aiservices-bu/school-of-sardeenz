@@ -113,6 +113,11 @@ spec:
             - { name: SARDEENZ_MODULES_DIR, value: /modules }
             - { name: SARDEENZ_WEIGHTS_DIR, value: /weights }
             - { name: SARDEENZ_SCRATCH_DIR, value: /scratch }
+            # Runner catalog read once at worker startup (#289). The worker defaults
+            # SARDEENZ_RUNNER_CATALOG_URL to the official school-of-sardeenz runners.yaml, so a
+            # stock apply needs nothing here. Air-gapped clusters: mount a catalog file on the
+            # weights volume and set SARDEENZ_RUNNER_CATALOG_URL=file:///weights/runners.yaml in
+            # an overlay (plain http:// additionally needs SARDEENZ_ALLOW_INSECURE_CATALOG=true).
             - { name: SARDEENZ_VERIFY_SIF, value: 'true' }
             - name: SARDEENZ_REDIS_URL
               valueFrom:
