@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadRootEnv } from './load-env.js';
 import { loadConfig, redactUrl } from './config.js';
-import { createRedisClient, redisKey } from './clients/redis.js';
+import { createRedisClient } from './clients/redis.js';
 import { createDatabasePool } from './clients/database.js';
 import { runMigrations } from './clients/migrations.js';
 import { RunnerClient } from './clients/runner.js';
@@ -31,6 +31,7 @@ import { WorkerClient } from './clients/worker.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
 import { StartupLogRepository } from './services/startup-log-repository.js';
 import { StartupLogCaptureService } from './services/startup-log-capture.js';
+import { ClusterEventPublisher } from './services/cluster-events.js';
 
 async function main(): Promise<void> {
   loadRootEnv();
@@ -50,7 +51,22 @@ async function main(): Promise<void> {
   const modelRepository = new ModelRepository(db);
   const instanceRepository = new InstanceRepository(db);
   const startupLogRepository = new StartupLogRepository(db);
-  const lifecycle = new ModelLifecycleService(redis, config.redisKeyPrefix);
+  const notificationLogger = {
+    info: (obj: Record<string, unknown>, msg: string) => console.log(msg, obj),
+    warn: (obj: Record<string, unknown>, msg: string) => console.warn(msg, obj),
+    error: (obj: Record<string, unknown>, msg: string) => console.error(msg, obj),
+    debug: (obj: Record<string, unknown>, msg: string) => console.debug(msg, obj),
+  };
+  // Shared publisher for {prefix}:cluster-events — the channel the BFF relays verbatim to the
+  // dashboard SSE stream. Used by the lifecycle's orphan audit (#286) and the runner-catalog events
+  // below (one publisher, one channel, one failure policy: never throws).
+  const clusterEvents = new ClusterEventPublisher(redis, config.redisKeyPrefix, notificationLogger);
+  const lifecycle = new ModelLifecycleService(
+    redis,
+    config.redisKeyPrefix,
+    clusterEvents,
+    notificationLogger,
+  );
   const memoryBudget = new MemoryBudgetService(
     redis,
     config.redisKeyPrefix,
@@ -85,12 +101,6 @@ async function main(): Promise<void> {
     config.wakeTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
   );
-  const notificationLogger = {
-    info: (obj: Record<string, unknown>, msg: string) => console.log(msg, obj),
-    warn: (obj: Record<string, unknown>, msg: string) => console.warn(msg, obj),
-    error: (obj: Record<string, unknown>, msg: string) => console.error(msg, obj),
-    debug: (obj: Record<string, unknown>, msg: string) => console.debug(msg, obj),
-  };
   const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
 
   // Runner catalog + SIF import. The importer is pluggable so the control plane stays
@@ -103,9 +113,8 @@ async function main(): Promise<void> {
     config.sifImporter === 'oras'
       ? new OrasImporter({ apptainerBin: config.apptainerBin, verifySif: config.verifySif })
       : new StubImporter();
-  const catalogEventsChannel = redisKey(config.redisKeyPrefix, 'cluster-events');
   const emitCatalogEvent = (event: ControlPlaneComponents['schemas']['ClusterEvent']): void => {
-    void redis.publish(catalogEventsChannel, JSON.stringify(event)).catch(() => {});
+    clusterEvents.publish(event);
   };
   const moduleStore = new ModuleStoreService(
     config.modulesDir,

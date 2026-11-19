@@ -130,6 +130,15 @@ export const reconciliationMissingRunnersTotal = new Counter({
   registers: [registry],
 });
 
+export const reconciliationUnclaimedRunnersTotal = new Counter({
+  name: 'sardeenz_control_plane_reconciliation_unclaimed_runners_total',
+  help:
+    'Unclaimed runner sightings by action: "reaped" counts runners stopped by reconciliation; ' +
+    '"refused" counts worker-ticks refused by the mass-divergence guard (one per worker per tick)',
+  labelNames: ['action'] as const,
+  registers: [registry],
+});
+
 export const reconciliationErrors = new Counter({
   name: 'sardeenz_control_plane_reconciliation_errors_total',
   help: 'Reconciliation step errors',

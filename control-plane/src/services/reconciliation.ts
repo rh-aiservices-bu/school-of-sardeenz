@@ -2,7 +2,7 @@ import { ClusterEventType, ModelLifecycleState, WorkerStatus } from '@sardeenz/t
 import type { ControlPlaneComponents } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
-import type { ModelLifecycleService } from './model-lifecycle.js';
+import type { ModelLifecycleService, RunnerDisposition } from './model-lifecycle.js';
 import type { EvictionEngine } from './eviction.js';
 import type { SleepWakeService } from './sleep-wake.js';
 import { coLocationGroup } from './placement.js';
@@ -16,12 +16,13 @@ import type { StartupLogCaptureService } from './startup-log-capture.js';
 import { refreshModelRoutingState } from './sleep-wake.js';
 import type { WorkerClient } from '../clients/worker.js';
 import type { MoveOrchestrationService } from './move-orchestration.js';
-import { WorkerHttpError } from '../clients/worker.js';
+import { WorkerHttpError, type RunnerSummary } from '../clients/worker.js';
 import {
   reconciliationTicksTotal,
   reconciliationStuckModelsTotal,
   reconciliationDeadWorkersTotal,
   reconciliationMissingRunnersTotal,
+  reconciliationUnclaimedRunnersTotal,
   reconciliationTickDuration,
   reconciliationErrors,
   modelsTotal,
@@ -77,6 +78,18 @@ type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 
 const CLUSTER_EVENTS_CHANNEL = 'cluster-events';
 
+/** Consecutive unclaimed observations required before the reverse sweep stops a runner (#286). */
+const UNCLAIMED_REAP_CONFIRM_TICKS = 2;
+
+/**
+ * Per-cycle reap budget for the reverse sweep (#286 review), the same bound the eviction engine's
+ * `maxPerCycle` puts on one admission wave. Reaps are sequential worker DELETE calls plus a log
+ * line, an event and a notification each; without a cap, a worker advertising thousands of fake
+ * registry entries would turn the leader's reconciliation tick into an unbounded stop loop. A
+ * confirmed runner left over stays confirmed (its counter is not reset) and is reaped next cycle.
+ */
+const UNCLAIMED_REAP_MAX_PER_CYCLE = 5;
+
 const TRANSITIONAL_STATES: ReadonlyMap<ModelLifecycleState, 'deploy' | 'sleep'> = new Map([
   [ModelLifecycleState.STARTING, 'deploy'],
   [ModelLifecycleState.DRAINING, 'sleep'],
@@ -93,6 +106,15 @@ export class ReconciliationService {
    * failover naturally resets it (new service instance) — the conservative direction: it can
    * only delay action, never skip telemetry. */
   private readonly poolPressureTicks = new Map<string, number>();
+  /** Runner→instance sweep (#286): `${workerId}:${instanceId}` → consecutive unclaimed observations.
+   * Leader failover re-creates the service and re-arms every counter — the conservative direction:
+   * it can only delay a reap, never skip the second confirmation. */
+  private readonly unclaimedRunnerTicks = new Map<string, number>();
+  /** Mass-divergence refusal (#286 review): workerIds already reported during the current
+   * divergence episode. Publishing once per worker per episode keeps a long-lived #241 state from
+   * adding one red row per worker per interval; the set is cleared as soon as the divergence
+   * clears, so a recurrence is reported again. */
+  private readonly massDivergenceReported = new Set<string>();
 
   constructor(
     private readonly lifecycle: ModelLifecycleService,
@@ -224,6 +246,7 @@ export class ReconciliationService {
       await this.safeStep('reconcileMissingRunners', () => this.reconcileMissingRunners());
       await this.safeStep('reconcileInstanceTable', () => this.reconcileInstanceTable());
       await this.safeStep('reapOrphanedInstances', () => this.reapOrphanedInstances());
+      await this.safeStep('reconcileUnclaimedRunners', () => this.reconcileUnclaimedRunners());
       await this.safeStep('refreshMetrics', () => this.refreshMetrics());
 
       reconciliationTickDuration.observe((Date.now() - startedAt) / 1000);
@@ -474,6 +497,9 @@ export class ReconciliationService {
           // below.
           const state = await this.lifecycle.getInstance(victim.modelName, victim.instanceId);
           await sleepWake.stopModel(victim.modelName, victim.instanceId, null);
+          // Runner fate for the record drop below (#286): confirmed only on the branch that
+          // actually reached the worker; a dispatched runner we could not reach is audited.
+          let disposition: RunnerDisposition;
           if (state?.workerId && state.runnerId && this.createWorkerClient) {
             const worker = this.workerPool.getWorker(state.workerId);
             if (worker) {
@@ -486,6 +512,7 @@ export class ReconciliationService {
                   throw stopErr;
                 }
               }
+              disposition = 'runner-stopped';
             } else {
               this.logger.warn(
                 {
@@ -495,17 +522,21 @@ export class ReconciliationService {
                 },
                 'Pool-pressure reap skipped: worker unknown',
               );
+              disposition = 'worker-unreachable';
             }
           } else {
             this.logger.warn(
               { modelName: victim.modelName, instanceId: victim.instanceId },
               'Pool-pressure reap skipped: no runnerId or worker client (nothing dispatched yet)',
             );
+            // A record that claims a runner with no reachable client is not "nothing dispatched":
+            // something was, we just cannot stop it — audit it so the reverse sweep can find it.
+            disposition = state?.runnerId ? 'worker-unreachable' : 'not-dispatched';
           }
           // Registry semantics (matches the route-layer evictions): the DB row for the model
           // is kept; the victim instance's Redis state and Postgres row are cleared, and its
           // placement holds are released by stopModel itself.
-          await this.lifecycle.removeInstance(victim.modelName, victim.instanceId);
+          await this.lifecycle.removeInstance(victim.modelName, victim.instanceId, disposition);
           await this.instanceRepository?.delete(victim.instanceId).catch(() => {});
           eviction.recordEviction('pressure');
           this.logger.info(
@@ -638,7 +669,13 @@ export class ReconciliationService {
             );
           }
           await refreshModelRoutingState(this.lifecycle, this.routingMap, instance.modelName);
-          await this.lifecycle.removeInstance(instance.modelName, instance.instanceId);
+          // The worker is presumed dead: its fate (and the runner's) is unknown by design, which
+          // is exactly the audited 'worker-unreachable' disposition (#286).
+          await this.lifecycle.removeInstance(
+            instance.modelName,
+            instance.instanceId,
+            'worker-unreachable',
+          );
           await this.instanceRepository?.delete(instance.instanceId);
           this.memoryBudget.releaseInstanceReservations(instance.instanceId);
           reconciliationDeadWorkersTotal.inc();
@@ -872,14 +909,21 @@ export class ReconciliationService {
         // its runner process — teardownInstance's own reap can fail non-404 and retain the
         // record for exactly this step to retry, and reconciliation was previously the dead end
         // where that retained record silently vanished next tick with the process still alive.
+        // Runner fate for the drop below (#286): only the branch that reached the worker can
+        // claim a stop; the two "drop anyway" shapes are audited.
+        let disposition: RunnerDisposition = instance.runnerId
+          ? 'worker-unreachable'
+          : 'not-dispatched';
         if (instance.workerId && instance.runnerId && this.createWorkerClient) {
           const worker = this.workerPool.getWorker(instance.workerId);
           if (worker) {
             try {
               await this.createWorkerClient(worker.managementUrl).stopRunner(instance.runnerId);
+              disposition = 'runner-stopped';
             } catch (stopErr) {
               if (stopErr instanceof WorkerHttpError && stopErr.status === 404) {
                 // Already gone — fall through to the usual cleanup below.
+                disposition = 'runner-stopped';
               } else {
                 this.logger.warn(
                   {
@@ -913,7 +957,7 @@ export class ReconciliationService {
             instance.runnerEnginePort ?? instance.runnerPort,
           );
         }
-        await this.lifecycle.removeInstance(instance.modelName, instance.instanceId);
+        await this.lifecycle.removeInstance(instance.modelName, instance.instanceId, disposition);
         this.logger.info(
           { modelName: instance.modelName, instanceId: instance.instanceId },
           'Reaped orphaned Redis instance with no matching model row',
@@ -928,6 +972,213 @@ export class ReconciliationService {
           'Failed to reap orphaned instance',
         );
       }
+    }
+  }
+
+  /**
+   * Runner→instance reconciliation (#286): the only direction that can recover a runner whose
+   * instance record is already gone. Every other step here is record-driven; this one asks each
+   * reachable worker what it is actually hosting and stops what the control plane cannot account
+   * for.
+   *
+   * Safety design (a bad predicate here would kill serving models):
+   * - only workers that are not OFFLINE are probed — same reachability rule as
+   *   reconcileMissingRunners (see its docblock); a worker that cannot answer is inconclusive,
+   *   never evidence;
+   * - a runner whose `instanceId` matches ANY record is claimed and never touched — a retained
+   *   STOPPED/ERROR record still means the control plane knows the process exists;
+   * - mass-divergence refusal: with zero instance records in Redis, Redis state itself is evidently
+   *   gone (the #241 signature) and reaping would stop every serving model. Refuse, publish one
+   *   event per affected worker per episode (not per tick — the refusal is recounted every cycle,
+   *   the red row is not repeated), and leave adopt-vs-reap to #241;
+   * - two-tick confirmation: a transient delete racing a dispatch is a seconds-scale phenomenon,
+   *   a leak is permanent. Reaping on the second consecutive observation costs one interval and
+   *   removes the whole class of race-kill;
+   * - bounded work per cycle: at most UNCLAIMED_REAP_MAX_PER_CYCLE reaps, and the confirmation
+   *   map only holds keys observed this tick — a worker advertising a huge registry cannot turn
+   *   one tick into an unbounded stop loop or unbounded leader memory (#286 review);
+   * - the Postgres ledger is never touched: an unclaimed runner has no record to delete by
+   *   construction, and reconcileInstanceTable owns Redis→Postgres pruning.
+   */
+  private async reconcileUnclaimedRunners(): Promise<void> {
+    if (!this.createWorkerClient) return;
+    const createWorkerClient = this.createWorkerClient;
+
+    const workers = this.workerPool
+      .getAllWorkers()
+      .filter((w) => w.status !== WorkerStatus.OFFLINE);
+    if (workers.length === 0) {
+      this.unclaimedRunnerTicks.clear();
+      this.massDivergenceReported.clear();
+      return;
+    }
+
+    // Strict: a partially-read record set would make live runners look unclaimed, and this read
+    // decides what gets killed. A per-key read failure rejects, so the tick's safeStep aborts with
+    // no reap instead of acting on a set it could not fully read (#286 review).
+    const live = await this.lifecycle.getAllInstances({ strict: true });
+    const claimed = new Set(live.map((i) => i.instanceId));
+    const observed = new Set<string>();
+    const perWorker: Array<{
+      workerId: string;
+      managementUrl: string;
+      unclaimed: RunnerSummary[];
+    }> = [];
+
+    for (const worker of workers) {
+      let runners: RunnerSummary[];
+      try {
+        runners = await createWorkerClient(worker.managementUrl).listRunners();
+      } catch (err) {
+        // Inconclusive: the worker is not OFFLINE but could not answer. Never reap on a failed
+        // probe (reapOrphanedInstances / reconcileMissingRunners share this rule).
+        this.logger.warn(
+          {
+            workerId: worker.workerId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'Runner enumeration failed — skipping unclaimed-runner sweep for this worker',
+        );
+        continue;
+      }
+      const unclaimed = runners.filter((r) => !claimed.has(r.instanceId));
+      for (const runner of unclaimed) observed.add(`${worker.workerId}:${runner.instanceId}`);
+      if (unclaimed.length > 0) {
+        perWorker.push({
+          workerId: worker.workerId,
+          managementUrl: worker.managementUrl,
+          unclaimed,
+        });
+      }
+    }
+
+    // Entries not observed this tick are dropped: a runner that disappeared (or whose worker
+    // became unreachable) must re-earn its confirmation window.
+    for (const key of [...this.unclaimedRunnerTicks.keys()]) {
+      if (!observed.has(key)) this.unclaimedRunnerTicks.delete(key);
+    }
+
+    const totalUnclaimed = perWorker.reduce((sum, w) => sum + w.unclaimed.length, 0);
+    if (totalUnclaimed === 0) {
+      this.massDivergenceReported.clear();
+      return;
+    }
+
+    if (live.length === 0) {
+      // Mass divergence: nothing to account for anything. Clear the confirmation counters so a
+      // post-recovery reap still needs two fresh observations.
+      this.unclaimedRunnerTicks.clear();
+      for (const { workerId, unclaimed } of perWorker) {
+        // The refusal is counted per tick (it is a per-tick fact), but the event is published once
+        // per worker per divergence episode: a long-lived #241 state must not add one red row per
+        // worker on every interval.
+        reconciliationUnclaimedRunnersTotal.inc({ action: 'refused' });
+        this.logger.error(
+          {
+            workerId,
+            runnerIds: unclaimed.map((r) => r.runnerId),
+            instanceIds: unclaimed.map((r) => r.instanceId),
+          },
+          'Refusing to reap unclaimed runners: the control plane holds no instance records at all (mass divergence — see #241)',
+        );
+        if (this.massDivergenceReported.has(workerId)) continue;
+        this.massDivergenceReported.add(workerId);
+        await this.publishClusterEvent({
+          type: ClusterEventType.RUNNER_ORPHANED,
+          workerId,
+          timestamp: new Date().toISOString(),
+          message:
+            'Unclaimed runners detected while the control plane holds no instance records — refusing to reap (mass-divergence guard, #241)',
+          data: {
+            reason: 'mass-divergence',
+            runnerIds: unclaimed.map((r) => r.runnerId),
+            modelNames: [...new Set(unclaimed.map((r) => r.modelName))],
+          },
+        });
+      }
+      return;
+    }
+
+    // Past the guard: the divergence has cleared, so a later episode is reported again.
+    this.massDivergenceReported.clear();
+
+    let reapBudget = UNCLAIMED_REAP_MAX_PER_CYCLE;
+    let deferred = 0;
+    for (const { workerId, managementUrl, unclaimed } of perWorker) {
+      for (const runner of unclaimed) {
+        const key = `${workerId}:${runner.instanceId}`;
+        const ticks = (this.unclaimedRunnerTicks.get(key) ?? 0) + 1;
+        this.unclaimedRunnerTicks.set(key, ticks);
+        if (ticks < UNCLAIMED_REAP_CONFIRM_TICKS) {
+          this.logger.info(
+            { workerId, runnerId: runner.runnerId, instanceId: runner.instanceId, ticks },
+            'Unclaimed runner observed — awaiting confirmation before reaping',
+          );
+          continue;
+        }
+        if (reapBudget === 0) {
+          // Confirmed but out of budget: the counter stays armed, so this is reaped next cycle.
+          // Counted, then summarised once below — a hostile registry must not flood the log either.
+          deferred++;
+          continue;
+        }
+        reapBudget--;
+
+        try {
+          await createWorkerClient(managementUrl).stopRunner(runner.runnerId);
+        } catch (err) {
+          if (!(err instanceof WorkerHttpError && err.status === 404)) {
+            // Leave the counter armed (= confirm threshold) and retry next tick: the runner is
+            // still listed, so the divergence is self-healing.
+            this.logger.warn(
+              {
+                workerId,
+                runnerId: runner.runnerId,
+                instanceId: runner.instanceId,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'Failed to stop unclaimed runner — retrying next tick',
+            );
+            continue;
+          }
+          // 404 = already gone; fall through and account it as reaped.
+        }
+
+        this.unclaimedRunnerTicks.delete(key);
+        reconciliationUnclaimedRunnersTotal.inc({ action: 'reaped' });
+        this.logger.info(
+          { workerId, runnerId: runner.runnerId, instanceId: runner.instanceId },
+          'Stopped leaked runner with no control-plane instance record',
+        );
+        this.notifications
+          ?.createNotification({
+            title: 'Leaked runner stopped',
+            description: `${runner.modelName} (${runner.instanceId}) was running on ${workerId} with no control-plane record`,
+            variant: 'warning',
+            source: { type: 'worker', name: workerId },
+          })
+          .catch(() => {});
+        await this.publishClusterEvent({
+          type: ClusterEventType.RUNNER_ORPHANED,
+          modelName: runner.modelName,
+          workerId,
+          timestamp: new Date().toISOString(),
+          message: `Leaked runner ${runner.runnerId} stopped (no instance record)`,
+          data: {
+            runnerId: runner.runnerId,
+            instanceId: runner.instanceId,
+            modelName: runner.modelName,
+            reason: 'unclaimed',
+          },
+        });
+      }
+    }
+
+    if (deferred > 0) {
+      this.logger.warn(
+        { deferred, maxPerCycle: UNCLAIMED_REAP_MAX_PER_CYCLE },
+        'Unclaimed-runner reap budget exhausted — deferring the rest to the next cycle',
+      );
     }
   }
 
@@ -1043,7 +1294,12 @@ export class ReconciliationService {
           );
         }
         await refreshModelRoutingState(this.lifecycle, this.routingMap, instance.modelName);
-        await this.lifecycle.removeInstance(instance.modelName, instance.instanceId);
+        // The probe above answered 404: the worker does not host this runner (#286).
+        await this.lifecycle.removeInstance(
+          instance.modelName,
+          instance.instanceId,
+          'runner-absent',
+        );
         await this.instanceRepository?.delete(instance.instanceId);
         this.memoryBudget.releaseInstanceReservations(instance.instanceId);
         reconciliationMissingRunnersTotal.inc();
@@ -1126,7 +1382,11 @@ export class ReconciliationService {
             instance.runnerEnginePort ?? instance.runnerPort,
           );
         }
-        await this.lifecycle.removeInstance(instance.modelName, instance.instanceId);
+        await this.lifecycle.removeInstance(
+          instance.modelName,
+          instance.instanceId,
+          lookup.status === 'ready' ? 'runner-stopped' : 'runner-absent',
+        );
         await this.instanceRepository?.delete(instance.instanceId);
         this.memoryBudget.releaseInstanceReservations(instance.instanceId);
         await refreshModelRoutingState(this.lifecycle, this.routingMap, instance.modelName);

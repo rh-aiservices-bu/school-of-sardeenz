@@ -200,7 +200,7 @@ describe.skipIf(!AVAILABLE)('Instances integration (#120: logical model / instan
 
       // Stop instance A only — mirrors DELETE /api/v1/models/:modelName/instances/:instanceId.
       await harness.sleepWake.stopModel(MODEL, INSTANCE_A, null);
-      await harness.lifecycle.removeInstance(MODEL, INSTANCE_A);
+      await harness.lifecycle.removeInstance(MODEL, INSTANCE_A, 'runner-stopped');
 
       entry = await harness.routingMap.getEntry(MODEL);
       expect(entry).not.toBeNull();
@@ -353,7 +353,7 @@ describe.skipIf(!AVAILABLE)('Instances integration (#120: logical model / instan
 
         // Step 4: drain + remove the old instance — the "stop old" move step.
         await harness.sleepWake.stopModel(MODEL, INSTANCE_OLD, null);
-        await harness.lifecycle.removeInstance(MODEL, INSTANCE_OLD);
+        await harness.lifecycle.removeInstance(MODEL, INSTANCE_OLD, 'runner-stopped');
 
         // Let the load loop keep sampling briefly after the removal too.
         await new Promise((r) => setTimeout(r, 50));

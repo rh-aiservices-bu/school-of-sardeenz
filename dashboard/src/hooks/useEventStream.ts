@@ -80,6 +80,11 @@ export function useEventStreamConnection(): EventStreamState {
             void queryClient.invalidateQueries({ queryKey: ['cluster'] });
             void queryClient.invalidateQueries({ queryKey: ['metrics'] });
             break;
+          case ClusterEventType.RUNNER_ORPHANED:
+            void queryClient.invalidateQueries({ queryKey: ['models'] });
+            void queryClient.invalidateQueries({ queryKey: ['workers'] });
+            void queryClient.invalidateQueries({ queryKey: ['cluster'] });
+            break;
           case ClusterEventType.PLACEMENT_COMPLETED:
             void queryClient.invalidateQueries({ queryKey: ['models'] });
             void queryClient.invalidateQueries({ queryKey: ['workers'] });

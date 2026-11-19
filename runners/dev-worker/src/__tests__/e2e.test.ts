@@ -256,6 +256,48 @@ describe('Dev Worker E2E', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it('GET /runners lists the running runner, then nothing after stop (#286)', async () => {
+    const started = await fetch(`${baseUrl}/runners`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        modelName: 'list-model',
+        instanceId: 'inst-list-model',
+        runnerType: 'vllm',
+        modelPath: '/models/list',
+        requiredMemory: 1024 * 1024 * 1024,
+        tensorParallel: 1,
+        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      }),
+    });
+    expect(started.status).toBe(201);
+    const { runnerId, host, port } = (await started.json()) as {
+      runnerId: string;
+      host: string;
+      port: number;
+    };
+
+    const listed = await fetch(`${baseUrl}/runners`);
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as {
+      runners: Array<{ runnerId: string; instanceId: string; state: string; port?: number }>;
+    };
+    const entry = body.runners.find((r) => r.runnerId === runnerId);
+    expect(entry).toMatchObject({
+      instanceId: 'inst-list-model',
+      state: 'READY',
+      host,
+      port,
+    });
+
+    expect((await fetch(`${baseUrl}/runners/${runnerId}`, { method: 'DELETE' })).status).toBe(204);
+
+    const afterStop = (await (await fetch(`${baseUrl}/runners`)).json()) as {
+      runners: Array<{ runnerId: string }>;
+    };
+    expect(afterStop.runners.some((r) => r.runnerId === runnerId)).toBe(false);
+  });
 });
 
 async function waitForState(runnerUrl: string, target: string, timeoutMs: number): Promise<void> {

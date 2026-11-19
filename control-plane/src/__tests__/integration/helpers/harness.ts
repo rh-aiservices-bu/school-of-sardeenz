@@ -3,7 +3,7 @@ import pg from 'pg';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { WorkerAgentComponents } from '@sardeenz/types';
+import type { ControlPlaneComponents, WorkerAgentComponents } from '@sardeenz/types';
 import { ModelType, SleepLevel } from '@sardeenz/types';
 
 import { loadRootEnv } from '../../../load-env.js';
@@ -13,6 +13,7 @@ import { runMigrations } from '../../../clients/migrations.js';
 import { ModelRepository } from '../../../services/model-repository.js';
 import { InstanceRepository } from '../../../services/instance-repository.js';
 import { ModelLifecycleService } from '../../../services/model-lifecycle.js';
+import { ClusterEventPublisher } from '../../../services/cluster-events.js';
 import { MemoryBudgetService } from '../../../services/memory-budget.js';
 import { WorkerPoolService } from '../../../services/worker-pool.js';
 import { RoutingMapService } from '../../../services/routing-map.js';
@@ -136,6 +137,14 @@ export interface TestHarness {
   sleepWake: SleepWakeService;
   deployOrchestration: DeployOrchestrationService;
   registerWorker(opts: RegisterWorkerOpts): Promise<void>;
+  /**
+   * Subscribe to this harness's `{prefix}:cluster-events` channel (the one the BFF relays to the
+   * dashboard). Resolves to an unsubscribe function. Used by the #286 reconciliation test to see the
+   * RUNNER_ORPHANED events the sweep publishes for real rather than through a spy.
+   */
+  subscribeClusterEvents(
+    handler: (event: ControlPlaneComponents['schemas']['ClusterEvent']) => void,
+  ): Promise<() => Promise<void>>;
   setup(): Promise<void>;
   teardown(): Promise<void>;
 }
@@ -189,7 +198,11 @@ export function createHarness(): TestHarness {
 
   const modelRepository = new ModelRepository(db);
   const instanceRepository = new InstanceRepository(db);
-  const lifecycle = new ModelLifecycleService(redis, keyPrefix);
+  // Same wiring as production (control-plane/src/index.ts): one publisher on this harness's
+  // `{prefix}:cluster-events` channel, so the record-dropped events `removeInstance` publishes are
+  // observable here through `subscribeClusterEvents` rather than invisible to the suite.
+  const clusterEvents = new ClusterEventPublisher(redis, keyPrefix);
+  const lifecycle = new ModelLifecycleService(redis, keyPrefix, clusterEvents);
   const memoryBudget = new MemoryBudgetService(redis, keyPrefix, 30);
   const workerPool = new WorkerPoolService(redis, keyPrefix, 300);
   const routingMap = new RoutingMapService(redis, keyPrefix);
@@ -258,6 +271,21 @@ export function createHarness(): TestHarness {
     await memoryBudget.refreshAll();
   }
 
+  async function subscribeClusterEvents(
+    handler: (event: ControlPlaneComponents['schemas']['ClusterEvent']) => void,
+  ): Promise<() => Promise<void>> {
+    const sub = new Redis(REDIS_URL, { lazyConnect: true });
+    await sub.connect();
+    await sub.subscribe(redisKey(keyPrefix, 'cluster-events'));
+    sub.on('message', (_chan: string, message: string) => {
+      handler(JSON.parse(message) as ControlPlaneComponents['schemas']['ClusterEvent']);
+    });
+    return async () => {
+      await sub.unsubscribe();
+      sub.disconnect();
+    };
+  }
+
   async function setup(): Promise<void> {
     // Last line of defence: the truncation below must only ever hit a dedicated test DB.
     if (!ALLOW_NON_TEST_DB && !isTestDatabase(DATABASE_URL)) {
@@ -307,6 +335,7 @@ export function createHarness(): TestHarness {
     sleepWake,
     deployOrchestration,
     registerWorker,
+    subscribeClusterEvents,
     setup,
     teardown,
   };

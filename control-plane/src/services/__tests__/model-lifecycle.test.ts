@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
 
 import {
@@ -226,7 +227,7 @@ describe('ModelLifecycleService instance-keyed round trips', () => {
     const all = await service.getAllInstances();
     expect(all.map((i) => i.instanceId).sort()).toEqual(['inst-a', 'inst-b']);
 
-    await service.removeInstance('my-model', 'inst-a');
+    await service.removeInstance('my-model', 'inst-a', 'runner-stopped');
     expect(await service.getInstance('my-model', 'inst-a')).toBeNull();
     expect(await service.getInstance('my-model', 'inst-b')).not.toBeNull();
   });
@@ -306,6 +307,51 @@ describe('getAllInstances legacy-key boundary (boundary review MEDIUM-1 / LOW-1)
     const forModel = await service.getInstancesForModel('legacy-model');
 
     expect(forModel).toEqual([]);
+  });
+});
+
+describe('getAllInstances strict read (#286 review)', () => {
+  const RECORD = JSON.stringify({
+    instanceId: 'inst-a',
+    modelName: 'model-a',
+    state: ModelLifecycleState.ACTIVE,
+    workerId: 'w1',
+  });
+
+  /** `scan` returns two instance keys; `exec` returns whatever the case hands it. */
+  function buildServiceWith(results: Array<[Error | null, string | null]>): ModelLifecycleService {
+    const redis = {
+      scan: vi
+        .fn()
+        .mockResolvedValue(['0', ['test:models:model-a:inst-a', 'test:models:b:inst-b']]),
+      pipeline: () => ({
+        get: vi.fn(),
+        exec: vi.fn().mockResolvedValue(results),
+      }),
+    } as unknown as Redis;
+    return new ModelLifecycleService(redis, 'test');
+  }
+
+  it('rejects instead of returning a partial set when a key cannot be read', async () => {
+    const service = buildServiceWith([
+      [null, RECORD],
+      [new Error('LOADING Redis is loading the dataset in memory'), null],
+    ]);
+
+    await expect(service.getAllInstances({ strict: true })).rejects.toThrow(
+      'Instance-state read failed for one key',
+    );
+  });
+
+  it('skips the unreadable key for read-only callers that only display state', async () => {
+    const service = buildServiceWith([
+      [null, RECORD],
+      [new Error('LOADING Redis is loading the dataset in memory'), null],
+    ]);
+
+    const all = await service.getAllInstances();
+
+    expect(all.map((i) => i.instanceId)).toEqual(['inst-a']);
   });
 });
 
@@ -520,5 +566,219 @@ describe('ModelLifecycleService.getLastInferenceTimestamps', () => {
     const service = new ModelLifecycleService(redis, 'test');
     const result = await service.getLastInferenceTimestamps(['model-a', 'model-b']);
     expect(result.size).toBe(0);
+  });
+});
+
+describe('ModelLifecycleService.removeInstance disposition boundary (#286)', () => {
+  const MODEL = 'teardown-model';
+  const INSTANCE = 'inst-teardown';
+  const KEY = `test:models:${MODEL}:${INSTANCE}`;
+
+  function record(overrides: Partial<InstanceState> = {}): string {
+    return JSON.stringify({
+      instanceId: INSTANCE,
+      modelName: MODEL,
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'worker-1',
+      runnerHost: '10.0.0.1',
+      runnerPort: 8000,
+      runnerId: 'runner-1',
+      deviceIndices: [0],
+      lastInferenceAt: null,
+      stateChangedAt: new Date().toISOString(),
+      errorMessage: null,
+      ...overrides,
+    });
+  }
+
+  function buildService(seed: Record<string, string>) {
+    const { redis, store } = buildMockRedisStore(seed);
+    const events = { publish: vi.fn<(event: unknown) => Promise<void>>(() => Promise.resolve()) };
+    const logger = { error: vi.fn() };
+    const service = new ModelLifecycleService(redis, 'test', events, logger);
+    return { service, store, events, logger };
+  }
+
+  it('is a no-op for a missing record and publishes nothing', async () => {
+    const { service, events, logger } = buildService({});
+
+    await expect(
+      service.removeInstance(MODEL, INSTANCE, 'operator-forced'),
+    ).resolves.toBeUndefined();
+
+    expect(events.publish).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('deletes silently for a confirmed stop', async () => {
+    const { service, store, events, logger } = buildService({ [KEY]: record() });
+
+    await service.removeInstance(MODEL, INSTANCE, 'runner-stopped');
+
+    expect(store.has(KEY)).toBe(false);
+    expect(events.publish).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('deletes silently for a runner the worker proved absent', async () => {
+    const { service, store, events } = buildService({ [KEY]: record() });
+
+    await service.removeInstance(MODEL, INSTANCE, 'runner-absent');
+
+    expect(store.has(KEY)).toBe(false);
+    expect(events.publish).not.toHaveBeenCalled();
+  });
+
+  it("audits an 'operator-forced' drop of a record that claims a runner", async () => {
+    const { service, store, events, logger } = buildService({ [KEY]: record() });
+
+    await service.removeInstance(MODEL, INSTANCE, 'operator-forced');
+
+    expect(store.has(KEY)).toBe(false);
+    expect(logger.error).toHaveBeenCalledOnce();
+    expect(logger.error).toHaveBeenCalledWith(
+      {
+        modelName: MODEL,
+        instanceId: INSTANCE,
+        workerId: 'worker-1',
+        runnerId: 'runner-1',
+        disposition: 'operator-forced',
+      },
+      'Instance record dropped without a confirmed runner stop',
+    );
+    expect(events.publish).toHaveBeenCalledOnce();
+    expect(events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'RUNNER_ORPHANED',
+        modelName: MODEL,
+        workerId: 'worker-1',
+        message: 'Instance record dropped without a confirmed runner stop',
+        data: {
+          instanceId: INSTANCE,
+          runnerId: 'runner-1',
+          disposition: 'operator-forced',
+          reason: 'record-dropped',
+        },
+      }),
+    );
+  });
+
+  it("audits 'worker-unreachable' with a workerId but no runnerId", async () => {
+    const { service, store, events } = buildService({
+      [KEY]: record({ runnerId: null, runnerHost: null, runnerPort: null }),
+    });
+
+    await service.removeInstance(MODEL, INSTANCE, 'worker-unreachable');
+
+    expect(store.has(KEY)).toBe(false);
+    expect(events.publish).toHaveBeenCalledOnce();
+    expect(events.publish.mock.calls[0]?.[0]).toMatchObject({
+      type: 'RUNNER_ORPHANED',
+      workerId: 'worker-1',
+      data: { instanceId: INSTANCE, disposition: 'worker-unreachable', reason: 'record-dropped' },
+    });
+  });
+
+  it("deletes silently for 'worker-unreachable' when the record claims neither identity", async () => {
+    const { service, store, events, logger } = buildService({
+      [KEY]: record({ workerId: null, runnerId: null }),
+    });
+
+    await service.removeInstance(MODEL, INSTANCE, 'worker-unreachable');
+
+    expect(store.has(KEY)).toBe(false);
+    expect(events.publish).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('publishes nothing when the DEL fails: no record was dropped', async () => {
+    const { redis, store } = buildMockRedisStore({ [KEY]: record() });
+    const events = { publish: vi.fn(() => Promise.resolve()) };
+    const logger = { error: vi.fn() };
+    const service = new ModelLifecycleService(redis, 'test', events, logger);
+    (redis.del as unknown as Mock).mockRejectedValueOnce(new Error('redis unavailable'));
+
+    await expect(service.removeInstance(MODEL, INSTANCE, 'operator-forced')).rejects.toThrow(
+      'redis unavailable',
+    );
+
+    // The event and the log both claim a drop; neither may happen when the drop did not.
+    expect(store.has(KEY)).toBe(true);
+    expect(events.publish).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('publishes once, after the record is gone, on a confirmed forced drop', async () => {
+    const { service, store, events } = buildService({ [KEY]: record() });
+
+    await service.removeInstance(MODEL, INSTANCE, 'operator-forced');
+
+    expect(store.has(KEY)).toBe(false);
+    expect(events.publish).toHaveBeenCalledOnce();
+  });
+
+  it('never fails the removal when the publisher rejects, and logs the failed event', async () => {
+    const { redis, store } = buildMockRedisStore({ [KEY]: record() });
+    const events = { publish: vi.fn(() => Promise.reject(new Error('redis down'))) };
+    const logger = { error: vi.fn() };
+    const service = new ModelLifecycleService(redis, 'test', events, logger);
+
+    await expect(
+      service.removeInstance(MODEL, INSTANCE, 'operator-forced'),
+    ).resolves.toBeUndefined();
+
+    expect(store.has(KEY)).toBe(false);
+    expect(events.publish).toHaveBeenCalledOnce();
+    // One line for the audited drop, one for the event that never reached the sink.
+    expect(logger.error).toHaveBeenCalledTimes(2);
+    const publishFailure = logger.error.mock.calls.find(
+      (call) => call[1] === 'Failed to publish RUNNER_ORPHANED cluster event',
+    );
+    expect(publishFailure?.[0]).toMatchObject({
+      modelName: MODEL,
+      instanceId: INSTANCE,
+      disposition: 'operator-forced',
+      event: 'RUNNER_ORPHANED',
+    });
+    expect((publishFailure?.[0] as { err: unknown } | undefined)?.err).toHaveProperty(
+      'message',
+      'redis down',
+    );
+  });
+
+  it('never fails the removal when the publisher throws synchronously, and logs it', async () => {
+    const { redis, store } = buildMockRedisStore({ [KEY]: record() });
+    const events = {
+      publish: vi.fn(() => {
+        throw new Error('publisher exploded');
+      }),
+    };
+    const logger = { error: vi.fn() };
+    const service = new ModelLifecycleService(redis, 'test', events, logger);
+
+    await expect(
+      service.removeInstance(MODEL, INSTANCE, 'operator-forced'),
+    ).resolves.toBeUndefined();
+
+    expect(store.has(KEY)).toBe(false);
+    const publishFailure = logger.error.mock.calls.find(
+      (call) => call[1] === 'Failed to publish RUNNER_ORPHANED cluster event',
+    );
+    expect(publishFailure?.[0]).toMatchObject({ disposition: 'operator-forced' });
+    expect((publishFailure?.[0] as { err: unknown } | undefined)?.err).toHaveProperty(
+      'message',
+      'publisher exploded',
+    );
+  });
+
+  it('deletes without a publisher injected', async () => {
+    const { redis, store } = buildMockRedisStore({ [KEY]: record() });
+    const service = new ModelLifecycleService(redis, 'test');
+
+    await expect(
+      service.removeInstance(MODEL, INSTANCE, 'operator-forced'),
+    ).resolves.toBeUndefined();
+
+    expect(store.has(KEY)).toBe(false);
   });
 });

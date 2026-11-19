@@ -89,7 +89,7 @@ Browser → EventSource(/api/events) — authenticated by the HttpOnly `sardeenz
 The BFF's SSE relay subscribes to two Redis pub/sub channels:
 
 - **`{prefix}:routing-updates`** — Published by `RoutingMapService` during model state transitions and endpoint changes. The BFF translates `RoutingMapUpdate` payloads into `ClusterEvent` objects. The proxy also subscribes to this channel for routing table sync.
-- **`{prefix}:cluster-events`** — Published by `ReconciliationService` during the reconciliation loop. Carries `ClusterEvent` payloads directly (worker join/leave, memory updates). The BFF forwards these as-is without translation.
+- **`{prefix}:cluster-events`** — Published by `ReconciliationService` during the reconciliation loop **and by `ModelLifecycleService` (`ClusterEventPublisher`) when an instance record is dropped without a confirmed runner stop**. Carries `ClusterEvent` payloads directly (worker join/leave, memory updates, and `RUNNER_ORPHANED` for leaked/unaudited runner records). The BFF forwards these as-is without translation.
 
 The two-channel design keeps the proxy's hot path (`routing-updates`) free of events it doesn't consume. Each connected browser client gets its own dedicated Redis subscriber connection; the subscriber is created on SSE handshake and cleaned up when the client disconnects.
 

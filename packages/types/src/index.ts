@@ -37,5 +37,6 @@ export type {
 } from './generated/worker-agent.js';
 export {
   RunnerByInstanceResponseState,
+  RunnerProcessState,
   InstanceMemoryMeasurementAttribution,
 } from './generated/worker-agent.js';

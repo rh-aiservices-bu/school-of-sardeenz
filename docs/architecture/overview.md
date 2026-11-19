@@ -117,6 +117,7 @@ Key responsibilities:
 - **Workload placement.** Matches model requirements → compatible runner type → capable worker → best candidate (see [Worker and Runner Model](#worker-and-runner-model)). Operators can also move one active instance to an explicit compatible worker and device set. A durable transaction creates a healthy replacement, atomically sets the old endpoint's weight to zero, waits for every serving proxy to apply and quiesce the old routing generation, then drains and stops the source; leader reconciliation resumes any interrupted phase.
 - **Routing map management.** Writes the routing map to Redis/Valkey, which the proxy consumes.
 - **Worker pool management.** Detects workers joining or leaving the pool dynamically without requiring a restart.
+- **Reconciliation.** The leader runs a periodic tick that heals divergence between Redis/Valkey state, workers and runners. Reconciliation also runs the opposite direction: each tick the leader lists every reachable worker's registry (`GET /runners`) and stops runners whose `instanceId` has no control-plane record — after a second consecutive observation — publishing `RUNNER_ORPHANED`; if the control plane holds no instance records at all it refuses (mass divergence, #241).
 - **Runner catalog + SIF import.** Loads a catalog of available runner SIFs and imports them on demand by pulling signed SIFs from an OCI registry (ORAS) onto the shared module store — see [ADR-018](adrs/adr-018-runner-catalog-oras-distribution.md).
 
 ### Admin Dashboard
@@ -146,7 +147,7 @@ This independence means the dashboard can display cluster state and metrics even
 
 Each worker runs a three-layer process architecture:
 
-1. **Worker agent** — a long-lived management process inside the worker Pod. It self-registers to Redis/Valkey (capabilities, devices, heartbeat), receives commands from the control plane to start and stop runners, and exposes an HTTP management API (`POST /runners`, `DELETE /runners/{runnerId}`).
+1. **Worker agent** — a long-lived management process inside the worker Pod. It self-registers to Redis/Valkey (capabilities, devices, heartbeat), receives commands from the control plane to start and stop runners, and exposes an HTTP management API (`POST /runners`, `GET /runners` (registry enumeration), `DELETE /runners/{runnerId}`).
 
 2. **Runner** — a separate process spawned by the worker agent, one per model **instance**. A logical model may have several instances (replicas) — including more than one on the same worker — each with its own runner process (see [ADR-019](adrs/adr-019-logical-model-vs-instance-split.md)). Each runner is a thin engine-specific shim that:
    - Executes its engine **SIF** in place — `apptainer exec --nv /modules/<engine>-<version>.sif <serve cmd>` — from the shared RWX module store (no per-host copy)
@@ -296,12 +297,12 @@ Worker agent (long-lived, manages everything)
 
 ### Communication Channels
 
-| Channel                       | Direction            | Purpose                                                                 |
-| ----------------------------- | -------------------- | ----------------------------------------------------------------------- |
-| Control plane → Worker agent  | Process management   | `POST /runners` to start a runner, `DELETE /runners/{id}` to stop one   |
-| Control plane → Runner        | Lifecycle management | `/health`, `/sleep`, `/wake` — the runner contract                      |
-| Proxy → Runner                | Inference traffic    | Direct request forwarding, no control plane involvement on the hot path |
-| Worker agent → Redis / Valkey | Self-registration    | Capabilities, devices, heartbeat, management URL                        |
+| Channel                       | Direction            | Purpose                                                                                                                  |
+| ----------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Control plane → Worker agent  | Process management   | `POST /runners` to start a runner, `GET /runners` to enumerate the worker's registry, `DELETE /runners/{id}` to stop one |
+| Control plane → Runner        | Lifecycle management | `/health`, `/sleep`, `/wake` — the runner contract                                                                       |
+| Proxy → Runner                | Inference traffic    | Direct request forwarding, no control plane involvement on the hot path                                                  |
+| Worker agent → Redis / Valkey | Self-registration    | Capabilities, devices, heartbeat, management URL                                                                         |
 
 ### Why Runners Are Separate Processes
 

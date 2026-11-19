@@ -352,7 +352,21 @@ export class MoveOrchestrationService {
         }
       }
 
-      await this.lifecycle.removeInstance(operation.modelName, instance.instanceId);
+      // The stop above is confirmed by construction for the shapes it covers: a runnerId with a
+      // workerId means the owning worker acknowledged it (2xx or tolerated 404 — an unknown worker
+      // threw), and no runnerId means nothing was dispatched. A runnerId with no workerId skipped
+      // that block entirely, so nothing is confirmed — same shape-and-verdict rule as
+      // `teardownInstance` (routes/models.ts): something was dispatched, we just cannot reach it,
+      // so it is audited and the reverse sweep finds the runner by instanceId (#286).
+      await this.lifecycle.removeInstance(
+        operation.modelName,
+        instance.instanceId,
+        instance.runnerId
+          ? instance.workerId
+            ? 'runner-stopped'
+            : 'worker-unreachable'
+          : 'not-dispatched',
+      );
       await this.instanceRepository.delete(instance.instanceId).catch(() => {});
       this.memoryBudget.releaseInstanceReservations(instance.instanceId);
       return true;

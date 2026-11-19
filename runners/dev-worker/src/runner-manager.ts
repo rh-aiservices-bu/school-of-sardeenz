@@ -3,8 +3,16 @@ import type { WorkerRegistration } from './registration.js';
 import type { LaunchHandle, LogSink, RunnerLauncher } from './launcher.js';
 import { StubLauncher } from './stub-launcher.js';
 import { MAX_RETAINED, RunnerLogBuffer } from './runner-log-buffer.js';
+import { RunnerProcessState, type WorkerAgentComponents } from '@sardeenz/types';
 import { randomUUID } from 'node:crypto';
 import { createServer as netCreateServer } from 'node:net';
+
+/**
+ * One row of `GET /runners` (worker-agent contract `RunnerSummary`, #286). Typed against the
+ * generated contract so a spec change that this view does not follow fails typecheck here instead
+ * of drifting silently.
+ */
+export type RunnerSummary = WorkerAgentComponents['schemas']['RunnerSummary'];
 
 /** One instance's ledger-simulated bytes on one device — see getLedgerInstanceShares(). */
 export interface LedgerInstanceShare {
@@ -404,6 +412,42 @@ export class RunnerManager {
 
   getAllRunners(): RunnerRecord[] {
     return Array.from(this.runners.values());
+  }
+
+  /**
+   * The worker's runner registry as the worker-agent contract `RunnerSummary` list (#286):
+   * READY runners plus launches still in flight. Includes `pendingRunners` on purpose — a start
+   * that is still awaiting engine health is exactly the window in which the control plane may
+   * have lost the record that requested it, and the reverse sweep must be able to see it.
+   *
+   * READY records come from `this.runners` (populated at the end of `startRunner`); STARTING
+   * records from `this.pendingRunners` (populated in `startRunner`, cleared in its `finally`).
+   * The two are disjoint at every point a request can observe them: the runner is inserted into
+   * `runners` and removed from `pendingRunners` in the same synchronous tail of `startRunner`,
+   * and this method is synchronous, so no interleaving is possible.
+   */
+  getAllRunnerSummaries(): RunnerSummary[] {
+    const summaries: RunnerSummary[] = [];
+    for (const record of this.runners.values()) {
+      summaries.push({
+        runnerId: record.runnerId,
+        instanceId: record.instanceId,
+        modelName: record.modelName,
+        state: RunnerProcessState.READY,
+        host: record.host,
+        port: record.port,
+        enginePort: record.enginePort,
+      });
+    }
+    for (const [runnerId, pending] of this.pendingRunners) {
+      summaries.push({
+        runnerId,
+        instanceId: pending.instanceId,
+        modelName: pending.modelName,
+        state: RunnerProcessState.STARTING,
+      });
+    }
+    return summaries;
   }
 
   // Runners whose launcher recorded a process PID (the ApptainerLauncher; the StubLauncher never

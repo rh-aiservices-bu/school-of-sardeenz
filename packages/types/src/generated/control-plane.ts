@@ -761,6 +761,19 @@ export type components = {
         WorkerStatus: WorkerStatus;
         /**
          * @description Type of cluster event emitted on the SSE stream.
+         *
+         *     - `RUNNER_ORPHANED` — a runner existed/was stopped without a
+         *       control-plane instance record to account for it. `data.reason` is
+         *       `record-dropped`, `unclaimed`, or `mass-divergence`, and determines
+         *       the shape of the rest of `data`:
+         *       - `record-dropped` — one instance record deleted while its runner's
+         *         fate was unconfirmed: singular `instanceId`, `runnerId`,
+         *         `disposition`.
+         *       - `unclaimed` — one leaked runner stopped: singular `runnerId`,
+         *         `instanceId`, `modelName`.
+         *       - `mass-divergence` — refusal, because the control plane held no
+         *         instance records at all: plural `runnerIds` and `modelNames`
+         *         arrays covering every affected runner on the event's `workerId`.
          * @enum {string}
          */
         ClusterEventType: ClusterEventType;
@@ -3477,7 +3490,8 @@ export enum ClusterEventType {
     CATALOG_IMPORT_PROGRESS = "CATALOG_IMPORT_PROGRESS",
     CATALOG_IMPORT_COMPLETED = "CATALOG_IMPORT_COMPLETED",
     CATALOG_IMPORT_FAILED = "CATALOG_IMPORT_FAILED",
-    CATALOG_MODULE_REMOVED = "CATALOG_MODULE_REMOVED"
+    CATALOG_MODULE_REMOVED = "CATALOG_MODULE_REMOVED",
+    RUNNER_ORPHANED = "RUNNER_ORPHANED"
 }
 export enum NotificationVariant {
     success = "success",

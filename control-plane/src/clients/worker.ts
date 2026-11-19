@@ -1,8 +1,14 @@
-import { RunnerByInstanceResponseState, type WorkerAgentComponents } from '@sardeenz/types';
+import {
+  RunnerByInstanceResponseState,
+  RunnerProcessState,
+  type WorkerAgentComponents,
+} from '@sardeenz/types';
 
 export type StartRunnerRequest = WorkerAgentComponents['schemas']['StartRunnerRequest'];
 export type StartRunnerResponse = WorkerAgentComponents['schemas']['StartRunnerResponse'];
 export type RunnerByInstanceResponse = WorkerAgentComponents['schemas']['RunnerByInstanceResponse'];
+export type RunnerSummary = WorkerAgentComponents['schemas']['RunnerSummary'];
+export type RunnerListResponse = WorkerAgentComponents['schemas']['RunnerListResponse'];
 
 export type RunnerByInstanceLookup =
   | { status: 'absent' }
@@ -28,6 +34,117 @@ export class WorkerHttpError extends Error {
   ) {
     super(message);
     this.name = 'WorkerHttpError';
+  }
+}
+
+/**
+ * Thrown when a worker answered 2xx with a body the contract does not allow: over the size cap,
+ * not JSON, or not the promised shape. Distinct from `WorkerHttpError`, which reports a status the
+ * worker chose — here the status is fine and the payload is not, so callers must treat the call as
+ * an inconclusive probe rather than as evidence about the worker's runners.
+ */
+export class WorkerResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkerResponseError';
+  }
+}
+
+/**
+ * A runner registry is a handful of entries, so a response past this ceiling is a broken or
+ * hostile worker. The socket timeout bounds time, not size: buffering an arbitrary body would let
+ * that worker decide how much memory the single-replica control plane allocates (the same rule the
+ * worker applies to the runner catalog, `runners/dev-worker/src/runner-catalog.ts`).
+ */
+const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
+
+const BODY_TOO_LARGE = `Response body exceeds the ${MAX_RESPONSE_BODY_BYTES}-byte limit for a worker API response`;
+
+/** Reads a response body, refusing anything past MAX_RESPONSE_BODY_BYTES (see the constant). */
+async function readBodyWithLimit(response: Response): Promise<string> {
+  // A declared length over the cap is refused before reading a byte; a chunked response declares
+  // none, so the streamed counter below is the real bound.
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BODY_BYTES) {
+    // Refusing without releasing the body would leave the worker streaming into a socket nobody
+    // reads; the streamed path below cancels its reader for the same reason.
+    await response.body?.cancel().catch(() => {});
+    throw new WorkerResponseError(BODY_TOO_LARGE);
+  }
+  if (!response.body) return '';
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_RESPONSE_BODY_BYTES) {
+      await reader.cancel();
+      throw new WorkerResponseError(BODY_TOO_LARGE);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Validates one registry entry against the contract's required fields (`RunnerSummary`:
+ * `runnerId`, `instanceId`, `modelName`, `state`). Only the fields the reverse sweep acts on are
+ * checked — the sweep decides who to kill from CP records, never from worker-advertised extras.
+ */
+function parseRunnerSummary(raw: unknown, index: number): RunnerSummary {
+  if (raw === null || typeof raw !== 'object') {
+    throw new WorkerResponseError(`Worker registry entry runners[${index}] is not an object`);
+  }
+  const entry = raw as Record<string, unknown>;
+  for (const field of ['runnerId', 'instanceId', 'modelName'] as const) {
+    const value = entry[field];
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new WorkerResponseError(
+        `Worker registry entry runners[${index}].${field} must be a non-empty string`,
+      );
+    }
+  }
+  const state = entry['state'];
+  if (state !== RunnerProcessState.STARTING && state !== RunnerProcessState.READY) {
+    throw new WorkerResponseError(
+      `Worker registry entry runners[${index}].state must be a RunnerProcessState value`,
+    );
+  }
+  return raw as RunnerSummary;
+}
+
+/**
+ * Parses and validates a `RunnerListResponse`. Anything else rejects: the caller's per-worker
+ * catch treats a rejection as an inconclusive probe, while a shape the sweep half-believed would
+ * turn into a TypeError outside that catch and disable the sweep every tick.
+ */
+function parseRunnerList(body: string): RunnerSummary[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new WorkerResponseError('Worker GET /runners returned a body that is not JSON');
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new WorkerResponseError('Worker GET /runners returned a body that is not an object');
+  }
+  const runners = (parsed as Record<string, unknown>)['runners'];
+  if (!Array.isArray(runners)) {
+    throw new WorkerResponseError('Worker GET /runners returned no `runners` array');
+  }
+  return runners.map((entry, index) => parseRunnerSummary(entry, index));
+}
+
+/** Bounded read of a non-2xx body: the status is the signal, the text only context. */
+async function readBoundedErrorBody(response: Response): Promise<string> {
+  try {
+    return await readBodyWithLimit(response);
+  } catch (err) {
+    if (err instanceof WorkerResponseError) return `<${err.message}>`;
+    throw err;
   }
 }
 
@@ -77,6 +194,7 @@ export class WorkerClient {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}/logs`, {
       headers: { Accept: 'text/event-stream', ...this.authHeaders() },
       signal,
+      redirect: 'error',
     });
     if (!response.ok) {
       const body = await response.text();
@@ -96,6 +214,7 @@ export class WorkerClient {
     return fetch(`${this.baseUrl}/runners/by-model/${encodeURIComponent(modelName)}/logs`, {
       headers: { Accept: 'text/event-stream', ...this.authHeaders() },
       signal,
+      redirect: 'error',
     });
   }
 
@@ -109,6 +228,7 @@ export class WorkerClient {
     return fetch(`${this.baseUrl}/runners/by-instance/${encodeURIComponent(instanceId)}/logs`, {
       headers: { Accept: 'text/event-stream', ...this.authHeaders() },
       signal,
+      redirect: 'error',
     });
   }
 
@@ -123,6 +243,7 @@ export class WorkerClient {
     const response = await fetch(`${this.baseUrl}/runners/${encodeURIComponent(runnerId)}`, {
       headers: { ...this.authHeaders() },
       signal: AbortSignal.timeout(this.timeoutMs),
+      redirect: 'error',
     });
     if (response.status === 404) return false;
     if (!response.ok) {
@@ -133,6 +254,33 @@ export class WorkerClient {
       );
     }
     return true;
+  }
+
+  /**
+   * Enumerate this worker's runner registry (worker-agent contract `listRunners`, #286). Used by
+   * reconciliation's runner→instance sweep: the returned `instanceId`s are compared against the
+   * control plane's own records. Any non-2xx rejects — a failed enumeration is inconclusive and the
+   * caller must never treat it as "no runners".
+   *
+   * The body is untrusted worker input on a path that decides what gets killed, so it is read
+   * under a size cap and validated against the contract before it is returned (#286 review):
+   * over-cap, unparseable or off-shape bodies reject with `WorkerResponseError`, which the sweep's
+   * per-worker catch treats as an inconclusive probe.
+   */
+  async listRunners(): Promise<RunnerSummary[]> {
+    const response = await fetch(`${this.baseUrl}/runners`, {
+      headers: { ...this.authHeaders() },
+      signal: AbortSignal.timeout(this.timeoutMs),
+      redirect: 'error',
+    });
+    if (!response.ok) {
+      const body = await readBoundedErrorBody(response);
+      throw new WorkerHttpError(
+        `Worker GET /runners returned ${response.status}: ${body}`,
+        response.status,
+      );
+    }
+    return parseRunnerList(await readBodyWithLimit(response));
   }
 
   /**
@@ -147,6 +295,7 @@ export class WorkerClient {
       {
         headers: { ...this.authHeaders() },
         signal: AbortSignal.timeout(this.timeoutMs),
+        redirect: 'error',
       },
     );
     if (response.status === 404) return { status: 'absent' };
@@ -179,6 +328,7 @@ export class WorkerClient {
       method: 'DELETE',
       headers: { ...this.authHeaders() },
       signal: AbortSignal.timeout(this.timeoutMs),
+      redirect: 'error',
     });
     if (!response.ok) {
       const body = await response.text();
@@ -199,6 +349,7 @@ export class WorkerClient {
       headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'error',
     });
     if (!response.ok) {
       const text = await response.text();
