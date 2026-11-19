@@ -26,6 +26,13 @@ specs/worker-agent.yaml:
   no-unused-components:
     - '#/components/schemas/WorkerInfo'
     - '#/components/schemas/WorkerMemoryReport'
+  # GET /runners enumerates the worker's own registry (#286). It takes no
+  # parameter and its handler has no 4XX code path; the only failures are a
+  # 500 and the server-wide 401 from the bearer onRequest hook, which no other
+  # operation in this contract documents either (auth is off in redocly.yaml
+  # because this is an internal interface).
+  operation-4xx-response:
+    - '#/paths/~1runners/get/responses'
 
 # Neither catalog operation accepts a path parameter, query parameter, or
 # request body, and neither handler has a 4XX code path (catalog.ts:19-38).

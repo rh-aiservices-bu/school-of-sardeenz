@@ -186,7 +186,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     // Stop: drives runtime state to STOPPED then clears it, but keeps the DB row (registry
     // semantics, #121) — mirrors the stop route's background sequence minus modelRepository.delete.
     await harness.sleepWake.stopModel(MODEL, INSTANCE_ID, null);
-    await harness.lifecycle.removeInstance(MODEL, INSTANCE_ID);
+    await harness.lifecycle.removeInstance(MODEL, INSTANCE_ID, 'runner-stopped');
 
     const recordAfterStop = await harness.modelRepository.findByName(MODEL);
     expect(recordAfterStop).not.toBeNull();

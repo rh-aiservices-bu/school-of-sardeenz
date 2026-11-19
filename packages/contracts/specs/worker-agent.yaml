@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Worker Agent API
-  version: 0.1.3
+  version: 0.1.4
   description: |
     Management API exposed by each worker agent (dev or production). The control
-    plane calls these endpoints to start and stop runner processes on a worker.
+    plane calls these endpoints to start, list, and stop runner processes on a worker.
 
     This contract formalizes the implicit API previously defined only by the
     `WorkerClient` class in the control plane. It also documents the Redis
@@ -12,18 +12,50 @@ info:
 
     ## Interface Areas
 
-    1. **Runner management** — start and stop runner processes
+    1. **Runner management** — start, list, and stop runner processes
     2. **Self-registration** — Redis key schemas for worker discovery (documented
        here as schemas, not as HTTP endpoints)
 
 tags:
   - name: Runners
-    description: Start and stop inference engine runner processes on this worker.
+    description: Start, list, and stop inference engine runner processes on this worker.
   - name: Logs
     description: Stream captured stdout/stderr from a running runner process.
 
 paths:
   /runners:
+    # Static route: the worker registers this before /runners/{runnerId} for readability. Fastify's
+    # router (find-my-way) prioritizes static segments over param segments regardless of order, so
+    # registration order carries no behavioural meaning here.
+    get:
+      operationId: listRunners
+      summary: List the runners this worker currently hosts
+      description: |
+        Enumerates the worker's own runner registry: every READY runner plus every
+        launch still in flight (`STARTING`). In-flight launches are included
+        deliberately — the control plane's reverse reconciliation (issue #286)
+        must be able to see a runner whose instance record it has already lost,
+        including in the window before that launch completes.
+
+        The response is a point-in-time snapshot, not a fence: a runner may stop
+        or start between this call and any later `DELETE /runners/{runnerId}`, and
+        callers must tolerate that race.
+      tags:
+        - Runners
+      responses:
+        "200":
+          description: The runner registry at the moment of the call
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerListResponse"
+        "500":
+          description: Internal worker error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     post:
       operationId: startRunner
       summary: Start a runner process
@@ -560,6 +592,72 @@ components:
           minimum: 1
           maximum: 65535
           description: Inference port of the live runner.
+
+    RunnerProcessState:
+      type: string
+      description: |
+        Lifecycle of a runner process in the worker's own registry: `STARTING`
+        while the launch is still in flight (`POST /runners` has not returned),
+        `READY` once the engine's health checks passed and the runner is
+        registered. Member names mirror `RunnerByInstanceResponse.state`.
+      enum:
+        - STARTING
+        - READY
+
+    RunnerSummary:
+      type: object
+      description: |
+        One entry of the worker's runner registry, as returned by `GET /runners`.
+        A runner appears whether it is READY or still STARTING, so the control
+        plane can see a launch in flight even when it no longer has the instance
+        record that requested it.
+      required:
+        - runnerId
+        - instanceId
+        - modelName
+        - state
+      properties:
+        runnerId:
+          type: string
+          description: Worker-assigned runner identity.
+        instanceId:
+          type: string
+          description: Control-plane-assigned instance identity this runner serves.
+        modelName:
+          type: string
+          description: Configuration model name the runner serves.
+        state:
+          $ref: "#/components/schemas/RunnerProcessState"
+        host:
+          type: string
+          description: |
+            Hostname or IP where the live runner is listening. Present only when
+            `state` is `READY`.
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Management port of the live runner. Present only when `state` is `READY`.
+        enginePort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Inference port of the live runner. Present only when `state` is `READY`.
+
+    RunnerListResponse:
+      type: object
+      description: |
+        The worker's runner registry at the moment of the call. Control-plane
+        reconciliation uses it for the runner→instance direction (issue #286): a
+        listed runner whose `instanceId` has no control-plane record is
+        unclaimed.
+      required:
+        - runners
+      properties:
+        runners:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunnerSummary"
 
     # -------------------------------------------------------------------------
     # Self-registration schemas (Redis data, not HTTP payloads)

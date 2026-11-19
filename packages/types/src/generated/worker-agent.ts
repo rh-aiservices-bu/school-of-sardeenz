@@ -11,7 +11,19 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List the runners this worker currently hosts
+         * @description Enumerates the worker's own runner registry: every READY runner plus every
+         *     launch still in flight (`STARTING`). In-flight launches are included
+         *     deliberately — the control plane's reverse reconciliation (issue #286)
+         *     must be able to see a runner whose instance record it has already lost,
+         *     including in the window before that launch completes.
+         *
+         *     The response is a point-in-time snapshot, not a fence: a runner may stop
+         *     or start between this call and any later `DELETE /runners/{runnerId}`, and
+         *     callers must tolerate that race.
+         */
+        get: operations["listRunners"];
         put?: never;
         /**
          * Start a runner process
@@ -360,6 +372,47 @@ export type components = {
             enginePort?: number;
         };
         /**
+         * @description Lifecycle of a runner process in the worker's own registry: `STARTING`
+         *     while the launch is still in flight (`POST /runners` has not returned),
+         *     `READY` once the engine's health checks passed and the runner is
+         *     registered. Member names mirror `RunnerByInstanceResponse.state`.
+         * @enum {string}
+         */
+        RunnerProcessState: RunnerProcessState;
+        /**
+         * @description One entry of the worker's runner registry, as returned by `GET /runners`.
+         *     A runner appears whether it is READY or still STARTING, so the control
+         *     plane can see a launch in flight even when it no longer has the instance
+         *     record that requested it.
+         */
+        RunnerSummary: {
+            /** @description Worker-assigned runner identity. */
+            runnerId: string;
+            /** @description Control-plane-assigned instance identity this runner serves. */
+            instanceId: string;
+            /** @description Configuration model name the runner serves. */
+            modelName: string;
+            state: components["schemas"]["RunnerProcessState"];
+            /**
+             * @description Hostname or IP where the live runner is listening. Present only when
+             *     `state` is `READY`.
+             */
+            host?: string;
+            /** @description Management port of the live runner. Present only when `state` is `READY`. */
+            port?: number;
+            /** @description Inference port of the live runner. Present only when `state` is `READY`. */
+            enginePort?: number;
+        };
+        /**
+         * @description The worker's runner registry at the moment of the call. Control-plane
+         *     reconciliation uses it for the runner→instance direction (issue #286): a
+         *     listed runner whose `instanceId` has no control-plane record is
+         *     unclaimed.
+         */
+        RunnerListResponse: {
+            runners: components["schemas"]["RunnerSummary"][];
+        };
+        /**
          * @description Worker registration data pushed to Redis at
          *     `{prefix}:workers:{workerId}:info`. The control plane discovers
          *     workers by scanning for these keys.
@@ -620,6 +673,35 @@ export type components = {
 };
 export type $defs = Record<string, never>;
 export interface operations {
+    listRunners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runner registry at the moment of the call */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerListResponse"];
+                };
+            };
+            /** @description Internal worker error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     startRunner: {
         parameters: {
             query?: never;
@@ -919,6 +1001,10 @@ export enum RunnerLogLineStream {
     stderr = "stderr"
 }
 export enum RunnerByInstanceResponseState {
+    STARTING = "STARTING",
+    READY = "READY"
+}
+export enum RunnerProcessState {
     STARTING = "STARTING",
     READY = "READY"
 }

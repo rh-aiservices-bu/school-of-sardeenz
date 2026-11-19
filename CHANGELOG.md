@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Worker `GET /runners` + reverse reconciliation (#286).** The worker agent can now report its
+  own runner registry (`GET /runners`: every READY runner plus any launch still in flight as
+  `STARTING`), and the leader reconciliation loop gained `reconcileUnclaimedRunners`, which lists
+  each reachable worker's registry and stops runners whose `instanceId` has no control-plane
+  record — after two consecutive observations, publishing `RUNNER_ORPHANED`
+  (`data.reason: 'unclaimed'`), a warning notification, and
+  `sardeenz_control_plane_reconciliation_unclaimed_runners_total{action}`. With zero instance
+  records in Redis the sweep refuses (`action: 'refused'`, `data.reason: 'mass-divergence'`) and
+  leaves adopt-vs-reap to #241. Operational consequence: a runner started out-of-band on a worker
+  is now stopped within two reconciliation intervals (60 s at the default). The registry read is
+  bounded (1 MiB) and validated against the contract before the sweep acts on it — a hostile or
+  broken worker yields an inconclusive probe, not a control-plane OOM or an aborted sweep — reaps
+  are capped per reconciliation cycle, and the refusal publishes one event per worker per
+  divergence episode instead of one per tick.
+
 - **Automated dependency updates start: `.github/dependabot.yml` (issue #233).**
   GitHub now opens weekly version-update PRs (Mondays) across 14 entries — npm
   (root lockfile, all workspaces), cargo (`proxy/`), pip (docs requirements +
@@ -32,6 +47,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deploy-only entries accordingly.
 
 ### Fixed
+
+- **Instance teardown can no longer drop the record of a possibly-live runner silently (#286).**
+  `ModelLifecycleService.removeInstance` now requires a `RunnerDisposition`
+  (`runner-stopped` | `runner-absent` | `not-dispatched` | `worker-unreachable` | `operator-forced`),
+  so the compiler enumerates every teardown path instead of relying on review discipline. The two
+  unconfirmed dispositions (`worker-unreachable`, `operator-forced`) log one structured error and
+  publish a `RUNNER_ORPHANED` cluster event when the record actually claims a worker/runner; the
+  `?force=true` stop/delete paths are therefore audited in the dashboard's Recent events instead of
+  being visible only as a `warn` log line. Publishing is fire-and-forget and can never fail a
+  removal, and it happens only after the record's `DEL` succeeded — a failed delete reports
+  nothing, because nothing was dropped. The leaks this closes are the ones the Gate 9b run
+  observed: a runner left holding VRAM with no control-plane record naming it.
 
 - **Worker honors `SARDEENZ_RUNNER_CATALOG_URL` (#289).** A stock `deployment/` worker could
   never advertise `kvCacheElasticSharing: true` — the env var was unset and the loader accepted

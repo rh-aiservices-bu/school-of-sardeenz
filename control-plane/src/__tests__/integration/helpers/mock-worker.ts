@@ -1,5 +1,8 @@
 import Fastify from 'fastify';
+import type { WorkerAgentComponents } from '@sardeenz/types';
 import type { MockRunnerServer } from './mock-runner.js';
+
+type RunnerSummary = WorkerAgentComponents['schemas']['RunnerSummary'];
 
 export interface MockWorkerServer {
   url: string;
@@ -7,6 +10,11 @@ export interface MockWorkerServer {
   startRequests: Array<Record<string, unknown>>;
   /** runnerId path params of every DELETE /runners/:runnerId (stop-runner) call, in order (#157). */
   stopRequests: string[];
+  /**
+   * The registry `GET /runners` answers with (#286). Set it with `setListedRunners` to model a
+   * worker that hosts runners the control plane is (or is not) aware of.
+   */
+  setListedRunners(runners: RunnerSummary[]): void;
   close(): Promise<void>;
 }
 
@@ -46,6 +54,11 @@ export async function createMockWorker(
     await reply.status(204).send();
   });
 
+  // Registry enumeration (#286): the control plane's reverse sweep lists this to find runners it
+  // has no instance record for. Empty unless a test populates it.
+  let listedRunners: RunnerSummary[] = [];
+  app.get('/runners', () => ({ runners: listedRunners }));
+
   await app.listen({ host: '127.0.0.1', port: 0 });
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
@@ -54,6 +67,9 @@ export async function createMockWorker(
     url: `http://127.0.0.1:${port}`,
     startRequests,
     stopRequests,
+    setListedRunners: (runners: RunnerSummary[]) => {
+      listedRunners = runners;
+    },
     close: () => app.close(),
   };
 }

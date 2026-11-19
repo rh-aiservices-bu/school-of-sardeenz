@@ -227,3 +227,206 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
     await pendingServer.close();
   });
 });
+
+// The list endpoint exists so the control plane's reverse reconciliation can find a runner whose
+// instance record it has lost (#286) — including one whose launch it lost track of mid-flight.
+describe('GET /runners (registry enumeration, #286)', () => {
+  const config = makeConfig();
+
+  type ListBody = {
+    runners: Array<{
+      runnerId: string;
+      instanceId: string;
+      modelName: string;
+      state: string;
+      host?: string;
+      port?: number;
+      enginePort?: number;
+    }>;
+  };
+
+  async function buildHarness(launcher: RunnerLauncher = instantLauncher) {
+    const manager = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+    const server = Fastify({ logger: false });
+    registerRunnerRoutes(
+      server,
+      manager,
+      buildEntrypointAllowlist(config.apptainer.runnerEntrypoint),
+    );
+    const baseUrl = await server.listen({ port: 0, host: '127.0.0.1' });
+    return {
+      manager,
+      baseUrl,
+      close: async () => {
+        await manager.stopAll();
+        await server.close();
+      },
+    };
+  }
+
+  function startRunnerFor(manager: RunnerManager, modelName: string, instanceId: string) {
+    return manager.startRunner({
+      modelName,
+      instanceId,
+      runnerType: 'vllm',
+      modelPath: `/models/${modelName}`,
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+  }
+
+  // The pending registry entry is published after the (async) port allocation, so the STARTING
+  // cases wait for the launcher call itself instead of polling: `start()` runs after the pending
+  // entry is registered, and its promise stays unresolved, so the registry cannot have moved on.
+  function deferredLauncher() {
+    const launched: { promise: Promise<void>; resolve: () => void } = (() => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    })();
+    let finish!: (handle: LaunchHandle) => void;
+    const launcher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: () => {
+        launched.resolve();
+        return new Promise<LaunchHandle>((resolve) => {
+          finish = resolve;
+        });
+      },
+    };
+    return { launcher, launched: launched.promise, finish: (h: LaunchHandle) => finish(h) };
+  }
+
+  async function listRunners(baseUrl: string): Promise<ListBody> {
+    const res = await fetch(`${baseUrl}/runners`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as ListBody;
+  }
+
+  it('returns an empty registry on a fresh worker', async () => {
+    const { baseUrl, close } = await buildHarness();
+    try {
+      expect(await listRunners(baseUrl)).toEqual({ runners: [] });
+    } finally {
+      await close();
+    }
+  });
+
+  it('lists a READY runner with its instance identity and ports', async () => {
+    const { manager, baseUrl, close } = await buildHarness();
+    try {
+      const { runnerId } = await startRunnerFor(manager, 'listed-model', 'inst-listed-model');
+
+      const body = await listRunners(baseUrl);
+      expect(body.runners).toHaveLength(1);
+      expect(body.runners[0]).toMatchObject({
+        runnerId,
+        instanceId: 'inst-listed-model',
+        modelName: 'listed-model',
+        state: 'READY',
+        host: 'localhost',
+        port: 19600,
+        enginePort: 19601,
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it('lists a launch still in flight as STARTING without endpoint fields', async () => {
+    const deferred = deferredLauncher();
+    const { manager, baseUrl, close } = await buildHarness(deferred.launcher);
+    try {
+      const starting = startRunnerFor(manager, 'starting-model', 'inst-starting-model');
+      await deferred.launched;
+
+      const body = await listRunners(baseUrl);
+      expect(body.runners).toHaveLength(1);
+      expect(body.runners[0]).toMatchObject({
+        instanceId: 'inst-starting-model',
+        modelName: 'starting-model',
+        state: 'STARTING',
+      });
+      expect(body.runners[0]).not.toHaveProperty('host');
+      expect(body.runners[0]).not.toHaveProperty('port');
+      expect(body.runners[0]).not.toHaveProperty('enginePort');
+
+      deferred.finish({
+        host: 'localhost',
+        port: 19600,
+        enginePort: 19601,
+        stop: () => Promise.resolve(),
+      });
+      await starting;
+
+      const ready = await listRunners(baseUrl);
+      expect(ready.runners).toHaveLength(1);
+      expect(ready.runners[0]).toMatchObject({ state: 'READY', port: 19600, enginePort: 19601 });
+    } finally {
+      await close();
+    }
+  });
+
+  it('lists a READY runner and an in-flight launch together, each with its own state', async () => {
+    // First start() call resolves instantly; the second is held open so the registry holds one
+    // READY and one STARTING entry at the same time.
+    const deferred = deferredLauncher();
+    let call = 0;
+    const mixedLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec) => {
+        call += 1;
+        if (call === 2) return deferred.launcher.start(spec);
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const { manager, baseUrl, close } = await buildHarness(mixedLauncher);
+    try {
+      const ready = await startRunnerFor(manager, 'mixed-model', 'inst-mixed-ready');
+      const starting = startRunnerFor(manager, 'mixed-model', 'inst-mixed-starting');
+      await deferred.launched;
+
+      const body = await listRunners(baseUrl);
+      expect(body.runners).toHaveLength(2);
+      const byInstance = new Map(body.runners.map((r) => [r.instanceId, r]));
+      expect(byInstance.get('inst-mixed-ready')).toMatchObject({
+        runnerId: ready.runnerId,
+        state: 'READY',
+      });
+      expect(byInstance.get('inst-mixed-starting')).toMatchObject({ state: 'STARTING' });
+
+      deferred.finish({
+        host: 'localhost',
+        port: 19600,
+        enginePort: 19601,
+        stop: () => Promise.resolve(),
+      });
+      await starting;
+    } finally {
+      await close();
+    }
+  });
+
+  it('drops a runner from the registry once it is stopped', async () => {
+    const { manager, baseUrl, close } = await buildHarness();
+    try {
+      const { runnerId } = await startRunnerFor(manager, 'stopped-model', 'inst-stopped-model');
+      expect((await listRunners(baseUrl)).runners).toHaveLength(1);
+
+      const res = await fetch(`${baseUrl}/runners/${runnerId}`, { method: 'DELETE' });
+      expect(res.status).toBe(204);
+
+      expect(await listRunners(baseUrl)).toEqual({ runners: [] });
+    } finally {
+      await close();
+    }
+  });
+});

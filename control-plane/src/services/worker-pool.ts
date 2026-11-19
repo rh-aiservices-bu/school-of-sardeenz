@@ -69,6 +69,22 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * A worker's `managementUrl` is where the control plane presents the shared worker token — on
+ * every reconciliation tick now, not only on a deploy — so only an absolute http(s) URL is
+ * accepted. A bare host:port, a relative path or an exotic scheme would either fail every call or
+ * invite the token onto a transport it was never meant for (#286 review).
+ */
+function isHttpUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === 'http:' || url.protocol === 'https:';
+}
+
 function validateCapability(
   raw: unknown,
   workerId: string,
@@ -179,6 +195,9 @@ function parseWorkerInfo(raw: string, workerId: string): WorkerInfoPayload | nul
 
   if (typeof parsed.managementUrl !== 'string' || parsed.managementUrl.length === 0) {
     return rejectWorkerInfo(workerId, 'managementUrl', 'must be a non-empty string');
+  }
+  if (!isHttpUrl(parsed.managementUrl)) {
+    return rejectWorkerInfo(workerId, 'managementUrl', 'must be an absolute http(s) URL');
   }
 
   if (!Array.isArray(parsed.capabilities) || parsed.capabilities.length === 0) {

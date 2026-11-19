@@ -12,7 +12,11 @@ import {
 } from '../utils/model-name.js';
 import { assertValidInstanceId } from '../utils/instance-id.js';
 import type { ModelRecord } from '../services/model-repository.js';
-import { deriveAggregateState, type InstanceState } from '../services/model-lifecycle.js';
+import {
+  deriveAggregateState,
+  type InstanceState,
+  type RunnerDisposition,
+} from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
 import { coLocationGroup, type CoLocationContext } from '../services/placement.js';
 import type { EvictionCandidate } from '../services/eviction.js';
@@ -126,6 +130,9 @@ async function teardownInstance(
     let workerClient: WorkerClient | null = null;
     let runnerId = state?.runnerId ?? null;
     let runnerConfirmedAbsent = false;
+    // Runner fate, stated by whichever branch below settles the process (#286). Required by
+    // removeInstance so the audited dispositions can never be reached by accident.
+    let disposition: RunnerDisposition;
     // A pending start has no runnerId persisted in Redis yet. Resolve it before the lifecycle
     // transition so Stop/Delete can cancel the worker's retained launch handle.
     if (state?.workerId && !runnerId) {
@@ -175,19 +182,25 @@ async function teardownInstance(
           throw stopErr;
         }
       }
+      disposition = 'runner-stopped';
     } else if (runnerConfirmedAbsent) {
       app.log.debug(
         { modelName, instanceId: instance.instanceId },
         `${context}: worker confirms no live or in-progress runner`,
       );
+      disposition = 'runner-absent';
     } else {
       app.log.warn(
         { modelName, instanceId: instance.instanceId },
         `${context}: cannot reap runner process; no runnerId (nothing dispatched yet — see #140)`,
       );
+      // A record that claims a runner but no worker (the pre-#286 hole) is not 'not-dispatched':
+      // something was dispatched, we just cannot reach it — audit it, and let the reverse sweep
+      // find the runner by instanceId on whichever worker still reports it.
+      disposition = state?.runnerId ? 'worker-unreachable' : 'not-dispatched';
     }
 
-    await deps.lifecycle.removeInstance(modelName, instance.instanceId);
+    await deps.lifecycle.removeInstance(modelName, instance.instanceId, disposition);
     await deps.instanceRepository.delete(instance.instanceId).catch(() => {});
     return true;
   } catch (err: unknown) {
@@ -773,7 +786,9 @@ async function deployFromRecord(
     };
   } catch (err) {
     if (redisCreated) {
-      await deps.lifecycle.removeInstance(record.name, instanceId).catch(() => {});
+      await deps.lifecycle
+        .removeInstance(record.name, instanceId, 'not-dispatched')
+        .catch(() => {});
     }
     // The direct-place branch above reserves capacity before the transition/instanceRepository
     // writes that can still throw synchronously here; release is idempotent and a no-op if this
@@ -1585,7 +1600,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           await clearMoveForDelete(modelName, true);
           await Promise.all(
             instances.map((instance) =>
-              deps.lifecycle.removeInstance(modelName, instance.instanceId),
+              deps.lifecycle.removeInstance(modelName, instance.instanceId, 'operator-forced'),
             ),
           );
           for (const instance of instances) {
@@ -2097,7 +2112,11 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         try {
           await Promise.all(
             instances.map(async (instance) => {
-              await deps.lifecycle.removeInstance(modelName, instance.instanceId);
+              await deps.lifecycle.removeInstance(
+                modelName,
+                instance.instanceId,
+                'operator-forced',
+              );
               await deps.instanceRepository.delete(instance.instanceId).catch(() => {});
               deps.memoryBudget.releaseInstanceReservations(instance.instanceId);
             }),

@@ -1175,9 +1175,9 @@ describe('DELETE /api/v1/models/:modelName background deletion', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-a');
-    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-b');
-    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-c');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-a', 'runner-stopped');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-b', 'runner-stopped');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-c', 'runner-stopped');
     expect(err).toHaveBeenCalledWith(
       { modelName: 'm1', failures: 1, total: 3 },
       'Some instances failed teardown during model delete',
@@ -1213,11 +1213,35 @@ describe('DELETE /api/v1/models/:modelName tombstone and state guards', () => {
     const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1?force=true' });
 
     expect(res.statusCode).toBe(202);
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'operator-forced');
     expect(releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     expect(removeModel).toHaveBeenCalledWith('m1');
     expect(deleteModel).toHaveBeenCalledWith('m1');
     expect(stopModel).not.toHaveBeenCalled();
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith(
+      { modelName: 'm1', instanceIds: [INSTANCE_ID] },
+      'Model force-deleted without runner teardown',
+    );
+  });
+
+  it('force-deletes an ACTIVE model as an audited operator-forced drop (#286)', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const removeModel = vi.fn(() => Promise.resolve());
+    const deleteModel = vi.fn(() => Promise.resolve());
+    const { app, stopRunner, logWarn } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ACTIVE_STATE])),
+      removeInstance,
+      removeModel,
+      deleteModel,
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1?force=true' });
+
+    expect(res.statusCode).toBe(202);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'operator-forced');
+    // The escape hatch stays an escape hatch: no worker call even for a record that names a runner.
     expect(stopRunner).not.toHaveBeenCalled();
     expect(logWarn).toHaveBeenCalledWith(
       { modelName: 'm1', instanceIds: [INSTANCE_ID] },
@@ -1553,7 +1577,11 @@ describe('launch/stop/instance paths fenced against an in-flight model DELETE (#
 
     await new Promise((resolve) => setImmediate(resolve));
     expect(deployModel).not.toHaveBeenCalled();
-    expect(removeInstance).toHaveBeenCalledWith('m1', expect.stringMatching(/^inst-/) as string);
+    expect(removeInstance).toHaveBeenCalledWith(
+      'm1',
+      expect.stringMatching(/^inst-/) as string,
+      'not-dispatched',
+    );
     const budget = deps.memoryBudget as { releaseInstanceReservations: Mock };
     expect(budget.releaseInstanceReservations).toHaveBeenCalled();
     const instanceRepo = deps.instanceRepository as { delete: Mock };
@@ -1592,7 +1620,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     expect(getRunnerByInstance).toHaveBeenCalledWith(INSTANCE_ID);
     expect(stopRunner).toHaveBeenCalledWith('runner-pending');
     expect(stopModel).toHaveBeenCalled();
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-stopped');
     expect(deleteInstance).toHaveBeenCalledWith(INSTANCE_ID);
     await app.close();
   });
@@ -1653,7 +1681,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(getRunnerByInstance).toHaveBeenCalledWith(INSTANCE_ID);
     expect(stopRunner).toHaveBeenCalledWith('runner-pending');
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-stopped');
     await app.close();
   });
 
@@ -1673,7 +1701,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     // with the instance's runnerId.
     expect(createWorkerClient).toHaveBeenCalledWith('http://worker-1:9000');
     expect(stopRunner).toHaveBeenCalledWith('runner-1');
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-stopped');
     expect(deleteInstance).toHaveBeenCalledWith(INSTANCE_ID);
   });
 
@@ -1688,7 +1716,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(stopRunner).toHaveBeenCalledWith('runner-1');
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-stopped');
   });
 
   it('tolerates a 404 from stopRunner (runner already exited and reaped) — teardown still succeeds', async () => {
@@ -1708,7 +1736,7 @@ describe('teardownInstance reaps the runner process (#157)', () => {
 
     expect(stopRunner).toHaveBeenCalledWith('runner-1');
     // Not treated as a teardown failure — cleanup proceeds and nothing is logged as an error.
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-stopped');
     expect(logError).not.toHaveBeenCalled();
   });
 
@@ -1778,7 +1806,28 @@ describe('teardownInstance reaps the runner process (#157)', () => {
 
     expect(stopRunner).not.toHaveBeenCalled();
     expect(createWorkerClient).toHaveBeenCalled();
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-absent');
+  });
+
+  it('audits a teardown drop when the record names a runner but no worker (#286)', async () => {
+    // The pre-#286 hole: a record that claims a runner but cannot name the worker it runs on. The
+    // process may well be alive, so the drop must be audited rather than called "not dispatched".
+    const noWorker = { ...ACTIVE_STATE, workerId: null };
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const { app, stopRunner } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(noWorker)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([noWorker])),
+      removeInstance,
+    });
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(202);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'worker-unreachable');
   });
 
   it('retains bookkeeping when the worker is not found in the pool', async () => {
@@ -1830,10 +1879,36 @@ describe('POST /api/v1/models/:modelName/stop', () => {
 
     expect(res.statusCode).toBe(202);
     expect(res.json<{ state: string }>().state).toBe(ModelLifecycleState.STOPPED);
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'operator-forced');
     expect(deleteInstance).toHaveBeenCalledWith(INSTANCE_ID);
     expect(releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     expect(removeModel).toHaveBeenCalledWith('m1');
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(deleteModel).not.toHaveBeenCalled();
+    expect(logWarn).toHaveBeenCalledWith(
+      { modelName: 'm1', instanceIds: [INSTANCE_ID] },
+      'Model force-stopped without runner teardown',
+    );
+  });
+
+  it('force-stops an ACTIVE model as an audited operator-forced drop (#286)', async () => {
+    const removeInstance = vi.fn(() => Promise.resolve());
+    const deleteInstance = vi.fn(() => Promise.resolve(true));
+    const deleteModel = vi.fn();
+    const removeModel = vi.fn(() => Promise.resolve());
+    const { app, stopRunner, logWarn } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(ACTIVE_STATE)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([ACTIVE_STATE])),
+      removeInstance,
+      deleteInstance,
+      deleteModel,
+      removeModel,
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/stop?force=true' });
+
+    expect(res.statusCode).toBe(202);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'operator-forced');
     expect(stopRunner).not.toHaveBeenCalled();
     expect(deleteModel).not.toHaveBeenCalled();
     expect(logWarn).toHaveBeenCalledWith(
@@ -1860,7 +1935,7 @@ describe('POST /api/v1/models/:modelName/stop', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(stopModel).toHaveBeenCalledWith('m1', INSTANCE_ID, expect.anything());
-    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID);
+    expect(removeInstance).toHaveBeenCalledWith('m1', INSTANCE_ID, 'runner-stopped');
     expect(deleteModel).not.toHaveBeenCalled();
   });
 
@@ -1957,9 +2032,9 @@ describe('POST /api/v1/models/:modelName/stop', () => {
     expect(stopModel).toHaveBeenCalledWith('m1', 'inst-a', expect.anything());
     expect(stopModel).toHaveBeenCalledWith('m1', 'inst-b', expect.anything());
     expect(stopModel).toHaveBeenCalledWith('m1', 'inst-c', expect.anything());
-    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-a');
-    expect(removeInstance).not.toHaveBeenCalledWith('m1', 'inst-b');
-    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-c');
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-a', 'runner-stopped');
+    expect(removeInstance).not.toHaveBeenCalledWith('m1', 'inst-b', expect.any(String) as string);
+    expect(removeInstance).toHaveBeenCalledWith('m1', 'inst-c', 'runner-stopped');
     expect(logError).toHaveBeenCalledWith(
       { modelName: 'm1', failures: 1, total: 3 },
       'Some instances failed teardown during model stop',

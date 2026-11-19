@@ -167,6 +167,41 @@ describe('MoveOrchestrationService', () => {
       'finish',
     ]);
     expect(lifecycle.removeMoveOperation).toHaveBeenCalledWith('m1', 'move-1');
+    expect(lifecycle.removeInstance).toHaveBeenCalledWith('m1', 'inst-source', 'runner-stopped');
+  });
+
+  it("audits a source record that names a runner but no worker as 'worker-unreachable'", async () => {
+    const op = { ...operation, phase: 'CUTTING_OVER' as const };
+    const { service, lifecycle, instances, stopRunner } = build({ op });
+    // The one shape that skips the stop block entirely: a runnerId with no owning workerId.
+    instances.set('inst-source', {
+      ...instance('inst-source', ModelLifecycleState.DRAINING, 'worker-1', 8000),
+      workerId: null,
+    });
+
+    await service.resume('m1');
+
+    expect(stopRunner).not.toHaveBeenCalled();
+    expect(lifecycle.removeInstance).toHaveBeenCalledWith(
+      'm1',
+      'inst-source',
+      'worker-unreachable',
+    );
+    expect(instances.has('inst-source')).toBe(false);
+  });
+
+  it("derives 'not-dispatched' for a source record that never named a runner", async () => {
+    const op = { ...operation, phase: 'CUTTING_OVER' as const };
+    const { service, lifecycle, instances } = build({ op });
+    instances.set('inst-source', {
+      ...instance('inst-source', ModelLifecycleState.DRAINING, 'worker-1', 8000),
+      runnerId: null,
+    });
+
+    await service.resume('m1');
+
+    expect(lifecycle.removeInstance).toHaveBeenCalledWith('m1', 'inst-source', 'not-dispatched');
+    expect(instances.has('inst-source')).toBe(false);
   });
 
   it('retains both instances and the durable transaction when the barrier is not acknowledged', async () => {

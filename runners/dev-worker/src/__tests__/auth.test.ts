@@ -108,6 +108,21 @@ describe('dev-worker API auth hook', () => {
     await app.close();
   });
 
+  it('guards GET /runners like every other runner route', async () => {
+    const app = buildTestApp('secret-token');
+    const anonymous = await app.inject({ method: 'GET', url: '/runners' });
+    expect(anonymous.statusCode).toBe(401);
+
+    const authorized = await app.inject({
+      method: 'GET',
+      url: '/runners',
+      headers: { authorization: 'Bearer secret-token' },
+    });
+    expect(authorized.statusCode).toBe(200);
+    expect(authorized.json()).toEqual({ runners: [] });
+    await app.close();
+  });
+
   it('allows requests without a header when no token is configured (auth disabled)', async () => {
     const app = buildTestApp('');
     const res = await app.inject({ method: 'DELETE', url: '/runners/some-runner' });

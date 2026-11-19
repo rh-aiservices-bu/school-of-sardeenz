@@ -510,6 +510,8 @@ function getEventTypeColor(
       return 'grey';
     case 'EVICTION_TRIGGERED':
       return 'red';
+    case 'RUNNER_ORPHANED':
+      return 'red';
     case 'PLACEMENT_COMPLETED':
       return 'purple';
     default:

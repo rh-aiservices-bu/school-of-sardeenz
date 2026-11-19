@@ -15,7 +15,7 @@ import type { SleepWakeService } from '../sleep-wake.js';
 import type { InstanceRepository } from '../instance-repository.js';
 import type { NotificationService } from '../notification.js';
 import { ControlPlaneError } from '../../errors.js';
-import { deviceMemoryBytes } from '../../health/metrics.js';
+import { deviceMemoryBytes, registry } from '../../health/metrics.js';
 import { WorkerHttpError, type WorkerClient } from '../../clients/worker.js';
 import type { Redis } from '../../clients/redis.js';
 
@@ -104,6 +104,7 @@ interface MockDeps {
     stopRunner: Mock;
     getRunner: Mock;
     getRunnerByInstance: Mock;
+    listRunners: Mock;
   };
   // Phase 5 (#277) pool-pressure collaborators (opt-in via createService options).
   eviction: {
@@ -230,6 +231,9 @@ function createMocks(): MockDeps {
       // never wire createWorkerClient, and safe for the new tests that don't set it explicitly.
       getRunner: vi.fn().mockResolvedValue(true),
       getRunnerByInstance: vi.fn().mockResolvedValue({ status: 'absent' }),
+      // Default "hosts nothing" — the reverse sweep (#286) short-circuits on an empty registry, so
+      // every test that does not populate it stays unaffected.
+      listRunners: vi.fn().mockResolvedValue([]),
     },
     // Phase 5 (#277): pool-pressure collaborators. selectVictims defaults to "no victims";
     // individual tests override. recordEviction is a plain spy (the engine would also run its
@@ -638,6 +642,7 @@ describe('ReconciliationService', () => {
       expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
         'ghost-model',
         'inst-ghost-model',
+        'runner-absent',
       );
       expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
         'inst-ghost-model',
@@ -745,6 +750,7 @@ describe('ReconciliationService', () => {
       expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
         'stale-starting',
         'inst-stale-starting',
+        'runner-absent',
       );
     });
 
@@ -811,6 +817,7 @@ describe('ReconciliationService', () => {
       expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
         'ambiguous-start',
         'inst-ambiguous-start',
+        'runner-stopped',
       );
       expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
         'inst-ambiguous-start',
@@ -962,7 +969,11 @@ describe('ReconciliationService', () => {
         'worker-1',
         8000,
       );
-      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'deleted-model',
+        'inst-orphan',
+        'not-dispatched',
+      );
       expect(mocks.logger.info).toHaveBeenCalledWith(
         { modelName: 'deleted-model', instanceId: 'inst-orphan' },
         'Reaped orphaned Redis instance with no matching model row',
@@ -1002,7 +1013,11 @@ describe('ReconciliationService', () => {
       await orphanService.tick();
 
       expect(mocks.routingMap.removeEndpoint).not.toHaveBeenCalled();
-      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'deleted-model',
+        'inst-orphan',
+        'not-dispatched',
+      );
     });
 
     it('is a no-op when modelRepository is not wired', async () => {
@@ -1063,7 +1078,11 @@ describe('ReconciliationService', () => {
       await orphanService.tick();
 
       expect(mocks.modelRepository.findByName).toHaveBeenCalledWith('deleted-model');
-      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'deleted-model',
+        'inst-orphan',
+        'not-dispatched',
+      );
     });
 
     it('a reap failure for one orphan does not abort the rest of the tick', async () => {
@@ -1110,7 +1129,11 @@ describe('ReconciliationService', () => {
 
         expect(mocks.workerPool.getWorker).toHaveBeenCalledWith('w1');
         expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-1');
-        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+          'deleted-model',
+          'inst-orphan',
+          'runner-stopped',
+        );
       });
 
       it('still removes the record when stopRunner reports 404 (runner already gone)', async () => {
@@ -1137,7 +1160,11 @@ describe('ReconciliationService', () => {
         await orphanService.tick();
 
         expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-1');
-        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+          'deleted-model',
+          'inst-orphan',
+          'runner-stopped',
+        );
       });
 
       it('retains the record this tick on a non-404 stopRunner failure, without affecting other orphans in the same tick', async () => {
@@ -1176,6 +1203,7 @@ describe('ReconciliationService', () => {
         expect(mocks.lifecycle.removeInstance).not.toHaveBeenCalledWith(
           'stuck-orphan',
           'inst-stuck',
+          expect.any(String) as string,
         );
         expect(mocks.logger.warn).toHaveBeenCalledWith(
           expect.objectContaining({ modelName: 'stuck-orphan', instanceId: 'inst-stuck' }),
@@ -1183,7 +1211,11 @@ describe('ReconciliationService', () => {
         );
         // Isolated per-instance: the other orphan in the same tick is still fully processed.
         expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith('inst-clean');
-        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('clean-orphan', 'inst-clean');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+          'clean-orphan',
+          'inst-clean',
+          'not-dispatched',
+        );
       });
 
       it('removes the record without attempting stopRunner when the worker is not in the pool', async () => {
@@ -1206,7 +1238,11 @@ describe('ReconciliationService', () => {
 
         expect(mocks.workerPool.getWorker).toHaveBeenCalledWith('w-gone');
         expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
-        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('deleted-model', 'inst-orphan');
+        expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+          'deleted-model',
+          'inst-orphan',
+          'worker-unreachable',
+        );
         expect(mocks.logger.debug).toHaveBeenCalledWith(
           expect.objectContaining({
             modelName: 'deleted-model',
@@ -1744,7 +1780,11 @@ describe('ReconciliationService', () => {
         mocks.workerClient.stopRunner.mock.invocationCallOrder[0],
       );
       expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-1');
-      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith('alpha', victim.instanceId);
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'alpha',
+        victim.instanceId,
+        'runner-stopped',
+      );
       expect(mocks.eviction.recordEviction).toHaveBeenCalledWith('pressure');
       expect(mocks.notifications.createNotification).toHaveBeenCalledOnce();
     });
@@ -1971,6 +2011,355 @@ describe('ReconciliationService', () => {
           source: { type: 'model', name: 'alpha' },
         }),
       );
+    });
+  });
+
+  describe('reconcileUnclaimedRunners — reverse sweep (#286)', () => {
+    const WORKER_ID = 'w1';
+    const MANAGEMENT_URL = 'http://w1:9000';
+
+    function onlineWorker(workerId = WORKER_ID): WorkerRecord {
+      return makeWorker({
+        workerId,
+        status: WorkerStatus.ONLINE,
+        managementUrl: workerId === WORKER_ID ? MANAGEMENT_URL : `http://${workerId}:9000`,
+      });
+    }
+
+    function runner(instanceId: string, runnerId = `runner-${instanceId}`) {
+      return {
+        runnerId,
+        instanceId,
+        modelName: `model-${instanceId}`,
+        state: 'READY' as const,
+        host: 'w1',
+        port: 8000,
+        enginePort: 8001,
+      };
+    }
+
+    /** Current value of one `action` label of the #286 counter. */
+    async function unclaimedCount(action: 'reaped' | 'refused'): Promise<number> {
+      const metrics = await registry.getMetricsAsJSON();
+      const metric = metrics.find(
+        (m) => m.name === 'sardeenz_control_plane_reconciliation_unclaimed_runners_total',
+      );
+      const sample = metric?.values.find((v) => v.labels.action === action);
+      return sample?.value ?? 0;
+    }
+
+    function publishedOrphanEvents(): ClusterEvent[] {
+      return (mocks.redis.publish.mock.calls as unknown as [string, string][])
+        .map(([, payload]) => JSON.parse(payload) as ClusterEvent)
+        .filter((event) => event.type === ClusterEventType.RUNNER_ORPHANED);
+    }
+
+    function buildSweepService() {
+      return createService(mocks, { withWorkerClient: true, withNotifications: true });
+    }
+
+    it('stops an unclaimed runner only on the second consecutive observation', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-lost', 'runner-lost')]);
+      const reapedBefore = await unclaimedCount('reaped');
+
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+      expect(publishedOrphanEvents()).toHaveLength(0);
+      expect(await unclaimedCount('reaped')).toBe(reapedBefore);
+
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledOnce();
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-lost');
+      const events = publishedOrphanEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: ClusterEventType.RUNNER_ORPHANED,
+        modelName: 'model-inst-lost',
+        workerId: WORKER_ID,
+        data: { runnerId: 'runner-lost', instanceId: 'inst-lost', reason: 'unclaimed' },
+      });
+      expect(mocks.notifications.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Leaked runner stopped',
+          variant: 'warning',
+          source: { type: 'worker', name: WORKER_ID },
+        }),
+      );
+      expect(await unclaimedCount('reaped')).toBe(reapedBefore + 1);
+      expect(mocks.logger.info).toHaveBeenCalledWith(
+        { workerId: WORKER_ID, runnerId: 'runner-lost', instanceId: 'inst-lost' },
+        'Stopped leaked runner with no control-plane instance record',
+      );
+    });
+
+    it('never touches a runner claimed by a retained STOPPED or ERROR record', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({
+          modelName: 'stopped-model',
+          instanceId: 'inst-stopped',
+          state: ModelLifecycleState.STOPPED,
+        }),
+        makeModelState({
+          modelName: 'error-model',
+          instanceId: 'inst-error',
+          state: ModelLifecycleState.ERROR,
+        }),
+      ]);
+      mocks.workerClient.listRunners.mockResolvedValue([
+        runner('inst-stopped'),
+        runner('inst-error'),
+      ]);
+
+      await sweep.tick();
+      await sweep.tick();
+
+      expect(mocks.workerClient.listRunners).toHaveBeenCalledTimes(2);
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+      expect(publishedOrphanEvents()).toHaveLength(0);
+    });
+
+    it('re-arms the confirmation window when a runner disappears from the registry', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-flaky')]);
+      await sweep.tick();
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+
+      // Gone this tick — the observation does not carry over.
+      mocks.workerClient.listRunners.mockResolvedValue([]);
+      await sweep.tick();
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+
+      // Unclaimed again: the counter restarts, so this is observation 1, not 3.
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-flaky')]);
+      await sweep.tick();
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+
+      await sweep.tick();
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledOnce();
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-inst-flaky');
+    });
+
+    it('never reaps on a failed enumeration', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+      mocks.workerClient.listRunners.mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+      await expect(sweep.tick()).resolves.toBeUndefined();
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+      expect(publishedOrphanEvents()).toHaveLength(0);
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        { workerId: WORKER_ID, err: 'connect ECONNREFUSED' },
+        'Runner enumeration failed — skipping unclaimed-runner sweep for this worker',
+      );
+    });
+
+    it('refuses to reap when the control plane holds no instance records at all (mass divergence)', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      mocks.workerClient.listRunners.mockResolvedValue([
+        runner('inst-a', 'runner-a'),
+        runner('inst-b', 'runner-b'),
+      ]);
+      const refusedBefore = await unclaimedCount('refused');
+
+      await sweep.tick();
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+      const events = publishedOrphanEvents();
+      // One event per worker per divergence episode: the second refused tick recounts the refusal
+      // but must not repeat the red row.
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: ClusterEventType.RUNNER_ORPHANED,
+        workerId: WORKER_ID,
+        data: { reason: 'mass-divergence' },
+      });
+      expect(events[0]?.data).toMatchObject({ runnerIds: ['runner-a', 'runner-b'] });
+      expect(await unclaimedCount('refused')).toBe(refusedBefore + 2);
+      expect(mocks.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ workerId: WORKER_ID }),
+        expect.stringContaining('#241') as string,
+      );
+
+      // The refusal cleared the confirmation counters: a single live record must not turn the
+      // next tick into an immediate reap.
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'survivor', instanceId: 'inst-survivor' }),
+      ]);
+      await sweep.tick();
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+    });
+
+    it('reports the divergence again once it has cleared and returned', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-a', 'runner-a')]);
+
+      // Diverged: one row.
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      await sweep.tick();
+      expect(publishedOrphanEvents()).toHaveLength(1);
+
+      // Cleared (the record is back, so nothing is unclaimed): the debounce set empties.
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'model-inst-a', instanceId: 'inst-a' }),
+      ]);
+      await sweep.tick();
+      expect(publishedOrphanEvents()).toHaveLength(1);
+
+      // A new episode is worth a new row.
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      await sweep.tick();
+      expect(publishedOrphanEvents()).toHaveLength(2);
+    });
+
+    it('aborts the sweep without reaping when the instance read is partial', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-lost', 'runner-lost')]);
+      // A per-key read failure is inconclusive: the record may exist and simply be unreadable.
+      mocks.lifecycle.getAllInstances.mockRejectedValue(
+        new Error('Instance-state read failed for one key: LOADING'),
+      );
+
+      await expect(sweep.tick()).resolves.toBeUndefined();
+      await sweep.tick();
+
+      expect(mocks.lifecycle.getAllInstances).toHaveBeenCalledWith({ strict: true });
+      expect(mocks.workerClient.listRunners).not.toHaveBeenCalled();
+      expect(mocks.workerClient.stopRunner).not.toHaveBeenCalled();
+      expect(publishedOrphanEvents()).toHaveLength(0);
+    });
+
+    it('caps reaps per cycle and drains the remainder on the next cycle', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+      // Eight confirmed leaks against a per-cycle budget of five.
+      const unclaimed = Array.from({ length: 8 }, (_, i) => runner(`inst-${i}`, `runner-${i}`));
+      mocks.workerClient.listRunners.mockResolvedValue(unclaimed);
+
+      await sweep.tick(); // observation 1
+      await sweep.tick(); // observation 2: reaps up to the budget, defers the rest
+
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledTimes(5);
+      expect(publishedOrphanEvents()).toHaveLength(5);
+      // One summary line per cycle, not one per deferred runner.
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        { deferred: 3, maxPerCycle: 5 },
+        'Unclaimed-runner reap budget exhausted — deferring the rest to the next cycle',
+      );
+
+      // The deferred runners stayed confirmed, so one more cycle finishes them.
+      await sweep.tick();
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledTimes(8);
+      expect(publishedOrphanEvents()).toHaveLength(8);
+    });
+
+    it('keeps the confirmation armed when the stop fails, then reaps on retry', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-lost', 'runner-lost')]);
+
+      await sweep.tick();
+
+      mocks.workerClient.stopRunner.mockRejectedValueOnce(
+        new WorkerHttpError('Worker DELETE /runners/runner-lost returned 500: boom', 500),
+      );
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledOnce();
+      expect(publishedOrphanEvents()).toHaveLength(0);
+      expect(mocks.notifications.createNotification).not.toHaveBeenCalled();
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ workerId: WORKER_ID, runnerId: 'runner-lost' }),
+        'Failed to stop unclaimed runner — retrying next tick',
+      );
+
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledTimes(2);
+      expect(publishedOrphanEvents()).toHaveLength(1);
+      expect(mocks.notifications.createNotification).toHaveBeenCalledOnce();
+    });
+
+    it('treats a 404 from the stop as reaped (runner already gone)', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+      mocks.workerClient.listRunners.mockResolvedValue([runner('inst-lost', 'runner-lost')]);
+      const reapedBefore = await unclaimedCount('reaped');
+
+      await sweep.tick();
+      mocks.workerClient.stopRunner.mockRejectedValueOnce(
+        new WorkerHttpError('Worker DELETE /runners/runner-lost returned 404: gone', 404),
+      );
+      await sweep.tick();
+
+      expect(publishedOrphanEvents()).toHaveLength(1);
+      expect(await unclaimedCount('reaped')).toBe(reapedBefore + 1);
+    });
+
+    it('isolates a failing worker: another worker still reaps its own unclaimed runner', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker('w1'), onlineWorker('w2')]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'claimed-model', instanceId: 'inst-claimed' }),
+      ]);
+      // Workers are probed in pool order, one call each per tick: the odd calls are w1 (always
+      // failing), the even calls w2 (always answering).
+      let call = 0;
+      mocks.workerClient.listRunners.mockImplementation(() => {
+        call += 1;
+        return call % 2 === 1
+          ? Promise.reject(new Error('w1 unreachable'))
+          : Promise.resolve([runner('inst-lost', 'runner-lost')]);
+      });
+
+      await sweep.tick();
+      await sweep.tick();
+
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledOnce();
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-lost');
+      expect(publishedOrphanEvents()).toHaveLength(1);
+    });
+
+    it('never enumerates when not the leader', async () => {
+      const sweep = buildSweepService();
+      mocks.workerPool.getAllWorkers.mockReturnValue([onlineWorker()]);
+      mocks.leaderElection.isLeader = false;
+
+      await sweep.tick();
+
+      expect(mocks.workerClient.listRunners).not.toHaveBeenCalled();
     });
   });
 });

@@ -89,6 +89,13 @@ export function registerRunnerRoutes(
     }
   });
 
+  // Registry enumeration (#286): the control plane's reverse reconciliation lists this worker's
+  // runners to find ones whose instance record it has lost. READY + STARTING, see
+  // RunnerManager.getAllRunnerSummaries. Auth is the server's global onRequest hook — no change.
+  app.get('/runners', (_req, reply) => {
+    return reply.status(200).send({ runners: runnerManager.getAllRunnerSummaries() });
+  });
+
   // Recovery lookup for an ambiguous POST /runners outcome. `instanceRunners` is populated
   // before the launcher is awaited, while `runners` is populated only after startup succeeds,
   // so the two maps distinguish a still-running cold start (202) from a ready runner (200)

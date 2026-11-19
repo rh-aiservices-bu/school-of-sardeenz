@@ -1,8 +1,9 @@
-import { ModelLifecycleState, Protocol } from '@sardeenz/types';
+import { ModelLifecycleState, Protocol, ClusterEventType } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 import { ControlPlaneError } from '../errors.js';
 import { stateTransitionsTotal } from '../health/metrics.js';
+import type { ClusterEvent, ClusterEventLogger, ClusterEventSink } from './cluster-events.js';
 
 const VALID_TRANSITIONS: ReadonlyMap<ModelLifecycleState, readonly ModelLifecycleState[]> = new Map(
   [
@@ -132,10 +133,29 @@ function instanceStateKey(prefix: string, modelName: string, instanceId: string)
   return redisKey(prefix, MODEL_STATE_PREFIX, modelName, instanceId);
 }
 
+/**
+ * What happened to the runner that backed an instance record, stated by the call site that drops the
+ * record (#286). Required so no call site can silently discard the bookkeeping of a possibly-live
+ * process: the compiler enumerates every site, and the two "we did not confirm a stop" values are
+ * audited with a `RUNNER_ORPHANED` cluster event.
+ *
+ * - 'runner-stopped'     the worker acknowledged the stop (DELETE 2xx or 404 — already gone)
+ * - 'runner-absent'      the worker answered "no runner for this instance" (probe/lookup 404)
+ * - 'not-dispatched'     no POST /runners was ever sent for this record
+ * - 'worker-unreachable' best-effort cleanup of a dead/unknown worker — the runner's fate is unknown
+ * - 'operator-forced'    an explicit ?force=true stop/delete dropped the record on purpose
+ */
+export type RunnerDisposition =
+  'runner-stopped' | 'runner-absent' | 'not-dispatched' | 'worker-unreachable' | 'operator-forced';
+
 export class ModelLifecycleService {
   constructor(
     private readonly redis: Redis,
     private readonly keyPrefix: string,
+    /** Audit channel for record drops that were not preceded by a confirmed runner stop (#286). */
+    private readonly events?: ClusterEventSink,
+    /** Audit log line for the same case; optional so unit tests need only inject what they assert. */
+    private readonly logger?: ClusterEventLogger,
   ) {}
 
   async getInstance(modelName: string, instanceId: string): Promise<InstanceState | null> {
@@ -157,10 +177,15 @@ export class ModelLifecycleService {
    * would surface a stale in-place-upgrade orphan as a phantom instance with `instanceId ===
    * undefined`. Two segments structurally rejects those; see `pruneLegacyInstanceKeys` and
    * ADR-019.
+   *
+   * `strict` turns a partially-read result into a rejection. Read paths default to the tolerant
+   * behavior (one unreadable record must not blind the caller to the rest), but a caller that
+   * decides what to *kill* from the absence of a record must not confuse "no record" with "could
+   * not read the record" — `reconcileUnclaimedRunners` reads strictly (#286 review).
    */
-  async getAllInstances(): Promise<InstanceState[]> {
+  async getAllInstances(options?: { strict?: boolean }): Promise<InstanceState[]> {
     const pattern = redisKey(this.keyPrefix, MODEL_STATE_PREFIX, '*', '*');
-    return this.getStatesForPattern(pattern);
+    return this.getStatesForPattern(pattern, options?.strict ?? false);
   }
 
   /**
@@ -184,7 +209,7 @@ export class ModelLifecycleService {
     return removed;
   }
 
-  private async getStatesForPattern(pattern: string): Promise<InstanceState[]> {
+  private async getStatesForPattern(pattern: string, strict = false): Promise<InstanceState[]> {
     const keys = await this.scanKeys(pattern);
     if (keys.length === 0) return [];
 
@@ -197,7 +222,18 @@ export class ModelLifecycleService {
 
     const states: InstanceState[] = [];
     for (const [err, raw] of results) {
-      if (!err && typeof raw === 'string') {
+      if (err) {
+        // Strict callers treat any per-key failure as inconclusive rather than as a missing
+        // record (see getAllInstances). Tolerant callers skip it: the alternative is one bad key
+        // hiding every other instance from the caller.
+        if (strict) {
+          throw new Error(`Instance-state read failed for one key: ${err.message}`, {
+            cause: err,
+          });
+        }
+        continue;
+      }
+      if (typeof raw === 'string') {
         states.push(JSON.parse(raw) as InstanceState);
       }
     }
@@ -392,9 +428,80 @@ export class ModelLifecycleService {
     await this.redis.set(key, JSON.stringify(state));
   }
 
-  async removeInstance(modelName: string, instanceId: string): Promise<void> {
+  /**
+   * Drop one instance record, but never silently when the runner's fate is unconfirmed (#286).
+   *
+   * The disposition is a required argument: the type system, not review discipline, is what keeps a
+   * new teardown path from deleting the bookkeeping of a live process. `'worker-unreachable'` and
+   * `'operator-forced'` are audited — a `RUNNER_ORPHANED` cluster event (and one structured error
+   * line) when the record actually claims a worker/runner — because those are the two shapes that
+   * can produce a serving process with no record. Publishing is fire-and-forget and cannot fail a
+   * removal: the reverse sweep (reconciliation `reconcileUnclaimedRunners`) is the recovery
+   * mechanism, not an exception thrown inside a failure handler.
+   *
+   * Missing record → return (idempotent; every existing caller depends on this).
+   *
+   * The one throw surface is the stored record itself: a value `getInstance` cannot parse (corrupt
+   * Redis state) rejects out of the GET, before the `DEL`, so the record survives and the caller
+   * sees the parse error. Against the previous atomic `DEL` this is new — a path that could never
+   * fail on Redis content (e.g. the force-stop `Promise.all` in routes/models.ts) can now throw
+   * here. Practically unreachable (Redis does not truncate and every writer uses `JSON.stringify`);
+   * documented rather than swallowed so corruption stays visible.
+   */
+  async removeInstance(
+    modelName: string,
+    instanceId: string,
+    disposition: RunnerDisposition,
+  ): Promise<void> {
     const key = instanceStateKey(this.keyPrefix, modelName, instanceId);
+    const state = await this.getInstance(modelName, instanceId);
+    if (!state) return;
+
+    const audited = disposition === 'worker-unreachable' || disposition === 'operator-forced';
+    // `?? null` keeps legacy records (fields absent rather than null) from being read as "claims a
+    // worker" — a record that never carried either identity has nothing to leak.
+    const claimsRunner = (state.workerId ?? null) !== null || (state.runnerId ?? null) !== null;
+
+    // The DEL comes first: both the log line and the event assert that the record *was* dropped,
+    // so publishing before a DEL that then fails would report a drop that did not happen (the
+    // record survives, still claims its runner, and the reverse sweep will not touch it).
     await this.redis.del(key);
+
+    if (audited && claimsRunner) {
+      this.logger?.error(
+        {
+          modelName,
+          instanceId,
+          workerId: state.workerId,
+          runnerId: state.runnerId,
+          disposition,
+        },
+        'Instance record dropped without a confirmed runner stop',
+      );
+      const event: ClusterEvent = {
+        type: ClusterEventType.RUNNER_ORPHANED,
+        modelName,
+        ...(state.workerId ? { workerId: state.workerId } : {}),
+        timestamp: new Date().toISOString(),
+        message: 'Instance record dropped without a confirmed runner stop',
+        data: { instanceId, runnerId: state.runnerId, disposition, reason: 'record-dropped' },
+      };
+      // Audit only — a broken publisher must never keep a record alive or throw out of a failure
+      // handler, but it must never be silent either: without a log line an injected sink that does
+      // not log its own failures would lose the orphan trace entirely.
+      const logPublishFailure = (err: unknown): void => {
+        this.logger?.error(
+          { err, modelName, instanceId, disposition, event: event.type },
+          'Failed to publish RUNNER_ORPHANED cluster event',
+        );
+      };
+      try {
+        // Covers both a synchronous throw and an asynchronous rejection from an injected publisher.
+        void Promise.resolve(this.events?.publish(event)).catch(logPublishFailure);
+      } catch (err) {
+        logPublishFailure(err);
+      }
+    }
   }
 
   /**

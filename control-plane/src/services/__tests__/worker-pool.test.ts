@@ -241,4 +241,31 @@ describe('WorkerPoolService — parseWorkerInfo (via discoverWorkers)', () => {
     expect(service.getWorker(workerId)).toBeNull();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('managementUrl'));
   });
+
+  it.each([
+    ['a bare host:port (no scheme)', 'worker1:9100'],
+    ['a non-http scheme', 'ftp://worker1:9100'],
+    ['a relative path', '/workers/w1'],
+  ])('rejects managementUrl that is %s', async (_label, managementUrl) => {
+    const workerId = 'w1';
+    const { redis } = makeMockRedis({ [infoKey(workerId)]: validPayload({ managementUrl }) });
+    const service = makeService(redis);
+
+    await service.discoverWorkers();
+
+    expect(service.getWorker(workerId)).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('managementUrl'));
+  });
+
+  it('accepts an https managementUrl', async () => {
+    const workerId = 'w1';
+    const { redis } = makeMockRedis({
+      [infoKey(workerId)]: validPayload({ managementUrl: 'https://worker1.example:9100' }),
+    });
+    const service = makeService(redis);
+
+    await service.discoverWorkers();
+
+    expect(service.getWorker(workerId)?.managementUrl).toBe('https://worker1.example:9100');
+  });
 });
