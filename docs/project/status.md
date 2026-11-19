@@ -1,7 +1,7 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-17 (Phase 5 merged; Gate 9b run recorded).
+Last update: 2026-11-19 (#286 teardown boundary + unclaimed-runner sweep merged).
 
 ## Phases (complete)
 
@@ -76,7 +76,7 @@ Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) thro
 Phase 5 (kvcached oversubscription & co-location policy) merged via PR #281 and its deploy-only
 verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)). The remainder of
 M19 owns the image/supply-chain half (#266/#267) plus the four defects the Gate 9b run raised
-(#286–#289). In progress: nothing else.
+(#286–#289); of those, #286 and #289 are fixed and #287/#288 remain. In progress: nothing else.
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -98,10 +98,10 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
   NVML follow-up to #244 (option A from its decision) would also belong there.
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
-  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 is
-  fixed in the worker (official catalog default, http(s) fetch, startup warnings), so only #286
-  and #287 remain co-location gates; #286 is the highest-severity one.
-- M16 (Orchestration Resilience) stays parked.
+  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 (worker
+  catalog default) and #286 (teardown boundary + `GET /runners` reverse sweep, PR #292) are fixed
+  and merged; #287 (stale published runner modules) and #288 (duplicate `POST /runners`) remain.
+- M16 (Orchestration Resilience) stays parked except #286, which merged early as a P1 follow-up.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
 
