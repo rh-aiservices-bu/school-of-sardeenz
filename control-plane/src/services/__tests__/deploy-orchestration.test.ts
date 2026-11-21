@@ -294,6 +294,31 @@ describe('DeployOrchestrationService', () => {
       );
     });
 
+    it('accepts a 200 reuse reply and persists the worker-returned runnerId', async () => {
+      mocks.workerClient.startRunner.mockResolvedValue(
+        makeRunnerResponse({ runnerId: 'runner-preexisting', reused: true }),
+      );
+
+      await service.deployModel(makeParams());
+
+      expect(mocks.lifecycle.setRunnerEndpoint).toHaveBeenCalledWith(
+        'test-model',
+        INSTANCE_ID,
+        expect.objectContaining({ runnerId: 'runner-preexisting' }),
+      );
+      expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
+        'test-model',
+        expect.objectContaining({ runnerId: 'runner-preexisting' }),
+        Protocol.openai,
+      );
+      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+        'test-model',
+        INSTANCE_ID,
+        ModelLifecycleState.ACTIVE,
+        expect.any(Object),
+      );
+    });
+
     it('routes inference to the engine port while keeping management on the runner port', async () => {
       // vLLM-style runner: management shim on 5001, OpenAI server on 5002.
       mocks.workerClient.startRunner.mockResolvedValue(
@@ -533,6 +558,40 @@ describe('DeployOrchestrationService', () => {
         ModelLifecycleState.ACTIVE,
         expect.any(Object),
       );
+    });
+
+    it('dispatches exactly one startRunner when the health poll times out', async () => {
+      mocks.runnerClient.getHealth.mockResolvedValue({
+        state: RunnerState.STARTING,
+        activeRequests: 0,
+      });
+
+      // createService hardcodes a 5s timeout; build the short-timeout variant directly.
+      const shortTimeoutService = new DeployOrchestrationService(
+        mocks.lifecycle as unknown as ModelLifecycleService,
+        mocks.routingMap as unknown as RoutingMapService,
+        mocks.workerPool as unknown as WorkerPoolService,
+        mocks.memoryBudget as unknown as MemoryBudgetService,
+        () => mocks.workerClient as unknown as WorkerClient,
+        () => mocks.runnerClient as unknown as RunnerClient,
+        50,
+        10,
+      );
+
+      await expect(shortTimeoutService.deployModel(makeParams())).rejects.toMatchObject({
+        code: 'RUNNER_TIMEOUT',
+      });
+
+      // A timeout happens after the start reply arrived, so the CP never re-dispatches the start…
+      expect(mocks.workerClient.startRunner).toHaveBeenCalledTimes(1);
+      expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+        'test-model',
+        INSTANCE_ID,
+        ModelLifecycleState.ERROR,
+        expect.objectContaining({ errorMessage: expect.any(String) as string }),
+      );
+      // …and, since the start is not ambiguous, the capacity hold is released.
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(INSTANCE_ID);
     });
 
     it('accepts BUSY as a ready state', async () => {

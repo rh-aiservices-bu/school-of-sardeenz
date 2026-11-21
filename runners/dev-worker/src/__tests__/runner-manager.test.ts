@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RunnerManager, ConflictError, NotFoundError } from '../runner-manager.js';
+import type { StartRunnerParams } from '../runner-manager.js';
 import { RunnerLogBuffer, RETAIN_TTL_MS } from '../runner-log-buffer.js';
 import { WorkerRegistration } from '../registration.js';
 import type { DevWorkerConfig } from '../config.js';
@@ -120,6 +121,57 @@ function makeSupervisedLauncher(): {
   };
 }
 
+// Counts start() calls; `handle` shapes the returned LaunchHandle. `failAfterHandle` rejects the
+// launch *after* the handle sink fired, i.e. a launch whose process may have survived.
+function makeCountingLauncher(options: {
+  pid?: number;
+  isAlive?: () => boolean;
+  stop?: () => Promise<void>;
+  failAfterHandle?: string;
+}) {
+  const start = vi.fn(
+    (
+      spec: LaunchSpec,
+      _onLog?: unknown,
+      _onStartupComplete?: () => void,
+      _onExit?: () => void,
+      onLaunchHandle?: (handle: LaunchHandle) => void,
+    ): Promise<LaunchHandle> => {
+      const handle: LaunchHandle = {
+        host: 'localhost',
+        port: spec.port,
+        enginePort: spec.enginePort,
+        ...(options.pid !== undefined ? { pid: options.pid } : {}),
+        ...(options.isAlive ? { isAlive: options.isAlive } : {}),
+        stop: options.stop ?? (() => Promise.resolve()),
+      };
+      onLaunchHandle?.(handle);
+      return options.failAfterHandle
+        ? Promise.reject(new Error(options.failAfterHandle))
+        : Promise.resolve(handle);
+    },
+  );
+  const launcher: RunnerLauncher = { serializeColdStarts: false, start };
+  return { launcher, start };
+}
+
+// One start request for the idempotency cases (#288); overrides replace individual fields.
+function startParams(
+  instanceId: string,
+  overrides: Partial<StartRunnerParams> = {},
+): StartRunnerParams {
+  return {
+    modelName: 'idem-model',
+    instanceId,
+    runnerType: 'vllm',
+    modelPath: '/models/idem',
+    requiredMemory: 1024 * 1024 * 1024,
+    tensorParallel: 1,
+    devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    ...overrides,
+  };
+}
+
 describe('RunnerManager', () => {
   let manager: RunnerManager;
 
@@ -207,8 +259,8 @@ describe('RunnerManager', () => {
     expect(capturedSpec?.metricsPort).toBe(19304);
   });
 
-  it('rejects duplicate instanceId with ConflictError (#120: conflict key is instanceId, not model name)', async () => {
-    await manager.startRunner({
+  it('duplicate instanceId reuses the running runner instead of launching again (#288)', async () => {
+    const first = await manager.startRunner({
       modelName: 'dupe-model',
       instanceId: 'inst-dupe-model',
       runnerType: 'vllm',
@@ -218,17 +270,19 @@ describe('RunnerManager', () => {
       devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     });
 
-    await expect(
-      manager.startRunner({
-        modelName: 'dupe-model',
-        instanceId: 'inst-dupe-model',
-        runnerType: 'vllm',
-        modelPath: '/models/dupe',
-        requiredMemory: 1024 * 1024 * 1024,
-        tensorParallel: 1,
-        devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
-      }),
-    ).rejects.toThrow(ConflictError);
+    const second = await manager.startRunner({
+      modelName: 'dupe-model',
+      instanceId: 'inst-dupe-model',
+      runnerType: 'vllm',
+      modelPath: '/models/dupe',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+    });
+
+    expect(second.runnerId).toBe(first.runnerId);
+    expect(second.reused).toBe(true);
+    expect(manager.getAllRunners()).toHaveLength(1);
   });
 
   it('cancels a runner while launcher health checks are still in progress', async () => {
@@ -403,63 +457,276 @@ describe('RunnerManager', () => {
     ).rejects.toThrow('cold-start boom');
   });
 
-  // #257 defect 1: the slot must be reserved synchronously, before the first await. Two
-  // concurrent starts of one instanceId must race to exactly one ConflictError (pre-fix, both
-  // passed the has() check while allocatePorts was suspended and both launched), and exactly one
-  // port block must be consumed.
-  it('concurrent same-instanceId starts race to exactly one ConflictError and one port block', async () => {
+  // #288: the instance slot is still reserved synchronously, before the first await, but a second
+  // start that arrives during that window now *joins* the in-flight launch instead of failing:
+  // one spawn, one port block, both callers get the same endpoint (the joiner marked `reused`).
+  it('concurrent same-instanceId starts coalesce to one spawn and both resolve to the same runnerId', async () => {
     // A shared deferred probePort: every allocatePorts probe suspends on it until released, so
-    // whichever starts are in flight are held in the port-probe window the fix guards.
+    // whichever starts are in flight are held in the port-probe window the guard covers.
     let releaseProbe!: (value: boolean) => void;
     const gate = new Promise<boolean>((resolve) => {
       releaseProbe = resolve;
     });
     const slowProbe = (): Promise<boolean> => gate;
-    const mgr = new RunnerManager(
-      makeConfig(),
-      makeRegistration(),
-      makeFakeLauncher(),
-      undefined,
-      slowProbe,
-    );
+    const { launcher, start } = makeCountingLauncher({});
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher, undefined, slowProbe);
 
-    const startParams = {
+    const params = startParams('inst-raced', {
       modelName: 'raced-model',
-      instanceId: 'inst-raced',
-      runnerType: 'vllm',
       modelPath: '/models/raced',
-      requiredMemory: 1,
-      tensorParallel: 1,
-      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
-    };
-    // Fire both, release the gate, then settle. Pre-fix both pass the has() check (the
-    // reservation only happens after allocatePorts) and both fulfill; post-fix the second
-    // start hits the synchronous reservation and rejects with ConflictError before probing.
-    const first = mgr.startRunner(startParams);
-    const second = mgr.startRunner(startParams);
+    });
+    // Fire both, release the gate, then settle. Pre-fix (before the synchronous reservation) both
+    // passed the guard while allocatePorts was suspended and both launched.
+    const first = mgr.startRunner(params);
+    const second = mgr.startRunner(params);
     releaseProbe(true);
-    const settled = await Promise.allSettled([first, second]);
+    const [a, b] = await Promise.all([first, second]);
 
-    const fulfilled = settled.filter((s) => s.status === 'fulfilled');
-    const conflictErrors = settled.filter(
-      (s) => s.status === 'rejected' && s.reason instanceof ConflictError,
-    );
-    expect(fulfilled).toHaveLength(1);
-    expect(conflictErrors).toHaveLength(1);
+    expect(start).toHaveBeenCalledOnce();
+    expect(a.runnerId).toBe(b.runnerId);
+    expect(a.reused).toBeUndefined();
+    expect(b.reused).toBe(true);
 
     // Exactly one 4-port block was consumed: a third, unrelated start lands on 19305
     // (runnerPortStart + PORTS_PER_RUNNER), not 19309.
     const third = await mgr.startRunner({
-      ...startParams,
+      ...params,
       modelName: 'other-model',
       instanceId: 'inst-other',
     });
     expect(third.port).toBe(19305);
   });
 
+  it('duplicate start for a READY instanceId returns the existing endpoint with reused: true and spawns once', async () => {
+    const { launcher, start } = makeCountingLauncher({});
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+
+    const first = await mgr.startRunner(startParams('inst-idem-ready'));
+    const second = await mgr.startRunner(startParams('inst-idem-ready'));
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(second).toEqual({
+      runnerId: first.runnerId,
+      host: first.host,
+      port: first.port,
+      enginePort: first.enginePort,
+      reused: true,
+    });
+    expect(mgr.getAllRunners()).toHaveLength(1);
+
+    // The reuse allocated nothing: an unrelated instance lands on the second port block.
+    const third = await mgr.startRunner(startParams('inst-idem-other'));
+    expect(third.port).toBe(19305);
+  });
+
+  it('duplicate start with a different launch spec throws ConflictError naming the existing runner and spawns nothing', async () => {
+    const { launcher, start } = makeCountingLauncher({});
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+    const twoDevices = [
+      { deviceIndex: 0, deviceType: 'CUDA' },
+      { deviceIndex: 1, deviceType: 'CUDA' },
+    ];
+    const baseline = startParams('inst-idem-spec', {
+      modelPath: '/models/a',
+      tensorParallel: 2,
+      devices: twoDevices,
+      engineConfig: { a: 1, b: 2 },
+    });
+    const first = await mgr.startRunner(baseline);
+
+    // A different modelPath is a different launch.
+    const conflict = await mgr
+      .startRunner({ ...baseline, modelPath: '/models/b' })
+      .catch((err: unknown) => err);
+    expect(conflict).toBeInstanceOf(ConflictError);
+    expect((conflict as Error).message).toContain(first.runnerId);
+
+    // engineConfig key order is not part of the launch identity.
+    const reorderedConfig = await mgr.startRunner({ ...baseline, engineConfig: { b: 2, a: 1 } });
+    expect(reorderedConfig.reused).toBe(true);
+
+    // Device placement order is not part of the launch identity either.
+    const reorderedDevices = await mgr.startRunner({
+      ...baseline,
+      devices: [...twoDevices].reverse(),
+    });
+    expect(reorderedDevices.reused).toBe(true);
+
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('a failed launch whose process is still alive is retained and a retry refuses with 409', async () => {
+    let zombieRunnerId: string | undefined;
+    const stop = vi.fn(() => Promise.resolve());
+    const { launcher, start } = makeCountingLauncher({
+      pid: 4242,
+      isAlive: () => true,
+      stop,
+      failAfterHandle: 'cold-start boom',
+    });
+    const capturing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec, onLog, onStartupComplete, onExit, onLaunchHandle) => {
+        zombieRunnerId = spec.runnerId;
+        return launcher.start(spec, onLog, onStartupComplete, onExit, onLaunchHandle);
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), capturing);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(mgr.startRunner(startParams('inst-zombie'))).rejects.toThrow('cold-start boom');
+
+      const retry = await mgr.startRunner(startParams('inst-zombie')).catch((err: unknown) => err);
+      expect(retry).toBeInstanceOf(ConflictError);
+      expect((retry as Error).message).toContain(zombieRunnerId);
+
+      expect(start).toHaveBeenCalledOnce();
+      expect(errorSpy.mock.calls.flat().join('\n')).toMatch(/retained as a zombie/);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('a retained failed launch is stopped and cleared before a retry proceeds', async () => {
+    let alive = true;
+    const stop = vi.fn(() => {
+      if (stop.mock.calls.length > 1) alive = false;
+      return Promise.resolve();
+    });
+    let attempts = 0;
+    let zombieRunnerId: string | undefined;
+    const launcher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec, _onLog, _onStartupComplete, _onExit, onLaunchHandle) => {
+        attempts += 1;
+        const handle: LaunchHandle = {
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          pid: 4242,
+          isAlive: () => alive,
+          stop,
+        };
+        onLaunchHandle?.(handle);
+        if (attempts === 1) {
+          zombieRunnerId = spec.runnerId;
+          return Promise.reject(new Error('cold-start boom'));
+        }
+        return Promise.resolve(handle);
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(mgr.startRunner(startParams('inst-zombie-retry'))).rejects.toThrow(
+        'cold-start boom',
+      );
+
+      // The retry stops the retained launch first; it now reports dead, so the entry is dropped
+      // and the fresh spawn proceeds under a new runnerId.
+      const retry = await mgr.startRunner(startParams('inst-zombie-retry'));
+      expect(attempts).toBe(2);
+      expect(retry.runnerId).not.toBe(zombieRunnerId);
+      expect(retry.reused).toBeUndefined();
+
+      // The retained entry is gone: the old runnerId is no longer addressable.
+      await expect(mgr.stopRunner(zombieRunnerId!)).rejects.toThrow(NotFoundError);
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('stopRunner(runnerId) of a retained failed launch stops it and answers instead of NotFound', async () => {
+    let zombieRunnerId: string | undefined;
+    const stop = vi.fn(() => Promise.resolve());
+    const { launcher } = makeCountingLauncher({
+      pid: 4242,
+      isAlive: () => true,
+      stop,
+      failAfterHandle: 'cold-start boom',
+    });
+    const capturing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec, onLog, onStartupComplete, onExit, onLaunchHandle) => {
+        zombieRunnerId = spec.runnerId;
+        return launcher.start(spec, onLog, onStartupComplete, onExit, onLaunchHandle);
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), capturing);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(mgr.startRunner(startParams('inst-zombie-delete'))).rejects.toThrow(
+        'cold-start boom',
+      );
+      // The failed launch's catch already issued one stop attempt; DELETE issues the second.
+      const stopsBeforeDelete = stop.mock.calls.length;
+
+      await expect(mgr.stopRunner(zombieRunnerId!)).resolves.toBeUndefined();
+      expect(stop.mock.calls.length).toBe(stopsBeforeDelete + 1);
+
+      // The entry was cleared, so a second DELETE is a plain 404 again.
+      await expect(mgr.stopRunner(zombieRunnerId!)).rejects.toThrow(NotFoundError);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('getRetainedLaunchForInstance exposes the retained runnerId until the launch is stopped', async () => {
+    let zombieRunnerId: string | undefined;
+    const stop = vi.fn(() => Promise.resolve());
+    const { launcher } = makeCountingLauncher({
+      pid: 4242,
+      isAlive: () => true,
+      stop,
+      failAfterHandle: 'cold-start boom',
+    });
+    const capturing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec, onLog, onStartupComplete, onExit, onLaunchHandle) => {
+        zombieRunnerId = spec.runnerId;
+        return launcher.start(spec, onLog, onStartupComplete, onExit, onLaunchHandle);
+      },
+    };
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), capturing);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(mgr.getRetainedLaunchForInstance('inst-zombie-lookup')).toBeUndefined();
+
+      await expect(mgr.startRunner(startParams('inst-zombie-lookup'))).rejects.toThrow(
+        'cold-start boom',
+      );
+      // Only the id is exposed — the launcher handle stays private to the manager.
+      expect(mgr.getRetainedLaunchForInstance('inst-zombie-lookup')).toEqual({
+        runnerId: zombieRunnerId,
+      });
+      expect(mgr.getRetainedLaunchForInstance('inst-other')).toBeUndefined();
+
+      await mgr.stopRunner(zombieRunnerId!);
+      expect(mgr.getRetainedLaunchForInstance('inst-zombie-lookup')).toBeUndefined();
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('the Started runner line carries the launcher pid', async () => {
+    const { launcher } = makeCountingLauncher({ pid: 4242 });
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await mgr.startRunner(startParams('inst-pid'));
+      expect(logSpy.mock.calls.flat().join('\n')).toMatch(/Started runner \S+ for .* pid=4242/);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   // #257 defect 1, rollback half: with the reservation moved above allocatePorts, an allocation
-  // failure lands inside the extended try, whose catch rolls the reserved slot back — a retry of
-  // the same instanceId must fail with the allocation error again, never ConflictError.
+  // failure lands inside the try, whose catch rolls the reserved slot back — a retry of the same
+  // instanceId must fail with the allocation error again, never ConflictError.
   it('a failed port allocation rolls back the reserved slot so the same instanceId can retry', async () => {
     // One-slot range whose only block always fails its probe: allocatePorts throws exhausted.
     const mgr = new RunnerManager(

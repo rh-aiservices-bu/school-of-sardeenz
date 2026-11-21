@@ -27,16 +27,33 @@ export type paths = {
         put?: never;
         /**
          * Start a runner process
-         * @description Instructs the worker to spawn a new runner process for the given model.
+         * @description Instructs the worker to spawn a runner process for the given model.
          *     The worker allocates a port, starts the runner, waits for the runner's
          *     health endpoint to respond, and returns the runner's endpoint.
+         *
+         *     `instanceId` is the idempotency key (ADR-019): when the caller supplies
+         *     one, at most one runner process is ever started for it.
+         *
+         *     - `201` — this request spawned the process.
+         *     - `200` — a runner for this `instanceId` is already running with an
+         *       identical launch spec, or was still starting and this request joined
+         *       that launch. The reply describes that runner and
+         *       `StartRunnerResponse.reused` is `true`; this request spawned nothing
+         *       and allocated no port or memory.
+         *     - `409` — a runner for this `instanceId` exists with a different launch
+         *       spec, or a previous launch for it could not be stopped. The error
+         *       message names the existing `runnerId`; `DELETE /runners/{runnerId}`
+         *       clears it.
+         *
+         *     When `instanceId` is omitted the worker mints one, so every such request
+         *     starts a fresh runner (back-compat). A client that retries a start MUST
+         *     resend the same `instanceId` — the control plane does not retry today, and
+         *     any future retry loop must be idempotent through this key.
          *
          *     Multiple runners for the same model name may run concurrently on one
          *     worker (replicas) as long as each has a distinct `instanceId`.
          *
-         *     Returns `409` if a runner for the same `instanceId` is already running
-         *     on this worker. Returns `503` if the worker has no capacity to start
-         *     another runner.
+         *     Returns `503` if the worker has no capacity to start another runner.
          */
         post: operations["startRunner"];
         delete?: never;
@@ -94,6 +111,13 @@ export type paths = {
          *     `POST /runners` outcome. Returns the full endpoint once the runner is
          *     live, `202` while its start is still in flight, and `404` when this
          *     worker has no current or in-flight runner for the instance.
+         *
+         *     A `200` with `state: FAILED` reports a launch that failed after its
+         *     process may have started and whose process could not be confirmed
+         *     stopped. Only `instanceId` and `runnerId` are present. The caller must
+         *     clear it with `DELETE /runners/{runnerId}`: retries for the instance
+         *     are refused with `409` until it is, and its process may still hold the
+         *     device memory it allocated.
          *
          *     The control plane uses this endpoint to reconcile a lost start reply
          *     without either leaking the runner or releasing its capacity early.
@@ -352,10 +376,22 @@ export type components = {
              *     inference here. When omitted, inference is served on `port`.
              */
             enginePort?: number;
+            /**
+             * @description Present and `true` when the runner was already running (or already
+             *     starting) for this `instanceId`; this request did not spawn a process.
+             *     Absent on a fresh `201`.
+             */
+            reused?: boolean;
         };
         /**
          * @description Worker-side runner identity recovered from a control-plane instance
          *     id. Endpoint fields are present only once `state` is `READY`.
+         *
+         *     `state: FAILED` reports a launch that failed after its process may have
+         *     started and that the worker could not confirm stopped; only
+         *     `instanceId` and `runnerId` are returned, and the caller must
+         *     `DELETE /runners/{runnerId}`. Retries for the instance are refused with
+         *     `409` until the retained launch is cleared.
          */
         RunnerByInstanceResponse: {
             /** @description Control-plane-assigned instance identity. */
@@ -375,7 +411,10 @@ export type components = {
          * @description Lifecycle of a runner process in the worker's own registry: `STARTING`
          *     while the launch is still in flight (`POST /runners` has not returned),
          *     `READY` once the engine's health checks passed and the runner is
-         *     registered. Member names mirror `RunnerByInstanceResponse.state`.
+         *     registered. `STARTING`/`READY` share their names with
+         *     `RunnerByInstanceResponse.state`; that lookup's `FAILED`, a retained
+         *     failed launch, is deliberately not a registry state — it is not a
+         *     runner, and `GET /runners` never lists it.
          * @enum {string}
          */
         RunnerProcessState: RunnerProcessState;
@@ -715,7 +754,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Runner started successfully */
+            /**
+             * @description Runner already present for this `instanceId` — already running with an
+             *     identical launch spec, or joined while it was still starting. This
+             *     request spawned no process; `reused` is `true`.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartRunnerResponse"];
+                };
+            };
+            /** @description Runner started successfully by this request */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -733,7 +785,11 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A runner for this instanceId is already running */
+            /**
+             * @description A runner for this `instanceId` exists with a different launch spec, or a
+             *     previous launch for it could not be stopped. The error message names
+             *     the existing `runnerId`.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -834,7 +890,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Runner is live and its endpoint is recoverable */
+            /**
+             * @description Runner is live and its endpoint is recoverable, or a failed launch
+             *     for this instance still holds a retained process (`state: FAILED`,
+             *     no endpoint fields — stop it with `DELETE /runners/{runnerId}`)
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1002,7 +1062,8 @@ export enum RunnerLogLineStream {
 }
 export enum RunnerByInstanceResponseState {
     STARTING = "STARTING",
-    READY = "READY"
+    READY = "READY",
+    FAILED = "FAILED"
 }
 export enum RunnerProcessState {
     STARTING = "STARTING",

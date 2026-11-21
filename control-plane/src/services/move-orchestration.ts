@@ -238,23 +238,29 @@ export class MoveOrchestrationService {
       initial.instanceId,
     );
     if (lookup.status === 'starting') return null;
+    if (lookup.status === 'failed') {
+      // The launch already failed and its process could not be confirmed stopped, so nothing more
+      // can arrive and the zombie is holding device memory: stop it, then fail the replacement
+      // now rather than waiting out the start-ambiguity grace (#288).
+      try {
+        await this.createWorkerClient(worker.managementUrl).stopRunner(lookup.runnerId);
+      } catch (err) {
+        if (!(err instanceof WorkerHttpError && err.status === 404)) throw err;
+      }
+      return this.failReplacementStart(
+        operation,
+        initial,
+        `replacement runner ${lookup.runnerId} failed to start and was stopped`,
+      );
+    }
     if (lookup.status === 'absent') {
       const ageMs = Date.now() - new Date(operation.createdAt).getTime();
       if (ageMs < this.ambiguousStartGraceMs) return null;
-      try {
-        return await this.lifecycle.transition(
-          operation.modelName,
-          initial.instanceId,
-          ModelLifecycleState.ERROR,
-          { errorMessage: 'replacement runner was not started before leader handoff' },
-        );
-      } catch (err) {
-        // The old leader may have completed activation between the lookup and transition. Treat
-        // that as recovered success; every other state/error remains retryable via the durable op.
-        const current = await this.lifecycle.getInstance(operation.modelName, initial.instanceId);
-        if (current?.state === ModelLifecycleState.ACTIVE) return current;
-        throw err;
-      }
+      return this.failReplacementStart(
+        operation,
+        initial,
+        'replacement runner was not started before leader handoff',
+      );
     }
 
     let replacement = initial;
@@ -307,12 +313,37 @@ export class MoveOrchestrationService {
     return replacement;
   }
 
+  /**
+   * Transition a replacement whose start can no longer succeed to ERROR. If the old leader
+   * completed activation between the lookup and the transition, that activation wins; every other
+   * state/error remains retryable via the durable operation.
+   */
+  private async failReplacementStart(
+    operation: MoveOperation,
+    initial: InstanceState,
+    errorMessage: string,
+  ): Promise<InstanceState | null> {
+    try {
+      return await this.lifecycle.transition(
+        operation.modelName,
+        initial.instanceId,
+        ModelLifecycleState.ERROR,
+        { errorMessage },
+      );
+    } catch (err) {
+      const current = await this.lifecycle.getInstance(operation.modelName, initial.instanceId);
+      if (current?.state === ModelLifecycleState.ACTIVE) return current;
+      throw err;
+    }
+  }
+
   private async teardown(
     operation: MoveOperation,
     initial: InstanceState,
     isReplacementCleanup: boolean,
   ): Promise<boolean> {
     let instance = initial;
+    let retainedLaunchStopped = false;
     try {
       if (instance.runnerStartAmbiguous && !instance.runnerId) {
         if (!instance.workerId) return false;
@@ -322,7 +353,17 @@ export class MoveOrchestrationService {
           instance.instanceId,
         );
         if (lookup.status === 'starting') return false;
-        if (lookup.status === 'absent') {
+        if (lookup.status === 'failed') {
+          // A retained failed launch (#288) is definitive — nothing more can arrive — so stop the
+          // zombie and fall through to the teardown body. No endpoint is recorded: there is no
+          // live runner to route to, only a process to kill.
+          try {
+            await this.createWorkerClient(worker.managementUrl).stopRunner(lookup.runnerId);
+          } catch (err) {
+            if (!(err instanceof WorkerHttpError && err.status === 404)) throw err;
+          }
+          retainedLaunchStopped = true;
+        } else if (lookup.status === 'absent') {
           const ageMs = Date.now() - new Date(instance.stateChangedAt).getTime();
           if (ageMs < this.ambiguousStartGraceMs) return false;
         } else {
@@ -357,7 +398,9 @@ export class MoveOrchestrationService {
       // threw), and no runnerId means nothing was dispatched. A runnerId with no workerId skipped
       // that block entirely, so nothing is confirmed — same shape-and-verdict rule as
       // `teardownInstance` (routes/models.ts): something was dispatched, we just cannot reach it,
-      // so it is audited and the reverse sweep finds the runner by instanceId (#286).
+      // so it is audited and the reverse sweep finds the runner by instanceId (#286). A retained
+      // failed launch has no runnerId on the record, but its stop was already acknowledged above,
+      // so it is audited as stopped rather than as never dispatched (#288).
       await this.lifecycle.removeInstance(
         operation.modelName,
         instance.instanceId,
@@ -365,7 +408,9 @@ export class MoveOrchestrationService {
           ? instance.workerId
             ? 'runner-stopped'
             : 'worker-unreachable'
-          : 'not-dispatched',
+          : retainedLaunchStopped
+            ? 'runner-stopped'
+            : 'not-dispatched',
       );
       await this.instanceRepository.delete(instance.instanceId).catch(() => {});
       this.memoryBudget.releaseInstanceReservations(instance.instanceId);

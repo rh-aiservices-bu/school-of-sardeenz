@@ -443,6 +443,10 @@ export class ApptainerLauncher implements RunnerLauncher {
       port: spec.port,
       enginePort: spec.enginePort,
       pid: child.pid,
+      // The exec is alive until its 'exit'/'error' event fires (`exited`). `stopChild` can resolve
+      // on its backstop timer without that event, so this is the only reliable answer to "did the
+      // process actually die" (#288).
+      isAlive: () => !exited,
       stop: () => this.stopChild(child, () => exited),
     };
     onLaunchHandle?.(handle);
