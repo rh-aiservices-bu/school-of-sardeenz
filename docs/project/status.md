@@ -1,7 +1,7 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-19 (#286 teardown boundary + unclaimed-runner sweep merged).
+Last update: 2026-11-21 (#288 idempotent worker start + retained-launch recovery merged).
 
 ## Phases (complete)
 
@@ -76,7 +76,7 @@ Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) thro
 Phase 5 (kvcached oversubscription & co-location policy) merged via PR #281 and its deploy-only
 verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)). The remainder of
 M19 owns the image/supply-chain half (#266/#267) plus the four defects the Gate 9b run raised
-(#286–#289); of those, #286 and #289 are fixed and #287/#288 remain. In progress: nothing else.
+(#286–#289); of those, #286, #288 and #289 are fixed and #287 remains. In progress: nothing else.
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -99,9 +99,11 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   NVML follow-up to #244 (option A from its decision) would also belong there.
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
   `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 (worker
-  catalog default) and #286 (teardown boundary + `GET /runners` reverse sweep, PR #292) are fixed
-  and merged; #287 (stale published runner modules) and #288 (duplicate `POST /runners`) remain.
-- M16 (Orchestration Resilience) stays parked except #286, which merged early as a P1 follow-up.
+  catalog default), #286 (teardown boundary + `GET /runners` reverse sweep, PR #292) and #288
+  (idempotent worker start + contract-visible retained launches, PR #294) are fixed and merged;
+  #287 (stale published runner modules) remains — it needs a runner-module/SIF republish.
+- M16 (Orchestration Resilience) stays parked except #286 and #288, which merged early as P1/P2
+  follow-ups.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
 
@@ -159,7 +161,12 @@ From the Phase 5 Gate 9b run (2026-11-17, see [`phase5-gate9b-run.md`](phase5-ga
 - **#286**: instance records can be dropped without stopping the runner — a failed start left a
   live `READY` runner holding 5.0 GB that the control plane no longer knew about.
 - **#287**: published vLLM runner modules predate #275 (no `attribution` in `/memory-report`).
-- **#288**: the deploy path issued `POST /runners` twice for one instanceId.
+- ~~**#288**: the deploy path issued `POST /runners` twice for one instanceId.~~ — fixed:
+  `POST /runners` is idempotent per `instanceId` (identical repeat or in-flight join returns
+  `200` + `reused: true`, `201` means this request spawned, a different spec or an undying prior
+  launch is `409` naming the runner), retained failed launches are contract-visible as `FAILED`
+  and stopped + reaped by the control plane, and `Started runner … pid=` distinguishes a
+  duplicated log block from a real double spawn (PR #294).
 - ~~**#289**: a stock `deployment/` cannot advertise `kvCacheElasticSharing` (worker catalog URL
   unset; loader accepts local paths only), which makes Phase 5 co-location unreachable.~~ —
   fixed: the worker shares the control plane's catalog default and fetches http(s) catalogs, with
