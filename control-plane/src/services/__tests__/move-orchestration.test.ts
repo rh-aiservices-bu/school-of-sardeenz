@@ -63,13 +63,24 @@ function build(over: { barrier?: () => Promise<boolean>; op?: MoveOperation } = 
     }),
     getInstance: vi.fn((_model: string, id: string) => Promise.resolve(instances.get(id) ?? null)),
     getInstancesForModel: vi.fn(() => Promise.resolve([...instances.values()])),
-    transition: vi.fn((_model: string, id: string, state: ModelLifecycleState) => {
-      order.push(`transition:${state}`);
-      const current = instances.get(id)!;
-      const updated = { ...current, state };
-      instances.set(id, updated);
-      return Promise.resolve(updated);
-    }),
+    transition: vi.fn(
+      (
+        _model: string,
+        id: string,
+        state: ModelLifecycleState,
+        options?: { errorMessage?: string },
+      ) => {
+        order.push(`transition:${state}`);
+        const current = instances.get(id)!;
+        const updated = {
+          ...current,
+          state,
+          ...(options?.errorMessage ? { errorMessage: options.errorMessage } : {}),
+        };
+        instances.set(id, updated);
+        return Promise.resolve(updated);
+      },
+    ),
     setRunnerEndpoint: vi.fn(
       (
         _model: string,
@@ -355,5 +366,74 @@ describe('MoveOrchestrationService', () => {
     expect(getRunnerByInstance).toHaveBeenCalledWith('inst-replacement');
     expect(instances.has('inst-replacement')).toBe(false);
     expect(lifecycle.removeMoveOperation).toHaveBeenCalledWith('m1', 'move-1');
+  });
+
+  // A retained failed launch (#288) is definitive: nothing more can arrive, so the replacement is
+  // failed at once and the zombie is stopped instead of being adopted as a routing endpoint.
+  it('stops a retained failed replacement launch and fails the replacement without an endpoint', async () => {
+    const op = {
+      ...operation,
+      phase: 'REPLACEMENT_STARTING' as const,
+      createdAt: new Date().toISOString(),
+    };
+    const { service, instances, lifecycle, routingMap, getRunnerByInstance, stopRunner, order } =
+      build({
+        op,
+      });
+    instances.set('inst-replacement', {
+      ...instance('inst-replacement', ModelLifecycleState.STARTING, 'worker-2', 9000),
+      runnerHost: null,
+      runnerPort: null,
+      runnerEnginePort: null,
+      runnerId: null,
+    });
+    getRunnerByInstance.mockResolvedValueOnce({
+      status: 'failed',
+      runnerId: 'runner-zombie',
+    });
+
+    await service.resume('m1');
+
+    expect(stopRunner).toHaveBeenCalledOnce();
+    expect(stopRunner).toHaveBeenCalledWith('runner-zombie');
+    expect(order).toContain(`transition:${ModelLifecycleState.ERROR}`);
+    expect(lifecycle.updateMoveOperation).toHaveBeenCalledWith('m1', 'move-1', {
+      phase: 'REPLACEMENT_CLEANUP',
+      errorMessage: 'replacement runner runner-zombie failed to start and was stopped',
+    });
+    expect(lifecycle.setRunnerEndpoint).not.toHaveBeenCalled();
+    expect(routingMap.addEndpoint).not.toHaveBeenCalled();
+    expect(instances.has('inst-replacement')).toBe(false);
+    expect(instances.get('inst-source')?.state).toBe(ModelLifecycleState.ACTIVE);
+  });
+
+  it('stops a retained failed launch during cleanup teardown and audits the stop', async () => {
+    const op = { ...operation, phase: 'REPLACEMENT_CLEANUP' as const };
+    const { service, lifecycle, instances, getRunnerByInstance, stopRunner } = build({ op });
+    instances.set('inst-replacement', {
+      ...instance('inst-replacement', ModelLifecycleState.ERROR, 'worker-2', 9000),
+      runnerHost: null,
+      runnerPort: null,
+      runnerEnginePort: null,
+      runnerId: null,
+      runnerStartAmbiguous: true,
+    });
+    getRunnerByInstance.mockResolvedValueOnce({
+      status: 'failed',
+      runnerId: 'runner-zombie',
+    });
+
+    await service.resume('m1');
+
+    expect(stopRunner).toHaveBeenCalledOnce();
+    expect(stopRunner).toHaveBeenCalledWith('runner-zombie');
+    // No endpoint is recorded for a launch that never became usable.
+    expect(lifecycle.setRunnerEndpoint).not.toHaveBeenCalled();
+    expect(lifecycle.removeInstance).toHaveBeenCalledWith(
+      'm1',
+      'inst-replacement',
+      'runner-stopped',
+    );
+    expect(instances.has('inst-replacement')).toBe(false);
   });
 });

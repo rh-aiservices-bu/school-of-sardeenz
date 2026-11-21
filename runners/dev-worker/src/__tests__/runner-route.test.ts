@@ -228,6 +228,89 @@ describe('GET /runners/:runnerId (liveness probe, #166)', () => {
   });
 });
 
+// A retained failed launch ("zombie", #288) is contract-visible: without a FAILED verdict the
+// control plane would see STARTING (sealed log buffer) and then 404 while the process may still
+// hold VRAM, and nothing CP-facing would ever learn the runnerId it must DELETE.
+describe('GET /runners/by-instance/:instanceId/status — retained failed launch (#288)', () => {
+  const config = makeConfig();
+
+  it('reports a retained failed launch as 200 FAILED, then 404 once it is deleted', async () => {
+    let alive = true;
+    const stop = vi.fn(() => Promise.resolve());
+    const zombieLauncher: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (_spec, _onLog, _onStartupComplete, _onExit, onLaunchHandle) => {
+        onLaunchHandle?.({
+          host: 'localhost',
+          port: 19600,
+          enginePort: 19601,
+          isAlive: () => alive,
+          stop,
+        });
+        return Promise.reject(new Error('cold-start boom'));
+      },
+    };
+    const manager = new RunnerManager(config, makeRegistration(), zombieLauncher);
+    const server = Fastify({ logger: false });
+    registerRunnerRoutes(
+      server,
+      manager,
+      buildEntrypointAllowlist(config.apptainer.runnerEntrypoint),
+    );
+    const baseUrl = await server.listen({ port: 0, host: '127.0.0.1' });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await expect(
+        manager.startRunner({
+          modelName: 'zombie-model',
+          instanceId: 'inst-zombie-route',
+          runnerType: 'vllm',
+          modelPath: '/models/zombie',
+          requiredMemory: 1024,
+          tensorParallel: 1,
+          devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+        }),
+      ).rejects.toThrow('cold-start boom');
+
+      const retained = await fetch(`${baseUrl}/runners/by-instance/inst-zombie-route/status`);
+      expect(retained.status).toBe(200);
+      const body = (await retained.json()) as {
+        instanceId: string;
+        runnerId: string;
+        state: string;
+        host?: string;
+        port?: number;
+        enginePort?: number;
+      };
+      expect(body.instanceId).toBe('inst-zombie-route');
+      expect(body.runnerId).toMatch(/^runner-/);
+      expect(body.state).toBe('FAILED');
+      // No endpoint: the launch never became usable, so there is nothing to route to.
+      expect(body.host).toBeUndefined();
+      expect(body.port).toBeUndefined();
+      expect(body.enginePort).toBeUndefined();
+
+      // Retained launches stay out of the registry (#286's reverse sweep must not see a phantom).
+      const registry = await fetch(`${baseUrl}/runners`);
+      expect(await registry.json()).toEqual({ runners: [] });
+
+      alive = false;
+      const deleted = await fetch(`${baseUrl}/runners/${body.runnerId}`, { method: 'DELETE' });
+      expect(deleted.status).toBe(204);
+
+      const gone = await fetch(`${baseUrl}/runners/by-instance/inst-zombie-route/status`);
+      expect(gone.status).toBe(404);
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+      await manager.stopAll();
+      await server.close();
+    }
+  });
+});
+
 // The list endpoint exists so the control plane's reverse reconciliation can find a runner whose
 // instance record it has lost (#286) — including one whose launch it lost track of mid-flight.
 describe('GET /runners (registry enumeration, #286)', () => {
@@ -425,6 +508,101 @@ describe('GET /runners (registry enumeration, #286)', () => {
       expect(res.status).toBe(204);
 
       expect(await listRunners(baseUrl)).toEqual({ runners: [] });
+    } finally {
+      await close();
+    }
+  });
+});
+
+// A repeat start for one instanceId must not spawn a second process (#288): the route answers
+// 201 only when this request spawned, 200 when it returned a runner it did not spawn.
+describe('POST /runners idempotency (#288)', () => {
+  async function buildHarness() {
+    const manager = new RunnerManager(makeConfig(), makeRegistration(), instantLauncher);
+    const server = Fastify({ logger: false });
+    registerRunnerRoutes(
+      server,
+      manager,
+      buildEntrypointAllowlist(makeConfig().apptainer.runnerEntrypoint),
+    );
+    const baseUrl = await server.listen({ port: 0, host: '127.0.0.1' });
+    return {
+      manager,
+      baseUrl,
+      close: async () => {
+        await manager.stopAll();
+        await server.close();
+      },
+    };
+  }
+
+  function makeBody(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      modelName: 'idem-route-model',
+      instanceId: 'inst-idem',
+      runnerType: 'vllm',
+      modelPath: '/models/idem',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      ...overrides,
+    });
+  }
+
+  function post(baseUrl: string, body: string) {
+    return fetch(`${baseUrl}/runners`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+  }
+
+  it('POST /runners twice with the same instanceId answers 201 then 200 with reused: true', async () => {
+    const { baseUrl, close } = await buildHarness();
+    try {
+      const r1 = await post(baseUrl, makeBody());
+      expect(r1.status).toBe(201);
+      const first = (await r1.json()) as { runnerId: string };
+
+      const r2 = await post(baseUrl, makeBody());
+      expect(r2.status).toBe(200);
+      const second = (await r2.json()) as { runnerId: string; reused?: boolean };
+      expect(second.runnerId).toBe(first.runnerId);
+      expect(second.reused).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('POST /runners with the same instanceId and a different modelPath answers 409', async () => {
+    const { baseUrl, close } = await buildHarness();
+    try {
+      const r1 = await post(baseUrl, makeBody());
+      expect(r1.status).toBe(201);
+      const first = (await r1.json()) as { runnerId: string };
+
+      const r2 = await post(baseUrl, makeBody({ modelPath: '/models/other' }));
+      expect(r2.status).toBe(409);
+      const body = (await r2.json()) as { error: string; code: string };
+      expect(body.code).toBe('CONFLICT');
+      expect(body.error).toContain(first.runnerId);
+    } finally {
+      await close();
+    }
+  });
+
+  it('POST /runners without an instanceId twice answers 201 twice', async () => {
+    const { baseUrl, close } = await buildHarness();
+    try {
+      const body = makeBody({ instanceId: undefined });
+      const r1 = await post(baseUrl, body);
+      expect(r1.status).toBe(201);
+      const first = (await r1.json()) as { runnerId: string };
+
+      const r2 = await post(baseUrl, body);
+      expect(r2.status).toBe(201);
+      const second = (await r2.json()) as { runnerId: string };
+      expect(second.runnerId).not.toBe(first.runnerId);
     } finally {
       await close();
     }

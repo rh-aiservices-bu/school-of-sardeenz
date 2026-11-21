@@ -92,6 +92,7 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
     // Runner becomes READY after a short delay
     setTimeout(() => runner.setHealthState(RunnerState.READY), 200);
 
+    const startsBeforeDeploy = worker.startRequests.length;
     await harness.deployOrchestration.deployModel({
       protocol: Protocol.openai,
       modelName: MODEL,
@@ -105,10 +106,14 @@ describe.skipIf(!AVAILABLE)('Deploy integration', () => {
       devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
     });
 
+    // One deploy dispatches exactly one start (#288) — the CP never re-sends a start it cannot
+    // correlate, and the worker-side idempotency key is the instanceId it sent.
+    expect(worker.startRequests.length - startsBeforeDeploy).toBe(1);
+    expect(worker.startRequests.at(-1)?.instanceId).toBe(INSTANCE_ID);
+
     // The runtime module is forwarded to the worker's start-runner request (which the Apptainer
     // launcher resolves to /modules/vllm-0.21.sif).
     expect(worker.startRequests.at(-1)?.runtimeModule).toBe('vllm-0.21');
-    expect(worker.startRequests.at(-1)?.instanceId).toBe(INSTANCE_ID);
 
     const instance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
     expect(instance?.state).toBe(ModelLifecycleState.ACTIVE);

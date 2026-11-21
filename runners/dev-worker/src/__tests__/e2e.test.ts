@@ -187,7 +187,7 @@ describe('Dev Worker E2E', () => {
     expect(manager.getRunner(runnerId)).toBeUndefined();
   }, 15000);
 
-  it('returns 409 for duplicate instanceId (#120: conflict key is instanceId, not model name)', async () => {
+  it('returns the same runner for a duplicate instanceId with reused: true (#288)', async () => {
     const body = JSON.stringify({
       modelName: 'dup-model',
       instanceId: 'inst-dup-fixed',
@@ -211,9 +211,22 @@ describe('Dev Worker E2E', () => {
       headers: { 'Content-Type': 'application/json' },
       body,
     });
-    expect(r2.status).toBe(409);
+    expect(r2.status).toBe(200);
+    const duplicate = (await r2.json()) as { runnerId: string; reused?: boolean };
+    expect(duplicate.runnerId).toBe(runnerId);
+    expect(duplicate.reused).toBe(true);
 
-    await fetch(`${baseUrl}/runners/${runnerId}`, { method: 'DELETE' });
+    // One spawn, one registry entry — the second request allocated nothing.
+    expect(manager.getAllRunners()).toHaveLength(1);
+    expect(manager.getAllRunners()[0].runnerId).toBe(runnerId);
+
+    const listed = (await (await fetch(`${baseUrl}/runners`)).json()) as {
+      runners: Array<{ runnerId: string }>;
+    };
+    expect(listed.runners.filter((r) => r.runnerId === runnerId)).toHaveLength(1);
+
+    expect((await fetch(`${baseUrl}/runners/${runnerId}`, { method: 'DELETE' })).status).toBe(204);
+    expect(manager.getAllRunners()).toHaveLength(0);
   });
 
   it('allows two replicas of the same model on this worker with distinct instanceIds (#120)', async () => {

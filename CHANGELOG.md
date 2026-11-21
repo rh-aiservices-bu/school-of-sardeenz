@@ -48,6 +48,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Worker start is idempotent per `instanceId` (issue #288).** A repeat `POST /runners` for an
+  instance that already has a runner now answers `200` with that runner's endpoint and
+  `reused: true` instead of launching a second `apptainer exec`; a start that arrives while the
+  first is still cold-starting joins it (one spawn, both callers get the endpoint). `201` now means
+  "this request spawned the process". A repeat with a _different_ launch spec — or a previous launch
+  whose process could not be confirmed dead — answers `409` naming the colliding `runnerId`, and the
+  retained ("zombie") launch can be cleared with `DELETE /runners/{runnerId}` or is stopped
+  automatically before a retry proceeds. Every `Started runner …` line now carries `pid=`, so a
+  duplicated log block (same pid twice) can no longer be mistaken for a duplicated process
+  (different pids for one `instanceId`). A retained failed launch is also contract-visible now:
+  `GET /runners/by-instance/{instanceId}/status` answers `200` with
+  `{ instanceId, runnerId, state: 'FAILED' }` (no endpoint) instead of `202 STARTING`/`404`, so the
+  control plane learns the `runnerId`; reconciliation then stops it and reaps the instance as
+  `runner-stopped` without waiting out the absent grace, and a move stops it before failing the
+  replacement. Worker-agent contract `0.1.5` (the `FAILED` lookup state is part of the same
+  unreleased change); retained launches stay out of the `GET /runners` registry.
+
 - **Instance teardown can no longer drop the record of a possibly-live runner silently (#286).**
   `ModelLifecycleService.removeInstance` now requires a `RunnerDisposition`
   (`runner-stopped` | `runner-absent` | `not-dispatched` | `worker-unreachable` | `operator-forced`),

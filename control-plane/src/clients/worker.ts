@@ -13,6 +13,9 @@ export type RunnerListResponse = WorkerAgentComponents['schemas']['RunnerListRes
 export type RunnerByInstanceLookup =
   | { status: 'absent' }
   | { status: 'starting'; runnerId: string }
+  // A launch for this instance failed and its process could not be confirmed stopped (#288). The
+  // worker holds it under `runnerId` until someone DELETEs it; retries for the instance 409.
+  | { status: 'failed'; runnerId: string }
   | {
       status: 'ready';
       runnerId: string;
@@ -308,6 +311,11 @@ export class WorkerClient {
     }
 
     const body = (await response.json()) as RunnerByInstanceResponse;
+    // Checked before the endpoint requirement: a FAILED body legitimately has no host/port, and
+    // the caller still needs the runnerId to DELETE the retained process (#288).
+    if (body.state === RunnerByInstanceResponseState.FAILED) {
+      return { status: 'failed', runnerId: body.runnerId };
+    }
     if (response.status === 202 || body.state === RunnerByInstanceResponseState.STARTING) {
       return { status: 'starting', runnerId: body.runnerId };
     }

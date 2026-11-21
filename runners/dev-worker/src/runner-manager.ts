@@ -71,6 +71,8 @@ export interface RunnerRecord {
   host: string;
   requiredMemory: number;
   devices: { deviceIndex: number; deviceType: string }[];
+  /** The launch identity this record was created for — a later start compares against it (#288). */
+  launchSpec: NormalizedLaunchSpec;
   handle: LaunchHandle;
 }
 
@@ -98,6 +100,94 @@ export interface StartRunnerParams {
   devices: { deviceIndex: number; deviceType: string }[];
 }
 
+/** What `startRunner` answers. `reused` is set only when the caller got a runner this request did
+ *  not spawn (#288) — a READY reuse or an in-flight join. */
+export interface StartRunnerResult {
+  runnerId: string;
+  host: string;
+  port: number;
+  enginePort: number;
+  /** true when this call returned a runner it did not spawn (READY reuse or in-flight join). */
+  reused?: boolean;
+}
+
+/** Defaults the manager substitutes for omitted request fields — needed so two requests that
+ *  differ only by an omitted-vs-explicit default compare equal. */
+export interface LaunchSpecDefaults {
+  runnerType: string;
+  deviceType: string;
+}
+
+/**
+ * The launch-relevant subset of a start request (#288, design D8). `instanceId` is the idempotency
+ * key and the ports are allocated per launch, so neither is part of the launch identity. Every
+ * member's ordering is fixed by construction, which makes `launchSpecMatches` a string compare.
+ */
+export interface NormalizedLaunchSpec {
+  modelName: string;
+  modelPath: string;
+  runnerType: string;
+  runtimeModule: string | null;
+  deviceType: string;
+  requiredMemory: number;
+  tensorParallel: number;
+  /** Canonical JSON (recursively key-sorted) so object key order never fakes a mismatch. */
+  engineConfig: string | null;
+  /** Ordered argv tail — order is meaningful, never sorted. */
+  engineArgs: string[];
+  servedModelName: string | null;
+  /** Ordered argv — order is meaningful, never sorted. */
+  entrypoint: string[];
+  /** Sorted by deviceIndex: placement order is not part of the launch identity. */
+  devices: { deviceIndex: number; deviceType: string }[];
+}
+
+// Recursively sorts object keys so two engineConfig objects that differ only in key order
+// serialize identically. Arrays keep their order (argv semantics).
+function canonicalJson(value: unknown): string {
+  const canonicalize = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(canonicalize);
+    if (v && typeof v === 'object') {
+      const record = v as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map((key) => [key, canonicalize(record[key])]),
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(canonicalize(value)) ?? 'null';
+}
+
+/** Normalize the launch-relevant fields of a start request for identity comparison (#288, D8). */
+export function normalizeLaunchSpec(
+  params: StartRunnerParams,
+  defaults: LaunchSpecDefaults,
+): NormalizedLaunchSpec {
+  return {
+    modelName: params.modelName,
+    modelPath: params.modelPath,
+    runnerType: params.runnerType || defaults.runnerType,
+    runtimeModule: params.runtimeModule ?? null,
+    deviceType: params.deviceType || defaults.deviceType,
+    requiredMemory: params.requiredMemory,
+    tensorParallel: params.tensorParallel,
+    engineConfig: params.engineConfig === undefined ? null : canonicalJson(params.engineConfig),
+    engineArgs: [...(params.engineArgs ?? [])],
+    servedModelName: params.servedModelName ?? null,
+    entrypoint: [...(params.entrypoint ?? [])],
+    devices: [...params.devices]
+      .sort((a, b) => a.deviceIndex - b.deviceIndex)
+      .map((device) => ({ deviceIndex: device.deviceIndex, deviceType: device.deviceType })),
+  };
+}
+
+/** Do two start requests describe the same launch? (#288, D8) */
+export function launchSpecMatches(a: NormalizedLaunchSpec, b: NormalizedLaunchSpec): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 // Ports reserved per runner: mgmt, engine, gRPC, metrics — see allocatePorts.
 const PORTS_PER_RUNNER = 4;
 
@@ -114,9 +204,25 @@ export class RunnerManager {
   // instanceId -> runnerId. The unambiguous lookup/conflict key — unlike modelName, an instanceId
   // identifies exactly one runner even with replicas.
   private readonly instanceRunners = new Map<string, string>();
+  // instanceId -> the in-flight start (#288). Registered synchronously by startRunner *before* its
+  // first await, so a second POST for the same instanceId always observes one of: this promise
+  // (join), the READY record (reuse), or neither (fresh start). Removed on settle so a *failed*
+  // launch does not keep rejecting later attempts — runStart's catch rolls the slot back itself.
+  private readonly instanceStarts = new Map<
+    string,
+    { spec: NormalizedLaunchSpec; runnerId: string; promise: Promise<StartRunnerResult> }
+  >();
   // Failed launches are removed from instanceRunners so they do not block a retry, but their
   // sealed startup logs remain addressable by instanceId for RunnerLogBuffer's retention window.
   private readonly failedInstanceLogRunners = new Map<string, string>();
+  // instanceId -> a failed launch whose process could not be confirmed dead (#288, D4). A retry
+  // for that instance must stop it before spawning; DELETE /runners/{runnerId} addresses it too.
+  // Deliberately NOT listed by getAllRunnerSummaries(): a zombie may be no process at all, and the
+  // reverse sweep must not be handed a phantom. Bounded like failedInstanceLogRunners.
+  private readonly failedLaunchHandles = new Map<
+    string,
+    { runnerId: string; handle: LaunchHandle }
+  >();
   private readonly launcher: RunnerLauncher;
   private readonly logBuffer: RunnerLogBuffer;
   private readonly usedPorts = new Set<number>();
@@ -142,14 +248,135 @@ export class RunnerManager {
     return this.logBuffer;
   }
 
-  async startRunner(
+  /**
+   * Start — or join/reuse — the runner for one `instanceId` (#288). Deliberately **not** `async`:
+   * the in-flight entry is registered before this method yields, so two concurrent callers can
+   * never both reach `runStart`.
+   */
+  startRunner(params: StartRunnerParams): Promise<StartRunnerResult> {
+    const inFlight = this.instanceStarts.get(params.instanceId);
+    if (inFlight) return this.joinStart(inFlight, params);
+
+    const existingId = this.instanceRunners.get(params.instanceId);
+    if (existingId) return this.reuseRunner(existingId, params);
+
+    const spec = normalizeLaunchSpec(params, this.launchSpecDefaults());
+    const runnerId = `runner-${randomUUID().slice(0, 8)}`;
+    const promise = this.runStart(
+      params,
+      spec,
+      runnerId,
+      this.failedLaunchHandles.get(params.instanceId),
+    );
+    this.instanceStarts.set(params.instanceId, { spec, runnerId, promise });
+    promise
+      .finally(() => {
+        if (this.instanceStarts.get(params.instanceId)?.promise === promise) {
+          this.instanceStarts.delete(params.instanceId);
+        }
+      })
+      .catch(() => {}); // the caller owns the rejection; this chain only cleans the map
+    return promise;
+  }
+
+  private launchSpecDefaults(): LaunchSpecDefaults {
+    return { runnerType: this.config.runnerType, deviceType: this.config.deviceType };
+  }
+
+  // A second POST for an instance whose first start is still cold-starting: identical spec joins
+  // that launch (both callers need the endpoint); a different spec is a real conflict (#288, D2).
+  private async joinStart(
+    joined: { spec: NormalizedLaunchSpec; runnerId: string; promise: Promise<StartRunnerResult> },
     params: StartRunnerParams,
-  ): Promise<{ runnerId: string; host: string; port: number; enginePort: number }> {
-    if (this.instanceRunners.has(params.instanceId)) {
-      throw new ConflictError(`Runner for instance ${params.instanceId} already exists`);
+  ): Promise<StartRunnerResult> {
+    const spec = normalizeLaunchSpec(params, this.launchSpecDefaults());
+    if (!launchSpecMatches(joined.spec, spec)) {
+      throw new ConflictError(
+        `Runner ${joined.runnerId} for instance ${params.instanceId} is already starting with a ` +
+          `different launch spec; stop it first (DELETE /runners/${joined.runnerId})`,
+      );
+    }
+    console.log(
+      `[worker] POST /runners coalesced with in-flight start: instance=${params.instanceId} ` +
+        `runner=${joined.runnerId}`,
+    );
+    const result = await joined.promise;
+    return { ...result, reused: true };
+  }
+
+  // A repeat POST for an instance that already has a READY runner: describe it, spawn nothing
+  // (#288, D1 step 2). No port allocation, no launcher call, no memory re-allocation. Returns a
+  // promise (rather than throwing synchronously) so every `startRunner` outcome is a rejection.
+  private reuseRunner(existingId: string, params: StartRunnerParams): Promise<StartRunnerResult> {
+    const record = this.runners.get(existingId);
+    if (!record) {
+      // Defensive only: instanceRunners is claimed together with the in-flight entry, so a
+      // claimed slot without a READY record is a launch that has not settled yet.
+      return Promise.reject(
+        new ConflictError(
+          `Runner ${existingId} for instance ${params.instanceId} is still starting`,
+        ),
+      );
+    }
+    const spec = normalizeLaunchSpec(params, this.launchSpecDefaults());
+    if (!launchSpecMatches(record.launchSpec, spec)) {
+      return Promise.reject(
+        new ConflictError(
+          `Runner ${existingId} for instance ${params.instanceId} was started with a different ` +
+            `launch spec; stop it first (DELETE /runners/${existingId})`,
+        ),
+      );
+    }
+    console.log(
+      `[worker] POST /runners idempotent reuse: instance=${params.instanceId} ` +
+        `runner=${existingId} (identical launch spec, no spawn)`,
+    );
+    return Promise.resolve({
+      runnerId: record.runnerId,
+      host: record.host,
+      port: record.port,
+      enginePort: record.enginePort,
+      reused: true,
+    });
+  }
+
+  private async runStart(
+    params: StartRunnerParams,
+    spec: NormalizedLaunchSpec,
+    runnerId: string,
+    zombie?: { runnerId: string; handle: LaunchHandle },
+  ): Promise<StartRunnerResult> {
+    // Reserve the instance slot up-front — synchronously, before the first await — so a second
+    // start of the same instance (which missed the in-flight join only because it arrived later)
+    // sees a claimed slot rather than racing this launch. Also register under modelName — a Set
+    // now (#120), since several instances of the same model may run concurrently on this worker.
+    this.instanceRunners.set(params.instanceId, runnerId);
+    let modelRunnerIds = this.modelRunners.get(params.modelName);
+    if (!modelRunnerIds) {
+      modelRunnerIds = new Set();
+      this.modelRunners.set(params.modelName, modelRunnerIds);
+    }
+    modelRunnerIds.add(runnerId);
+
+    // A previous launch for this instance may have left a process behind (#288, D4). Try once more
+    // to stop it; if it is still alive, refuse loudly instead of spawning a second process.
+    if (zombie) {
+      await zombie.handle.stop().catch(() => {});
+      if (zombie.handle.isAlive?.()) {
+        this.releaseReservation(params, runnerId);
+        throw new ConflictError(
+          `Runner ${zombie.runnerId} for instance ${params.instanceId} did not stop after a ` +
+            `failed launch (pid=${zombie.handle.pid ?? '-'}); stop it first ` +
+            `(DELETE /runners/${zombie.runnerId})`,
+        );
+      }
+      this.failedLaunchHandles.delete(params.instanceId);
+      console.warn(
+        `[worker] Stopped retained launch ${zombie.runnerId} for instance ` +
+          `${params.instanceId} before retry`,
+      );
     }
 
-    const runnerId = `runner-${randomUUID().slice(0, 8)}`;
     // Pre-declared nullable port bindings: the catch below deletes the block base from
     // usedPorts, so the binding must exist (not be destructured inside the try) — otherwise an
     // allocation failure that throws before the destructure would make the catch's delete hit
@@ -161,18 +388,6 @@ export class RunnerManager {
     let grpcPort: number | undefined;
     let metricsPort: number | undefined;
     try {
-      // Reserve the instance slot up-front — synchronously, before the first await — so
-      // concurrent starts of the same instance race to ConflictError rather than both
-      // proceeding. Also register under modelName — a Set now (#120), since several instances
-      // of the same model may run concurrently on this worker.
-      this.instanceRunners.set(params.instanceId, runnerId);
-      let modelRunnerIds = this.modelRunners.get(params.modelName);
-      if (!modelRunnerIds) {
-        modelRunnerIds = new Set();
-        this.modelRunners.set(params.modelName, modelRunnerIds);
-      }
-      modelRunnerIds.add(runnerId);
-
       ({ port, enginePort, grpcPort, metricsPort } = await this.allocatePorts());
       const pending: {
         instanceId: string;
@@ -258,6 +473,7 @@ export class RunnerManager {
         host: handle.host,
         requiredMemory: params.requiredMemory,
         devices: params.devices,
+        launchSpec: spec,
         handle,
       };
       this.runners.set(runnerId, record);
@@ -269,23 +485,23 @@ export class RunnerManager {
       }
       this.registration.pushMemoryReportOnce();
 
+      // `pid` makes a duplicated log block self-diagnosing (#288, D5): the same pid on two
+      // "Started runner" lines is one process logged twice; a different pid for one instanceId
+      // would be a genuine double spawn — impossible with the guard above.
       console.log(
         `[worker] Started runner ${runnerId} for ${params.modelName}/${params.instanceId} on ${handle.host}:${handle.port}` +
-          (handle.enginePort !== handle.port ? ` (inference on :${handle.enginePort})` : ''),
+          (handle.enginePort !== handle.port ? ` (inference on :${handle.enginePort})` : '') +
+          ` pid=${handle.pid ?? '-'}`,
       );
 
       return { runnerId, host: handle.host, port: handle.port, enginePort: handle.enginePort };
     } catch (err) {
       // Roll back the reserved instance/model slots so a failed start doesn't permanently block
       // either the instance id or (transitively) the model. Covers allocation-phase failures too:
-      // the try opens before the reservation and the allocatePorts await, so an exhausted port
-      // range rolls the just-reserved slot back instead of stranding it behind ConflictError.
+      // the reservation happens above the try, so an exhausted port range rolls it back instead of
+      // stranding it behind ConflictError.
       if (port !== undefined) this.usedPorts.delete(port);
-      this.instanceRunners.delete(params.instanceId);
-      this.modelRunners.get(params.modelName)?.delete(runnerId);
-      if (this.modelRunners.get(params.modelName)?.size === 0) {
-        this.modelRunners.delete(params.modelName);
-      }
+      this.releaseReservation(params, runnerId);
       // Seal the launch-log stream (any SSE client attached mid-launch gets its `end` frame) and
       // schedule the buffer for later cleanup — there's no stopRunner() call for a failed launch to
       // drop() it, so without retain() the failure logs (and their listeners) would leak forever.
@@ -299,10 +515,72 @@ export class RunnerManager {
         if (oldestInstanceId) this.failedInstanceLogRunners.delete(oldestInstanceId);
       }
       this.failedInstanceLogRunners.set(params.instanceId, runnerId);
+
+      // A failed launch whose process is not confirmed dead must not be forgotten: a retry would
+      // spawn a second process under a new runnerId with nothing able to stop the first (#288, D4).
+      // When the caller already requested the stop (stopRunner's cancel path, or the cancel branch
+      // above), stop() has been issued once; issuing it again would only double the launcher call.
+      const pendingEntry = this.pendingRunners.get(runnerId);
+      const failedHandle = pendingEntry?.handle;
+      if (failedHandle) {
+        if (!pendingEntry?.cancelRequested) {
+          await failedHandle.stop().catch(() => {});
+        }
+        if (failedHandle.isAlive?.()) {
+          this.retainFailedLaunch(params.instanceId, runnerId, failedHandle);
+          console.error(
+            `[worker] Runner ${runnerId} for instance ${params.instanceId} did not stop after a ` +
+              `failed launch — retained as a zombie (pid=${failedHandle.pid ?? '-'}); ` +
+              `retry DELETE /runners/${runnerId}`,
+          );
+        }
+      }
       throw err;
     } finally {
       this.pendingRunners.delete(runnerId);
     }
+  }
+
+  // Undo runStart's synchronous instance/model reservation. Shared by the launch catch and the
+  // retained-zombie refusal so both roll back identically.
+  private releaseReservation(params: StartRunnerParams, runnerId: string): void {
+    this.instanceRunners.delete(params.instanceId);
+    const modelRunnerIds = this.modelRunners.get(params.modelName);
+    modelRunnerIds?.delete(runnerId);
+    if (modelRunnerIds?.size === 0) this.modelRunners.delete(params.modelName);
+  }
+
+  // Bound the retention map exactly like failedInstanceLogRunners: FIFO by insertion, evicting the
+  // oldest. An evicted handle gets one last stop attempt — dropping it silently would discard the
+  // only reference to a live process.
+  private retainFailedLaunch(instanceId: string, runnerId: string, handle: LaunchHandle): void {
+    if (
+      !this.failedLaunchHandles.has(instanceId) &&
+      this.failedLaunchHandles.size >= MAX_RETAINED
+    ) {
+      const oldestInstanceId = this.failedLaunchHandles.keys().next().value;
+      if (oldestInstanceId) {
+        const evicted = this.failedLaunchHandles.get(oldestInstanceId);
+        this.failedLaunchHandles.delete(oldestInstanceId);
+        if (evicted) {
+          void evicted.handle.stop().catch(() => {});
+          console.warn(
+            `[worker] Dropped retained launch ${evicted.runnerId} for instance ` +
+              `${oldestInstanceId} (retention bound ${MAX_RETAINED}); its process may still be alive`,
+          );
+        }
+      }
+    }
+    this.failedLaunchHandles.set(instanceId, { runnerId, handle });
+  }
+
+  private findRetainedLaunch(
+    runnerId: string,
+  ): { instanceId: string; handle: LaunchHandle } | undefined {
+    for (const [instanceId, retained] of this.failedLaunchHandles) {
+      if (retained.runnerId === runnerId) return { instanceId, handle: retained.handle };
+    }
+    return undefined;
   }
 
   // Run the launcher, serializing cold-starts when the launcher requires it.
@@ -340,6 +618,22 @@ export class RunnerManager {
       return;
     }
     if (!record) {
+      const retained = this.findRetainedLaunch(runnerId);
+      if (retained) {
+        await retained.handle.stop().catch(() => {});
+        this.failedLaunchHandles.delete(retained.instanceId);
+        if (retained.handle.isAlive?.()) {
+          console.error(
+            `[worker] DELETE /runners/${runnerId}: retained launch for instance ` +
+              `${retained.instanceId} may still be alive (pid=${retained.handle.pid ?? '-'})`,
+          );
+        } else {
+          console.warn(
+            `[worker] Stopped retained launch ${runnerId} for instance ${retained.instanceId}`,
+          );
+        }
+        return;
+      }
       throw new NotFoundError(`Runner ${runnerId} not found`);
     }
 
@@ -375,8 +669,14 @@ export class RunnerManager {
     // Stop concurrently: cold-start serialization is a start-time constraint, not a stop-time one,
     // and draining runners in series would let total teardown exceed the pod's grace period when a
     // worker hosts several runners. Each stopRunner touches distinct map keys, so this is safe.
-    const runnerIds = [...new Set([...this.runners.keys(), ...this.pendingRunners.keys()])];
-    await Promise.all(runnerIds.map((runnerId) => this.stopRunner(runnerId)));
+    // Retained failed launches are included: draining a worker must attempt every process it knows
+    // about, including one whose launch failed after the process started (#288).
+    const runnerIds = new Set([
+      ...this.runners.keys(),
+      ...this.pendingRunners.keys(),
+      ...[...this.failedLaunchHandles.values()].map((retained) => retained.runnerId),
+    ]);
+    await Promise.all([...runnerIds].map((runnerId) => this.stopRunner(runnerId)));
   }
 
   getRunner(runnerId: string): RunnerRecord | undefined {
@@ -408,6 +708,16 @@ export class RunnerManager {
     if (this.logBuffer.has(failed)) return failed;
     this.failedInstanceLogRunners.delete(instanceId);
     return undefined;
+  }
+
+  // The retained failed launch ("zombie", #288 D4) for an instance, if its process could not be
+  // confirmed dead — exposed to the status route so the control plane can stop it. Only the
+  // runnerId leaves the manager: the caller needs an id to DELETE, never the launcher handle.
+  // Deliberately separate from getRunnerIdForInstance, which answers registry/log identity and
+  // would misreport a zombie as STARTING once its log buffer is the only thing left.
+  getRetainedLaunchForInstance(instanceId: string): { runnerId: string } | undefined {
+    const retained = this.failedLaunchHandles.get(instanceId);
+    return retained ? { runnerId: retained.runnerId } : undefined;
   }
 
   getAllRunners(): RunnerRecord[] {

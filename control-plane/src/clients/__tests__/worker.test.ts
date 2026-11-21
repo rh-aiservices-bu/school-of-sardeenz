@@ -120,6 +120,18 @@ describe('WorkerClient', () => {
           enginePort: 8001,
         },
       ],
+      // A retained failed launch (#288) answers 200 with no endpoint; the caller still gets the
+      // runnerId it must DELETE.
+      [
+        200,
+        { instanceId: 'inst-1', runnerId: 'runner-zombie', state: 'FAILED' },
+        { status: 'failed', runnerId: 'runner-zombie' },
+      ],
+      [
+        202,
+        { instanceId: 'inst-1', runnerId: 'runner-zombie', state: 'FAILED' },
+        { status: 'failed', runnerId: 'runner-zombie' },
+      ],
     ])('maps worker status %i to a recovery fact', async (status, body, expected) => {
       mockFetch.mockResolvedValue(jsonResponse(body, status));
       const client = new WorkerClient({ baseUrl: 'http://worker-1:8080' });

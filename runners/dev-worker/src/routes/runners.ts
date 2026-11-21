@@ -76,7 +76,9 @@ export function registerRunnerRoutes(
         entrypoint: body.entrypoint,
         devices: body.devices,
       });
-      return reply.status(201).send(result);
+      // 201 only when *this* request spawned a process; a READY reuse or an in-flight join answers
+      // 200 with the same endpoint and `reused: true` (#288).
+      return reply.status(result.reused ? 200 : 201).send(result);
     } catch (err) {
       if (err instanceof ConflictError) {
         console.warn(`[worker] POST /runners conflict for instance ${instanceId}: ${err.message}`);
@@ -103,6 +105,19 @@ export function registerRunnerRoutes(
   app.get<{ Params: { instanceId: string } }>(
     '/runners/by-instance/:instanceId/status',
     (req, reply) => {
+      // A failed launch whose process could not be confirmed dead (#288) outranks both registry
+      // lookups: the instance slot was rolled back, so without this the control plane would see
+      // STARTING (sealed log buffer) and then 404 while the process may still hold VRAM. Only the
+      // ids are returned — there is no endpoint to recover, and the caller must DELETE the runner.
+      const retained = runnerManager.getRetainedLaunchForInstance(req.params.instanceId);
+      if (retained) {
+        return reply.status(200).send({
+          instanceId: req.params.instanceId,
+          runnerId: retained.runnerId,
+          state: 'FAILED',
+        });
+      }
+
       const runnerId = runnerManager.getRunnerIdForInstance(req.params.instanceId);
       if (!runnerId) {
         return reply.status(404).send({

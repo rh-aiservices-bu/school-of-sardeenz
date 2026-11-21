@@ -1341,7 +1341,9 @@ export class ReconciliationService {
    * Resolve POST /runners transport failures by the stable control-plane instance id. Capacity
    * stays held during the full deploy grace only when the worker reports ABSENT: an early 404
    * could merely mean the worker has not entered its handler yet. READY is explicitly stopped as
-   * soon as it is discoverable; STARTING and inconclusive probes remain for the next tick.
+   * soon as it is discoverable; FAILED (a retained failed launch, #288) is stopped and reaped
+   * immediately, since nothing more can arrive for the instance; STARTING and inconclusive probes
+   * remain for the next tick.
    */
   private async recoverAmbiguousStarts(): Promise<void> {
     if (!this.createWorkerClient) return;
@@ -1361,6 +1363,17 @@ export class ReconciliationService {
         const client = this.createWorkerClient(worker.managementUrl);
         const lookup = await client.getRunnerByInstance(instance.instanceId);
         if (lookup.status === 'starting') continue;
+        // A retained failed launch is definitive: the worker's launch already failed and its
+        // process could not be confirmed stopped, so nothing more can arrive for this instance and
+        // it may still hold VRAM. Stop it and reap now — the absent grace does not apply — so a
+        // restart cannot be admitted onto memory the zombie still occupies (#288).
+        if (lookup.status === 'failed') {
+          try {
+            await client.stopRunner(lookup.runnerId);
+          } catch (err) {
+            if (!(err instanceof WorkerHttpError && err.status === 404)) throw err;
+          }
+        }
         if (
           lookup.status === 'absent' &&
           now - new Date(instance.stateChangedAt).getTime() <= graceMs
@@ -1385,7 +1398,9 @@ export class ReconciliationService {
         await this.lifecycle.removeInstance(
           instance.modelName,
           instance.instanceId,
-          lookup.status === 'ready' ? 'runner-stopped' : 'runner-absent',
+          lookup.status === 'ready' || lookup.status === 'failed'
+            ? 'runner-stopped'
+            : 'runner-absent',
         );
         await this.instanceRepository?.delete(instance.instanceId);
         this.memoryBudget.releaseInstanceReservations(instance.instanceId);

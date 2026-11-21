@@ -77,6 +77,12 @@ export interface LaunchHandle {
    */
   enginePort: number;
   pid?: number;
+  /**
+   * Optional liveness check used to refuse a re-start over a process that would not die (#288):
+   * `true` while the launcher can still see the process alive. In-process launchers (StubLauncher)
+   * omit it — their process death is synchronous.
+   */
+  isAlive?: () => boolean;
   stop: () => Promise<void>;
 }
 

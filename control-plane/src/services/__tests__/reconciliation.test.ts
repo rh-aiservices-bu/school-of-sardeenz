@@ -842,6 +842,34 @@ describe('ReconciliationService', () => {
       expect(mocks.memoryBudget.releaseInstanceReservations).not.toHaveBeenCalled();
     });
 
+    it('stops a retained failed launch and reaps the instance without waiting for the grace', async () => {
+      // Well inside the absent grace (60 s): an absent verdict here would defer, so the reap can
+      // only come from the definitive FAILED verdict (#288).
+      mocks.lifecycle.getAllInstances.mockResolvedValue([ambiguous(1_000)]);
+      mocks.workerPool.getWorker.mockReturnValue(liveWorker);
+      mocks.workerClient.getRunnerByInstance.mockResolvedValue({
+        status: 'failed',
+        runnerId: 'runner-zombie',
+      });
+      const recovering = createService(mocks, {
+        withWorkerClient: true,
+        config: { ...DEFAULT_CONFIG, missingRunnerProbeGraceSecs: 60 },
+      });
+
+      await recovering.tick();
+
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledOnce();
+      expect(mocks.workerClient.stopRunner).toHaveBeenCalledWith('runner-zombie');
+      expect(mocks.lifecycle.removeInstance).toHaveBeenCalledWith(
+        'ambiguous-start',
+        'inst-ambiguous-start',
+        'runner-stopped',
+      );
+      expect(mocks.memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith(
+        'inst-ambiguous-start',
+      );
+    });
+
     it('probes early but does not treat a 404 as proof that a dispatched start cannot still arrive', async () => {
       mocks.lifecycle.getAllInstances.mockResolvedValue([ambiguous(30_000)]);
       mocks.workerPool.getWorker.mockReturnValue(liveWorker);

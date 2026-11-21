@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sardeenz Worker Agent API
-  version: 0.1.4
+  version: 0.1.5
   description: |
     Management API exposed by each worker agent (dev or production). The control
     plane calls these endpoints to start, list, and stop runner processes on a worker.
@@ -60,16 +60,33 @@ paths:
       operationId: startRunner
       summary: Start a runner process
       description: |
-        Instructs the worker to spawn a new runner process for the given model.
+        Instructs the worker to spawn a runner process for the given model.
         The worker allocates a port, starts the runner, waits for the runner's
         health endpoint to respond, and returns the runner's endpoint.
+
+        `instanceId` is the idempotency key (ADR-019): when the caller supplies
+        one, at most one runner process is ever started for it.
+
+        - `201` — this request spawned the process.
+        - `200` — a runner for this `instanceId` is already running with an
+          identical launch spec, or was still starting and this request joined
+          that launch. The reply describes that runner and
+          `StartRunnerResponse.reused` is `true`; this request spawned nothing
+          and allocated no port or memory.
+        - `409` — a runner for this `instanceId` exists with a different launch
+          spec, or a previous launch for it could not be stopped. The error
+          message names the existing `runnerId`; `DELETE /runners/{runnerId}`
+          clears it.
+
+        When `instanceId` is omitted the worker mints one, so every such request
+        starts a fresh runner (back-compat). A client that retries a start MUST
+        resend the same `instanceId` — the control plane does not retry today, and
+        any future retry loop must be idempotent through this key.
 
         Multiple runners for the same model name may run concurrently on one
         worker (replicas) as long as each has a distinct `instanceId`.
 
-        Returns `409` if a runner for the same `instanceId` is already running
-        on this worker. Returns `503` if the worker has no capacity to start
-        another runner.
+        Returns `503` if the worker has no capacity to start another runner.
       tags:
         - Runners
       requestBody:
@@ -80,7 +97,16 @@ paths:
               $ref: "#/components/schemas/StartRunnerRequest"
       responses:
         "201":
-          description: Runner started successfully
+          description: Runner started successfully by this request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartRunnerResponse"
+        "200":
+          description: |
+            Runner already present for this `instanceId` — already running with an
+            identical launch spec, or joined while it was still starting. This
+            request spawned no process; `reused` is `true`.
           content:
             application/json:
               schema:
@@ -92,7 +118,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: A runner for this instanceId is already running
+          description: |
+            A runner for this `instanceId` exists with a different launch spec, or a
+            previous launch for it could not be stopped. The error message names
+            the existing `runnerId`.
           content:
             application/json:
               schema:
@@ -181,6 +210,13 @@ paths:
         live, `202` while its start is still in flight, and `404` when this
         worker has no current or in-flight runner for the instance.
 
+        A `200` with `state: FAILED` reports a launch that failed after its
+        process may have started and whose process could not be confirmed
+        stopped. Only `instanceId` and `runnerId` are present. The caller must
+        clear it with `DELETE /runners/{runnerId}`: retries for the instance
+        are refused with `409` until it is, and its process may still hold the
+        device memory it allocated.
+
         The control plane uses this endpoint to reconcile a lost start reply
         without either leaking the runner or releasing its capacity early.
       tags:
@@ -194,7 +230,10 @@ paths:
           description: Control-plane-assigned instance identity.
       responses:
         "200":
-          description: Runner is live and its endpoint is recoverable
+          description: |
+            Runner is live and its endpoint is recoverable, or a failed launch
+            for this instance still holds a retained process (`state: FAILED`,
+            no endpoint fields — stop it with `DELETE /runners/{runnerId}`)
           content:
             application/json:
               schema:
@@ -557,12 +596,24 @@ components:
             a port distinct from the management port; the control plane registers
             this port as the model's routing endpoint so the proxy forwards
             inference here. When omitted, inference is served on `port`.
+        reused:
+          type: boolean
+          description: |
+            Present and `true` when the runner was already running (or already
+            starting) for this `instanceId`; this request did not spawn a process.
+            Absent on a fresh `201`.
 
     RunnerByInstanceResponse:
       type: object
       description: |
         Worker-side runner identity recovered from a control-plane instance
         id. Endpoint fields are present only once `state` is `READY`.
+
+        `state: FAILED` reports a launch that failed after its process may have
+        started and that the worker could not confirm stopped; only
+        `instanceId` and `runnerId` are returned, and the caller must
+        `DELETE /runners/{runnerId}`. Retries for the instance are refused with
+        `409` until the retained launch is cleared.
       required:
         - instanceId
         - runnerId
@@ -579,6 +630,7 @@ components:
           enum:
             - STARTING
             - READY
+            - FAILED
         host:
           type: string
           description: Hostname or IP where the live runner is listening.
@@ -599,7 +651,10 @@ components:
         Lifecycle of a runner process in the worker's own registry: `STARTING`
         while the launch is still in flight (`POST /runners` has not returned),
         `READY` once the engine's health checks passed and the runner is
-        registered. Member names mirror `RunnerByInstanceResponse.state`.
+        registered. `STARTING`/`READY` share their names with
+        `RunnerByInstanceResponse.state`; that lookup's `FAILED`, a retained
+        failed launch, is deliberately not a registry state — it is not a
+        runner, and `GET /runners` never lists it.
       enum:
         - STARTING
         - READY
