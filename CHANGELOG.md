@@ -19,7 +19,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `content_length`. The variable is surfaced in `deployment/proxy/deployment.yaml` (next to the
   parking byte budget and the 1Gi container memory limit it protects), `.env.example`,
   `deployment/proxy/README.md`, the proxy architecture doc, and the usage docs — including the
-  MLServer/ONNX section whose multi-MiB tensor payloads motivated the raise.
+  MLServer/ONNX section whose multi-MiB tensor payloads motivated the raise. The deployment README
+  also spells out the concurrent-buffer exposure that the raise widens: in-flight bodies are
+  unaccounted, concurrent forwards are uncapped by default, so roughly 32 simultaneous
+  maximum-size requests can reach the 1Gi container ceiling.
 - **Platform images re-resolve their tag at every pod start (#247).** The four platform Deployments
   in `deployment/` (proxy, control plane, dashboard, worker) now set `imagePullPolicy: Always`, so a
   republished mutable tag (`:latest`, or a re-pushed sha tag) actually rolls out instead of silently

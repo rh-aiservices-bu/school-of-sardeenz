@@ -19,9 +19,14 @@ a message naming the configured limit and the variable.
 
 The limit bounds one request, not total proxy memory: parked bodies are budgeted separately by
 `SARDEENZ_PARKING_MAX_BYTES` (1 GiB), and the container memory limit in `deployment.yaml` is
-`1Gi` — the hard ceiling for concurrent buffered bodies and forwards. Raise the body limit and the
-memory limit together. An OpenShift Route in front of the proxy may impose its own, lower body
-limit, in which case the router rejects the request first with its own error shape.
+`1Gi` — the hard ceiling. In-flight buffers are not accounted anywhere, and
+`SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` defaults to `0` (no cap), so at the default body limit
+roughly 32 simultaneous maximum-size requests can fill that ceiling before any parking or
+forwarding decision is made. Keep the inference Service cluster-internal or behind an authenticated
+gateway that enforces its own body cap, and lower `SARDEENZ_PROXY_MAX_BODY_BYTES` where that
+exposure is unacceptable; raise the memory limit only after accounting for concurrency. An
+OpenShift Route in front of the proxy may impose its own, lower body limit, in which case the
+router rejects the request first with its own error shape.
 
 Apply this component alone with:
 
