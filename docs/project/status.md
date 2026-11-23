@@ -1,8 +1,9 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-23 (#287 runner-shim provenance + republish runbook merged; the vLLM image
-republish itself is still pending on-cluster).
+Last update: 2026-11-23 (#247 documents the intended platform-image publish + rollout flow and
+makes the four platform Deployments pull `Always`; #287 runner-shim provenance + republish runbook
+also merged. The vLLM image republish and the on-cluster rollout proof for #247 remain pending.)
 
 ## Phases (complete)
 
@@ -63,7 +64,7 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                     |
 | M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238) |
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                              |
-| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; image/supply-chain half (#266/#267) still open.                                                                           |
+| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; platform publish/rollout documented and pull policy fixed (#247); image/supply-chain half (#266/#267) still open.                                                                           |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -79,7 +80,14 @@ verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)).
 M19 owns the image/supply-chain half (#266/#267) plus the four defects the Gate 9b run raised
 (#286–#289); all four are fixed and merged. #287's code half is merged, but its remedy is operational:
 the published vLLM SIFs still predate #275 and must be republished (`rc2`) and re-imported — the
-runbook is in [`../usage/runner-catalog.md`](../usage/runner-catalog.md). In progress:
+runbook is in [`../usage/runner-catalog.md`](../usage/runner-catalog.md).
+
+#247 documents the platform-image half of the intended manual flow — publish, pin through the
+overlay's `images:` block, roll out — and removes the mutable-tag footgun (`imagePullPolicy:
+Always` on all four platform Deployments); its registry re-resolution and worker-restart
+behaviour are deploy-only and unproven until the first rollout.
+
+In progress:
 nothing else.
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -97,8 +105,9 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
 
 ## Next
 
-- **M19** (Runner & Image backlog) — Phase 5 is merged and verified on-cluster; the remainder of
-  the M19 theme owns the image/supply-chain half split out of M15's #235 (#266: non-root `USER`,
+- **M19** (Runner & Image backlog) — Phase 5 is merged and verified on-cluster; the platform-image
+  rollout is documented (#247) and still needs one on-cluster rollout proof; the remainder of the
+  M19 theme owns the image/supply-chain half split out of M15's #235 (#266: non-root `USER`,
   digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
   NVML follow-up to #244 (option A from its decision) would also belong there.
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate

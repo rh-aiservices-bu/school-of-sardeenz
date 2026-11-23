@@ -91,3 +91,7 @@ spec:
 
 The control plane imports the signing public key on startup the same way the worker does (or bake
 it into the image); with `SARDEENZ_VERIFY_SIF=true` an unsigned/untrusted SIF is refused at import.
+
+The snippet shows the base image reference; to pin a release tag or digest in an environment overlay
+and roll the workloads out, see
+[Platform image publishing and rollout](../README.md#platform-image-publishing-and-rollout).
