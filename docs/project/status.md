@@ -1,7 +1,8 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-21 (#288 idempotent worker start + retained-launch recovery merged).
+Last update: 2026-11-23 (#287 runner-shim provenance + republish runbook merged; the vLLM image
+republish itself is still pending on-cluster).
 
 ## Phases (complete)
 
@@ -76,7 +77,10 @@ Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) thro
 Phase 5 (kvcached oversubscription & co-location policy) merged via PR #281 and its deploy-only
 verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)). The remainder of
 M19 owns the image/supply-chain half (#266/#267) plus the four defects the Gate 9b run raised
-(#286–#289); of those, #286, #288 and #289 are fixed and #287 remains. In progress: nothing else.
+(#286–#289); all four are fixed and merged. #287's code half is merged, but its remedy is operational:
+the published vLLM SIFs still predate #275 and must be republished (`rc2`) and re-imported — the
+runbook is in [`../usage/runner-catalog.md`](../usage/runner-catalog.md). In progress:
+nothing else.
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -98,10 +102,13 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
   NVML follow-up to #244 (option A from its decision) would also belong there.
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
-  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. #289 (worker
-  catalog default), #286 (teardown boundary + `GET /runners` reverse sweep, PR #292) and #288
-  (idempotent worker start + contract-visible retained launches, PR #294) are fixed and merged;
-  #287 (stale published runner modules) remains — it needs a runner-module/SIF republish.
+  `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. All four are
+  fixed and merged: #289 (worker catalog default), #286 (teardown boundary + `GET /runners`
+  reverse sweep, PR #292), #288 (idempotent worker start + contract-visible retained launches,
+  PR #294) and #287 (runner-shim provenance + staleness gate + republish runbook, PR #297).
+  #287's operational half remains: republish the three vLLM SIFs (`rc2`), bump the digest-pinned
+  `runners.yaml` entries on `main`, re-import, and verify `attribution: "device"` from two
+  co-located runners.
 - M16 (Orchestration Resilience) stays parked except #286 and #288, which merged early as P1/P2
   follow-ups.
 
@@ -132,11 +139,18 @@ revision except where #278 changed the follow-through:
   invariant with the same pool, elastic admission of 20 GiB against 18.01 GiB available, the
   same requirement refused with the opt-in off, and NVML peaking at 5,934 of 23,034 MiB under
   concurrent inference. Record: [`phase5-gate9b-run.md`](phase5-gate9b-run.md). The run also
-  showed `attribution` absent from the published modules (#287) and could not stress the
+  showed `attribution` absent from the published modules (#287 — now detected as
+  `updateReason: "unprovenanced"`; the republish is the remaining step) and could not stress the
   virtual headroom — see that note's "What this run does not prove".
 - **#289**: a fresh `deployment/` apply on a GPU node must show
   `vllm: kvCacheElasticSharing: true` in `GET /api/v1/workers` with no manual patch, and the
   worker log must carry no `[dev-worker] … catalog …` warning.
+- **#287**: the `rc2` librarian republish of vLLM 0.21/0.24/0.26, the digest-pinned `runners.yaml`
+  bump on `main`, the cluster re-import, and the live check that two co-located runners report
+  `attribution: "device"` with deduped per-runner bars in the dashboard (not two whole-device
+  bars). Until then the imported modules report `updateAvailable: true`,
+  `updateReason: "unprovenanced"` — the provenance gate's intended visibility. Runbook:
+  [`../usage/runner-catalog.md`](../usage/runner-catalog.md).
 - **Phase 5 — live pool-pressure behavior (#277)**: the evaluator ships off
   (`SARDEENZ_POOL_PRESSURE_ENABLED=false`); first on-cluster exercise needs a device whose
   kvcached pool is driven to the threshold (≥90% of `totalBytes`) for 3 consecutive ticks, then
@@ -160,7 +174,13 @@ From the Phase 5 Gate 9b run (2026-11-17, see [`phase5-gate9b-run.md`](phase5-ga
 
 - **#286**: instance records can be dropped without stopping the runner — a failed start left a
   live `READY` runner holding 5.0 GB that the control plane no longer knew about.
-- **#287**: published vLLM runner modules predate #275 (no `attribution` in `/memory-report`).
+- ~~**#287**: published vLLM runner modules predate #275 (no `attribution` in `/memory-report`).~~
+  — fixed in code: the catalog may declare `shimSource` (the runner-shim commit an image was built
+  from), the import sidecar records it (`schemaVersion: 2`, v1 still readable), and
+  `GET /api/v1/catalog` flags a module as `unprovenanced`, `shim-source-advanced` or
+  `digest-changed`, with a maintainer check script and the `rc2` republish runbook
+  (`docs/usage/runner-catalog.md`). The republish + re-import remain the deploy-only step
+  (PR #297).
 - ~~**#288**: the deploy path issued `POST /runners` twice for one instanceId.~~ — fixed:
   `POST /runners` is idempotent per `instanceId` (identical repeat or in-flight join returns
   `200` + `reused: true`, `201` means this request spawned, a different spec or an undying prior
@@ -187,7 +207,8 @@ From M17 (reviewer-recorded, non-blocking):
   merged via #281): the shared `sumInstanceMeasurementsByInstance` helper and the
   dashboard's "Other" bucket now own the dedup; the `getKvCacheDeviceStats` first-wins precedent
   remains the pool-stats analogue. The on-cluster run showed the rule is only as good as the
-  shim inside the published modules — see #287 (attribution absent).
+  shim inside the published modules — see #287 (the provenance gate now flags it; the republish
+  remains).
 - **#253 carried low**: the `test_health_responds_while_memory_report_blocks` retry leaves the
   first attempt's `report_task` unawaited (harmless under `asyncio.run` teardown).
 - **#243 pre-existing**: TDZ latent bug in `ApptainerLauncher.stopChild` — a child emitting
