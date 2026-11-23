@@ -141,6 +141,9 @@ export interface MockCatalogItem {
   };
   status: { id: string; state: 'NOT_IMPORTED' | 'IMPORTING' | 'IMPORTED' | 'FAILED' };
   updateAvailable: boolean;
+  updateReason?: 'digest-changed' | 'shim-source-advanced' | 'unprovenanced';
+  catalogShimSource?: string;
+  importedShimSource?: string;
 }
 
 export interface MockRunnerCatalog {
@@ -480,6 +483,11 @@ export class MockControlPlane {
       if (!runner) return reply.code(404).send({ error: 'not found' });
       runner.status = { id: runner.entry.id, state: 'NOT_IMPORTED' };
       runner.updateAvailable = false;
+      // Deleting drops the module's provenance too; a NOT_IMPORTED card must not keep a stale
+      // reason label or `Shim source:` line.
+      delete runner.updateReason;
+      delete runner.catalogShimSource;
+      delete runner.importedShimSource;
       return reply.code(204).send();
     });
 

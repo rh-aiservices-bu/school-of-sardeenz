@@ -1409,6 +1409,19 @@ export type components = {
          */
         CatalogItemState: CatalogItemState;
         /**
+         * @description Why an imported catalog entry is flagged `updateAvailable`.
+         *
+         *     - `digest-changed` — the module store's recorded digest (or absence of one) does
+         *       not equal the digest pinned in the catalog `image`.
+         *     - `shim-source-advanced` — digests match, but the catalog advertises a
+         *       `shimSource` and the imported module recorded a different one.
+         *     - `unprovenanced` — digests match and the catalog advertises a `shimSource`,
+         *       but the imported module recorded none (legacy schema-v1 sidecar, or a module
+         *       imported before the catalog declared a source). Re-import records it.
+         * @enum {string}
+         */
+        CatalogUpdateReason: CatalogUpdateReason;
+        /**
          * @description A single runner published in the catalog. Mirrors the `runners.yaml`
          *     schema (see the repo-root sample).
          */
@@ -1482,6 +1495,14 @@ export type components = {
              *     SARDEENZ_RUNNER_ENTRYPOINT (default the vLLM shim). Mirrors the runners.yaml field.
              */
             entrypoint?: string[];
+            /**
+             * @description Optional git commit of the runner-shim source tree this image was built
+             *     from — the "Source commit" the librarian pipeline logs. The control plane
+             *     records it in the module metadata sidecar at import and flags an imported
+             *     module whose provenance is missing or different as `updateAvailable`.
+             *     Omitted by catalogs that publish no provenance (e.g. mlserver).
+             */
+            shimSource?: string;
         };
         /** @description The import state of one catalog entry. */
         CatalogItemStatus: {
@@ -1495,14 +1516,29 @@ export type components = {
         };
         /**
          * @description A catalog entry merged with its current import state. `updateAvailable`
-         *     is true when the entry is imported but the catalog advertises a
-         *     different image/version than what is on the store.
+         *     is true when the entry is imported but the store disagrees with what the
+         *     catalog advertises: a different image digest/version, a runner shim source
+         *     that has advanced since the module's import, or a module with no recorded
+         *     shim provenance while the catalog advertises one. When true,
+         *     `updateReason` names the specific reason (digest change versus shim
+         *     provenance/staleness).
          */
         CatalogItem: {
             entry: components["schemas"]["CatalogEntry"];
             status: components["schemas"]["CatalogItemStatus"];
-            /** @description True when an imported entry has a newer catalog version. */
+            /**
+             * @description True when an imported entry has a newer catalog version. When true,
+             *     `updateReason` says why.
+             */
             updateAvailable: boolean;
+            updateReason?: components["schemas"]["CatalogUpdateReason"];
+            /** @description The `shimSource` the catalog advertises for this entry, when it has one. */
+            catalogShimSource?: string;
+            /**
+             * @description The `shimSource` recorded in the module sidecar at import time, when the
+             *     imported module recorded one. Absent for legacy/unknown provenance.
+             */
+            importedShimSource?: string;
         };
         /**
          * @description The catalog merged against the module store: catalog entries with their
@@ -3509,6 +3545,11 @@ export enum CatalogItemState {
     IMPORTING = "IMPORTING",
     IMPORTED = "IMPORTED",
     FAILED = "FAILED"
+}
+export enum CatalogUpdateReason {
+    digest_changed = "digest-changed",
+    shim_source_advanced = "shim-source-advanced",
+    unprovenanced = "unprovenanced"
 }
 export enum CatalogEntryProtocol {
     openai = "openai",

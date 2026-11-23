@@ -414,3 +414,95 @@ runners:
     });
   });
 });
+
+describe('CatalogService shim provenance (#287)', () => {
+  const SHIM = '337e0aeba53554c42b5e920011ed592fd4f30e8b';
+
+  const catalog = (shimLine: string) => `
+runners:
+  - id: vllm-0.21
+    title: vLLM 0.21
+    description: desc
+    runnerType: vllm
+    version: "0.21"
+    image: oras://quay.io/x/vllm:0.21@sha256:${'a'.repeat(64)}
+    sifName: vllm-0.21
+    protocol: openai
+${shimLine}
+`;
+
+  it('keeps a valid 40-char lowercase shimSource', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(catalog(`    shimSource: ${SHIM}`)),
+    });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(1);
+    expect(snap.entries[0].shimSource).toBe(SHIM);
+  });
+
+  it('skips an entry whose shimSource is not 40 lowercase hex', async () => {
+    for (const bad of ['XYZ', 'a'.repeat(39), 'a'.repeat(41), 'A'.repeat(40)]) {
+      const svc = new CatalogService('/c.yaml', logger, {
+        readFile: () => Promise.resolve(catalog(`    shimSource: ${bad}`)),
+      });
+      const snap = await svc.load();
+      expect(snap.entries).toHaveLength(0);
+      expect(snap.invalidEntries[0].reason).toMatch(/shimSource/);
+    }
+  });
+
+  it('skips an entry whose shimSource is not a string', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(catalog('    shimSource: 123456')),
+    });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(0);
+    expect(snap.invalidEntries[0].reason).toMatch(/shimSource/);
+  });
+
+  it('accepts an entry without shimSource', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(catalog('')),
+    });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(1);
+    expect(snap.entries[0].shimSource).toBeUndefined();
+  });
+
+  it('truncates an oversized invalid shimSource in the reason and the log', async () => {
+    const huge = 'a'.repeat(4096);
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(catalog(`    shimSource: ${huge}`)),
+    });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(0);
+    const reason = snap.invalidEntries[0].reason;
+    expect(reason).toMatch(/shimSource/);
+    expect(reason).toContain('…');
+    expect(reason).not.toContain(huge);
+    expect(reason.length).toBeLessThan(200);
+    const logged = logger.warn.mock.calls.at(-1)?.[0] as { shimSource: string };
+    expect(logged.shimSource).toContain('…');
+    expect(logged.shimSource.length).toBeLessThan(100);
+  });
+});
+
+describe('CatalogService YAML alias bound (#287)', () => {
+  // Classic "billion laughs" shape: each anchor aliases the previous one nine times.
+  const ALIAS_BOMB = `
+a: &a ["lol","lol","lol","lol","lol","lol","lol","lol","lol"]
+b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]
+f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]
+runners: []
+`;
+
+  it('rejects a document whose alias expansion exceeds the cap', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(ALIAS_BOMB),
+    });
+    await expect(svc.load()).rejects.toThrow(/alias/i);
+  });
+});

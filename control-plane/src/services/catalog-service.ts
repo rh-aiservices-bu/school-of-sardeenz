@@ -28,7 +28,24 @@ export interface CatalogLogger {
 }
 
 const NAME_RE = /^[A-Za-z0-9_.-]+$/;
+const SHIM_SOURCE_RE = /^[a-f0-9]{40}$/;
 const FETCH_TIMEOUT_MS = 15_000;
+// Rejected catalog values are echoed into the log and into `invalidEntries` → every
+// `GET /api/v1/catalog` response and dashboard alert. The catalog is remote input, so cap the
+// echo: a hostile/huge scalar must not be amplified into the log and the API.
+const ECHO_LIMIT = 64;
+
+function echoCatalogValue(value: unknown): string {
+  let text: string;
+  try {
+    text = typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value));
+  } catch {
+    // Circular alias structures cannot be serialized; name the type instead.
+    text = Object.prototype.toString.call(value);
+  }
+  if (text.length > ECHO_LIMIT) text = `${text.slice(0, ECHO_LIMIT)}…`;
+  return typeof value === 'string' ? JSON.stringify(text) : text;
+}
 
 // Loads the runner catalog from SARDEENZ_RUNNER_CATALOG_URL: an http(s) URL (official/remote
 // catalog) or a local file path / file:// URL (dev). Parses the YAML, validates entries, caches.
@@ -134,7 +151,9 @@ export class CatalogService {
   // Parse + validate. Invalid entries are excluded from `entries` (logged, and surfaced in
   // `invalidEntries`) rather than failing the whole catalog.
   private parse(raw: string): { entries: CatalogEntry[]; invalidEntries: CatalogInvalidEntry[] } {
-    const doc = parseYaml(raw) as unknown;
+    // Explicit alias bound instead of trusting the library default (100 today): the catalog is
+    // untrusted input, so a future default change must not turn into an alias bomb.
+    const doc = parseYaml(raw, { maxAliasCount: 100 }) as unknown;
     if (!doc || typeof doc !== 'object') {
       throw new Error('Catalog is not a valid YAML document');
     }
@@ -262,6 +281,20 @@ export class CatalogService {
     if (Array.isArray(e.entrypoint)) {
       const argv = e.entrypoint.filter((t): t is string => typeof t === 'string');
       if (argv.length) entry.entrypoint = argv;
+    }
+    // shimSource is machine data (the librarian job logs the build's source commit), so a
+    // present-but-invalid value is loud: it means the catalog was hand-edited wrong. Absent is
+    // fine — catalogs without provenance (e.g. mlserver) keep digest-only semantics.
+    if (e.shimSource !== undefined) {
+      if (typeof e.shimSource !== 'string' || !SHIM_SOURCE_RE.test(e.shimSource)) {
+        const echoed = echoCatalogValue(e.shimSource);
+        const reason =
+          `runner '${idIfString ?? '?'}' has invalid 'shimSource' ` +
+          `(expected a full 40-char lowercase git commit, got ${echoed})`;
+        this.logger.warn({ id: e.id, shimSource: echoed }, `${reason} — skipping`);
+        return { error: reason, id: idIfString };
+      }
+      entry.shimSource = e.shimSource;
     }
     return { entry };
   }

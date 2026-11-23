@@ -13,11 +13,17 @@
     "importing": "Importing",
     "notImported": "Not imported",
     "failed": "Failed",
-    "updateAvailable": "Update available"
+    "updateAvailable": "Update available",
+    "updateReason": {
+      "digestchanged": "New image published — re-import",
+      "shimsourceadvanced": "Runner older than catalog shim source",
+      "unprovenanced": "Provenance unknown — re-import to record source"
+    }
   },
   "card": {
     "minVram": "{{gib}} GiB VRAM",
-    "imageDigest": "Image digest: {{digest}}"
+    "imageDigest": "Image digest: {{digest}}",
+    "shimSource": "Shim source: {{sha}}"
   },
   "empty": {
     "title": "No runners in the catalog",

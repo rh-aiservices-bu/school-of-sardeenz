@@ -51,9 +51,14 @@ formats, model directory layout, and `model-settings.json` examples.
   via the event stream during imports.
 - **Import** resolves the digest-pinned OCI manifest, streams its single SIF layer directly onto
   the module store with byte-level progress, verifies the layer digest and SIF signature, and
-  publishes it atomically. The imported image digest is recorded in a
-  `<sifName>.sif.metadata.json` sidecar. If the catalog later advertises a different digest for the
-  same engine version, the dashboard marks an update available; **Re-import** installs it. Legacy
+  publishes it atomically. The imported image digest — and, when the catalog entry declares a
+  `shimSource`, the git commit of the runner-shim tree the image was built from — is recorded in a
+  `<sifName>.sif.metadata.json` sidecar (`schemaVersion: 2`). The dashboard marks an update
+  available when the catalog advertises a different digest for the same engine version, **or** when
+  it advertises a `shimSource` that the imported module did not record (legacy `schemaVersion: 1`
+  sidecar, or a module imported before the catalog declared a source) or recorded differently;
+  **Re-import** installs it and records the new provenance. Such a module is flagged once, until
+  re-imported. A catalog without `shimSource` (e.g. mlserver) keeps digest-only semantics. Legacy
   SIFs without sidecar metadata are conservatively marked as having an update until re-imported
   once. **Uninstall** deletes both files (blocked while a runner started from the SIF is running).
   The [librarian build pipeline](../../deployment/librarian/) remains for building your own SIFs.
@@ -94,6 +99,87 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
    the `runtimeModule` a worker execs).
 4. Sign SIFs with the key whose **public** half is distributed to workers and the control plane, so
    `apptainer verify` trusts them at import and exec.
+
+## Republishing a runner and recording its shim source
+
+Use this when the runner **shim** (`runners/vllm`) changes and the published runner images predate
+that change. `shimSource` in the catalog records the commit an image was built from; the control
+plane writes it into the module sidecar at import and flags an imported module whose provenance is
+missing or behind (#287).
+
+1. **Precondition: the shim change is merged**, and `GIT_REF` is the release commit (a sha, never a
+   moving branch, for a release build). Then check the catalog against the tree:
+
+   ```bash
+   cd control-plane && node --import tsx scripts/check-catalog-shim-source.mts
+   cd control-plane && node --import tsx scripts/check-catalog-shim-source.mts --strict
+   ```
+
+   One row per catalog entry (`id`, catalog source, current source, verdict) plus a
+   `checked=… current=… stale=… unset=… unverified=… invalid=…` summary; `--strict` exits `1` when
+   any entry is `stale`, `invalid` or `unverified`. Record the output in the release notes. The
+   script is deliberately **not** wired into `make lint` or CI: published catalog digests lag `dev`
+   by design (see #247).
+
+2. **Publish one job per engine version with new `rc2` tags.** Never re-push an `rc1` tag — the
+   catalog pins its digest, so a tag must be immutable after publication — and give each job a unique
+   `PIPELINE_NAME`:
+
+   | engine | CONTAINERFILE                                  | OCI_TAG    | ORAS_TAG   | SIF_NAME    |
+   | ------ | ---------------------------------------------- | ---------- | ---------- | ----------- |
+   | 0.21   | `containers/runners/vllm/0.21.0/Containerfile` | `0.21-rc2` | `0.21-rc2` | `vllm-0.21` |
+   | 0.24   | `containers/runners/vllm/0.24.0/Containerfile` | `0.24-rc2` | `0.24-rc2` | `vllm-0.24` |
+   | 0.26   | `containers/runners/vllm/0.26.0/Containerfile` | `0.26-rc2` | `0.26-rc2` | `vllm-0.26` |
+
+   ```bash
+   PIPELINE_NAME="vllm-021-rc2-$(date +%Y%m%d%H%M%S)"
+   oc process -f deployment/librarian/job.yaml \
+     -p PIPELINE_NAME="$PIPELINE_NAME" \
+     -p GIT_URI=https://github.com/rh-aiservices-bu/school-of-sardeenz.git \
+     -p GIT_REF=<release sha> \
+     -p CONTEXT_DIR=. \
+     -p CONTAINERFILE=containers/runners/vllm/0.21.0/Containerfile \
+     -p OCI_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm \
+     -p OCI_TAG=0.21-rc2 \
+     -p SIF_NAME=vllm-0.21 \
+     -p ORAS_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runners/vllm \
+     -p ORAS_TAG=0.21-rc2 \
+     -p SIGN_SIF=false \
+     -p SIF_BUILDER_IMAGE=quay.io/rh-aiservices-bu/sardeenz-worker-base@sha256:<digest> \
+     | oc create -f - -n sardeenz
+   ```
+
+   `SIGN_SIF=false` is the default; `true` needs a provisioned `SIGNING_SECRET` and a matching
+   `SARDEENZ_VERIFY_SIF=true` on the control plane and the workers. Full parameter list and
+   diagnostics: [`deployment/librarian/README.md`](../../deployment/librarian/README.md).
+
+3. **Read back provenance and digest.**
+
+   ```bash
+   oc logs job/<PIPELINE_NAME> -c publish-sif -n sardeenz | grep -E 'Source commit|Catalog source'
+   skopeo inspect --format '{{.Digest}}' docker://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21-rc2
+   ```
+
+   The `Source commit` value is the new `shimSource`; the manifest digest is the `@sha256:<digest>`
+   the catalog needs (`catalog-service.ts` rejects an `image:` without one).
+
+4. **Bump `image:` and `shimSource:` together** in `runners.yaml` on `main` (the official catalog URL
+   is `https://raw.githubusercontent.com/rh-aiservices-bu/school-of-sardeenz/refs/heads/main/runners.yaml`),
+   through a `chore/` branch and a PR. A rebuild changes the manifest digest, so both fields always
+   move together.
+
+5. **Re-import and verify.** Dashboard **Refresh**, then **Re-import** each vLLM card: the update
+   labels clear, `Shim source:` shows the new commit, `GET /api/v1/catalog` returns
+   `updateAvailable: false` with no `updateReason`, and
+   `importedShimSource === catalogShimSource`. The sidecar
+   (`cat $SARDEENZ_MODULES_DIR/vllm-0.26.sif.metadata.json`) shows `schemaVersion: 2` plus the
+   `shimSource`.
+
+6. **Symptom check.** Deploy two co-located vLLM models: every `/memory-report` device row carries
+   `"attribution": "device"` and the dashboard shows deduped bars plus an "Other" residual. A stale
+   shim reports device-wide consumption as if each runner owned it.
+
+Related: platform runner image tags (#247) and supply-chain / cosign signing (#266).
 
 ## Unsigned SIFs (experimentation only)
 
