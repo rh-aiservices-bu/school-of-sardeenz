@@ -25,21 +25,27 @@ describe('compareShimSources', () => {
     ]);
   });
 
-  it('reports unset when the entry has no shimSource', () => {
-    expect(compareShimSources([{ id: 'a' }, { id: 'b', shimSource: null }], SHIM)).toEqual([
-      { id: 'a', verdict: 'unset' },
-      { id: 'b', verdict: 'unset' },
-    ]);
+  it('reports unset only when the shimSource key is absent', () => {
+    expect(compareShimSources([{ id: 'a' }], SHIM)).toEqual([{ id: 'a', verdict: 'unset' }]);
   });
 
-  it('reports invalid for non-40-hex values', () => {
-    for (const bad of ['XYZ', 'a'.repeat(39), 'A'.repeat(40), 123]) {
+  it('reports invalid for every present-but-non-40-hex value, matching the catalog validator', () => {
+    // `null` is what YAML `shimSource:` (no value) parses to; `''` is an explicit empty string.
+    // The control plane drops such an entry from the catalog, so the check must flag it too.
+    expect(compareShimSources([{ id: 'null', shimSource: null }], SHIM)).toEqual([
+      { id: 'null', verdict: 'invalid' },
+    ]);
+    for (const bad of ['', 'XYZ', 'a'.repeat(39), 'a'.repeat(41), 'A'.repeat(40)]) {
       expect(compareShimSources([{ id: 'e', shimSource: bad }], SHIM)).toEqual([
-        {
-          id: 'e',
-          verdict: 'invalid',
-          ...(typeof bad === 'string' ? { catalogShimSource: bad } : {}),
-        },
+        { id: 'e', catalogShimSource: bad, verdict: 'invalid' },
+      ]);
+    }
+  });
+
+  it('reports invalid for non-string values', () => {
+    for (const bad of [123, true, ['a']]) {
+      expect(compareShimSources([{ id: 'e', shimSource: bad }], SHIM)).toEqual([
+        { id: 'e', verdict: 'invalid' },
       ]);
     }
   });
@@ -98,6 +104,14 @@ describe('formatTable', () => {
         .slice(0, 4)
         .map((line) => line.split('\t')[0]),
     ).toEqual(['unset-entry', 'current-entry', 'stale-entry', 'unverified-entry']);
+  });
+
+  it('escapes catalog-controlled control characters so they cannot spoof rows or break columns', () => {
+    const [line] = formatTable([
+      { id: 'evil\u001b[2K\tid\nx', catalogShimSource: 'bad\nsource', verdict: 'invalid' },
+    ]);
+    expect(line).toBe('evil\\x1b[2K\\tid\\nx\tbad\\nsource\t-\tinvalid');
+    expect(line?.split('\t')).toHaveLength(4);
   });
 });
 
@@ -213,6 +227,14 @@ describe('runCheck', () => {
   it('exits 0 without --strict when an entry is stale', async () => {
     const stale = catalog(`  - id: a\n    shimSource: ${OTHER}\n`);
     await expect(runWith(() => Promise.resolve(stale), SHIM, false).exit).resolves.toBe(0);
+  });
+
+  it('exits 1 with --strict when an entry has an empty shimSource (YAML null)', async () => {
+    const empty = catalog('  - id: a\n    shimSource:\n');
+    const r = runWith(() => Promise.resolve(empty), SHIM, true);
+    await expect(r.exit).resolves.toBe(1);
+    expect(r.out[0]).toBe('a\t-\t-\tinvalid');
+    expect(r.out[1]).toBe('checked=1 current=0 stale=0 unset=0 unverified=0 invalid=1');
   });
 
   it('exits 1 with --strict when git produced no commit', async () => {

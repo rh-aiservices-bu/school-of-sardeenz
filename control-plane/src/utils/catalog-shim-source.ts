@@ -27,7 +27,10 @@ export interface ShimSourceRow {
 
 // One row per catalog entry, in file order. `currentSource` comes from `git log - <shimPath>`;
 // `undefined` (git missing/unusable) degrades every sourced entry to `unverified` rather than
-// silently claiming staleness.
+// silently claiming staleness. Only an *absent* `shimSource` key is `unset`: a present-but-empty
+// value (YAML `shimSource:` parses as null) or any other non-40-hex value is `invalid`, matching
+// the control-plane ingest validator (`catalog-service.ts`), which drops such an entry from the
+// catalog — a check that called it `unset` would let the hand-edit ship and then lose the runner.
 export function compareShimSources(
   entries: readonly CatalogShimSourceEntry[],
   currentSource: string | undefined,
@@ -38,7 +41,7 @@ export function compareShimSources(
       : undefined;
   return entries.map((entry): ShimSourceRow => {
     const catalogShimSource = entry.shimSource;
-    if (catalogShimSource === undefined || catalogShimSource === null) {
+    if (catalogShimSource === undefined) {
       return { id: entry.id, verdict: 'unset' };
     }
     if (typeof catalogShimSource !== 'string' || !SHIM_SOURCE_PATTERN.test(catalogShimSource)) {
@@ -60,6 +63,28 @@ export function compareShimSources(
   });
 }
 
+// Catalog-controlled values (`id`, `shimSource`) end up on a maintainer's terminal. Escape C0/C1
+// control characters so an escape sequence cannot rewrite rows or spoof a verdict; newlines and
+// tabs become visible escapes (they would otherwise break the tab-separated columns). Written as a
+// code-point loop rather than a control-character regex on purpose (eslint no-control-regex).
+function sanitizeCell(value: string): string {
+  let out = '';
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    const isControl = code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+    if (!isControl) {
+      out += ch;
+    } else if (ch === '\n') {
+      out += '\\n';
+    } else if (ch === '\t') {
+      out += '\\t';
+    } else {
+      out += `\\x${code.toString(16).padStart(2, '0')}`;
+    }
+  }
+  return out;
+}
+
 // One tab-separated line per row, then a single summary line. No trailing empty string.
 export function formatTable(rows: readonly ShimSourceRow[]): string[] {
   const counts: Record<ShimSourceVerdict, number> = {
@@ -71,7 +96,12 @@ export function formatTable(rows: readonly ShimSourceRow[]): string[] {
   };
   const lines = rows.map((row) => {
     counts[row.verdict] += 1;
-    return [row.id, row.catalogShimSource ?? '-', row.currentSource ?? '-', row.verdict].join('\t');
+    return [
+      sanitizeCell(row.id),
+      row.catalogShimSource === undefined ? '-' : sanitizeCell(row.catalogShimSource),
+      row.currentSource ?? '-',
+      row.verdict,
+    ].join('\t');
   });
   lines.push(
     `checked=${rows.length} current=${counts.current} stale=${counts.stale} ` +
@@ -112,6 +142,8 @@ export async function runCheck(opts: CheckOptions, deps: CheckDeps): Promise<num
   }
   let doc: unknown;
   try {
+    // Explicit alias bound instead of trusting the library default (100 today): the catalog is
+    // untrusted input, so a future default change must not turn into an alias bomb.
     doc = parseYaml(raw, { maxAliasCount: 100 });
   } catch (err) {
     deps.stderr(`cannot parse catalog ${opts.catalogPath}: ${errorMessage(err)}`);

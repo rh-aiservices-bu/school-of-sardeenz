@@ -468,4 +468,41 @@ ${shimLine}
     expect(snap.entries).toHaveLength(1);
     expect(snap.entries[0].shimSource).toBeUndefined();
   });
+
+  it('truncates an oversized invalid shimSource in the reason and the log', async () => {
+    const huge = 'a'.repeat(4096);
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(catalog(`    shimSource: ${huge}`)),
+    });
+    const snap = await svc.load();
+    expect(snap.entries).toHaveLength(0);
+    const reason = snap.invalidEntries[0].reason;
+    expect(reason).toMatch(/shimSource/);
+    expect(reason).toContain('…');
+    expect(reason).not.toContain(huge);
+    expect(reason.length).toBeLessThan(200);
+    const logged = logger.warn.mock.calls.at(-1)?.[0] as { shimSource: string };
+    expect(logged.shimSource).toContain('…');
+    expect(logged.shimSource.length).toBeLessThan(100);
+  });
+});
+
+describe('CatalogService YAML alias bound (#287)', () => {
+  // Classic "billion laughs" shape: each anchor aliases the previous one nine times.
+  const ALIAS_BOMB = `
+a: &a ["lol","lol","lol","lol","lol","lol","lol","lol","lol"]
+b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]
+f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]
+runners: []
+`;
+
+  it('rejects a document whose alias expansion exceeds the cap', async () => {
+    const svc = new CatalogService('/c.yaml', logger, {
+      readFile: () => Promise.resolve(ALIAS_BOMB),
+    });
+    await expect(svc.load()).rejects.toThrow(/alias/i);
+  });
 });

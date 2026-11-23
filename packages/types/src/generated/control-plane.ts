@@ -1516,8 +1516,12 @@ export type components = {
         };
         /**
          * @description A catalog entry merged with its current import state. `updateAvailable`
-         *     is true when the entry is imported but the catalog advertises a
-         *     different image/version than what is on the store.
+         *     is true when the entry is imported but the store disagrees with what the
+         *     catalog advertises: a different image digest/version, a runner shim source
+         *     that has advanced since the module's import, or a module with no recorded
+         *     shim provenance while the catalog advertises one. When true,
+         *     `updateReason` names the specific reason (digest change versus shim
+         *     provenance/staleness).
          */
         CatalogItem: {
             entry: components["schemas"]["CatalogEntry"];

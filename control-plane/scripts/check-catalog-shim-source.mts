@@ -23,7 +23,7 @@ const USAGE = `Usage: node --import tsx scripts/check-catalog-shim-source.mts [o
   --catalog <path>    catalog file to read (default: runners.yaml at the repo root)
   --shim-path <path>  repo-relative path whose last commit is the shim source (default: runners/vllm)
   --strict            exit 1 when any entry is stale, invalid or unverified
-  --help              show this help`;
+  -h, --help          show this help`;
 
 function resolveShimPath(shimPath: string): string {
   const absolute = resolve(repoRoot, shimPath);
