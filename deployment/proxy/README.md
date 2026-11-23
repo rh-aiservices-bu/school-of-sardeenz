@@ -10,6 +10,19 @@ The proxy reads the routing map from `sardeenz-redis` and sends wake requests to
 `sardeenz-control-plane`. It consumes `SARDEENZ_API_TOKEN` from the shared
 `sardeenz-service-tokens` Secret described in [`../README.md`](../README.md).
 
+## Request body limit
+
+Both inference surfaces (`/openai/*` and `/oip/*`) buffer the whole request body before routing it.
+`SARDEENZ_PROXY_MAX_BODY_BYTES` (default `33554432`, 32 MiB) caps that buffer; a larger body is
+rejected before routing with the proxy's JSON error envelope — `413`, `type: "request_too_large"`, and
+a message naming the configured limit and the variable.
+
+The limit bounds one request, not total proxy memory: parked bodies are budgeted separately by
+`SARDEENZ_PARKING_MAX_BYTES` (1 GiB), and the container memory limit in `deployment.yaml` is
+`1Gi` — the hard ceiling for concurrent buffered bodies and forwards. Raise the body limit and the
+memory limit together. An OpenShift Route in front of the proxy may impose its own, lower body
+limit, in which case the router rejects the request first with its own error shape.
+
 Apply this component alone with:
 
 ```bash

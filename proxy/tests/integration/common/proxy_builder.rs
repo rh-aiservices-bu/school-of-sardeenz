@@ -60,7 +60,7 @@ impl Default for TestProxyConfig {
             cb_failure_threshold: 5,
             cb_failure_window: Duration::from_secs(30),
             cb_recovery_timeout: Duration::from_secs(15),
-            max_body_bytes: 1_048_576,
+            max_body_bytes: 33_554_432,
             max_concurrent_forwards: 0,
             max_concurrent_forwards_per_model: 0,
         }

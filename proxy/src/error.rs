@@ -24,6 +24,9 @@ pub enum ProxyError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    #[error("request body exceeds the {limit}-byte limit (SARDEENZ_PROXY_MAX_BODY_BYTES); raise the limit or send a smaller payload")]
+    RequestTooLarge { limit: usize },
+
     #[error("upstream error: {0}")]
     Upstream(String),
 
@@ -44,6 +47,7 @@ impl ProxyError {
             | ProxyError::AllEndpointsUnhealthy(_)
             | ProxyError::Overloaded(_) => StatusCode::SERVICE_UNAVAILABLE,
             ProxyError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ProxyError::RequestTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             ProxyError::Upstream(_) => StatusCode::BAD_GATEWAY,
             ProxyError::Redis(_) | ProxyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -78,6 +82,7 @@ fn error_type(err: &ProxyError) -> &'static str {
         ProxyError::AllEndpointsUnhealthy(_) => "all_endpoints_unhealthy",
         ProxyError::Overloaded(_) => "overloaded",
         ProxyError::BadRequest(_) => "invalid_request_error",
+        ProxyError::RequestTooLarge { .. } => "request_too_large",
         ProxyError::Upstream(_) => "upstream_error",
         ProxyError::Redis(_) => "internal_error",
         ProxyError::Internal(_) => "internal_error",
