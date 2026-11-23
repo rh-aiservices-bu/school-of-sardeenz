@@ -44,6 +44,9 @@ spec:
         - name: worker
           # worker-base + the built TypeScript agent layered on top (see this dir's README).
           image: quay.io/rh-aiservices-bu/sardeenz-worker:latest
+          # Always (explicit): :latest is mutable — re-resolve at every pod start; being explicit
+          # also stops an overlay-pinned non-latest tag from defaulting back to IfNotPresent.
+          imagePullPolicy: Always
           workingDir: /opt/sardeenz/worker-agent
           command: ['/bin/sh', '-c']
           args:

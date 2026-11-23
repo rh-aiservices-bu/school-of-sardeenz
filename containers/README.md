@@ -58,6 +58,12 @@ gh workflow run publish-platform-images.yml --ref dev -f tag=latest
 The workflow publishes `linux/amd64` images. It builds the three services in parallel, publishes
 `worker-base`, and then builds `worker` from the exact base digest produced by that run.
 
+Pinning one of these tags — or a digest — in an environment overlay, and rolling the four platform
+Deployments out, is the operator half: see
+[Platform image publishing and rollout](../deployment/README.md#platform-image-publishing-and-rollout)
+in the deployment guide. Runner images and SIFs are published by the librarian pipeline instead
+(republish runbook: [`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md#republishing-a-runner-and-recording-its-shim-source)).
+
 ## How a runner runtime is produced
 
 Runner runtimes are **not** baked into the worker image and **not** Lmod modules (the superseded

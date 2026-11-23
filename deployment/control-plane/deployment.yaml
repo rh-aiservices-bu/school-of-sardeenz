@@ -25,7 +25,9 @@ spec:
       containers:
         - name: control-plane
           image: quay.io/rh-aiservices-bu/sardeenz-control-plane:latest
-          imagePullPolicy: IfNotPresent
+          # Always: :latest is mutable — re-resolve it at every pod start so a republished tag
+          # actually rolls out; unchanged layers still come from the node cache.
+          imagePullPolicy: Always
           env:
             - name: SARDEENZ_CONTROL_PLANE_LISTEN_ADDR
               value: 0.0.0.0:3000

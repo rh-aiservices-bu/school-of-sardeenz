@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Platform images re-resolve their tag at every pod start (#247).** The four platform Deployments
+  in `deployment/` (proxy, control plane, dashboard, worker) now set `imagePullPolicy: Always`, so a
+  republished mutable tag (`:latest`, or a re-pushed sha tag) actually rolls out instead of silently
+  serving the node-cached image — a restart alone was not enough under the old `IfNotPresent`.
+  `deployment/README.md` gains the operator runbook for the intended manual flow: dispatch the
+  publish workflow, pin a tag or digest through the overlay's Kustomize `images:` block, retrieve the
+  manifest-list digest, restart and verify the running image reference, plan for the worker
+  restart's model disruption, and seed `worker-base:latest` before relying on worker-only per-merge
+  publishes.
+  `containers/README.md`, `deployment/control-plane/README.md`, and the runner-SIF runbooks are
+  cross-linked rather than duplicated.
+
 ### Added
 
 - **Runner-shim provenance and staleness gate (#287).** The catalog accepts an optional
