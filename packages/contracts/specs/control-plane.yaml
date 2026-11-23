@@ -2733,6 +2733,23 @@ components:
         - IMPORTED
         - FAILED
 
+    CatalogUpdateReason:
+      type: string
+      description: |
+        Why an imported catalog entry is flagged `updateAvailable`.
+
+        - `digest-changed` — the module store's recorded digest (or absence of one) does
+          not equal the digest pinned in the catalog `image`.
+        - `shim-source-advanced` — digests match, but the catalog advertises a
+          `shimSource` and the imported module recorded a different one.
+        - `unprovenanced` — digests match and the catalog advertises a `shimSource`,
+          but the imported module recorded none (legacy schema-v1 sidecar, or a module
+          imported before the catalog declared a source). Re-import records it.
+      enum:
+        - digest-changed
+        - shim-source-advanced
+        - unprovenanced
+
     CatalogEntry:
       type: object
       description: |
@@ -2844,6 +2861,15 @@ components:
             runner's management shim (e.g. ["python3","-m","sardeenz_mlserver_runner"]).
             Never shell-interpreted. When absent, the worker falls back to its global
             SARDEENZ_RUNNER_ENTRYPOINT (default the vLLM shim). Mirrors the runners.yaml field.
+        shimSource:
+          type: string
+          pattern: "^[a-f0-9]{40}$"
+          description: |
+            Optional git commit of the runner-shim source tree this image was built
+            from — the "Source commit" the librarian pipeline logs. The control plane
+            records it in the module metadata sidecar at import and flags an imported
+            module whose provenance is missing or different as `updateAvailable`.
+            Omitted by catalogs that publish no provenance (e.g. mlserver).
 
     CatalogItemStatus:
       type: object
@@ -2883,7 +2909,22 @@ components:
           $ref: "#/components/schemas/CatalogItemStatus"
         updateAvailable:
           type: boolean
-          description: True when an imported entry has a newer catalog version.
+          description: |
+            True when an imported entry has a newer catalog version. When true,
+            `updateReason` says why.
+        updateReason:
+          $ref: "#/components/schemas/CatalogUpdateReason"
+        catalogShimSource:
+          type: string
+          pattern: "^[a-f0-9]{40}$"
+          description: |
+            The `shimSource` the catalog advertises for this entry, when it has one.
+        importedShimSource:
+          type: string
+          pattern: "^[a-f0-9]{40}$"
+          description: |
+            The `shimSource` recorded in the module sidecar at import time, when the
+            imported module recorded one. Absent for legacy/unknown provenance.
 
     RunnerCatalogView:
       type: object

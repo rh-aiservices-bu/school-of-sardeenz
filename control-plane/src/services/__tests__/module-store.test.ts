@@ -67,10 +67,11 @@ describe('ModuleStoreService with StubImporter', () => {
 
     const stems = await store.listImportedStems();
     expect(stems.has('vllm-0.21')).toBe(true);
-    expect((await store.listImportedModules()).get('vllm-0.21')).toBe(DIGEST);
+    expect((await store.listImportedModules()).get('vllm-0.21')).toEqual({ imageDigest: DIGEST });
     const metadata = JSON.parse(
       await readFile(join(dir, 'vllm-0.21.sif.metadata.json'), 'utf8'),
-    ) as { imageDigest: string; image: string };
+    ) as { schemaVersion: number; imageDigest: string; image: string };
+    expect(metadata.schemaVersion).toBe(2);
     expect(metadata.imageDigest).toBe(DIGEST);
     expect(metadata.image).toBe(`oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`);
     // No transient status once completed (state is fs-derived).
@@ -143,6 +144,70 @@ describe('ModuleStoreService with StubImporter', () => {
   it('reports an unknown digest for a legacy SIF without metadata', async () => {
     await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
     expect((await store.listImportedModules()).get('vllm-0.21')).toBeUndefined();
+  });
+
+  describe('shim provenance (#287)', () => {
+    const SHIM = '337e0aeba53554c42b5e920011ed592fd4f30e8b';
+
+    it('writes schemaVersion 2 with the shim source and reads it back', async () => {
+      store.startImport(entry({ shimSource: SHIM }));
+      await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
+
+      const metadata = JSON.parse(
+        await readFile(join(dir, 'vllm-0.21.sif.metadata.json'), 'utf8'),
+      ) as { schemaVersion: number; shimSource?: string };
+      expect(metadata.schemaVersion).toBe(2);
+      expect(metadata.shimSource).toBe(SHIM);
+
+      expect((await store.listImportedModules()).get('vllm-0.21')).toEqual({
+        imageDigest: DIGEST,
+        shimSource: SHIM,
+      });
+    });
+
+    it('writes schemaVersion 2 without a shimSource key when the entry has none', async () => {
+      store.startImport(entry());
+      await waitFor(() => events.some((e) => e.type === ClusterEventType.CATALOG_IMPORT_COMPLETED));
+
+      const metadata = JSON.parse(
+        await readFile(join(dir, 'vllm-0.21.sif.metadata.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(metadata.schemaVersion).toBe(2);
+      expect('shimSource' in metadata).toBe(false);
+    });
+
+    it('reads a hand-written schemaVersion 1 sidecar as digest-only', async () => {
+      await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
+      await writeFile(
+        join(dir, 'vllm-0.21.sif.metadata.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          image: `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
+          imageDigest: DIGEST,
+          importedAt: '2026-01-01T00:00:00.000Z',
+        }),
+      );
+      const warnCalls = logger.warn.mock.calls.length;
+      const errorCalls = logger.error.mock.calls.length;
+      expect((await store.listImportedModules()).get('vllm-0.21')).toEqual({ imageDigest: DIGEST });
+      expect(logger.warn).toHaveBeenCalledTimes(warnCalls);
+      expect(logger.error).toHaveBeenCalledTimes(errorCalls);
+    });
+
+    it('ignores an invalid shimSource in a v2 sidecar', async () => {
+      await writeFile(join(dir, 'vllm-0.21.sif'), 'x');
+      await writeFile(
+        join(dir, 'vllm-0.21.sif.metadata.json'),
+        JSON.stringify({
+          schemaVersion: 2,
+          image: `oras://quay.io/x/vllm:0.21@sha256:${DIGEST}`,
+          imageDigest: DIGEST,
+          shimSource: 'nope',
+          importedAt: '2026-01-01T00:00:00.000Z',
+        }),
+      );
+      expect((await store.listImportedModules()).get('vllm-0.21')).toEqual({ imageDigest: DIGEST });
+    });
   });
 
   it('imported stub SIF has the expected placeholder content', async () => {

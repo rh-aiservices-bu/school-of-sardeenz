@@ -55,4 +55,12 @@ export default tseslint.config(
       'no-empty-pattern': 'off',
     },
   },
+  {
+    // Maintainer CLI outside every tsconfig project: lint it without type information.
+    files: ['control-plane/scripts/**/*.mts'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      parserOptions: { projectService: false },
+    },
+  },
 );

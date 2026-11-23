@@ -5,6 +5,7 @@ import { ModelLifecycleState, CatalogItemState } from '@sardeenz/types';
 import { registerCatalogRoutes } from '../catalog.js';
 import type { RouteDeps } from '../deps.js';
 import type { CatalogEntry, CatalogSnapshot } from '../../services/catalog-service.js';
+import type { ImportedModuleProvenance } from '../../services/module-store.js';
 
 const ENTRY: CatalogEntry = {
   id: 'vllm-0.21',
@@ -27,6 +28,14 @@ const OIP_ENTRY: CatalogEntry = {
   protocol: 'oip' as CatalogEntry['protocol'],
 };
 
+const SHIM = '337e0aeba53554c42b5e920011ed592fd4f30e8b';
+const SHIM_DIGEST = 'a'.repeat(64);
+const SHIM_ENTRY: CatalogEntry = {
+  ...ENTRY,
+  image: `oras://quay.io/x/vllm:0.21@sha256:${SHIM_DIGEST}`,
+  shimSource: SHIM,
+};
+
 const SNAPSHOT: CatalogSnapshot = {
   source: 'test',
   fetchedAt: '2026-01-01T00:00:00Z',
@@ -37,7 +46,7 @@ const SNAPSHOT: CatalogSnapshot = {
 interface Overrides {
   isLeader?: boolean;
   importedStems?: Set<string>;
-  importedDigests?: Map<string, string | undefined>;
+  importedProvenance?: Map<string, ImportedModuleProvenance | undefined>;
   activeStates?: { modelName: string; state: ModelLifecycleState }[];
   modelRecords?: {
     name: string;
@@ -57,8 +66,10 @@ function buildApp(over: Overrides = {}): {
   const moduleStore = {
     listImportedModules: vi.fn(() =>
       Promise.resolve(
-        over.importedDigests ??
-          new Map([...(over.importedStems ?? new Set<string>())].map((stem) => [stem, undefined])),
+        over.importedProvenance ??
+          new Map<string, ImportedModuleProvenance | undefined>(
+            [...(over.importedStems ?? new Set<string>())].map((stem) => [stem, undefined]),
+          ),
       ),
     ),
     getAllTransient: vi.fn(() => new Map()),
@@ -106,6 +117,35 @@ describe('catalog routes', () => {
     const body = res.json<{ runners: { status: { state: string } }[] }>();
     expect(body.runners).toHaveLength(1);
     expect(body.runners[0].status.state).toBe(CatalogItemState.NOT_IMPORTED);
+  });
+
+  it('GET /catalog reports unprovenanced for a v1-style module', async () => {
+    const { app: a } = buildApp({
+      entries: [SHIM_ENTRY],
+      importedProvenance: new Map([['vllm-0.21', { imageDigest: SHIM_DIGEST }]]),
+    });
+    const res = await a.inject({ method: 'GET', url: '/api/v1/catalog' });
+    expect(res.statusCode).toBe(200);
+    const item = res.json<{ runners: Record<string, unknown>[] }>().runners[0];
+    expect(item.updateAvailable).toBe(true);
+    expect(item.updateReason).toBe('unprovenanced');
+    expect(item.catalogShimSource).toBe(SHIM);
+    expect(item.importedShimSource).toBeUndefined();
+  });
+
+  it('GET /catalog reports no update when digest and shim source agree', async () => {
+    const { app: a } = buildApp({
+      entries: [SHIM_ENTRY],
+      importedProvenance: new Map([
+        ['vllm-0.21', { imageDigest: SHIM_DIGEST, shimSource: SHIM }],
+      ]),
+    });
+    const res = await a.inject({ method: 'GET', url: '/api/v1/catalog' });
+    expect(res.statusCode).toBe(200);
+    const item = res.json<{ runners: Record<string, unknown>[] }>().runners[0];
+    expect(item.updateAvailable).toBe(false);
+    expect('updateReason' in item).toBe(false);
+    expect(item.importedShimSource).toBe(SHIM);
   });
 
   it('POST /catalog/:id/import returns 202 with IMPORTING status', async () => {

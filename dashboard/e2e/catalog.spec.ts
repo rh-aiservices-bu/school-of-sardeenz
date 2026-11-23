@@ -37,6 +37,44 @@ test.describe('Runner Catalog', () => {
     await expect(page.getByText('Update available')).toBeVisible();
   });
 
+  test('shows the reason-specific update label for an unprovenanced module', async ({
+    page,
+    bffPort,
+    mockControlPlane,
+  }) => {
+    mockControlPlane.setCatalog({
+      source: 'mock://runners.yaml',
+      fetchedAt: '2026-09-09T08:00:00Z',
+      runners: [
+        {
+          entry: {
+            id: 'vllm-0.21',
+            title: 'vLLM 0.21',
+            description: 'vLLM reference runner (mock).',
+            engine: 'vLLM',
+            runnerType: 'vllm',
+            version: '0.21',
+            image:
+              'oras://quay.io/example/vllm@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+            sifName: 'vllm-0.21',
+            protocol: 'openai',
+          },
+          status: { id: 'vllm-0.21', state: 'IMPORTED' },
+          updateAvailable: true,
+          updateReason: 'unprovenanced',
+          catalogShimSource: '337e0aeba53554c42b5e920011ed592fd4f30e8b',
+        },
+      ],
+      unmanagedModules: [],
+    });
+
+    await page.goto(bffUrl(bffPort, '/catalog'));
+
+    await expect(page.getByText('Update available')).toBeVisible();
+    await expect(page.getByText('Provenance unknown — re-import to record source')).toBeVisible();
+    await expect(page.getByText('Shim source: 337e0ae')).toBeVisible();
+  });
+
   test('Refresh sends a POST and displays the returned fetch time', async ({ page, bffPort }) => {
     await page.goto(bffUrl(bffPort, '/catalog'));
     await expect(page.getByText(/Fetched at:/)).toBeVisible();

@@ -36,7 +36,7 @@ import {
   ToolbarItem,
 } from '@patternfly/react-core';
 import { CubesIcon, DownloadIcon, SyncAltIcon, TrashIcon } from '@patternfly/react-icons';
-import { CatalogItemState } from '@sardeenz/types';
+import { CatalogItemState, CatalogUpdateReason } from '@sardeenz/types';
 import type { CatalogItem } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatDateTime, shortImageDigest } from '../../utils/format';
@@ -94,6 +94,7 @@ function RunnerCard({
   const { t } = useTranslation('catalog');
   const { entry, status } = item;
   const digest = shortImageDigest(entry.image);
+  const shimSource = item.importedShimSource ?? item.catalogShimSource;
   const imported = status.state === CatalogItemState.IMPORTED;
   const importing = status.state === CatalogItemState.IMPORTING;
 
@@ -113,11 +114,26 @@ function RunnerCard({
               <Content component="small">{t('card.imageDigest', { digest })}</Content>
             </StackItem>
           )}
+          {shimSource && (
+            <StackItem>
+              <Content component="small">
+                {t('card.shimSource', { sha: shimSource.slice(0, 7) })}
+              </Content>
+            </StackItem>
+          )}
           <StackItem>
             <LabelGroup numLabels={6}>
               {item.updateAvailable && (
                 <Label color="orange" isCompact>
                   {t('state.updateAvailable')}
+                </Label>
+              )}
+              {item.updateReason && (
+                <Label
+                  color={item.updateReason === CatalogUpdateReason.unprovenanced ? 'red' : 'orange'}
+                  isCompact
+                >
+                  {t(`state.updateReason.${item.updateReason.replace(/-/g, '')}`)}
                 </Label>
               )}
               {entry.engine && <Label isCompact>{entry.engine}</Label>}

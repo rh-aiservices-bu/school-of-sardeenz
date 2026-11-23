@@ -141,6 +141,9 @@ export interface MockCatalogItem {
   };
   status: { id: string; state: 'NOT_IMPORTED' | 'IMPORTING' | 'IMPORTED' | 'FAILED' };
   updateAvailable: boolean;
+  updateReason?: 'digest-changed' | 'shim-source-advanced' | 'unprovenanced';
+  catalogShimSource?: string;
+  importedShimSource?: string;
 }
 
 export interface MockRunnerCatalog {

@@ -28,6 +28,7 @@ export interface CatalogLogger {
 }
 
 const NAME_RE = /^[A-Za-z0-9_.-]+$/;
+const SHIM_SOURCE_RE = /^[a-f0-9]{40}$/;
 const FETCH_TIMEOUT_MS = 15_000;
 
 // Loads the runner catalog from SARDEENZ_RUNNER_CATALOG_URL: an http(s) URL (official/remote
@@ -262,6 +263,19 @@ export class CatalogService {
     if (Array.isArray(e.entrypoint)) {
       const argv = e.entrypoint.filter((t): t is string => typeof t === 'string');
       if (argv.length) entry.entrypoint = argv;
+    }
+    // shimSource is machine data (the librarian job logs the build's source commit), so a
+    // present-but-invalid value is loud: it means the catalog was hand-edited wrong. Absent is
+    // fine — catalogs without provenance (e.g. mlserver) keep digest-only semantics.
+    if (e.shimSource !== undefined) {
+      if (typeof e.shimSource !== 'string' || !SHIM_SOURCE_RE.test(e.shimSource)) {
+        const reason =
+          `runner '${idIfString ?? '?'}' has invalid 'shimSource' ` +
+          `(expected a full 40-char lowercase git commit, got ${JSON.stringify(e.shimSource)})`;
+        this.logger.warn({ id: e.id, shimSource: e.shimSource }, `${reason} — skipping`);
+        return { error: reason, id: idIfString };
+      }
+      entry.shimSource = e.shimSource;
     }
     return { entry };
   }

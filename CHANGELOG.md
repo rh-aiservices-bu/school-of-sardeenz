@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Runner-shim provenance and staleness gate (#287).** The catalog accepts an optional
+  `shimSource` — the full 40-char git commit of the runner-shim tree an image was built from
+  (the librarian job's logged `Source commit`) — validated at catalog ingest; the imported module's
+  sidecar is now `schemaVersion: 2` and records it (a v1 sidecar still reads as digest-only, and a
+  catalog without `shimSource`, e.g. mlserver, keeps digest-only semantics). `GET /api/v1/catalog`
+  items gain `updateReason` (`digest-changed` / `shim-source-advanced` / `unprovenanced`),
+  `catalogShimSource` and `importedShimSource`, and the dashboard shows a reason-specific label
+  plus a `Shim source:` line. A maintainer script
+  (`control-plane/scripts/check-catalog-shim-source.mts`, manual only — never a CI gate because
+  published digests lag `dev`) compares the catalog against `git log -1 -- runners/vllm`, and
+  `docs/usage/runner-catalog.md` plus `deployment/librarian/README.md` gain a republish runbook
+  (`rc2` tags, digest + `shimSource` bump, re-import verification). Operational consequence: the
+  existing vLLM modules (v1 sidecars, `rc1` digests still matching the catalog) now report
+  `updateAvailable: true`, `updateReason: "unprovenanced"` until re-imported after the `rc2`
+  republish.
+
 - **Worker `GET /runners` + reverse reconciliation (#286).** The worker agent can now report its
   own runner registry (`GET /runners`: every READY runner plus any launch still in flight as
   `STARTING`), and the leader reconciliation loop gained `reconcileUnclaimedRunners`, which lists

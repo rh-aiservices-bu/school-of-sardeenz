@@ -200,6 +200,53 @@ oc logs "build/$PIPELINE_NAME-oci" -n sardeenz
 After publishing, resolve the ORAS tag to its registry manifest digest and put the digest-pinned
 reference in `runners.yaml`; the catalog intentionally rejects mutable-only references.
 
+### Republishing the vLLM runner (shim provenance)
+
+Revendoring the runner shim (`runners/vllm`) means republishing every vLLM runner image so their
+`shimSource` — the commit the catalog advertises and the control plane records in the module sidecar
+at import — matches the tree. Use new `rc2` tags: the catalog pins `rc1` digests, and a tag must stay
+immutable once published.
+
+| engine | CONTAINERFILE                                  | OCI_TAG    | ORAS_TAG   | SIF_NAME    |
+| ------ | ---------------------------------------------- | ---------- | ---------- | ----------- |
+| 0.21   | `containers/runners/vllm/0.21.0/Containerfile` | `0.21-rc2` | `0.21-rc2` | `vllm-0.21` |
+| 0.24   | `containers/runners/vllm/0.24.0/Containerfile` | `0.24-rc2` | `0.24-rc2` | `vllm-0.24` |
+| 0.26   | `containers/runners/vllm/0.26.0/Containerfile` | `0.26-rc2` | `0.26-rc2` | `vllm-0.26` |
+
+`SIF_NAME` is the **catalog stem** (`vllm-0.21`), not the tag — `params.example.env` ships
+`vllm-0.21-rc1`, which is not the catalog's `sifName`; do not copy it. One job per row, each with a
+unique `PIPELINE_NAME`:
+
+```bash
+PIPELINE_NAME="vllm-021-rc2-$(date +%Y%m%d%H%M%S)"
+oc process -f deployment/librarian/job.yaml \
+  -p PIPELINE_NAME="$PIPELINE_NAME" \
+  -p GIT_URI=https://github.com/rh-aiservices-bu/school-of-sardeenz.git \
+  -p GIT_REF=<release sha> \
+  -p CONTEXT_DIR=. \
+  -p CONTAINERFILE=containers/runners/vllm/0.21.0/Containerfile \
+  -p OCI_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runner-images/vllm \
+  -p OCI_TAG=0.21-rc2 \
+  -p SIF_NAME=vllm-0.21 \
+  -p ORAS_REPOSITORY=quay.io/rh-aiservices-bu/sardeenz-runners/vllm \
+  -p ORAS_TAG=0.21-rc2 \
+  -p SIGN_SIF=false \
+  -p SIF_BUILDER_IMAGE=quay.io/rh-aiservices-bu/sardeenz-worker-base@sha256:<digest> \
+  | oc create -f - -n sardeenz
+```
+
+Then read the provenance and digest out of the job:
+
+```bash
+oc logs job/<PIPELINE_NAME> -c publish-sif -n sardeenz | grep -E 'Source commit|Catalog source'
+skopeo inspect --format '{{.Digest}}' docker://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21-rc2
+```
+
+`Source commit` (written to `git-commit` by `scripts/build-runner-sif.sh`) is the new `shimSource`.
+Bump `image:` **and** `shimSource:` together in `runners.yaml` on `main`, then re-import and verify —
+the full runbook, including the staleness check script, is in
+[docs/usage/runner-catalog.md](../../docs/usage/runner-catalog.md#republishing-a-runner-and-recording-its-shim-source).
+
 ## Resource tuning
 
 The defaults give the native OCI build 2 CPU, 8/16 GiB memory, and 50/100 GiB requested/limited

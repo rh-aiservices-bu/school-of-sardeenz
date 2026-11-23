@@ -1,4 +1,8 @@
-import { CatalogItemState, type ControlPlaneComponents } from '@sardeenz/types';
+import {
+  CatalogItemState,
+  CatalogUpdateReason,
+  type ControlPlaneComponents,
+} from '@sardeenz/types';
 import type { CatalogSnapshot } from './catalog-service.js';
 import type { ImportedModules } from './module-store.js';
 
@@ -26,11 +30,34 @@ export function buildCatalogView(
           : CatalogItemState.NOT_IMPORTED,
       } satisfies CatalogItemStatus);
     const catalogDigest = entry.image.match(/@sha256:([a-fA-F0-9]{64})$/)?.[1]?.toLowerCase();
-    const importedDigest = importedModules.get(entry.sifName);
-    const updateAvailable =
-      status.state === CatalogItemState.IMPORTED &&
-      (catalogDigest === undefined || importedDigest !== catalogDigest);
-    return { entry, status, updateAvailable };
+    const provenance = importedModules.get(entry.sifName);
+    const importedDigest = provenance?.imageDigest;
+    const importedShimSource = provenance?.shimSource;
+
+    let updateAvailable = false;
+    let updateReason: CatalogUpdateReason | undefined;
+    if (status.state === CatalogItemState.IMPORTED) {
+      if (catalogDigest === undefined || importedDigest !== catalogDigest) {
+        updateAvailable = true;
+        updateReason = CatalogUpdateReason.digest_changed;
+      } else if (entry.shimSource !== undefined && importedShimSource !== undefined) {
+        if (entry.shimSource !== importedShimSource) {
+          updateAvailable = true;
+          updateReason = CatalogUpdateReason.shim_source_advanced;
+        }
+      } else if (entry.shimSource !== undefined) {
+        updateAvailable = true;
+        updateReason = CatalogUpdateReason.unprovenanced;
+      }
+    }
+    return {
+      entry,
+      status,
+      updateAvailable,
+      ...(updateReason !== undefined ? { updateReason } : {}),
+      ...(entry.shimSource !== undefined ? { catalogShimSource: entry.shimSource } : {}),
+      ...(importedShimSource !== undefined ? { importedShimSource } : {}),
+    };
   });
 
   const unmanagedModules = [...importedStems].filter((stem) => !catalogStems.has(stem)).sort();

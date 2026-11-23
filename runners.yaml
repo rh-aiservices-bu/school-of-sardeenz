@@ -17,6 +17,10 @@
 #       version:     engine/build version string
 #       image:       ORAS reference to pull (oras://<registry>/<repo>:<tag>@sha256:<digest> — the
 #                    digest is required so a repointed tag can't silently change what gets pulled)
+#       shimSource:  optional full 40-char git commit of the runner-shim tree the image was built
+#                    from (the librarian job logs it as "Source commit"). Re-import records it in
+#                    the module sidecar; the dashboard flags an imported module whose provenance is
+#                    missing or older. Bump it together with `image:` when republishing.
 #       sifName:     module filename stem, [A-Za-z0-9_.-]+ → /modules/<sifName>.sif == runtimeModule
 #       protocol:    REQUIRED — proxy protocol family: "openai" (OpenAI-compatible, /openai/v1)
 #                    or "oip" (KServe V2 Open Inference Protocol, /oip/v2). Must be one the
@@ -52,6 +56,7 @@ runners:
     runnerType: vllm
     version: '0.21'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.21-rc1@sha256:0e1e72a7b39b063a35f30b2fea995a1d6133b5e447e045ab8d0ac2ae01570de7
+    shimSource: 337e0aeba53554c42b5e920011ed592fd4f30e8b
     sifName: vllm-0.21
     protocol: openai
     tags: [llm, cuda, kvcached, openai]
@@ -78,6 +83,7 @@ runners:
     runnerType: vllm
     version: '0.24'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.24-rc1@sha256:540551a591958cc23b1c2663ede6f74e3172f1cf0272a651b8b08e5385d7f58b
+    shimSource: 337e0aeba53554c42b5e920011ed592fd4f30e8b
     sifName: vllm-0.24
     protocol: openai
     tags: [llm, cuda, kvcached, openai]
@@ -104,6 +110,7 @@ runners:
     runnerType: vllm
     version: '0.26'
     image: oras://quay.io/rh-aiservices-bu/sardeenz-runners/vllm:0.26-rc1@sha256:075b3057000fca8122a4c059c66087bb4ed15aa240ca64b8ef953ccc048fa52b
+    shimSource: 337e0aeba53554c42b5e920011ed592fd4f30e8b
     sifName: vllm-0.26
     protocol: openai
     tags: [llm, cuda, kvcached, openai]

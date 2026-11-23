@@ -7,14 +7,26 @@ import type { SifImporter } from './sif-importer.js';
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
 type CatalogItemStatus = ControlPlaneComponents['schemas']['CatalogItemStatus'];
 
+/** Provenance recorded for an imported module; every field is optional because unknown is real. */
+export interface ImportedModuleProvenance {
+  imageDigest?: string;
+  shimSource?: string;
+}
+
 interface ImportedModuleMetadata {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   image: string;
   imageDigest: string;
+  /** Git commit of the shim tree the image was built from (schema 2 only). */
+  shimSource?: string;
   importedAt: string;
 }
 
-export type ImportedModules = Map<string, string | undefined>;
+/** stem → recorded provenance; `undefined` = no usable sidecar (legacy/unknown). */
+export type ImportedModules = Map<string, ImportedModuleProvenance | undefined>;
+
+const DIGEST_RE = /^[a-f0-9]{64}$/;
+const SHIM_SOURCE_RE = /^[a-f0-9]{40}$/;
 
 function imageDigest(image: string): string | undefined {
   return image.match(/@sha256:([a-fA-F0-9]{64})$/)?.[1]?.toLowerCase();
@@ -70,9 +82,11 @@ export class ModuleStoreService {
     }
   }
 
-  // Return every imported SIF and the digest recorded when it was imported. Existing SIFs from
-  // before digest tracking have an undefined digest, which is deliberately treated as needing a
-  // re-import: without provenance metadata we cannot prove that the installed bytes are current.
+  // Return every imported SIF with its recorded provenance (image digest + schema-v2 shim source).
+  // Existing SIFs from before provenance tracking have no usable sidecar, which is deliberately
+  // treated as needing a re-import: without provenance metadata we cannot prove that the installed
+  // bytes are current. A schemaVersion-1 sidecar is read as digest-only (shim source unknown); the
+  // sidecar's schemaVersion is unrelated to the OCI image-manifest schemaVersion.
   async listImportedModules(): Promise<ImportedModules> {
     const stems = await this.listImportedStems();
     const modules: ImportedModules = new Map();
@@ -82,10 +96,24 @@ export class ModuleStoreService {
           const raw = await readFile(join(this.modulesDir, `${stem}.sif.metadata.json`), 'utf8');
           const metadata = JSON.parse(raw) as Partial<ImportedModuleMetadata>;
           const digest =
-            metadata.schemaVersion === 1 && typeof metadata.imageDigest === 'string'
+            typeof metadata.imageDigest === 'string' &&
+            DIGEST_RE.test(metadata.imageDigest.toLowerCase())
               ? metadata.imageDigest.toLowerCase()
               : undefined;
-          modules.set(stem, /^[a-f0-9]{64}$/.test(digest ?? '') ? digest : undefined);
+          const shimSource =
+            metadata.schemaVersion === 2 &&
+            typeof metadata.shimSource === 'string' &&
+            SHIM_SOURCE_RE.test(metadata.shimSource)
+              ? metadata.shimSource
+              : undefined;
+          if (digest === undefined && shimSource === undefined) {
+            modules.set(stem, undefined);
+            return;
+          }
+          const provenance: ImportedModuleProvenance = {};
+          if (digest !== undefined) provenance.imageDigest = digest;
+          if (shimSource !== undefined) provenance.shimSource = shimSource;
+          modules.set(stem, provenance);
         } catch {
           modules.set(stem, undefined);
         }
@@ -176,10 +204,11 @@ export class ModuleStoreService {
         },
       });
       const metadata: ImportedModuleMetadata = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         image: entry.image,
         imageDigest: digest,
         importedAt: new Date().toISOString(),
+        ...(entry.shimSource !== undefined ? { shimSource: entry.shimSource } : {}),
       };
       await writeFile(metadataTmpPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o644 });
       // World-readable (workers read under an arbitrary UID), then atomic publish.
