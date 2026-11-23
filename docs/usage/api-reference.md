@@ -22,6 +22,26 @@ The dashboard BFF exposes its own `/api/*` surface (auth, events, metrics, catal
 relay) for the frontend only; it is documented in
 [`docs/architecture/components/dashboard.md`](../architecture/components/dashboard.md).
 
+## Proxy request limits
+
+The proxy buffers each inference request body before routing it, capped by
+`SARDEENZ_PROXY_MAX_BODY_BYTES` (default `33554432`, 32 MiB). A larger body is rejected before
+routing with `413` and the proxy's standard error envelope:
+
+```json
+{
+  "error": {
+    "message": "request body exceeds the 33554432-byte limit (SARDEENZ_PROXY_MAX_BODY_BYTES); raise the limit or send a smaller payload",
+    "type": "request_too_large"
+  }
+}
+```
+
+This applies to `/openai/*` and `/oip/*` alike. Because the inference API is not a Sardeenz
+contract (see above), the limit is operator configuration rather than a versioned contract
+value; an OpenShift Route or other router in front of the proxy may enforce its own, lower body
+limit.
+
 ## Browsing the specs
 
 ```bash

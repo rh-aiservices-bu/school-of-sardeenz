@@ -163,6 +163,12 @@ curl -s "$PROXY/oip/v2/models/<served-model-name>/infer" \
   }'
 ```
 
+> **Body size limit.** A `1×3×224×224` FP32 tensor is ~150k JSON numbers — several MiB of text.
+> The proxy buffers the whole inference body and rejects anything above
+> `SARDEENZ_PROXY_MAX_BODY_BYTES` (default 32 MiB) with `413 request_too_large`. Raise the proxy's
+> limit or batch smaller; an OpenShift Route or other router in front of the proxy may enforce its
+> own, lower body limit.
+
 Every model output is returned under its own name unless the request lists `outputs`. Numeric
 inputs are cast to the declared type, so `FP64` data sent to a `tensor(float)` input works.
 Non-tensor outputs, such as the per-row probability maps emitted by a sklearn-onnx classifier's

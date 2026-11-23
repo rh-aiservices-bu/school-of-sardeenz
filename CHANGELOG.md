@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Proxy request-body cap raised to 32 MiB and made self-explaining (#211).** The
+  `SARDEENZ_PROXY_MAX_BODY_BYTES` default rises from 1 MiB to `33554432`, and an over-limit body now
+  returns the proxy's own JSON `413` with `type: "request_too_large"`, whose message names the
+  configured limit and the variable (previously a chunked overflow surfaced as
+  `400 invalid_request_error` "length limit exceeded"). The prod-only
+  `tower_http::limit::RequestBodyLimitLayer` is removed, so the handlers' buffered read is the single
+  enforcement point and production behaves exactly like the integration harness; each rejection is
+  logged at `warn` with structured `surface`, `limit` and, when the client declared one,
+  `content_length`. The variable is surfaced in `deployment/proxy/deployment.yaml` (next to the
+  parking byte budget and the 1Gi container memory limit it protects), `.env.example`,
+  `deployment/proxy/README.md`, the proxy architecture doc, and the usage docs — including the
+  MLServer/ONNX section whose multi-MiB tensor payloads motivated the raise. The deployment README
+  also spells out the concurrent-buffer exposure that the raise widens: in-flight bodies are
+  unaccounted, concurrent forwards are uncapped by default, so roughly 32 simultaneous
+  maximum-size requests can reach the 1Gi container ceiling.
 - **Platform images re-resolve their tag at every pod start (#247).** The four platform Deployments
   in `deployment/` (proxy, control plane, dashboard, worker) now set `imagePullPolicy: Always`, so a
   republished mutable tag (`:latest`, or a re-pushed sha tag) actually rolls out instead of silently

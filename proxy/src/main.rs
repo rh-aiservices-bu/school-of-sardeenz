@@ -16,7 +16,6 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::watch;
-use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -105,37 +104,35 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Proxy routes (inference traffic)
-    let proxy_app = crate::routes::build_proxy_router(state.clone())
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &axum::http::Request<_>| {
-                    let request_id = request
-                        .headers()
-                        .get("x-request-id")
-                        .and_then(|v| v.to_str().ok())
-                        .map(String::from)
-                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let proxy_app = crate::routes::build_proxy_router(state.clone()).layer(
+        TraceLayer::new_for_http()
+            .make_span_with(|request: &axum::http::Request<_>| {
+                let request_id = request
+                    .headers()
+                    .get("x-request-id")
+                    .and_then(|v| v.to_str().ok())
+                    .map(String::from)
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-                    tracing::info_span!(
-                        "request",
-                        method = %request.method(),
-                        path = %request.uri().path(),
-                        request_id = %request_id,
-                    )
-                })
-                .on_response(
-                    |response: &axum::http::Response<_>,
-                     latency: std::time::Duration,
-                     _span: &tracing::Span| {
-                        tracing::info!(
-                            status = response.status().as_u16(),
-                            latency_ms = latency.as_millis(),
-                            "response"
-                        );
-                    },
-                ),
-        )
-        .layer(RequestBodyLimitLayer::new(config.max_body_bytes));
+                tracing::info_span!(
+                    "request",
+                    method = %request.method(),
+                    path = %request.uri().path(),
+                    request_id = %request_id,
+                )
+            })
+            .on_response(
+                |response: &axum::http::Response<_>,
+                 latency: std::time::Duration,
+                 _span: &tracing::Span| {
+                    tracing::info!(
+                        status = response.status().as_u16(),
+                        latency_ms = latency.as_millis(),
+                        "response"
+                    );
+                },
+            ),
+    );
 
     // Admin routes (health + metrics, separate port)
     let admin_app = Router::new()

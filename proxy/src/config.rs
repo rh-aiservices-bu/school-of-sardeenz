@@ -91,7 +91,7 @@ impl Config {
                 probe_timeout,
             },
             api_token: std::env::var("SARDEENZ_API_TOKEN").ok().filter(|s| !s.is_empty()),
-            max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "1048576")?,
+            max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "33554432")?,
             max_concurrent_forwards: parse_env("SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS", "0")?,
             max_concurrent_forwards_per_model: parse_env(
                 "SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL",
@@ -138,6 +138,7 @@ mod tests {
             "SARDEENZ_REDIS_URL",
             "SARDEENZ_CONTROL_PLANE_URL",
             "SARDEENZ_API_TOKEN",
+            "SARDEENZ_PROXY_MAX_BODY_BYTES",
         ] {
             std::env::remove_var(key);
         }
@@ -150,7 +151,7 @@ mod tests {
         assert_eq!(config.upstream_timeout, Duration::from_secs(300));
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
         assert_eq!(config.api_token, None);
-        assert_eq!(config.max_body_bytes, 1_048_576);
+        assert_eq!(config.max_body_bytes, 33_554_432);
         assert_eq!(config.max_concurrent_forwards, 0);
         assert_eq!(config.max_concurrent_forwards_per_model, 0);
     }

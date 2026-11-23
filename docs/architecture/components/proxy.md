@@ -55,7 +55,7 @@ The proxy is designed to run as multiple stateless replicas behind a load balanc
 
 Every inference request follows the same steps:
 
-1. Read the raw request body (buffered, max 1 MiB by default — `SARDEENZ_PROXY_MAX_BODY_BYTES`)
+1. Read the raw request body (buffered, max 32 MiB by default — `SARDEENZ_PROXY_MAX_BODY_BYTES`; larger bodies get a JSON `413 request_too_large`)
 2. Extract the `model` field — from the JSON body for `/openai/*` requests, from the `{model}` URL
    path segment for `/oip/*` requests. The rest of the path (resolve/park/wake/forward/circuit-break)
    is protocol-agnostic.
@@ -415,7 +415,7 @@ All configuration is read from environment variables at startup via `Config::fro
 | `SARDEENZ_PARKING_MAX_PER_MODEL`          | `usize`      | `1000`                   | Max concurrently parked requests per model                                                         |
 | `SARDEENZ_PARKING_MAX_GLOBAL`             | `usize`      | `10000`                  | Max concurrently parked requests across all models                                                 |
 | `SARDEENZ_PARKING_MAX_BYTES`              | `usize`      | `1073741824`             | Max total bytes of parked request bodies (1 GiB)                                                   |
-| `SARDEENZ_PROXY_MAX_BODY_BYTES`           | `usize`      | `1048576`                | Max buffered request body size (1 MiB); larger bodies are rejected                                 |
+| `SARDEENZ_PROXY_MAX_BODY_BYTES`           | `usize`      | `33554432`               | Max buffered request body size (32 MiB); larger bodies are rejected with 413 request_too_large     |
 | `SARDEENZ_API_TOKEN`                      | `String`     | unset                    | Bearer token sent on wake-trigger calls to the control plane (required when its auth is enabled)   |
 | `SARDEENZ_CB_FAILURE_THRESHOLD`           | `u32`        | `5`                      | Failures within window to trip a circuit breaker                                                   |
 | `SARDEENZ_CB_FAILURE_WINDOW_SECS`         | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                                                |

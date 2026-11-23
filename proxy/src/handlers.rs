@@ -81,6 +81,63 @@ struct InferenceOutcome {
     forward_start: std::time::Instant,
 }
 
+/// Parse a declared Content-Length; absent, non-UTF8 or unparseable → None.
+fn declared_content_length(parts: &axum::http::request::Parts) -> Option<u64> {
+    parts
+        .headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+/// Structured warn at rejection. OpenAI model names live inside the rejected
+/// body and must not be fabricated; only log a model when the path supplied one.
+fn log_body_too_large(
+    surface: &'static str,
+    model: Option<&str>,
+    content_length: Option<u64>,
+    limit: usize,
+) {
+    match model {
+        Some(model) => {
+            tracing::warn!(
+                surface,
+                model,
+                content_length,
+                limit,
+                "request body exceeds SARDEENZ_PROXY_MAX_BODY_BYTES"
+            )
+        }
+        None => tracing::warn!(
+            surface,
+            content_length,
+            limit,
+            "request body exceeds SARDEENZ_PROXY_MAX_BODY_BYTES"
+        ),
+    }
+}
+
+/// Map a `to_bytes` failure: overflow → 413 with a warn log, anything else → 400.
+fn body_read_error(
+    error: axum::Error,
+    surface: &'static str,
+    model: Option<&str>,
+    content_length: Option<u64>,
+    limit: usize,
+) -> ProxyError {
+    use std::error::Error as _;
+    let overflow = error
+        .source()
+        .and_then(|source| source.downcast_ref::<http_body_util::LengthLimitError>())
+        .is_some();
+    if overflow {
+        log_body_too_large(surface, model, content_length, limit);
+        ProxyError::RequestTooLarge { limit }
+    } else {
+        ProxyError::BadRequest(format!("invalid request body: {error}"))
+    }
+}
+
 /// Shared outer metrics wrapper for both infer handlers (openai and oip):
 /// records `sardeenz_proxy_requests_total` / `sardeenz_proxy_request_duration_seconds`
 /// regardless of success/failure, then produces the HTTP response.
@@ -121,9 +178,15 @@ async fn handle_inference_inner(
     request: Request<Body>,
 ) -> Result<InferenceOutcome, ProxyError> {
     let (parts, body) = request.into_parts();
-    let body_bytes = axum::body::to_bytes(body, state.config.max_body_bytes)
+    let limit = state.config.max_body_bytes;
+    let content_length = declared_content_length(&parts);
+    if content_length.is_some_and(|len| len > limit as u64) {
+        log_body_too_large("openai", None, content_length, limit);
+        return Err(ProxyError::RequestTooLarge { limit });
+    }
+    let body_bytes = axum::body::to_bytes(body, limit)
         .await
-        .map_err(|e| ProxyError::BadRequest(format!("invalid request body: {e}")))?;
+        .map_err(|e| body_read_error(e, "openai", None, content_length, limit))?;
 
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::BadRequest(format!("invalid JSON: {e}")))?;
@@ -156,9 +219,15 @@ async fn handle_oip_infer_inner(
     })?;
 
     let (parts, body) = request.into_parts();
-    let body_bytes = axum::body::to_bytes(body, state.config.max_body_bytes)
+    let limit = state.config.max_body_bytes;
+    let content_length = declared_content_length(&parts);
+    if content_length.is_some_and(|len| len > limit as u64) {
+        log_body_too_large("oip", Some(model_name.as_str()), content_length, limit);
+        return Err(ProxyError::RequestTooLarge { limit });
+    }
+    let body_bytes = axum::body::to_bytes(body, limit)
         .await
-        .map_err(|e| ProxyError::BadRequest(format!("invalid request body: {e}")))?;
+        .map_err(|e| body_read_error(e, "oip", Some(model_name.as_str()), content_length, limit))?;
 
     run_inference(state, model_name, parts, body_bytes).await
 }

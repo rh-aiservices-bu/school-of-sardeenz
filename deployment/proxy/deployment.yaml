@@ -35,6 +35,12 @@ spec:
                   key: SARDEENZ_REDIS_URL
             - name: SARDEENZ_CONTROL_PLANE_URL
               value: http://sardeenz-control-plane:3000
+            # Caps the fully buffered inference request body (OpenAI and OIP), which is what
+            # protects the parking byte budget (SARDEENZ_PARKING_MAX_BYTES). The 1Gi container
+            # memory limit at the bottom of this file is the hard ceiling — raise both together.
+            # Peak memory scales with concurrent maximum-size bodies; see deployment/proxy/README.md.
+            - name: SARDEENZ_PROXY_MAX_BODY_BYTES
+              value: '33554432'
             - name: SARDEENZ_API_TOKEN
               valueFrom:
                 secretKeyRef:
