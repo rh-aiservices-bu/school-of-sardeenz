@@ -93,6 +93,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Model wake answers `202` before victim eviction (#242).** `POST /api/v1/models/{modelName}/wake`
+  no longer awaits victim teardown inside the request: after the
+  `SLEEPING → STARTING` transitions, the routing-map refresh and the wake notification, the record
+  lookup, the per-instance shortfall/eviction loop and the `wakeModel` dispatch run in one detached
+  task and the existing `202` is returned immediately. Previously each victim could hold the request
+  for up to `SARDEENZ_SLEEP_TIMEOUT_SECS` (default 300 s) of drain, so clients — including the
+  proxy's 5 s wake-on-request path — timed out and retried into a `409 operation-in-progress`. The
+  loop stays sequential per instance (instance N+1's victim selection reads snapshots taken after
+  instance N's eviction settled), the `202` body and the `STARTING` timing are unchanged, and the
+  model claim is released in the detached task's `finally` — closing a pre-existing leak where a
+  failing record or instance query left the model claimed until process restart. The existing
+  eviction-failure and `Background wake failed` logs are kept, plus a new
+  `Background wake orchestration failed` log; no contract or response-shape change.
+
 - **Worker start is idempotent per `instanceId` (issue #288).** A repeat `POST /runners` for an
   instance that already has a runner now answers `200` with that runner's endpoint and
   `reused: true` instead of launching a second `apptainer exec`; a start that arrives while the

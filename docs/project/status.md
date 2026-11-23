@@ -118,8 +118,9 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   #287's operational half remains: republish the three vLLM SIFs (`rc2`), bump the digest-pinned
   `runners.yaml` entries on `main`, re-import, and verify `attribution: "device"` from two
   co-located runners.
-- M16 (Orchestration Resilience) stays parked except #286 and #288, which merged early as P1/P2
-  follow-ups.
+- M16 (Orchestration Resilience) has resumed: #242 (model-level wake blocks up to 300 s per
+  eviction victim) is in progress, with #245 (proxy piggybacked parkers not fast-failed on
+  wake-trigger failure) next; #286 and #288 had already merged early as P1/P2 follow-ups.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
 

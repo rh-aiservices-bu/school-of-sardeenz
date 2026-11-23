@@ -2979,58 +2979,58 @@ describe('allowCoLocation (Phase 5 #276)', () => {
   });
 });
 
-describe('wake per-device shortfall (#276)', () => {
-  const sleepingState = { ...ACTIVE_STATE, state: ModelLifecycleState.SLEEPING };
-  const WAKER_RECORD = {
-    id: 'rec-w1',
-    name: 'm1',
-    runnerType: 'vllm',
-    modelPath: '/weights/m1',
-    requiredMemory: 12e9,
-    deviceType: null,
-    tensorParallel: 1,
-    engineConfig: null,
-    engineArgs: null,
-    runtimeModule: null,
-    servedModelName: null,
-    displayName: null,
-    pinned: false,
-    allowCoLocation: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+const sleepingState = { ...ACTIVE_STATE, state: ModelLifecycleState.SLEEPING };
+const WAKER_RECORD = {
+  id: 'rec-w1',
+  name: 'm1',
+  runnerType: 'vllm',
+  modelPath: '/weights/m1',
+  requiredMemory: 12e9,
+  deviceType: null,
+  tensorParallel: 1,
+  engineConfig: null,
+  engineArgs: null,
+  runtimeModule: null,
+  servedModelName: null,
+  displayName: null,
+  pinned: false,
+  allowCoLocation: false,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+function budgetFor(devices: Array<{ deviceIndex: number; availableBytes: number }>) {
+  return {
+    workerId: 'worker-1',
+    stale: false,
+    devices: devices.map((d) => ({
+      deviceIndex: d.deviceIndex,
+      deviceType: 'CUDA',
+      totalBytes: 16e9,
+      usedBytes: 16e9 - d.availableBytes,
+      availableBytes: d.availableBytes,
+    })),
+    lastReportAt: new Date().toISOString(),
   };
+}
 
-  function budgetFor(devices: Array<{ deviceIndex: number; availableBytes: number }>) {
-    return {
-      workerId: 'worker-1',
-      stale: false,
-      devices: devices.map((d) => ({
-        deviceIndex: d.deviceIndex,
-        deviceType: 'CUDA',
-        totalBytes: 16e9,
-        usedBytes: 16e9 - d.availableBytes,
-        availableBytes: d.availableBytes,
-      })),
-      lastReportAt: new Date().toISOString(),
-    };
-  }
+function coTenant(instanceId: string, deviceIndices: number[], modelName = 'other-model') {
+  return {
+    instanceId,
+    modelName,
+    state: ModelLifecycleState.ACTIVE,
+    workerId: 'worker-1',
+    runnerHost: null,
+    runnerPort: null,
+    runnerId: null,
+    deviceIndices,
+    lastInferenceAt: null,
+    stateChangedAt: '2026-01-01T00:00:00Z',
+    errorMessage: null,
+  };
+}
 
-  function coTenant(instanceId: string, deviceIndices: number[], modelName = 'other-model') {
-    return {
-      instanceId,
-      modelName,
-      state: ModelLifecycleState.ACTIVE,
-      workerId: 'worker-1',
-      runnerHost: null,
-      runnerPort: null,
-      runnerId: null,
-      deviceIndices,
-      lastInferenceAt: null,
-      stateChangedAt: '2026-01-01T00:00:00Z',
-      errorMessage: null,
-    };
-  }
-
+describe('wake per-device shortfall (#276)', () => {
   it('skips eviction when the phantom shortfall is the waker own hold', async () => {
     // requiredMemory 12e9, two devices → 6e9/device. Worker-wide available = 4+4 = 8e9
     // (< 12e9 — the old check evicted an innocent co-tenant). Per device: 4e9 + waker hold
@@ -3054,9 +3054,12 @@ describe('wake per-device shortfall (#276)', () => {
       deviceIndex === 0 || deviceIndex === 1 ? holds : new Map(),
     ) as never;
     deps.eviction.selectVictims = selectVictims as never;
+    const { wakeModel } = deps.sleepWake as unknown as { wakeModel: Mock };
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
     expect(res.statusCode).toBe(202);
+    // The shortfall check now runs in the detached wake task; wakeModel proves the loop passed it.
+    await vi.waitFor(() => expect(wakeModel).toHaveBeenCalledOnce());
     expect(selectVictims).not.toHaveBeenCalled();
   });
 
@@ -3091,7 +3094,7 @@ describe('wake per-device shortfall (#276)', () => {
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
     expect(res.statusCode).toBe(202);
-    expect(selectVictims).toHaveBeenCalled();
+    await vi.waitFor(() => expect(selectVictims).toHaveBeenCalled());
     const candidates = (selectVictims.mock.calls[0]?.[0] ?? []) as Array<{
       instanceId: string;
     }>;
@@ -3131,6 +3134,7 @@ describe('wake per-device shortfall (#276)', () => {
     deps.eviction.selectVictims = selectVictims as never;
 
     await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    await vi.waitFor(() => expect(selectVictims).toHaveBeenCalled());
     // requiredPerDevice 12e9 − 3e9 available = 9e9 shortfall; sizing map is per-device.
     expect(selectVictims.mock.calls[0]?.[2]).toBe(9e9);
     const sizing = (selectVictims.mock.calls[0]?.[4] ?? new Map()) as Map<string, number>;
@@ -3185,12 +3189,14 @@ describe('wake per-device shortfall (#276)', () => {
     deps.memoryBudget.getReservationHolders = vi.fn(() => new Map()) as never;
     deps.eviction.selectVictims = selectVictims as never;
 
+    const { recordEviction } = deps.eviction as unknown as { recordEviction: Mock };
+
     await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
     // Both devices are short; each selectVictims call returns its 3 candidates, but the
     // deduped union handed to teardown must be sliced to the per-cycle cap (3), not 6.
+    await vi.waitFor(() => expect(recordEviction).toHaveBeenCalledTimes(3));
+    // Three recorded evictions imply both per-device selections ran.
     expect(selectVictims).toHaveBeenCalledTimes(2);
-    const { recordEviction } = deps.eviction as unknown as { recordEviction: Mock };
-    expect(recordEviction).toHaveBeenCalledTimes(3);
   });
 
   it('falls back to the worker-wide check for an instance without deviceIndices', async () => {
@@ -3210,7 +3216,7 @@ describe('wake per-device shortfall (#276)', () => {
 
     const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
     expect(res.statusCode).toBe(202);
-    expect(selectVictims).toHaveBeenCalled();
+    await vi.waitFor(() => expect(selectVictims).toHaveBeenCalled());
     // Legacy verbatim: requiredBytes = full requiredMemory, worker scope.
     expect(selectVictims.mock.calls[0]?.[2]).toBe(12e9);
     expect(selectVictims.mock.calls[0]?.[3]).toEqual(new Set(['worker-1']));
@@ -3236,11 +3242,123 @@ describe('wake per-device shortfall (#276)', () => {
     deps.eviction.selectVictims = selectVictims as never;
 
     await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    await vi.waitFor(() => expect(selectVictims).toHaveBeenCalled());
     const pinned = (selectVictims.mock.calls[0]?.[1] ?? new Set()) as Set<string>;
     expect(pinned.has('m1')).toBe(true);
     const candidates = (selectVictims.mock.calls[0]?.[0] ?? []) as Array<{
       modelName: string;
     }>;
     expect(candidates.some((c) => c.modelName === 'm1')).toBe(true);
+  });
+});
+
+describe('model wake returns promptly and backgrounds eviction (#242)', () => {
+  const victim = {
+    instanceId: 'i-victim',
+    modelName: 'other-model',
+    state: ModelLifecycleState.ACTIVE,
+    workerId: 'worker-1',
+    memoryBytes: 1e9,
+    lastInferenceAt: null,
+    pinned: false,
+  };
+
+  function buildWakeApp(over: Overrides = {}) {
+    const built = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(sleepingState)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([sleepingState])),
+      findByName: vi.fn(() => Promise.resolve(WAKER_RECORD)),
+      getAllInstances: vi.fn(() => Promise.resolve([coTenant('i-victim', [0])])),
+      findAll: vi.fn(() =>
+        Promise.resolve([
+          WAKER_RECORD,
+          { ...WAKER_RECORD, name: 'other-model', requiredMemory: 12e9 },
+        ]),
+      ),
+      ...over,
+    });
+    const selectVictims: Mock = vi.fn(() => [victim]);
+    built.deps.eviction.selectVictims = selectVictims as never;
+    built.deps.memoryBudget.getWorkerBudget = vi.fn(() =>
+      budgetFor([{ deviceIndex: 0, availableBytes: 3e9 }]),
+    );
+    built.deps.config = { ...built.deps.config, evictionMaxPerCycle: 3 };
+    const { wakeModel } = built.deps.sleepWake as unknown as { wakeModel: Mock };
+    return { ...built, selectVictims, wakeModel };
+  }
+
+  it('returns 202 while a victim drain is still in flight (#242)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stopModel = vi.fn().mockReturnValueOnce(gate).mockResolvedValue(undefined);
+    const { app, wakeModel } = buildWakeApp({ stopModel });
+
+    const first = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(first.statusCode).toBe(202);
+    expect(first.json()).toEqual({
+      modelName: 'm1',
+      state: ModelLifecycleState.STARTING,
+      previousState: ModelLifecycleState.SLEEPING,
+      message: 'Wake initiated for 1 instance(s)',
+    });
+
+    // The detached task reached victim teardown and is pinned there: the never-resolving
+    // stopModel holds the claim, so wakeModel is not dispatched and a retry is refused.
+    await vi.waitFor(() => expect(stopModel).toHaveBeenCalled());
+    expect(wakeModel).not.toHaveBeenCalled();
+
+    const second = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(second.statusCode).toBe(409);
+    const body = second.json<{ code: string; details: { reason: string } }>();
+    expect(body.code).toBe('INVALID_STATE');
+    expect(body.details.reason).toBe('operation-in-progress');
+
+    // Let the pinned teardown finish so nothing is left pending in the background.
+    release();
+  });
+
+  it('releases the wake claim after the background orchestration settles (#242)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stopModel = vi.fn().mockReturnValueOnce(gate).mockResolvedValue(undefined);
+    const { app, wakeModel } = buildWakeApp({ stopModel });
+
+    const first = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(first.statusCode).toBe(202);
+
+    release();
+    await vi.waitFor(() => expect(wakeModel).toHaveBeenCalledOnce());
+    // `wakeModel` resolves before the detached task's `finally` runs; one macrotask turn lets
+    // the catch chain, Promise.all and the finally drain.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const second = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(second.statusCode).toBe(202);
+  });
+
+  it('releases the wake claim when background setup throws (#242)', async () => {
+    const { app, logError, wakeModel } = buildWakeApp({
+      findByName: vi.fn().mockRejectedValueOnce(new Error('repository unavailable')),
+    });
+
+    const first = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(first.statusCode).toBe(202);
+
+    await vi.waitFor(() =>
+      expect(logError).toHaveBeenCalledWith(
+        expect.objectContaining({ modelName: 'm1' }),
+        'Background wake orchestration failed',
+      ),
+    );
+    expect(wakeModel).not.toHaveBeenCalled();
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const second = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(second.statusCode).toBe(202);
   });
 });
