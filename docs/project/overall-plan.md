@@ -405,8 +405,8 @@ and executed one milestone per branch, merged to `dev`. M2 through M15 are merge
 Hardening — Cluster & Auth — via #270/#271), M17 merged via #275, and M19's Phase 5 via #281 with
 its on-cluster Gate 9b run recorded; M16 stays parked except #286 and #288 (merged early via
 #292/#294) and M19 carries the image/supply-chain remainder plus the four Gate 9b follow-ups
-(#286–#289, of which #286, #288 and #289 are fixed). The list of themes and what each delivered
-is maintained in [`status.md`](status.md).
+(#286–#289, all fixed; #287's published-image republish is the remaining operational step). The
+list of themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---
 
