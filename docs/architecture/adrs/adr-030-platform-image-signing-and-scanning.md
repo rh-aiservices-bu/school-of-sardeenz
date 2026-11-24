@@ -30,8 +30,10 @@ Four facts shape this decision:
 1. **Every `FROM` of every image this repository builds is digest-pinned as `name:tag@sha256:<64>`**
    (tag kept for readability). `tests/container-images/verify-image-pins.mjs` enforces it in the CI
    `quality` job and via `make verify-image-pins`; stage aliases, `ARG` references and `scratch` are
-   exempt. Freshness is Dependabot's (existing `docker` entries); exceptions: `vllm/0.21.0` (manual
-   bump, no entry by decision) and the shared `node:22-slim` digest in two Dockerfiles.
+   exempt. Freshness is Dependabot's (existing `docker` entries); the manual-bump exceptions with
+   no entry by decision are `vllm/0.21.0` (the catalog is retiring it) and `vllm/0.24.0` (the
+   runner entries track the catalog's current versions per #233), plus the shared `node:22-slim`
+   digest in two Dockerfiles.
 2. **Every platform image is scanned post-push, by digest, with Trivy** (`--platform linux/amd64`
    because the digest is an index). A **CRITICAL** finding with a fix **fails the publish**
    (`severity: CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`). CRITICAL-unfixed and **HIGH** are
@@ -43,7 +45,10 @@ Four facts shape this decision:
    tag: `id-token: write`, Sigstore public-good Fulcio/Rekor, and cosign's legacy referrers mode
    (`--registry-referrers-mode legacy`), which stores an ordinary `sha256-<digest>.sig` tag that the
    Quay robot can already write. The signed reference is the digest, never a tag:
-   `cosign sign --yes <ref>@<digest>`. **No private key exists.**
+   `cosign sign --yes <ref>@<digest>`. **No private key exists.** If a publish reports the legacy
+   `.sig` write rejected by the registry, that is the documented fallback: re-run with
+   `COSIGN_EXPERIMENTAL=1` and `--registry-referrers-mode oci-1-1` (cosign 3.1.5 refuses that mode
+   without the environment variable).
 5. **The trust anchor is the workflow identity plus the OIDC issuer**, not a key. The exact
    verification command (also in `containers/README.md` and `deployment/README.md`):
 

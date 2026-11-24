@@ -7,7 +7,7 @@
 // Deliberate limits: no digest freshness check, no existence/network check, no parsing of
 // `COPY --from=` (that is an image stage, not a pull), no .dockerignore awareness.
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { error, log } from 'node:console';
 import { argv, exit } from 'node:process';
@@ -24,7 +24,10 @@ const skipDirectories = new Set([
   'logs',
 ]);
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
-const fromPattern = /^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?$/i;
+// A well-formed FROM: optional flags, the image, an optional `AS <alias>` and an optional
+// trailing comment. Any other FROM-shaped line is a violation, never a silent skip.
+const fromPattern = /^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*(?:#.*)?$/i;
+const fromDirectivePattern = /^FROM\b/i;
 
 const usage = `Usage: node tests/container-images/verify-image-pins.mjs [--root <dir>]
 
@@ -123,6 +126,17 @@ function main() {
     exit(2);
   }
 
+  let rootIsDirectory = false;
+  try {
+    rootIsDirectory = statSync(root).isDirectory();
+  } catch {
+    rootIsDirectory = false;
+  }
+  if (!rootIsDirectory) {
+    error(`--root must be an existing directory: ${root}`);
+    exit(2);
+  }
+
   const containerFiles = collectContainerFiles(root).sort();
   if (containerFiles.length === 0) {
     error(`No Dockerfile/Containerfile found under ${root}.`);
@@ -144,6 +158,17 @@ function main() {
       }
       const match = fromPattern.exec(directive);
       if (match === null) {
+        if (!fromDirectivePattern.test(directive)) {
+          continue;
+        }
+        sawFrom = true;
+        violations.push({
+          file: relative(root, file),
+          lineNumber,
+          directive,
+          reason:
+            'unparseable FROM directive (expected "FROM <image> [AS <alias>]", optional trailing comment)',
+        });
         continue;
       }
       sawFrom = true;

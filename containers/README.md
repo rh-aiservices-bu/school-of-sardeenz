@@ -51,9 +51,11 @@ Two layers, two rules — do not mix them:
 
 Freshness is Dependabot's job: the existing `docker` entries cover every pinned directory
 ([`.github/dependabot.yml`](../.github/dependabot.yml); the fetcher recognises `Containerfile` too).
-Two exceptions: `containers/runners/vllm/0.21.0/` has **no** Dependabot entry by decision (the
-catalog is retiring that image), so its base digest is a manual bump on the next catalog change; and
-`node:22-slim` is pinned identically in `containers/control-plane/Dockerfile` and
+Two manual-bump exceptions have **no** Dependabot entry by decision —
+`containers/runners/vllm/0.21.0/` (the catalog is retiring that image) and
+`containers/runners/vllm/0.24.0/` (the runner entries track the catalog's current versions per the
+#233 decision) — so their base digests move by hand on the next catalog change; and `node:22-slim`
+is pinned identically in `containers/control-plane/Dockerfile` and
 `containers/dashboard/Dockerfile`, so one bump must touch both files (Dependabot opens one PR per
 directory).
 
