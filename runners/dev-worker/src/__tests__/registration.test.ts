@@ -80,6 +80,7 @@ function makeMockRedis() {
       setHistory.push({ key, value });
       return 'OK';
     }),
+    pexpire: vi.fn(() => Promise.resolve(1)),
     _pipelineCalls: pipelineCalls,
     _setHistory: setHistory,
     _pipeline: pipeline,
@@ -249,6 +250,16 @@ describe('WorkerRegistration', () => {
       expect(capability.kvCacheElasticSharing).toBe(false);
       expect(capability.features).toEqual({});
     });
+
+    it('register() writes info, heartbeat and memory with the same PX TTL', async () => {
+      await registration.register();
+      const sets = mockRedis._pipelineCalls.filter((c) => c.method === 'set');
+      expect(sets).toHaveLength(3);
+      for (const call of sets) {
+        expect(call.args[2]).toBe('PX');
+        expect(call.args[3]).toBe(config.heartbeatIntervalMs * 4); // 100 ms → 400
+      }
+    });
   });
 
   describe('heartbeat', () => {
@@ -292,6 +303,73 @@ describe('WorkerRegistration', () => {
         expect(call[2]).toBe('PX');
         expect(call[3]).toBe(config.heartbeatIntervalMs * 4);
       }
+    });
+
+    it('the heartbeat tick refreshes the info TTL and does not re-register while it exists', async () => {
+      vi.useFakeTimers();
+      try {
+        registration = new WorkerRegistration(
+          mockRedis as never,
+          config,
+          undefined,
+          makeFetchFn(true),
+        );
+        registration.startHeartbeat();
+        await vi.advanceTimersByTimeAsync(config.heartbeatIntervalMs);
+        registration.stopHeartbeat();
+
+        expect(mockRedis.pexpire).toHaveBeenCalledWith('sardeenz:workers:test-worker-0:info', 400);
+        expect(mockRedis.pipeline).not.toHaveBeenCalled(); // no re-registration
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('the heartbeat tick re-registers when the info key has vanished (#240)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockRedis.pexpire.mockResolvedValue(0);
+        registration = new WorkerRegistration(
+          mockRedis as never,
+          config,
+          undefined,
+          makeFetchFn(true),
+        );
+        registration.startHeartbeat();
+        await vi.advanceTimersByTimeAsync(config.heartbeatIntervalMs);
+        registration.stopHeartbeat();
+
+        expect(mockRedis.pexpire).toHaveBeenCalledTimes(1);
+        expect(mockRedis.pipeline).toHaveBeenCalledTimes(1);
+        expect(mockRedis._pipeline.exec).toHaveBeenCalledTimes(1);
+        const sets = mockRedis._pipelineCalls.filter((c) => c.method === 'set');
+        expect(sets.map((c) => c.args[0])).toEqual([
+          'sardeenz:workers:test-worker-0:info',
+          'sardeenz:workers:test-worker-0:heartbeat',
+          'sardeenz:workers:test-worker-0:memory',
+        ]);
+        for (const call of sets) {
+          expect(call.args[2]).toBe('PX');
+          expect(call.args[3]).toBe(400);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not refresh the info TTL nor re-register when healthz is unhealthy', async () => {
+      registration = new WorkerRegistration(
+        mockRedis as never,
+        config,
+        undefined,
+        makeFetchFn(false),
+      );
+      registration.startHeartbeat();
+      await new Promise((r) => setTimeout(r, 350));
+      registration.stopHeartbeat();
+
+      expect(mockRedis.pexpire).not.toHaveBeenCalled();
+      expect(mockRedis.pipeline).not.toHaveBeenCalled();
     });
 
     it('skips heartbeat write when healthz returns non-200', async () => {
@@ -873,6 +951,15 @@ describe('WorkerRegistration', () => {
       await new Promise((resolve) => setImmediate(resolve));
       const memCalls = mockRedis._setHistory.filter((c) => c.key.endsWith(':memory'));
       expect(memCalls.length).toBe(0);
+    });
+
+    it('pushMemoryReport writes memory with PX', async () => {
+      registration.pushMemoryReportOnce();
+      await new Promise((r) => setTimeout(r, 0)); // flush the queueMicrotask + report build
+      const memSet = mockRedis.set.mock.calls.find((c) => (c[0] as string).endsWith(':memory'));
+      expect(memSet).toBeDefined();
+      expect(memSet![2]).toBe('PX');
+      expect(memSet![3]).toBe(400);
     });
 
     it('coalesces N ledger updates in one tick into a single report push', async () => {

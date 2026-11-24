@@ -99,6 +99,16 @@ export class WorkerRegistration {
     return [this.config.redisKeyPrefix, ...parts].join(':');
   }
 
+  /**
+   * Single TTL source of truth for everything this worker registers. Four missed heartbeat
+   * intervals (default 5 s → 20 s) — long enough to survive one slow tick, short enough that a
+   * crashed worker stops being discoverable well before the control plane's OFFLINE threshold.
+   * See issue #240.
+   */
+  private get keyTtlMs(): number {
+    return this.config.heartbeatIntervalMs * 4;
+  }
+
   async register(): Promise<void> {
     const runnerTypes = this.config.runnerTypes ?? [this.config.runnerType];
     const overridesFor = (runnerType: string): CatalogCapabilityOverrides | undefined =>
@@ -129,11 +139,23 @@ export class WorkerRegistration {
     };
 
     const pipeline = this.redis.pipeline();
-    pipeline.set(this.key('workers', this.config.workerId, 'info'), JSON.stringify(info));
-    pipeline.set(this.key('workers', this.config.workerId, 'heartbeat'), new Date().toISOString());
+    pipeline.set(
+      this.key('workers', this.config.workerId, 'info'),
+      JSON.stringify(info),
+      'PX',
+      this.keyTtlMs,
+    );
+    pipeline.set(
+      this.key('workers', this.config.workerId, 'heartbeat'),
+      new Date().toISOString(),
+      'PX',
+      this.keyTtlMs,
+    );
     pipeline.set(
       this.key('workers', this.config.workerId, 'memory'),
       JSON.stringify(await this.buildMemoryReport()),
+      'PX',
+      this.keyTtlMs,
     );
     await pipeline.exec();
   }
@@ -141,13 +163,20 @@ export class WorkerRegistration {
   startHeartbeat(): void {
     if (this.heartbeatTimer) return;
     const heartbeatKey = this.key('workers', this.config.workerId, 'heartbeat');
-    const ttlMs = this.config.heartbeatIntervalMs * 4;
+    const infoKey = this.key('workers', this.config.workerId, 'info');
+    const ttlMs = this.keyTtlMs;
     this.heartbeatTimer = setInterval(() => {
       void (async () => {
         try {
           const res = await this.fetchFn(`http://127.0.0.1:${this.config.workerPort}/healthz`);
           if (!res.ok) return;
           await this.redis.set(heartbeatKey, new Date().toISOString(), 'PX', ttlMs);
+          // #240: keep the info key on the same TTL. PEXPIRE answers 0 when the key is gone —
+          // the control plane reaped this worker, or the TTL lapsed while /healthz was failing —
+          // so re-register instead of staying invisible to discovery forever.
+          if ((await this.redis.pexpire(infoKey, ttlMs)) === 0) {
+            await this.register();
+          }
           // Refresh the memory report every tick too, in every mode — this is what keeps
           // `reportedAt` (and any measured NVML figures) fresh for the control plane's staleness
           // checks, not just the coalesced pushes `pushMemoryReportOnce()` schedules after
@@ -254,6 +283,8 @@ export class WorkerRegistration {
     await this.redis.set(
       this.key('workers', this.config.workerId, 'memory'),
       JSON.stringify(await this.buildMemoryReport()),
+      'PX',
+      this.keyTtlMs,
     );
   }
 

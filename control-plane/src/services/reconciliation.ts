@@ -722,6 +722,19 @@ export class ReconciliationService {
           source: { type: 'worker', name: worker.workerId },
         })
         .catch(() => {});
+      // #240: the worker's keys are immortal otherwise — next tick's discoverWorkers would
+      // resurrect it from `info` and re-emit WORKER_JOINED/WORKER_LEFT forever. Deleting is
+      // best-effort: the reap must still complete when Redis is unavailable, and a failed
+      // deletion is retried when the next reconciliation tick rediscovers the worker (its `info`
+      // key is what discovery scans).
+      try {
+        await this.workerPool.deleteWorkerState(worker.workerId);
+      } catch (err) {
+        this.logger.warn(
+          { workerId: worker.workerId, err: err instanceof Error ? err.message : String(err) },
+          'Failed to delete dead worker Redis state — the next reconciliation tick retries the deletion',
+        );
+      }
       this.workerPool.removeWorker(worker.workerId);
       this.memoryBudget.clearWorkerReservations(worker.workerId);
     }

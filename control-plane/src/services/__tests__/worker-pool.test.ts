@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
+import { WorkerStatus } from '@sardeenz/types';
 
 import { WorkerPoolService } from '../worker-pool.js';
 import type { Redis } from '../../clients/redis.js';
@@ -41,6 +42,55 @@ function makeMockRedis(infoRecords: Record<string, string>): { redis: Redis } {
 
 function makeService(redis: Redis): WorkerPoolService {
   return new WorkerPoolService(redis, KEY_PREFIX, HEARTBEAT_TIMEOUT_SECS);
+}
+
+/**
+ * Map-backed Redis for stateful discovery tests: SCAN with one `*`, pipelines of get/set, and del.
+ * TTL arguments are accepted and ignored (no test waits for expiry).
+ */
+function makeMutableRedis(seed: Record<string, string> = {}) {
+  const store = new Map<string, string>(Object.entries(seed));
+  const matches = (pattern: string, key: string): boolean => {
+    const re = new RegExp(
+      '^' +
+        pattern
+          .split('*')
+          .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.*') +
+        '$',
+    );
+    return re.test(key);
+  };
+  const scan = vi.fn((_cursor: string, _match: string, pattern: string) => {
+    const keys = Array.from(store.keys()).filter((k) => matches(pattern, k));
+    return Promise.resolve(['0', keys] as [string, string[]]);
+  });
+  const pipeline = vi.fn(() => {
+    const ops: Array<() => [null, unknown]> = [];
+    const pipe = {
+      get: vi.fn((key: string) => {
+        ops.push(() => [null, store.get(key) ?? null]);
+        return pipe;
+      }),
+      set: vi.fn((...args: unknown[]) => {
+        const [key, value] = args as [string, string];
+        ops.push(() => {
+          store.set(key, value);
+          return [null, 'OK'];
+        });
+        return pipe;
+      }),
+      exec: vi.fn(() => Promise.resolve(ops.map((op) => op()))),
+    };
+    return pipe;
+  });
+  const del = vi.fn((...keys: string[]) => {
+    let removed = 0;
+    for (const key of keys) if (store.delete(key)) removed += 1;
+    return Promise.resolve(removed);
+  });
+  const redis = { scan, pipeline, del } as unknown as Redis;
+  return { redis, store };
 }
 
 function validPayload(overrides: Record<string, unknown> = {}): string {
@@ -267,5 +317,42 @@ describe('WorkerPoolService — parseWorkerInfo (via discoverWorkers)', () => {
     await service.discoverWorkers();
 
     expect(service.getWorker(workerId)?.managementUrl).toBe('https://worker1.example:9100');
+  });
+});
+
+describe('WorkerPoolService — deleteWorkerState (#240)', () => {
+  it('deletes exactly the info, heartbeat and memory keys', async () => {
+    const del = vi.fn().mockResolvedValue(3);
+    const service = makeService({ del } as unknown as Redis);
+
+    await service.deleteWorkerState('w1');
+
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(del).toHaveBeenCalledWith(
+      'sardeenz:workers:w1:info',
+      'sardeenz:workers:w1:heartbeat',
+      'sardeenz:workers:w1:memory',
+    );
+  });
+
+  it('propagates a Redis error', async () => {
+    const service = makeService({
+      del: vi.fn().mockRejectedValue(new Error('redis down')),
+    } as unknown as Redis);
+
+    await expect(service.deleteWorkerState('w1')).rejects.toThrow('redis down');
+  });
+
+  it('a rediscovered OFFLINE worker leaves nothing for the next discovery after removeWorker + deleteWorkerState (#240)', async () => {
+    const { redis } = makeMutableRedis({ [infoKey('w1')]: validPayload() });
+    const service = makeService(redis);
+
+    await service.discoverWorkers();
+    expect(service.getWorker('w1')?.status).toBe(WorkerStatus.OFFLINE); // no heartbeat key
+    service.removeWorker('w1');
+    await service.deleteWorkerState('w1');
+    await service.discoverWorkers();
+
+    expect(service.getAllWorkers()).toEqual([]);
   });
 });
