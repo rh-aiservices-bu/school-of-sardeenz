@@ -5,7 +5,9 @@ name: Publish impacted images
 # commit's short sha (the 7-char form `git log --oneline` shows), and pushes
 # them to Quay. Worker-base/worker are digest-paired: worker always builds FROM
 # the digest of the worker-base built in the same run, and a worker-only change
-# fetches the last published worker-base digest from Quay.
+# fetches the last published worker-base digest from Quay — verifying its cosign
+# signature (this repository's publish workflows on `dev`) first, so an unsigned
+# or foreign base aborts the build instead of being re-signed as a worker.
 #
 # Impact map (mirrors the Dockerfiles' actual COPY graphs):
 #   proxy/**                                     → proxy
@@ -298,7 +300,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: 'false'
           exit-code: '0'
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Upload ${{ matrix.role }} vulnerability report
@@ -320,7 +322,7 @@ jobs:
           ignore-unfixed: 'true'
           exit-code: '1'
           format: table
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Install cosign
@@ -396,6 +398,27 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "Pairing worker with worker-base@$digest"
 
+      # Pairing consumes only a worker-base that this repository's publish workflows signed from
+      # `dev`: an unsigned or foreign base aborts the build here (fail-closed), so a moved `latest`
+      # cannot be laundered into a signed worker. `cosign verify` needs no `id-token`, so the job's
+      # permissions are unchanged. A `latest` published before #266 carries no signature yet —
+      # republish it with `Publish platform images` before the first worker-only merge, or that
+      # merge fails at this step.
+      - name: Install cosign for worker-base verification
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: v3.1.5
+
+      - name: Verify worker-base signature
+        env:
+          BASE: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base@${{ steps.base.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp '^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$BASE"
+
       - name: Build and push worker
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -431,7 +454,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: 'false'
           exit-code: '0'
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Upload worker vulnerability report
@@ -452,7 +475,7 @@ jobs:
           ignore-unfixed: 'true'
           exit-code: '1'
           format: table
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Install cosign

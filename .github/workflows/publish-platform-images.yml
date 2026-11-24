@@ -2,9 +2,13 @@ name: Publish platform images
 
 run-name: Publish platform images :${{ inputs.tag }} from ${{ github.ref_name }}
 
-# Supply chain (ADR-030): each image is scanned by digest after the push (Trivy: a fixed CRITICAL
-# fails the run; CRITICAL-unfixed and HIGH go to GitHub code scanning) and only then signed keyless
-# with cosign by digest. The signature's trust anchor is THIS FILE'S identity:
+# Supply chain (ADR-030): every build pushes to a staging tag (`<tag>-staging`), Trivy scans that
+# digest (a fixed CRITICAL fails the run; CRITICAL-unfixed and HIGH go to GitHub code scanning) and
+# only then is the digest signed keyless with cosign. The requested tag moves **last**, by digest
+# (`docker buildx imagetools create`, a manifest copy that keeps the digest and its signature), so a
+# rejected run never leaves it pointing at an unsigned image; the staging tag stays for inspection.
+# Worker builds only FROM a worker-base whose signature this repository's publish workflows made on
+# `dev`. The signature's trust anchor is THIS FILE'S identity:
 #   https://github.com/rh-aiservices-bu/school-of-sardeenz/.github/workflows/publish-platform-images.yml@refs/heads/dev
 # Renaming this file changes the verification identity documented in ADR-030.
 
@@ -33,14 +37,23 @@ jobs:
     name: Validate publishing parameters
     runs-on: ubuntu-latest
     steps:
-      - name: Validate OCI tag
+      - name: Validate OCI tags
         env:
           IMAGE_TAG: ${{ inputs.tag }}
         run: |
-          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "Invalid OCI tag: $IMAGE_TAG" >&2
-            exit 2
-          fi
+          set -euo pipefail
+          # Both the requested tag and the staging tag every push goes to (`<tag>-staging`) must be
+          # valid OCI tags; the staging suffix can push a 128-character tag over the limit.
+          for tag in "$IMAGE_TAG" "${IMAGE_TAG}-staging"; do
+            if [[ ${#tag} -gt 128 ]]; then
+              echo "Invalid OCI tag (longer than 128 characters): $tag" >&2
+              exit 2
+            fi
+            if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "Invalid OCI tag: $tag" >&2
+              exit 2
+            fi
+          done
 
   services:
     name: Publish ${{ matrix.role }}
@@ -90,7 +103,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
-          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}:${{ inputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}:${{ inputs.tag }}-staging
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -116,7 +129,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: 'false'
           exit-code: '0'
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Upload ${{ matrix.role }} vulnerability report
@@ -137,7 +150,7 @@ jobs:
           ignore-unfixed: 'true'
           exit-code: '1'
           format: table
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Install cosign
@@ -151,6 +164,20 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes --registry-referrers-mode legacy "$IMAGE"
+
+      # Promote last, by digest: `imagetools create` copies the pushed manifest list into the
+      # requested tag without rebuilding, so the digest — and therefore the signature over it — is
+      # unchanged. Reaching this step means the scan gate passed and the digest is signed; a gate
+      # failure never gets here, so the requested tag keeps pointing at the previous image and the
+      # `<tag>-staging` tag stays behind for inspection.
+      - name: Promote ${{ matrix.role }} to ${{ inputs.tag }}
+        env:
+          REPOSITORY: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t "$REPOSITORY:$TAG" "$REPOSITORY@$DIGEST"
 
       - name: Log out of Quay
         if: always()
@@ -190,7 +217,7 @@ jobs:
         with:
           context: ./containers/worker-base
           file: ./containers/worker-base/Containerfile
-          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base:${{ inputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base:${{ inputs.tag }}-staging
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -216,7 +243,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: 'false'
           exit-code: '0'
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Upload worker-base vulnerability report
@@ -237,7 +264,7 @@ jobs:
           ignore-unfixed: 'true'
           exit-code: '1'
           format: table
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Install cosign
@@ -251,6 +278,17 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes --registry-referrers-mode legacy "$IMAGE"
+
+      # Promote last, by digest — see the services job: `imagetools create` copies the manifest list,
+      # so the digest and its signature are unchanged, and a gate failure never reaches this step.
+      - name: Promote worker-base to ${{ inputs.tag }}
+        env:
+          REPOSITORY: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t "$REPOSITORY:$TAG" "$REPOSITORY@$DIGEST"
 
       - name: Log out of Quay
         if: always()
@@ -282,6 +320,27 @@ jobs:
           printf '%s' "$QUAY_ROBOT_SARDEENZ_TOKEN" \
             | docker login "$REGISTRY" --username "$QUAY_ROBOT_SARDEENZ_USERNAME" --password-stdin
 
+      # Pairing consumes only a worker-base that this repository's publish workflows signed from
+      # `dev` — here the one the worker-base job signed in this same run. An unsigned or foreign base
+      # aborts the build (fail-closed), so a compromised robot that moves the base tag cannot launder
+      # it into a signed worker; a base published before #266 carries no signature, so it must be
+      # republished with `Publish platform images` before it can be paired. `cosign verify` needs no
+      # `id-token`, so the permissions stay.
+      - name: Install cosign for worker-base verification
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: v3.1.5
+
+      - name: Verify worker-base signature
+        env:
+          BASE: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base@${{ needs.worker-base.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp '^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$BASE"
+
       - name: Build and push worker
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -290,7 +349,7 @@ jobs:
           file: ./containers/worker/Containerfile
           build-args: |
             WORKER_BASE_IMAGE=${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker-base@${{ needs.worker-base.outputs.digest }}
-          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker:${{ inputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker:${{ inputs.tag }}-staging
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -316,7 +375,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: 'false'
           exit-code: '0'
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Upload worker vulnerability report
@@ -337,7 +396,7 @@ jobs:
           ignore-unfixed: 'true'
           exit-code: '1'
           format: table
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           version: v0.76.2
 
       - name: Install cosign
@@ -351,6 +410,17 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes --registry-referrers-mode legacy "$IMAGE"
+
+      # Promote last, by digest — see the services job: `imagetools create` copies the manifest list,
+      # so the digest and its signature are unchanged, and a gate failure never reaches this step.
+      - name: Promote worker to ${{ inputs.tag }}
+        env:
+          REPOSITORY: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t "$REPOSITORY:$TAG" "$REPOSITORY@$DIGEST"
 
       - name: Log out of Quay
         if: always()

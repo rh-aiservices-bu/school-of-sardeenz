@@ -80,15 +80,24 @@ gh workflow run publish-platform-images.yml --ref dev -f tag=latest
 ```
 
 The workflow publishes `linux/amd64` images. It builds the three services in parallel, publishes
-`worker-base`, and then builds `worker` from the exact base digest produced by that run.
+`worker-base`, and then builds `worker` from the exact base digest produced by that run — after
+verifying that digest's cosign signature.
 
-Both workflows scan and sign every image (ADR-030). After the push, Trivy scans the pushed digest:
-a **CRITICAL** vulnerability that has a fix fails the run, while CRITICAL-unfixed and HIGH findings
-are uploaded to GitHub code scanning (suppress only via `.trivyignore`, with a dated justification).
-Only if the scan passes is the digest signed — keyless with cosign, so the signature records this
-workflow's OIDC identity and no signing key is stored anywhere.
+Both workflows scan and sign every image (ADR-030). In the manual workflow every push lands on a
+staging tag, `<tag>-staging`: Trivy scans that digest, and a **CRITICAL** vulnerability that has a
+fix fails the run, while CRITICAL-unfixed and HIGH findings are uploaded to GitHub code scanning
+(suppress only via `.trivyignore.yaml`, whose entries carry an `expired_at` date that Trivy
+enforces). Only if the scan passes is the digest signed — keyless with cosign, so the signature
+records this workflow's OIDC identity and no signing key is stored anywhere — and only then does the
+requested tag move onto that exact digest with `docker buildx imagetools create` (a manifest copy,
+so the digest and the signature over it are unchanged). **The requested tag therefore only moves
+after the scan gate and the signature**: a rejected run leaves it pointing at the previous image and
+leaves `<tag>-staging` behind for inspection. The per-merge workflow keeps its immutable 7-char sha
+tags — those are not a deployed reference. The worker job verifies the cosign signature of the
+worker-base it builds from and aborts on an unsigned or foreign base.
 
-**An unsigned image is not deployable.** Verify a digest before pinning it into an overlay:
+**A tag published by the workflow points at a scanned, signed digest.** Verify it before pinning it
+into an overlay:
 
 ```bash
 cosign verify \

@@ -150,8 +150,7 @@ const workerDockerignore = readFileSync(
 for (const requiredInstruction of [
   'ARG WORKER_BASE_IMAGE=',
   'USER 0',
-  'chown 1001:0 /opt/sardeenz',
-  'chmod 0775 /opt/sardeenz',
+  'chmod 0755 /opt/sardeenz',
   'USER 1001:0',
   'npx tsc --build runners/dev-worker/tsconfig.json',
   'npm ci --omit=dev --workspace=@sardeenz/dev-worker',
@@ -163,6 +162,12 @@ for (const requiredInstruction of [
     `worker Containerfile is missing required packaging instruction: ${requiredInstruction}`,
   );
 }
+// The agent's code directory is root-owned and not group-writable: nothing writes there at runtime,
+// and the engine SIF processes share uid 1001/gid 0 with the agent.
+assert(
+  !workerContainerfile.includes('0775'),
+  'worker Containerfile must not make /opt/sardeenz group-writable',
+);
 assertEndsWithNonRootUser(workerContainerfile, 'worker');
 
 for (const requiredInput of [

@@ -1,0 +1,18 @@
+# Trivy suppression file — read by both publish workflows (`trivyignores: .trivyignore.yaml`) for the
+# platform images' CRITICAL/HIGH report scan and the CRITICAL-fixed publish gate (ADR-030).
+# Schema: https://trivy.dev/latest/docs/configuration/filtering/#trivyignoreyaml
+#
+# The gate already ignores findings with no upstream fix (`ignore-unfixed: true`). An entry here
+# therefore suppresses a *fixable* finding for every platform image — treat it as an exception that
+# must expire: `expired_at` is enforced by Trivy itself, which stops suppressing the finding from
+# that date on, so a stale entry re-opens the gate instead of hiding forever. Every entry is:
+#
+#   vulnerabilities:
+#     - id: CVE-YYYY-NNNNN
+#       paths: [<path inside the image>]        # optional; omit to cover every image
+#       statement: <why>; removed by #<issue>
+#       expired_at: YYYY-MM-DD
+#
+# Empty at introduction (#266). The first publish run after merge proves the gate is clean; add an
+# entry only with a maintainer decision, an expiry date and an issue number that removes it.
+vulnerabilities: []

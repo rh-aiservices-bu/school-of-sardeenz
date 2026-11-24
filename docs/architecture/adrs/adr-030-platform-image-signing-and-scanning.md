@@ -37,10 +37,14 @@ Four facts shape this decision:
 2. **Every platform image is scanned post-push, by digest, with Trivy** (`--platform linux/amd64`
    because the digest is an index). A **CRITICAL** finding with a fix **fails the publish**
    (`severity: CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`). CRITICAL-unfixed and **HIGH** are
-   report-only, uploaded as SARIF to GitHub code scanning (`security-events: write`).
-3. **`.trivyignore` is the only suppression channel** and every entry carries the image, a
-   justification, the date and the removing issue. Unfixed findings need no entry (they are not
-   gated).
+   report-only, uploaded as SARIF to GitHub code scanning (`security-events: write`). In the manual
+   workflow the push lands on a **staging tag, `<tag>-staging`**, never on the requested tag: scans
+   are post-push by construction, so the requested tag is only moved afterwards (decision 4).
+3. **`.trivyignore.yaml` is the only suppression channel**, in Trivy's own YAML ignorefile schema
+   (<https://trivy.dev/latest/docs/configuration/filtering/#trivyignoreyaml>). Every entry carries
+   the id, a `statement` justification with the removing issue, and an `expired_at` date that Trivy
+   enforces — suppression stops by itself, so a stale exception re-opens the gate instead of hiding
+   a finding forever. Unfixed findings need no entry (they are not gated).
 4. **Every platform image is signed keyless with cosign after the scan passes**, by digest, never by
    tag: `id-token: write`, Sigstore public-good Fulcio/Rekor, and cosign's legacy referrers mode
    (`--registry-referrers-mode legacy`), which stores an ordinary `sha256-<digest>.sig` tag that the
@@ -48,7 +52,13 @@ Four facts shape this decision:
    `cosign sign --yes <ref>@<digest>`. **No private key exists.** If a publish reports the legacy
    `.sig` write rejected by the registry, that is the documented fallback: re-run with
    `COSIGN_EXPERIMENTAL=1` and `--registry-referrers-mode oci-1-1` (cosign 3.1.5 refuses that mode
-   without the environment variable).
+   without the environment variable). **Then, and only then, the manual workflow promotes the
+   requested tag onto that exact digest**: `docker buildx imagetools create -t <ref>:<tag> <ref>@<digest>`.
+   `imagetools create` copies the already-pushed manifest list into a new tag, so
+   the digest — and therefore the signature over it — is unchanged. A gate failure never reaches the
+   promotion, so the requested tag keeps pointing at the previous image; the staging tag stays
+   behind for inspection. The per-merge workflow keeps its immutable 7-char sha tags (not a deployed
+   reference) and does not promote.
 5. **The trust anchor is the workflow identity plus the OIDC issuer**, not a key. The exact
    verification command (also in `containers/README.md` and `deployment/README.md`):
 
@@ -67,21 +77,36 @@ Four facts shape this decision:
    base of the deployable worker and of the librarian SIF-conversion container). Runner images are
    built by the OpenShift Docker build and converted to SIFs; their integrity is the SIF signature
    (ADR-017) — they are **not** cosign-signed by these workflows.
-7. **Signed is a prerequisite for deployable**: overlays pin a tag/digest (unchanged, #247), and an
-   operator verifies the digest before pinning it.
+7. **A deployable reference is only ever scanned and signed**: the manual workflow moves the
+   requested tag onto a digest only after the gate passed and that digest was signed (decision 4),
+   and overlays pin a tag/digest (unchanged, #247) that an operator verifies before pinning it.
 8. **Air-gapped clusters**: verification needs Fulcio/Rekor reachability, so a mirror verifies the
    digest at import time and records it; the cluster then trusts the pinned digest, not the online
    signature.
+9. **Worker-base pairing consumes only a verified base**: both workflows' worker job runs
+   `cosign verify` on the resolved worker-base digest — identity
+   `^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$`,
+   issuer `https://token.actions.githubusercontent.com` — **before** building `FROM` it, and the
+   build is fail-closed: an unsigned or foreign base aborts the publish. The digest is the one the
+   base job signed in that run (manual workflow) or the one the resolved sha/`latest` tag points at
+   (per-merge); the per-run pair is therefore unchanged, but moving a tag with compromised robot
+   credentials can no longer launder an unsigned base into a signed worker. `cosign verify` needs no
+   `id-token`, so job permissions are unchanged.
 
 ## Consequences
 
 - **Positive:** the seven movable bases are frozen per digest and the gate names them; a compromised
-  or retagged base cannot silently enter a rebuild; an operator can prove provenance without a
-  shared secret; findings surface on the code-scanning board.
+  or retagged base cannot silently enter a rebuild, and a worker publish refuses a base this
+  repository did not sign on `dev`; the deployable tag never points at an image that failed the gate
+  or lacks a signature; an operator can prove provenance without a shared secret; findings surface
+  on the code-scanning board.
 - **Negative/costs:** the publisher now depends on Sigstore public-good availability (a documented
   outage fallback is an _additional_ keypair signature later — additive, nothing re-signed);
   verification is online-only; a fixed CRITICAL in a freshly published base blocks the publish until
-  the base digest is bumped (intended); HIGH findings can sit undismissed unless triaged.
+  the base digest is bumped (intended); HIGH findings can sit undismissed unless triaged; a
+  worker-only merge fails until a **signed** `worker-base:latest` exists (a pre-#266 tag must be
+  republished once); each manual publish leaves a `<tag>-staging` tag in the registry (kept for
+  inspection after a failure).
 
 ## Non-goals
 
@@ -92,3 +117,6 @@ Four facts shape this decision:
 - Signature enforcement at Kubernetes admission (that is the overlay pin + cluster policy,
   #247/#235-slim).
 - Signing from a non-`dev` ref.
+- Registry-side tag immutability and staging-tag cleanup: a robot that moves a tag is out of scope
+  here — the controls are the digest pins, the worker-base verification (decision 9) and Quay
+  policy.
