@@ -35,6 +35,28 @@ For future engines, use `sardeenz-runner-images/<engine>` for the intermediate O
 `sardeenz-runners/<engine>` for the distributed SIF artifacts. These are nested Quay repository
 names, not filesystem directories.
 
+### Base-image pinning
+
+Two layers, two rules — do not mix them:
+
+- **Build inputs.** Every `FROM` in a `Dockerfile`/`Containerfile` this repository builds is pinned
+  by **tag plus digest**: `FROM node:22-slim@sha256:<64 hex> AS base`. The human tag stays in front
+  of the digest so a reader knows what is pinned. Stage aliases (`FROM base AS deps`), `ARG`-driven
+  references (`FROM ${WORKER_BASE_IMAGE}`) and `scratch` are not pinnable and are exempt. Any other
+  unpinned `FROM` fails `tests/container-images/verify-image-pins.mjs`
+  (`make verify-image-pins`; CI runs it in the `quality` job).
+- **Deployable references.** Tags and digests are pinned in the environment **overlay only** — see
+  [Pin a tag or digest](../deployment/README.md#pin-a-tag-or-digest). The base manifests keep
+  `:latest` on purpose (#247).
+
+Freshness is Dependabot's job: the existing `docker` entries cover every pinned directory
+([`.github/dependabot.yml`](../.github/dependabot.yml); the fetcher recognises `Containerfile` too).
+Two exceptions: `containers/runners/vllm/0.21.0/` has **no** Dependabot entry by decision (the
+catalog is retiring that image), so its base digest is a manual bump on the next catalog change; and
+`node:22-slim` is pinned identically in `containers/control-plane/Dockerfile` and
+`containers/dashboard/Dockerfile`, so one bump must touch both files (Dependabot opens one PR per
+directory).
+
 ### Publishing platform images from GitHub
 
 The manually triggered `Publish platform images` workflow builds and pushes the five lightweight
@@ -120,7 +142,8 @@ Key rules:
 - Keep each version's `Containerfile`, dependency pins, and compatibility notes together. Shared
   runner-contract shim code remains in `runners/<engine>/` at the repository root.
 - Pin external inputs (base image tag, kvcached commit) in each runner's `Containerfile` and
-  `README.md`; re-run the kvcached co-tenancy gate on any bump.
+  `README.md`; re-run the kvcached co-tenancy gate on any bump. Every base image is additionally
+  pinned by digest (see "Base-image pinning" above).
 
 ## Adding a runner type
 

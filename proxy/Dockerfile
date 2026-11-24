@@ -7,7 +7,7 @@
 # =============================================================================
 # Keep this aligned with Cargo.toml's rust-version. CI verifies the locked
 # dependency graph with this exact MSRV before the image build.
-FROM rust:1.86-bookworm AS deps
+FROM rust:1.86-bookworm@sha256:300ec56abce8cc9448ddea2172747d048ed902a3090e6b57babb2bf19f754081 AS deps
 
 # Install musl toolchain and build-time dependencies for aws-lc-sys (rustls/reqwest)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -58,7 +58,7 @@ RUN file target/x86_64-unknown-linux-musl/release/sardeenz-proxy \
 # Distroless "static" image: no shell, no libc, no package manager.
 # The only files added are the proxy binary and a non-root user identity.
 # =============================================================================
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
 
 # Copy the statically-linked binary
 COPY --from=builder \

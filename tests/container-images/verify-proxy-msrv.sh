@@ -6,7 +6,7 @@ dockerfile="${repository_root}/proxy/Dockerfile"
 cargo_toml="${repository_root}/proxy/Cargo.toml"
 clippy_toml="${repository_root}/clippy.toml"
 
-docker_msrv="$(sed -nE 's/^FROM rust:([0-9]+\.[0-9]+)-bookworm AS deps$/\1/p' "${dockerfile}")"
+docker_msrv="$(sed -nE 's/^FROM rust:([0-9]+\.[0-9]+)-bookworm(@sha256:[0-9a-f]{64})? AS deps$/\1/p' "${dockerfile}")"
 cargo_msrv="$(sed -nE 's/^rust-version = "([0-9]+\.[0-9]+)"$/\1/p' "${cargo_toml}")"
 clippy_msrv="$(sed -nE 's/^msrv = "([0-9]+\.[0-9]+)"$/\1/p' "${clippy_toml}")"
 

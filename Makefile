@@ -5,7 +5,7 @@ COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podm
 .DEFAULT_GOAL := help
 
 .PHONY: help all lint lint-specs format format-check typecheck test test-deployment test-integration \
-        test-coverage test-python test-python-deps codegen clean services services-stop \
+        test-coverage test-python test-python-deps codegen verify-image-pins clean services services-stop \
         dev dev-full dev-full-logged dev-cp dev-bff dev-dashboard dev-proxy \
         dev-worker dev-worker-2 dev-worker-stop docs-deps docs-build docs-serve
 
@@ -134,6 +134,9 @@ test-python: ## Run the Python shim + conformance suites (needs test-python-deps
 
 codegen: ## Regenerate TypeScript types from OpenAPI specs
 	npm run codegen -w @sardeenz/types
+
+verify-image-pins: ## Verify every Dockerfile/Containerfile FROM is digest-pinned
+	node tests/container-images/verify-image-pins.mjs
 
 clean: ## Remove all build artifacts
 	rm -rf node_modules dist build coverage

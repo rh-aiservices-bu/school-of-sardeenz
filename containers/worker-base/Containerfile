@@ -7,7 +7,7 @@
 #     docs/architecture/adrs/adr-016-sif-worker-security-posture.md (SCC / userns / /dev/fuse),
 #     docs/project/phase4-apptainer-spike.md §4 (the validated image).
 
-FROM registry.access.redhat.com/ubi9/ubi:latest
+FROM registry.access.redhat.com/ubi9/ubi:latest@sha256:6636b79fba9e5044360366f189333c30b5ce528efd92c40c68b074592b971fcd
 
 # Node.js for the TypeScript worker agent (Phase 4 Task 4 decision: reuse the Phase 3.6 agent via
 # a RunnerLauncher; ApptainerLauncher runs in prod). The agent build output is layered on top of

@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------------------------
 # Stage 0: vLLM base
 # ---------------------------------------------------------------------------------------------
-FROM quay.io/vllm/vllm-cuda:0.21.0_rhaiv.8 AS vllm-base
+FROM quay.io/vllm/vllm-cuda:0.21.0_rhaiv.8@sha256:1e9b3f00771525605dc8ceec83b83b72e3658df044acae0814b9affa0275bac7 AS vllm-base
 USER 0
 RUN microdnf -y update && microdnf clean all && rm -rf /var/cache/yum/*
 
