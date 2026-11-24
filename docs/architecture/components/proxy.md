@@ -117,6 +117,8 @@ sequenceDiagram
         Note over Proxy: pending_wakes already has "llama-3"<br/>— skip wake trigger, park silently
     end
 
+    Note over Proxy: on trigger failure: remove entry + send_replace(Failed)<br/>→ every parked request returns 503 immediately (#245)
+
     loop Until Active or timeout (120s default)
         Proxy->>Proxy: watch::Receiver::changed()
         Note over Redis,Cache: Control plane updates<br/>routing map → Redis pub/sub<br/>→ cache.replace() → notify.send(())
@@ -174,24 +176,25 @@ When the resolver returns `Resolution::Sleeping`, the request enters the parking
 
 ### Thundering Herd Prevention
 
-The `pending_wakes` map (type `Arc<Mutex<HashMap<String, ()>>>`) serializes wake triggers:
+The `pending_wakes` map (type `Arc<Mutex<HashMap<String, watch::Sender<WakeState>>>>`) serializes wake triggers and carries the trigger outcome to the whole herd:
 
 ```
 park("llama-3", fire_wake: true):
   1. lock pending_wakes
-  2. if "llama-3" not present:
-       insert "llama-3" → ()
-       drop lock
+  2. entry absent (and fire_wake):
+       insert "llama-3" → watch::Sender(InFlight)
+       subscribe() to it, drop lock
        call wake_client.trigger_wake("llama-3")  ← only this task fires the trigger
-  3. else:
-       drop lock                                  ← all other tasks skip the trigger
+       on success: send(Triggered); on failure: remove the entry, send(Failed)
+  3. entry present:
+       subscribe() to that entry's sender, drop lock   ← piggyback, skip the trigger
   4. subscribe to routing_cache watch channel
-  5. loop: wait for cache change or timeout
+  5. loop: wait for cache change, wake failure, or timeout
 ```
 
 All parked tasks for the same model share the same `watch::Receiver` subscription — they all wake up when the routing cache is updated, check whether the model is now `ACTIVE`, and proceed if so.
 
-If the wake trigger call fails, `pending_wakes` removes the entry so the next parked task can retry.
+If the wake trigger call fails, the first parker removes the `pending_wakes` entry (so the next arrival retries) **and** publishes `WakeState::Failed` on it; every piggybacked parker holding that entry's receiver returns `503 model_unavailable` ("wake trigger failed for <model>") immediately instead of waiting out the parking deadline, and increments `sardeenz_proxy_wake_herd_fastfail_total{model}`. Once the entry is removed no new request can join that wake, so the failure signal is never missed by a subscriber that already observed `InFlight`.
 
 ### `Starting` State
 
@@ -201,13 +204,14 @@ When the resolver returns `Resolution::Starting`, the model's wake is already in
 
 The parking loop checks for the following terminal conditions on every wake from `receiver.changed()`:
 
-| State in cache | Action                                                                                                                                                                                                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ACTIVE`       | Remove from `pending_wakes`, return `Ok(())`, proceed to forward                                                                                                                                                                                                        |
-| `ERROR`        | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503                                                                                                                                                                                                       |
-| Entry removed  | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404                                                                                                                                                                                                          |
-| `DRAINING`     | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (matches the resolver's up-front fail-fast for draining models)                                                                                                                                       |
-| `SLEEPING`     | If the model has already left `SLEEPING` during this wait, treat as a rollback: remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (client retry re-triggers cleanly). Still-`SLEEPING` before the wake has progressed is not a rollback — keep waiting. |
+| State in cache      | Action                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACTIVE`            | Remove from `pending_wakes`, return `Ok(())`, proceed to forward                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `ERROR`             | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Entry removed       | Remove from `pending_wakes`, return `Err(ModelNotFound)` → 404                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Wake trigger failed | The failing first parker has already removed the entry and published `Failed`: every parked request returns `Err(ModelUnavailable)` → 503 ("wake trigger failed for <model>" for piggybacked requests; the first parker keeps "wake trigger failed: …"). Generic wording only — no control-plane status/body/URL reaches the client (#97). A dropped sender (channel closed, entry removed on a terminal arm) is **not** terminal here; the rows above and the deadline decide. |
+| `DRAINING`          | Remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (matches the resolver's up-front fail-fast for draining models)                                                                                                                                                                                                                                                                                                                                               |
+| `SLEEPING`          | If the model has already left `SLEEPING` during this wait, treat as a rollback: remove from `pending_wakes`, return `Err(ModelUnavailable)` → 503 (client retry re-triggers cleanly). Still-`SLEEPING` before the wake has progressed is not a rollback — keep waiting.                                                                                                                                                                                                         |
 
 `STARTING` — and `SLEEPING` before the model has been observed leaving it — cause the loop to keep waiting; the wake is still in progress.
 
@@ -429,16 +433,17 @@ All socket address and numeric values are validated at startup; a parse failure 
 
 Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). All metric names use the `sardeenz_proxy_` prefix.
 
-| Metric                                      | Type      | Labels                             | Description                                                             |
-| ------------------------------------------- | --------- | ---------------------------------- | ----------------------------------------------------------------------- |
-| `sardeenz_proxy_requests_total`             | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                                    |
-| `sardeenz_proxy_request_duration_seconds`   | Histogram | —                                  | End-to-end request latency, excluding parking wait time                 |
-| `sardeenz_proxy_active_connections`         | Gauge     | —                                  | Currently active forwarded connections                                  |
-| `sardeenz_proxy_parked_connections`         | Gauge     | `model`                            | Currently parked connections, per model                                 |
-| `sardeenz_proxy_wake_triggers_total`        | Counter   | —                                  | Wake triggers fired to the control plane                                |
-| `sardeenz_proxy_parking_duration_seconds`   | Histogram | —                                  | Time a request spent parked before forwarding                           |
-| `sardeenz_proxy_circuit_breaker_state`      | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                    |
-| `sardeenz_proxy_routing_parse_errors_total` | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model |
+| Metric                                      | Type      | Labels                             | Description                                                                    |
+| ------------------------------------------- | --------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `sardeenz_proxy_requests_total`             | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                                           |
+| `sardeenz_proxy_request_duration_seconds`   | Histogram | —                                  | End-to-end request latency, excluding parking wait time                        |
+| `sardeenz_proxy_active_connections`         | Gauge     | —                                  | Currently active forwarded connections                                         |
+| `sardeenz_proxy_parked_connections`         | Gauge     | `model`                            | Currently parked connections, per model                                        |
+| `sardeenz_proxy_wake_triggers_total`        | Counter   | `result`                           | Wake triggers fired to the control plane                                       |
+| `sardeenz_proxy_wake_herd_fastfail_total`   | Counter   | `model`                            | Piggybacked parked requests failed fast because the shared wake trigger failed |
+| `sardeenz_proxy_parking_duration_seconds`   | Histogram | —                                  | Time a request spent parked before forwarding                                  |
+| `sardeenz_proxy_circuit_breaker_state`      | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                           |
+| `sardeenz_proxy_routing_parse_errors_total` | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model        |
 
 Both histograms are registered with explicit bucket boundaries (seconds) so they render as
 Prometheus histograms (`_bucket` series) rather than summaries — required for the dashboard's
@@ -484,9 +489,9 @@ The proxy and control plane communicate through two channels: Redis (shared stat
 The proxy makes exactly one HTTP call to the control plane: `POST /api/v1/wake` when a sleeping model needs to wake. This call is:
 
 - **Fire-and-forget at the protocol level.** The control plane responds `202 Accepted` immediately; the actual wake-up is asynchronous.
-- **Deduplicated by the proxy.** The `pending_wakes` map ensures only one trigger per model per wake event, regardless of how many requests are parked.
+- **Deduplicated by the proxy.** The `pending_wakes` map ensures only one trigger per model per wake event, regardless of how many requests are parked, and one failed trigger aborts all of them together.
 - **Deduplicated by the control plane.** The spec declares this endpoint idempotent — duplicate triggers from multiple proxy replicas are safe.
-- **Timeout-bounded.** The wake trigger HTTP call has a 5-second timeout. A timeout causes the triggering task to fail with `ModelUnavailable` and removes the `pending_wakes` entry so subsequent parked tasks can retry.
+- **Timeout-bounded.** The wake trigger HTTP call has a 5-second timeout. A timeout or non-2xx response fails the triggering task with `ModelUnavailable` (generic wording, no control-plane detail), removes the `pending_wakes` entry so subsequent parked tasks can retry, and publishes `Failed` so the already-parked herd aborts at once instead of waiting out `SARDEENZ_PARKING_TIMEOUT_SECS` (#245).
 
 ### Wake Trigger Contract
 

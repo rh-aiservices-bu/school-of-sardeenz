@@ -69,6 +69,9 @@ struct HandlerState {
     /// `cache`.
     wake_actions: Arc<Vec<WakeAction>>,
     mode: WakeResponseMode,
+    /// Sleep this long inside `handle_wake` before responding, so a failing
+    /// wake can be observed while it is still in flight.
+    wake_response_delay: Duration,
 }
 
 struct WakeAction {
@@ -102,11 +105,16 @@ impl MockControlPlane {
 pub struct MockControlPlaneBuilder {
     mode: WakeResponseMode,
     wake_actions: Vec<WakeAction>,
+    wake_response_delay: Duration,
 }
 
 impl MockControlPlaneBuilder {
     pub fn new() -> Self {
-        Self { mode: WakeResponseMode::Accept, wake_actions: Vec::new() }
+        Self {
+            mode: WakeResponseMode::Accept,
+            wake_actions: Vec::new(),
+            wake_response_delay: Duration::ZERO,
+        }
     }
 
     /// When a wake for `model_name` arrives, update `cache` to Active (after
@@ -147,6 +155,15 @@ impl MockControlPlaneBuilder {
         self
     }
 
+    /// Sleep this long inside `handle_wake`, after the wake counter increment
+    /// and before the response mode is applied, so a *failing* wake can be
+    /// observed while it is still in flight. Defaults to zero, so no existing
+    /// test's timing changes.
+    pub fn wake_response_delay(mut self, delay: Duration) -> Self {
+        self.wake_response_delay = delay;
+        self
+    }
+
     pub async fn spawn(self) -> MockControlPlane {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -160,6 +177,7 @@ impl MockControlPlaneBuilder {
             shared: shared.clone(),
             wake_actions: Arc::new(self.wake_actions),
             mode: self.mode,
+            wake_response_delay: self.wake_response_delay,
         };
 
         let app = Router::new().route("/api/v1/wake", post(handle_wake)).with_state(state);
@@ -181,6 +199,10 @@ async fn handle_wake(
     {
         let mut counts = state.shared.wake_counts.lock().await;
         *counts.entry(req.model_name.clone()).or_insert(0) += 1;
+    }
+
+    if !state.wake_response_delay.is_zero() {
+        tokio::time::sleep(state.wake_response_delay).await;
     }
 
     match state.mode {

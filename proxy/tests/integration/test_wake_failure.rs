@@ -3,7 +3,8 @@
 // When the control plane rejects a wake trigger, the parked request should
 // eventually time out and the client should receive a 503.
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
 
@@ -143,4 +144,115 @@ async fn test_wake_transport_error_no_url_leak() {
         body_text.contains("wake trigger"),
         "expected the generic wake-trigger error wording, got: {body_text}"
     );
+}
+
+// #245: a request that piggybacks on an in-flight wake trigger must abort as
+// soon as that trigger fails, instead of sitting until the parking deadline.
+// Before the fix the piggybacker had no wake source at all: the first parker
+// returned 503 at once while every piggybacker waited out `parking_timeout`
+// (30 s here, well past the client timeout).
+#[tokio::test]
+async fn test_piggybacked_parkers_fast_fail_when_wake_fails() {
+    let cache = sardeenz_proxy::routing::RoutingMapCache::new();
+    let model = "piggyback-fail/model-v1";
+    insert_sleeping_model(&cache, model).await;
+
+    // The mock counts the wake at handler entry and only then sleeps, so a
+    // non-zero count proves the failing trigger is still in flight.
+    let cp = MockControlPlaneBuilder::new()
+        .fail_wakes()
+        .wake_response_delay(Duration::from_millis(500))
+        .spawn()
+        .await;
+
+    let proxy = TestProxy::spawn_with_shared_cache_and_config(
+        TestProxyConfig {
+            control_plane_url: format!("http://{}", cp.addr),
+            parking_timeout: Duration::from_secs(30),
+            ..Default::default()
+        },
+        cache,
+    )
+    .await;
+
+    let client =
+        Arc::new(reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap());
+    let url = proxy.proxy_url();
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "Hello"}]
+    });
+
+    // Request A fires the wake trigger; the mock keeps it in flight for 500 ms.
+    let first = {
+        let client = client.clone();
+        let url = url.clone();
+        let body = body.clone();
+        tokio::spawn(async move {
+            client.post(format!("{url}/openai/v1/chat/completions")).json(&body).send().await
+        })
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if cp.wake_count_for(model).await >= 1 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "first parker never reached the wake trigger");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Request B joins the herd while A's trigger is still in flight.
+    let b_start = Instant::now();
+    let b_resp = client
+        .post(format!("{url}/openai/v1/chat/completions"))
+        .json(&body)
+        .send()
+        .await
+        .expect("piggybacked request failed");
+    let b_elapsed = b_start.elapsed();
+
+    assert_eq!(
+        b_resp.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a failed shared wake trigger must surface as 503 for piggybackers"
+    );
+    let b_body: serde_json::Value = b_resp.json().await.expect("response not JSON");
+    assert_eq!(
+        b_body["error"]["type"].as_str().unwrap_or(""),
+        "model_unavailable",
+        "expected model_unavailable for the piggybacker, got: {b_body}"
+    );
+    let b_message = b_body["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        b_message.contains("wake trigger"),
+        "expected the generic wake-trigger wording, got: {b_message}"
+    );
+    // #97: the piggybacker never sees the control plane's body or the URL.
+    assert!(
+        !b_message.contains("mock failure"),
+        "client-facing error must not leak the control plane's response body: {b_message}"
+    );
+    assert!(
+        !b_message.contains("127.0.0.1"),
+        "client-facing error must not leak the control plane host: {b_message}"
+    );
+    assert!(
+        b_elapsed < Duration::from_secs(2),
+        "fast-fail expected; took {b_elapsed:?} (parking_timeout is 30s — unfixed code waits it out)"
+    );
+
+    // The first parker keeps its existing wording and status.
+    let a_resp = first.await.expect("first request task panicked").expect("request failed");
+    assert_eq!(a_resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let a_body: serde_json::Value = a_resp.json().await.expect("response not JSON");
+    assert_eq!(a_body["error"]["type"].as_str().unwrap_or(""), "model_unavailable");
+    let a_message = a_body["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        a_message.contains("wake trigger"),
+        "expected the first parker's wake-trigger wording, got: {a_message}"
+    );
+
+    // B piggybacked on A's trigger instead of firing its own.
+    assert_eq!(cp.wake_count_for(model).await, 1, "the piggybacker must not re-trigger the wake");
 }
