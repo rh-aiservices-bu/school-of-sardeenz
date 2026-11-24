@@ -44,7 +44,10 @@ Four facts shape this decision:
    (<https://trivy.dev/latest/docs/configuration/filtering/#trivyignoreyaml>). Every entry carries
    the id, a `statement` justification with the removing issue, and an `expired_at` date that Trivy
    enforces — suppression stops by itself, so a stale exception re-opens the gate instead of hiding
-   a finding forever. Unfixed findings need no entry (they are not gated).
+   a finding forever. The packaging guard
+   (`tests/container-images/verify-runtime-packaging.mjs`) asserts the field is present and
+   well-formed on every entry, so an exception cannot suppress a fixable CRITICAL indefinitely.
+   Unfixed findings need no entry (they are not gated).
 4. **Every platform image is signed keyless with cosign after the scan passes**, by digest, never by
    tag: `id-token: write`, Sigstore public-good Fulcio/Rekor, and cosign's legacy referrers mode
    (`--registry-referrers-mode legacy`), which stores an ordinary `sha256-<digest>.sig` tag that the

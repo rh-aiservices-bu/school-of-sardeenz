@@ -5,7 +5,9 @@
 # The gate already ignores findings with no upstream fix (`ignore-unfixed: true`). An entry here
 # therefore suppresses a *fixable* finding for every platform image — treat it as an exception that
 # must expire: `expired_at` is enforced by Trivy itself, which stops suppressing the finding from
-# that date on, so a stale entry re-opens the gate instead of hiding forever. Every entry is:
+# that date on, so a stale entry re-opens the gate instead of hiding forever. Trivy does not require
+# the field, so `tests/container-images/verify-runtime-packaging.mjs` asserts every entry declares
+# it. Every entry is:
 #
 #   vulnerabilities:
 #     - id: CVE-YYYY-NNNNN

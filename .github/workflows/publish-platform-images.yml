@@ -399,11 +399,6 @@ jobs:
           trivyignores: .trivyignore.yaml
           version: v0.76.2
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
-        with:
-          cosign-release: v3.1.5
-
       - name: Sign worker by digest (keyless)
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker@${{ steps.build.outputs.digest }}

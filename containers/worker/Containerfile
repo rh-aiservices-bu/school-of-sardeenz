@@ -45,8 +45,8 @@ ENV NODE_ENV=production
 # The base image runs as 1001:0. `/opt/sardeenz` is created root-owned mode 0755: the runtime
 # identity can read the agent's code but not modify it, and nothing writes there at runtime (the
 # engine SIF processes run as the same uid/gid). The agent path stays the one already used by
-# deployment/sif-runner/worker-deployment.yaml; the symlink is build-time, so it is made here as
-# root rather than by a later RUN in `worker-agent`.
+# deployment/sif-runner/worker-deployment.yaml; the symlink is created here as root so the
+# unprivileged runtime identity never needs write access to `/opt/sardeenz`.
 USER 0
 RUN mkdir -p /opt/sardeenz && chmod 0755 /opt/sardeenz && \
     ln -s runners/dev-worker /opt/sardeenz/worker-agent

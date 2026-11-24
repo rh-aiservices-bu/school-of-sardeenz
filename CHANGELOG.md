@@ -357,7 +357,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   job) fails on any `FROM` that is unpinned or lacks the human tag. Both publish workflows now scan
   the pushed digest with Trivy by digest — a CRITICAL finding that has a fix fails the publish,
   CRITICAL-unfixed and HIGH findings go to GitHub code scanning, and suppressions live in
-  `.trivyignore.yaml`, whose `expired_at` dates Trivy enforces — and only then sign it keyless with
+  `.trivyignore.yaml`, where every entry must declare the `expired_at` date Trivy enforces (the
+  packaging guard rejects an entry without one) — and only then sign it keyless with
   cosign, so an image can be verified against the publishing workflow's OIDC identity (ADR-030). The
   manual workflow promotes by digest: every push lands on `<tag>-staging`, and the requested tag is
   moved onto the scanned, signed digest with `docker buildx imagetools create` only after the gate
