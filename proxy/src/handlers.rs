@@ -315,7 +315,9 @@ async fn run_inference(
     // another task claimed it between is_available and here, drop that
     // candidate and re-pick — a lost probe race is NOT a 503. Bounded because
     // each miss removes one candidate; when none remain, pick() → None →
-    // AllEndpointsUnhealthy.
+    // AllEndpointsUnhealthy. The loop yields the picked endpoint together with
+    // the key that claimed its probe — that key is then reused for the breaker,
+    // the metrics label and the log.
     let (endpoint, ep_key, probe_guard) = loop {
         let picked = state
             .balancer
@@ -334,8 +336,6 @@ async fn run_inference(
 
     // Preserve query string via path_and_query
     let path = parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(parts.uri.path());
-
-    // `ep_key` came out of the probe loop above — the same key that claimed the probe.
 
     // Record inference recency regardless of upstream outcome — a model
     // receiving traffic (even 5xx) is still actively in use for LRU purposes.
