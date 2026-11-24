@@ -34,6 +34,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   publishes.
   `containers/README.md`, `deployment/control-plane/README.md`, and the runner-SIF runbooks are
   cross-linked rather than duplicated.
+- **Proxy hot-path cleanups: one endpoint key per pick, projected model listings, unused `tower`
+  dependency dropped (#258).** Endpoint identity (`host:port`, the circuit-breaker key and the
+  `endpoint` metrics label) is now built by a single `endpoint_key` helper, and the key used to claim
+  a half-open probe is carried out of the selection loop and reused for the breaker call, the
+  histogram label and the log line instead of being formatted a second time per request.
+  `/v1/models` and `/oip/v2/models` now project the routing map under the existing read guard
+  (`RoutingMapCache::project`) instead of deep-cloning every `RoutingEntry`; the `get_all` snapshot
+  survives for Redis reconciliation. The direct `tower` dependency is removed (`tower_http` is the
+  only user; `tower` stays as a transitive dependency of `axum`). Responses and breaker identity are
+  byte-identical — behaviour-preserving.
 
 ### Added
 

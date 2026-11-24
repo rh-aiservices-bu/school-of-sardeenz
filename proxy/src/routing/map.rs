@@ -52,6 +52,14 @@ impl RoutingMapCache {
             .collect()
     }
 
+    /// Project the routing map through `f` while holding the read guard, cloning
+    /// nothing of `RoutingEntry`. Used by the model listings; `get_all` stays for
+    /// callers that need a full snapshot (`state/redis_sync.rs:93,195`,
+    /// `routing/map.rs:142,149`).
+    pub async fn project<T>(&self, f: impl Fn(&str, &RoutingEntry) -> T) -> Vec<T> {
+        self.inner.read().await.iter().map(|(name, entry)| f(name, &entry.value)).collect()
+    }
+
     pub async fn replace(&self, map: RoutingMap) {
         // Only changes that can make a previously selectable endpoint unavailable need to wait.
         // Endpoint additions and diagnostic timestamp changes can publish immediately.

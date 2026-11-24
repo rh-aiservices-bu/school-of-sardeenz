@@ -307,10 +307,7 @@ async fn run_inference(
     let mut candidates: Vec<_> = entry
         .endpoints
         .iter()
-        .filter(|ep| {
-            let key = format!("{}:{}", ep.host, ep.port);
-            state.circuit_breaker.is_available(&key)
-        })
+        .filter(|ep| state.circuit_breaker.is_available(&endpoint_key(ep)))
         .cloned()
         .collect();
 
@@ -319,23 +316,26 @@ async fn run_inference(
     // candidate and re-pick — a lost probe race is NOT a 503. Bounded because
     // each miss removes one candidate; when none remain, pick() → None →
     // AllEndpointsUnhealthy.
-    let (endpoint, probe_guard) = loop {
+    let (endpoint, ep_key, probe_guard) = loop {
         let picked = state
             .balancer
             .pick(&candidates)
             .ok_or_else(|| ProxyError::AllEndpointsUnhealthy(model_name.clone()))?
             .clone();
-        let key = format!("{}:{}", picked.host, picked.port);
+        // Format the selected endpoint's key once: this is the string that claims
+        // the probe and is then reused as the breaker key, the metrics label and
+        // the logged endpoint.
+        let key = endpoint_key(&picked);
         match state.circuit_breaker.try_acquire_probe(&key) {
-            Some(guard) => break (picked, guard),
-            None => candidates.retain(|ep| format!("{}:{}", ep.host, ep.port) != key),
+            Some(guard) => break (picked, key, guard),
+            None => candidates.retain(|ep| endpoint_key(ep) != key),
         }
     };
 
     // Preserve query string via path_and_query
     let path = parts.uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(parts.uri.path());
 
-    let ep_key = format!("{}:{}", endpoint.host, endpoint.port);
+    // `ep_key` came out of the probe loop above — the same key that claimed the probe.
 
     // Record inference recency regardless of upstream outcome — a model
     // receiving traffic (even 5xx) is still actively in use for LRU purposes.
@@ -461,6 +461,16 @@ async fn handle_oip_ready_inner(
     Ok(hold_routing_lease(response, routing_lease))
 }
 
+/// Circuit-breaker identity of a runner endpoint and the value of the `endpoint`
+/// metrics label. The `host:port` rendering is load-bearing and must stay
+/// byte-identical: `CircuitBreaker` keys every circuit by this string
+/// (`forwarding/circuit_breaker.rs:111,134`) and the request histogram is labelled
+/// with it (`handlers.rs:151,162`), so any change collapses/creates breakers and
+/// moves label cardinality.
+fn endpoint_key(endpoint: &RunnerEndpoint) -> String {
+    format!("{}:{}", endpoint.host, endpoint.port)
+}
+
 /// Non-mutating endpoint selection for a readiness probe: filters by circuit
 /// breaker availability, then load-balances, WITHOUT claiming a half-open
 /// probe slot (unlike `run_inference`, which does — see its comments).
@@ -468,10 +478,7 @@ fn select_endpoint(state: &AppState, entry: &RoutingEntry) -> Option<RunnerEndpo
     let candidates: Vec<_> = entry
         .endpoints
         .iter()
-        .filter(|ep| {
-            let key = format!("{}:{}", ep.host, ep.port);
-            state.circuit_breaker.is_available(&key)
-        })
+        .filter(|ep| state.circuit_breaker.is_available(&endpoint_key(ep)))
         .cloned()
         .collect();
 
@@ -510,6 +517,22 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             metadata: None,
         }
+    }
+
+    #[test]
+    fn endpoint_key_is_host_colon_port_verbatim() {
+        let ep = |host: &str, port: u16| RunnerEndpoint {
+            host: host.to_string(),
+            port,
+            weight: 1,
+            healthy: true,
+            runner_id: None,
+        };
+        assert_eq!(endpoint_key(&ep("127.0.0.1", 8000)), "127.0.0.1:8000");
+        // Deliberately NOT "[::1]:8000": the breaker key and metrics label have always
+        // been the raw `host:port` join, and changing it silently would orphan every
+        // existing circuit and split the label series.
+        assert_eq!(endpoint_key(&ep("::1", 8000)), "::1:8000");
     }
 
     #[tokio::test]
