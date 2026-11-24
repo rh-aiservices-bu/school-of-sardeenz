@@ -93,6 +93,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Piggybacked parkers fast-fail when the wake trigger fails (#245).** The first parker for a
+  sleeping model still returns its 503 "wake trigger failed: …" immediately, but it now also
+  publishes the failure to the herd: `pending_wakes` entries carry a `watch::Sender<WakeState>`
+  (new terminal state `Failed`), acquired in the same critical section as the membership test, so
+  requests that joined during the in-flight trigger window abort at once with
+  `503 model_unavailable` ("wake trigger failed for <model>", generic wording — no control-plane
+  detail) instead of hanging until `SARDEENZ_PARKING_TIMEOUT_SECS` (default 120 s). The entry is
+  still removed so the next arrival retries, and a new counter
+  `sardeenz_proxy_wake_herd_fastfail_total{model}` records aborted piggybackers. A dropped wake
+  sender is deliberately not terminal: routing-state transitions and the parking deadline still
+  own those outcomes. Documented residual race: a `Resolution::Starting` request landing after the
+  failure-side removal subscribes to nothing and keeps the old deadline-bound behavior. No
+  contract, config or error-status change.
+
 - **Model wake answers `202` before victim eviction (#242).** `POST /api/v1/models/{modelName}/wake`
   no longer awaits victim teardown inside the request: after the
   `SLEEPING → STARTING` transitions, the routing-map refresh and the wake notification, the record

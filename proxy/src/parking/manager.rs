@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use metrics::{counter, gauge, histogram};
+use tokio::sync::watch;
 
 use crate::config::ParkingConfig;
 use crate::error::ProxyError;
@@ -16,19 +17,25 @@ enum WakeState {
     InFlight,
     /// Wake trigger completed successfully; waiting for model to become Active.
     Triggered,
+    /// Wake trigger for this model failed and its `pending_wakes` entry was
+    /// removed (#245). Terminal for every request that was parked on the
+    /// shared wake signal: they abort instead of waiting out the deadline.
+    Failed,
 }
 
 /// Manages connection parking for sleeping models.
 ///
 /// Uses a `watch::Receiver` from the routing map cache to detect state
 /// transitions. Implements thundering herd prevention by tracking which
-/// models have pending wake triggers.
+/// models have pending wake triggers. Each entry is a `watch::Sender` carrying
+/// the trigger outcome, so a failed trigger aborts the whole herd instead of
+/// only the first parker (#245).
 #[derive(Clone)]
 pub struct ParkingManager {
     config: ParkingConfig,
     routing_cache: RoutingMapCache,
     wake_client: WakeTriggerClient,
-    pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
+    pending_wakes: Arc<std::sync::Mutex<HashMap<String, watch::Sender<WakeState>>>>,
     parked_count: Arc<ParkedCount>,
 }
 
@@ -46,7 +53,7 @@ struct ParkedCount {
 /// cancelled mid-park.
 struct ParkingSlotGuard {
     parked_count: Arc<ParkedCount>,
-    pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
+    pending_wakes: Arc<std::sync::Mutex<HashMap<String, watch::Sender<WakeState>>>>,
     model_name: String,
     park_start: std::time::Instant,
     body_len: usize,
@@ -56,7 +63,7 @@ impl ParkingSlotGuard {
     /// Call ONLY after the slot has been reserved (counters incremented).
     fn new(
         parked_count: Arc<ParkedCount>,
-        pending_wakes: Arc<std::sync::Mutex<HashMap<String, WakeState>>>,
+        pending_wakes: Arc<std::sync::Mutex<HashMap<String, watch::Sender<WakeState>>>>,
         model_name: String,
         body_len: usize,
     ) -> Self {
@@ -111,6 +118,40 @@ impl Drop for ParkingSlotGuard {
     }
 }
 
+/// Client-facing error for a piggybacked parker whose shared wake trigger
+/// failed. Generic wording only — the underlying `anyhow::Error` is visible
+/// to the first parker alone, so no control-plane detail or URL can leak
+/// here (#97). Counts one aborted piggybacker per call.
+fn piggyback_wake_failure(model_name: &str) -> ProxyError {
+    counter!("sardeenz_proxy_wake_herd_fastfail_total", "model" => model_name.to_string())
+        .increment(1);
+    ProxyError::ModelUnavailable(format!("wake trigger failed for {model_name}"))
+}
+
+/// Resolve only when the shared wake signal reaches `WakeState::Failed`.
+///
+/// `None` (a `Resolution::Starting` request that found no local entry, see
+/// `do_park`) never resolves — the routing-cache arms and the parking
+/// deadline own that request's outcome. A dropped sender (another waiter
+/// removed the entry on a routing terminal arm) is not a wake-failure signal
+/// either: it parks here forever and those same arms decide.
+async fn wait_for_wake_failure(rx: &mut Option<watch::Receiver<WakeState>>) {
+    let Some(rx) = rx else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    loop {
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+        // Scope the `Ref` to the comparison: holding a borrow across
+        // `changed().await` would deadlock the watch channel.
+        if *rx.borrow() == WakeState::Failed {
+            return;
+        }
+    }
+}
+
 impl ParkingManager {
     pub fn new(
         config: ParkingConfig,
@@ -148,14 +189,27 @@ impl ParkingManager {
         // Thundering herd prevention: the pending_wakes entry is inserted
         // under the lock BEFORE the wake trigger HTTP call, and the lock is
         // dropped BEFORE the await — so concurrent arrivals see the entry
-        // immediately and skip the trigger.
-        let is_first = fire_wake && {
+        // immediately and skip the trigger. Subscriber acquisition happens in
+        // the SAME critical section as the membership test: a request that
+        // observes an entry also obtains that entry's wake receiver, so it
+        // cannot miss a `Failed` published right after the lock is released.
+        //
+        // Known narrow race, documented not fixed: a `fire_wake: false`
+        // (Resolution::Starting) request that acquires this lock after the
+        // failing first parker's `remove` finds no entry, subscribes to
+        // nothing, and still waits out the parking deadline. The window is
+        // the span between that `remove` and this lock; closing it would need
+        // per-model state kept alive indefinitely.
+        let (is_first, mut wake_rx) = {
             let mut pending = self.pending_wakes.lock().unwrap();
-            if pending.contains_key(model_name) {
-                false
-            } else {
-                pending.insert(model_name.to_string(), WakeState::InFlight);
-                true
+            match pending.get(model_name) {
+                Some(sender) => (false, Some(sender.subscribe())),
+                None if fire_wake => {
+                    let (sender, receiver) = watch::channel(WakeState::InFlight);
+                    pending.insert(model_name.to_string(), sender);
+                    (true, Some(receiver))
+                }
+                None => (false, None),
             }
         };
         if is_first {
@@ -163,15 +217,21 @@ impl ParkingManager {
                 Ok(()) => {
                     counter!("sardeenz_proxy_wake_triggers_total", "result" => "accepted")
                         .increment(1);
-                    let mut pending = self.pending_wakes.lock().unwrap();
-                    if let Some(state) = pending.get_mut(model_name) {
-                        *state = WakeState::Triggered;
+                    if let Some(sender) = self.pending_wakes.lock().unwrap().get(model_name) {
+                        sender.send_replace(WakeState::Triggered);
                     }
                 }
                 Err(e) => {
                     counter!("sardeenz_proxy_wake_triggers_total", "result" => "failed")
                         .increment(1);
-                    self.pending_wakes.lock().unwrap().remove(model_name);
+                    // #245: fan the failure out to the herd. The entry is
+                    // still removed (the next arrival retries, exactly as
+                    // before), but the removed sender publishes `Failed` so
+                    // every piggybacked parker aborts immediately instead of
+                    // waiting out `SARDEENZ_PARKING_TIMEOUT_SECS`.
+                    if let Some(sender) = self.pending_wakes.lock().unwrap().remove(model_name) {
+                        sender.send_replace(WakeState::Failed);
+                    }
                     return Err(ProxyError::ModelUnavailable(format!("wake trigger failed: {e}")));
                 }
             }
@@ -190,6 +250,13 @@ impl ParkingManager {
         // path instead of fast-failing — still correct (503 either way),
         // just not instantaneous in that rare case.
         let mut left_sleeping = false;
+
+        // A Failed published between our lock release and the first select
+        // (the trigger failed while we were subscribing) is caught here:
+        // `changed()` would not re-deliver a value the receiver already saw.
+        if wake_rx.as_ref().is_some_and(|rx| *rx.borrow() == WakeState::Failed) {
+            return Err(piggyback_wake_failure(model_name));
+        }
 
         loop {
             match self.routing_cache.get(model_name).await {
@@ -240,6 +307,9 @@ impl ParkingManager {
                             anyhow::anyhow!("routing map channel closed")
                         ));
                     }
+                }
+                () = wait_for_wake_failure(&mut wake_rx) => {
+                    return Err(piggyback_wake_failure(model_name));
                 }
             }
         }
@@ -341,5 +411,49 @@ mod tests {
         assert_eq!(manager.global_parked_count(), 1);
         drop(guard_b);
         assert_eq!(manager.global_parked_count(), 0);
+    }
+
+    // #245: a piggybacked parker must abort as soon as the shared wake
+    // trigger publishes `Failed`, instead of waiting out the parking
+    // deadline. The cache entry is STARTING (wake in progress) so the
+    // routing arms keep the loop waiting — the real piggyback situation.
+    #[tokio::test]
+    async fn parked_request_fails_fast_when_shared_wake_fails() {
+        use crate::generated::proxy_control_plane::{Protocol, RoutingEntry};
+
+        let manager = test_manager();
+        manager
+            .routing_cache
+            .update_entry(
+                "model-f".to_string(),
+                RoutingEntry {
+                    model_name: "model-f".to_string(),
+                    state: ModelState::Starting,
+                    protocol: Protocol::Openai,
+                    endpoints: vec![],
+                    updated_at: "2024-01-01T00:00:00Z".to_string(),
+                    metadata: None,
+                },
+            )
+            .await;
+
+        let (sender, _rx) = watch::channel(WakeState::InFlight);
+        manager.pending_wakes.lock().unwrap().insert("model-f".to_string(), sender.clone());
+
+        let manager_for_park = manager.clone();
+        let park = tokio::spawn(async move { manager_for_park.park("model-f", false, 0).await });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sender.send_replace(WakeState::Failed);
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), park)
+            .await
+            .expect("park did not fast-fail")
+            .expect("park task panicked");
+        assert!(
+            matches!(&result, Err(ProxyError::ModelUnavailable(m)) if m.contains("wake trigger")),
+            "unexpected: {result:?}"
+        );
+        assert!(!manager.pending_wakes.lock().unwrap().contains_key("model-f"));
     }
 }

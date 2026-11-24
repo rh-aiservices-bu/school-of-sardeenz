@@ -55,6 +55,10 @@ pub fn describe_metrics() {
         "sardeenz_proxy_wake_triggers_total",
         "Wake triggers sent to the control plane"
     );
+    describe_counter!(
+        "sardeenz_proxy_wake_herd_fastfail_total",
+        "Piggybacked parked requests failed fast because the shared wake trigger failed, labeled by model"
+    );
     describe_histogram!(
         "sardeenz_proxy_parking_duration_seconds",
         "Time spent parked before forwarding"
