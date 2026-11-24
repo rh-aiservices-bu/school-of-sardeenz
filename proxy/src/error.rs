@@ -6,6 +6,11 @@ pub enum ProxyError {
     #[error("model not found: {0}")]
     ModelNotFound(String),
 
+    /// The model exists but is tagged with the other protocol family: it does
+    /// not exist under this surface's prefix (#246).
+    #[error("model not found under this protocol family: {0}")]
+    ModelNotFoundUnderProtocol(String),
+
     #[error("model unavailable: {0}")]
     ModelUnavailable(String),
 
@@ -40,7 +45,9 @@ pub enum ProxyError {
 impl ProxyError {
     pub fn status_code(&self) -> StatusCode {
         match self {
-            ProxyError::ModelNotFound(_) => StatusCode::NOT_FOUND,
+            ProxyError::ModelNotFound(_) | ProxyError::ModelNotFoundUnderProtocol(_) => {
+                StatusCode::NOT_FOUND
+            }
             ProxyError::ModelUnavailable(_)
             | ProxyError::ParkingTimeout(_)
             | ProxyError::ParkingLimitReached(_)
@@ -75,7 +82,9 @@ impl IntoResponse for ProxyError {
 
 fn error_type(err: &ProxyError) -> &'static str {
     match err {
-        ProxyError::ModelNotFound(_) => "model_not_found",
+        ProxyError::ModelNotFound(_) | ProxyError::ModelNotFoundUnderProtocol(_) => {
+            "model_not_found"
+        }
         ProxyError::ModelUnavailable(_) => "model_unavailable",
         ProxyError::ParkingTimeout(_) => "parking_timeout",
         ProxyError::ParkingLimitReached(_) => "parking_limit_reached",

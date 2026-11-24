@@ -239,7 +239,12 @@ async fn handle_wake(
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let entry = build_active_entry(&model, runner_addr);
+                // In the normal wake path the real control plane derives a model's protocol tag
+                // from the model's instance configuration (sleep-wake.ts); preserve the tag of
+                // the entry being woken to model that path, so an oip model wakes as oip (#246).
+                let protocol =
+                    cache.get(&model).await.map_or(Protocol::Openai, |entry| entry.protocol);
+                let entry = build_active_entry(&model, runner_addr, protocol);
                 cache.update_entry(model, entry).await;
             });
         }
@@ -259,11 +264,15 @@ async fn handle_wake(
 }
 
 /// Build an Active RoutingEntry pointing at a runner.
-pub fn build_active_entry(model_name: &str, runner_addr: SocketAddr) -> RoutingEntry {
+pub fn build_active_entry(
+    model_name: &str,
+    runner_addr: SocketAddr,
+    protocol: Protocol,
+) -> RoutingEntry {
     RoutingEntry {
         model_name: model_name.to_string(),
         state: ModelState::Active,
-        protocol: Protocol::Openai,
+        protocol,
         endpoints: vec![RunnerEndpoint {
             host: runner_addr.ip().to_string(),
             port: runner_addr.port(),

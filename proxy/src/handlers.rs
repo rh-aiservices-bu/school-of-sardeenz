@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use crate::error::ProxyError;
-use crate::generated::proxy_control_plane::{ModelState, RoutingEntry, RunnerEndpoint};
+use crate::generated::proxy_control_plane::{ModelState, Protocol, RoutingEntry, RunnerEndpoint};
 use crate::routing::resolver::Resolution;
 use crate::routing::RoutingLease;
 use crate::state::AppState;
@@ -195,7 +195,7 @@ async fn handle_inference_inner(
         .ok_or_else(|| ProxyError::BadRequest("missing or invalid 'model' field".to_string()))?;
     drop(body_json);
 
-    run_inference(state, model_name, parts, body_bytes).await
+    run_inference(state, model_name, parts, body_bytes, Protocol::Openai).await
 }
 
 /// V2 (OIP) inference: `POST /oip/v2/models/{model}/infer`. The model name
@@ -229,17 +229,17 @@ async fn handle_oip_infer_inner(
         .await
         .map_err(|e| body_read_error(e, "oip", Some(model_name.as_str()), content_length, limit))?;
 
-    run_inference(state, model_name, parts, body_bytes).await
+    run_inference(state, model_name, parts, body_bytes, Protocol::Oip).await
 }
 
 /// Resolve→park→forward core shared by the openai and oip infer handlers.
-/// No behavioral change from the pre-split `handle_inference_inner` body —
-/// only the model-name acquisition (body vs. path) moved out.
+/// `protocol` is the family of the surface the request arrived on; both admission checks use it.
 async fn run_inference(
     state: AppState,
     model_name: String,
     parts: axum::http::request::Parts,
     body_bytes: bytes::Bytes,
+    protocol: Protocol,
 ) -> Result<InferenceOutcome, ProxyError> {
     // A disconnected proxy intentionally stops admitting inference. Serving from a stale cache
     // would let a move's cutover barrier miss this process while it continues selecting the old
@@ -248,7 +248,7 @@ async fn run_inference(
         return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
     }
 
-    let resolution = state.resolver.resolve(&model_name).await?;
+    let resolution = state.resolver.resolve(&model_name, protocol).await?;
 
     match &resolution {
         Resolution::Sleeping(_) => {
@@ -286,6 +286,14 @@ async fn run_inference(
         return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
     }
     let entry = &routing_lease.entry;
+
+    // A protocol-only change of an ACTIVE entry swaps the value with no quiescence barrier:
+    // RoutingMapCache::requires_quiescence inspects state and endpoint identity only (routing/map.rs),
+    // so a lease acquired after such a swap can carry the other family's tag. Re-check under the
+    // lease before selecting an endpoint; a cross-family entry is "not here", not a 503.
+    if entry.protocol != protocol {
+        return Err(ProxyError::ModelNotFoundUnderProtocol(model_name.clone()));
+    }
 
     if entry.state != ModelState::Active {
         return Err(ProxyError::ModelUnavailable(format!(
@@ -383,7 +391,8 @@ pub async fn handle_oip_models(State(state): State<AppState>) -> impl IntoRespon
 /// cold-starts a sleeping model would make health-checking clients an
 /// accidental wake trigger. A SLEEPING/STARTING/DRAINING/ERROR model answers
 /// 503 straight from the routing map; only an ACTIVE model's probe is
-/// forwarded to the runner.
+/// forwarded to the runner. An entry tagged with the other protocol family
+/// answers 404 without probing (#246).
 pub async fn handle_oip_ready(
     State(state): State<AppState>,
     Path(model): Path<String>,
@@ -416,6 +425,13 @@ async fn handle_oip_ready_inner(
         return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
     }
     let entry = &routing_lease.entry;
+
+    // Readiness is admitted only for an entry in the family this prefix names (#246, ADR-021
+    // Decision 3). The other family's model is "not here" (404), not "not ready" (503), and the
+    // probe is never forwarded to a wrong-protocol engine (Decision 6: no park, no wake).
+    if entry.protocol != Protocol::Oip {
+        return Err(ProxyError::ModelNotFoundUnderProtocol(model_name.clone()));
+    }
 
     if entry.state != ModelState::Active {
         let body = serde_json::json!({

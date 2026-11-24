@@ -93,6 +93,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Cross-family inference and readiness now 404 before any parking, wake or forward (#246).** The
+  proxy compared a request's path-prefix family with nothing: an `oip`-tagged model invoked through
+  `/openai/v1/...` (or the reverse) was parked, woken and then forwarded to an engine that cannot
+  serve the canonical path. Resolution now rejects an entry whose `protocol` tag is the other
+  family's with the proxy's own `404` (`type: "model_not_found"`, message
+  `model not found under this protocol family: <model>`), and the lease-time re-check closes the
+  protocol-only-change window for an active entry; the `/oip/v2/models/{model}/ready` probe applies
+  the same rule. A wrong-prefix request no longer reaches an engine, no longer fires a wake, and no
+  longer extends the model's inference-recency clock. No contract, config, metric or `error_type`
+  vocabulary change.
+
 - **Phantom device-memory series are dropped from `/metrics` (#254).** Reconciliation only ever
   `.set()` the three `sardeenz_control_plane_device_memory_bytes{worker_id,device_index,state}`
   series per device, so a worker that left the cluster — or whose memory report stopped arriving

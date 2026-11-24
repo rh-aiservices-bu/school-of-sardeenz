@@ -186,7 +186,10 @@ export type components = {
             /**
              * @description Written by the control plane. The proxy filters both model
              *     listings on this value — `/openai/v1/models` lists only `openai`
-             *     entries, `/oip/v2/models` only `oip` — so it must be present on
+             *     entries, `/oip/v2/models` only `oip` — and admits inference and
+             *     readiness only under the matching family's prefix: a request for
+             *     this model under the other prefix answers `404 model_not_found`
+             *     and is never parked, woken or forwarded. It must be present on
              *     every entry.
              */
             protocol: components["schemas"]["Protocol"];

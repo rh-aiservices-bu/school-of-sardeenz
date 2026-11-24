@@ -34,6 +34,12 @@ The prefix names the **protocol family, never the engine** — it is stripped be
 runners always receive canonical `/v1/*` or `/v2/*` paths. Both prefixes are always mounted; a
 protocol family with no deployed models simply lists nothing.
 
+A request under the wrong family's prefix is not a routing question: if the entry's `protocol`
+tag is the other family, the proxy answers its own JSON `404` with `type: "model_not_found"` and
+message `model not found under this protocol family: <model>`, before parking, waking or
+forwarding — the same holds for the `/oip/v2/models/{model}/ready` probe. Nothing reaches an
+engine, and a sleeping model is not woken.
+
 ### Protocol families
 
 Each routing entry carries a required `protocol` tag (`openai` or `oip`, [ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md))
@@ -57,8 +63,10 @@ Every inference request follows the same steps:
 
 1. Read the raw request body (buffered, max 32 MiB by default — `SARDEENZ_PROXY_MAX_BODY_BYTES`; larger bodies get a JSON `413 request_too_large`)
 2. Extract the `model` field — from the JSON body for `/openai/*` requests, from the `{model}` URL
-   path segment for `/oip/*` requests. The rest of the path (resolve/park/wake/forward/circuit-break)
-   is protocol-agnostic.
+   path segment for `/oip/*` requests. Resolution then compares the entry's `protocol` tag with the
+   prefix's family and rejects a mismatch with `404 model_not_found` before any parking, wake or
+   forward, so a wrong-prefix request never reaches an engine; the rest of the path
+   (park/wake/forward/circuit-break) stays protocol-agnostic.
 3. Resolve the model's current state from the in-memory routing cache
 4. If sleeping, park the connection and fire a wake trigger; if starting (wake already in progress), park without triggering
 5. Filter endpoints through the circuit breaker
@@ -269,9 +277,11 @@ Each hash field value is a JSON-serialized `RoutingEntry`:
 ```
 
 A sleeping model has `"state": "SLEEPING"` and an empty `endpoints` array. `protocol` is a required
-top-level field ([ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)) — it drives which
-listing (`/openai/v1/models` or `/oip/v2/models`) the entry appears under. The metadata block
-remains optional and is passed through to the `openai` listing response without interpretation.
+top-level field ([ADR-021](../adrs/adr-021-protocol-family-path-prefixes.md)) — it gates admission
+and listing: the model is invocable — and, for `oip`, probeable — only under its own family's
+prefix (the other prefix answers the proxy's `404 model_not_found`) and appears only in that
+family's listing. The metadata block remains optional and is passed through to the `openai` listing
+response without interpretation.
 
 The `updatedAt` timestamp is written by the control plane for operator diagnostics and dashboard display. The proxy deserializes it for round-trip fidelity but does not consult it for routing or staleness decisions — cache freshness is determined entirely by Redis pub/sub notifications (see [Cache Invalidation](#cache-invalidation) below).
 

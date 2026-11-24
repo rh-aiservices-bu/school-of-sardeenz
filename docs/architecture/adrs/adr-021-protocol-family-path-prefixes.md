@@ -8,7 +8,9 @@ Accepted. Implementation tracked in
 `RoutingEntry` in the Rust-mirrored `proxy-control-plane.yaml`; a required `protocol` + optional
 `entrypoint` on `CatalogEntry` in `control-plane.yaml`). Amends
 [ADR-020](adr-020-config-name-vs-served-model-name.md)'s "the Rust proxy and
-`proxy-control-plane.yaml` are untouched" consequence (see Consequences). Builds on
+`proxy-control-plane.yaml` are untouched" consequence (see Consequences). Enforcement of the tag
+at admission is completed in
+[#246](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/246). Builds on
 [ADR-010](adr-010-engine-runners.md) (engine runners) and
 [ADR-019](adr-019-logical-model-vs-instance-split.md) (logical model vs. instance).
 
@@ -33,7 +35,10 @@ would advertise models their surface cannot actually invoke.
    period (pre-release). The dashboard inference-URL banner shows both protocol-labeled base URLs.
 3. **First-class routing-entry `protocol` tag.** Required, non-`Option` on the Rust mirror (an
    absent tag must not be representable); both listings filter on it. The dead `engineType` field
-   is deleted in the same change.
+   is deleted in the same change. Both inference surfaces and the `/oip/v2/models/{model}/ready`
+   probe enforce it at admission: a request under the other family's prefix answers the proxy's
+   `404 model_not_found` before parking, waking or forwarding
+   ([#246](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/246)).
 4. **Data-driven activation.** The proxy compiles in its protocol adapters and always mounts every
    prefix; which models appear under which prefix is driven entirely by the per-entry `protocol`
    tag written by the control plane. Importing and deploying a runner lights up its surface live —
