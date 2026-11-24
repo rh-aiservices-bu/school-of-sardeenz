@@ -8,7 +8,6 @@ export interface Config {
   readonly leaseName: string;
   readonly leaseNamespace: string;
   readonly workerHeartbeatTimeoutSecs: number;
-  readonly parkingTimeoutSecs: number;
   readonly evictionMaxPerCycle: number;
   // Phase 5 (#276): elastic co-location oversubscription cap, integer percent of the device's
   // reported KV-pool totalBytes. 0 disables elastic headroom entirely (plain byte-fit only).
@@ -59,6 +58,25 @@ function intEnv(name: string, fallback: number): number {
   const parsed = parseInt(raw, 10);
   if (Number.isNaN(parsed)) {
     throw new Error(`Environment variable ${name} must be an integer, got: ${raw}`);
+  }
+  return parsed;
+}
+
+/**
+ * Listen-port validation. The port is the substring after the last ':' of the listen address,
+ * not its own environment variable, so intEnv (which reads process.env by name) cannot be
+ * reused. Fail loudly at loadConfig, like the other numeric knobs: parseInt would read '3100abc'
+ * as 3100 and leave NaN for a trailing ':' — either value only surfaces at app.listen
+ * (index.ts:290) as an opaque bind error.
+ */
+function parseListenPort(portRaw: string, listenAddr: string): number {
+  // Strict integer syntax: same posture as colocationMaxPoolHeadroomPercentEnv — '3100.5' and
+  // '-1' are operator mistakes, not values to truncate or accept.
+  const parsed = /^\d+$/.test(portRaw.trim()) ? parseInt(portRaw.trim(), 10) : NaN;
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(
+      `Environment variable SARDEENZ_CONTROL_PLANE_LISTEN_ADDR (or the legacy SARDEENZ_LISTEN_ADDR) must have an integer port between 1 and 65535, got: ${listenAddr}`,
+    );
   }
   return parsed;
 }
@@ -195,7 +213,7 @@ export function loadConfig(): Config {
 
   return {
     listenAddr: host ?? '0.0.0.0',
-    listenPort: parseInt(portStr ?? '3000', 10),
+    listenPort: parseListenPort(portStr, listenAddr),
     logLevel: optionalEnv('SARDEENZ_LOG_LEVEL', 'info'),
     redisUrl: optionalEnv('SARDEENZ_REDIS_URL', 'redis://localhost:6379'),
     databaseUrl: optionalEnv(
@@ -206,7 +224,6 @@ export function loadConfig(): Config {
     leaseName: optionalEnv('SARDEENZ_LEASE_NAME', 'sardeenz-control-plane'),
     leaseNamespace: optionalEnv('SARDEENZ_LEASE_NAMESPACE', 'default'),
     workerHeartbeatTimeoutSecs: intEnv('SARDEENZ_WORKER_HEARTBEAT_TIMEOUT_SECS', 30),
-    parkingTimeoutSecs: intEnv('SARDEENZ_PARKING_TIMEOUT_SECS', 120),
     evictionMaxPerCycle: intEnv('SARDEENZ_EVICTION_MAX_PER_CYCLE', 3),
     // Phase 5 (#276) oversubscription cap: percent of the device's reported KV-pool totalBytes.
     // Decision 2026-11-13: default 50; 0 disables elastic headroom entirely (plain byte-fit).

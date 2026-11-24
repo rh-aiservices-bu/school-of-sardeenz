@@ -74,6 +74,37 @@ describe('loadConfig', () => {
     expect(config.listenPort).toBe(3100);
   });
 
+  it('defaults the listen port to 3000 for a colon-less address (#258)', () => {
+    process.env['SARDEENZ_CONTROL_PLANE_LISTEN_ADDR'] = '127.0.0.1';
+    const config = loadConfig();
+    expect(config.listenAddr).toBe('127.0.0.1');
+    expect(config.listenPort).toBe(3000);
+  });
+
+  it('keeps a bracketed IPv6 host with an explicit port working (#258)', () => {
+    process.env['SARDEENZ_CONTROL_PLANE_LISTEN_ADDR'] = '[::1]:3100';
+    const config = loadConfig();
+    expect(config.listenAddr).toBe('[::1]');
+    expect(config.listenPort).toBe(3100);
+  });
+
+  it.each(['0.0.0.0:abc', '0.0.0.0:', ':0', ':65536', '0.0.0.0:-1', '0.0.0.0:3100.5'])(
+    'rejects SARDEENZ_CONTROL_PLANE_LISTEN_ADDR=%s instead of booting an invalid port (#258)',
+    (raw) => {
+      process.env['SARDEENZ_CONTROL_PLANE_LISTEN_ADDR'] = raw;
+      expect(() => loadConfig()).toThrow(
+        'SARDEENZ_CONTROL_PLANE_LISTEN_ADDR (or the legacy SARDEENZ_LISTEN_ADDR) must have an integer port between 1 and 65535',
+      );
+    },
+  );
+
+  it('rejects an invalid port on the legacy SARDEENZ_LISTEN_ADDR too (#258)', () => {
+    process.env['SARDEENZ_LISTEN_ADDR'] = '127.0.0.1:0';
+    expect(() => loadConfig()).toThrow(
+      'Environment variable SARDEENZ_CONTROL_PLANE_LISTEN_ADDR (or the legacy SARDEENZ_LISTEN_ADDR) must have an integer port between 1 and 65535',
+    );
+  });
+
   it('reads SARDEENZ_LOG_LEVEL from env', () => {
     process.env['SARDEENZ_LOG_LEVEL'] = 'debug';
     const config = loadConfig();
