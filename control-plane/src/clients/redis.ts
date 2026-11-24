@@ -14,16 +14,6 @@ export function createRedisClient(config: Config): Redis {
   });
 }
 
-export function createSubscriber(config: Config): Redis {
-  return new Redis(config.redisUrl, {
-    keyPrefix: '',
-    lazyConnect: true,
-    retryStrategy(times: number) {
-      return Math.min(times * 200, 5000);
-    },
-  });
-}
-
 export function redisKey(prefix: string, ...parts: string[]): string {
   return [prefix, ...parts].join(':');
 }
