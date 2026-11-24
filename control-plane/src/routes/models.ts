@@ -1963,112 +1963,129 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           app.log.debug({ err, modelName }, 'Failed to create wake notification');
         });
 
-      const record = await deps.modelRepository.findByName(modelName);
-      const requiredMemory = record?.requiredMemory ?? 0;
-      const wakeTasks: Promise<void>[] = [];
+      void (async () => {
+        try {
+          const record = await deps.modelRepository.findByName(modelName);
+          const requiredMemory = record?.requiredMemory ?? 0;
+          const wakeTasks: Promise<void>[] = [];
 
-      for (const instance of claimed) {
-        if (requiredMemory > 0 && instance.workerId) {
-          // #276: per-device shortfall check that excludes the waking instance's own hold (sleep
-          // never released it, so availableBytes already nets it out — the old worker-wide sum
-          // produced a phantom shortfall and evicted an innocent co-tenant). Legacy rows without
-          // deviceIndices fall back to the worker-wide check verbatim.
-          const shortfalls = wakeShortfalls(deps, instance, requiredMemory);
+          for (const instance of claimed) {
+            if (requiredMemory > 0 && instance.workerId) {
+              // #276: per-device shortfall check that excludes the waking instance's own hold (sleep
+              // never released it, so availableBytes already nets it out — the old worker-wide sum
+              // produced a phantom shortfall and evicted an innocent co-tenant). Legacy rows without
+              // deviceIndices fall back to the worker-wide check verbatim.
+              const shortfalls = wakeShortfalls(deps, instance, requiredMemory);
 
-          if (shortfalls.length > 0) {
-            const allInstances = await deps.lifecycle.getAllInstances();
-            const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
-              allInstances.map((s) => s.modelName),
-            );
-            for (const s of allInstances) {
-              s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
-            }
-            const allRecords = await deps.modelRepository.findAll();
-            const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
-            pinnedModels.add(modelName);
-            const memoryByModel = new Map(
-              allRecords
-                .filter((r) => r.requiredMemory !== null)
-                .map((r) => [r.name, r.requiredMemory!]),
-            );
-            // Per-device victim sizing for the per-device shortfalls (#276): the LRU strategy
-            // must compare a device shortfall against what eviction actually frees on THAT
-            // device, so each candidate's figure is requiredMemory / tensorParallel. Built
-            // from the same allRecords snapshot; the `|| 1` keeps the figure finite for a
-            // degenerate 0 record (route validation already enforces >= 1 on deploy/update).
-            const perDeviceMemoryByModel = new Map(
-              allRecords
-                .filter((r) => r.requiredMemory !== null)
-                .map((r) => [r.name, r.requiredMemory! / (r.tensorParallel || 1)]),
-            );
-
-            // Victim scope: per shortfall, only the waker's device co-location group (worker-wide
-            // victims tore down healthy co-tenants on other devices for a shortfall on one
-            // device — the same innocent-eviction class the per-device check exposed).
-            const victims = selectWakeVictims(
-              deps,
-              instance,
-              shortfalls,
-              allInstances,
-              pinnedModels,
-              memoryByModel,
-              perDeviceMemoryByModel,
-            );
-
-            // Isolated per victim, same rationale as deployFromRecord's eviction loop: one
-            // victim's teardown failure must not throw out of this synchronous handler and
-            // strand the remaining `claimed` instances (whose wakeModel dispatch below would
-            // then never run, leaving them stuck in STARTING until reconciliation times out).
-            const victimResults = await Promise.allSettled(
-              victims.map(async (victim) => {
-                const vs = await deps.lifecycle.getInstance(victim.modelName, victim.instanceId);
-                const ok = await teardownInstance(
-                  app,
-                  deps,
-                  victim.modelName,
-                  {
-                    instanceId: victim.instanceId,
-                    runnerHost: vs?.runnerHost ?? null,
-                    runnerPort: vs?.runnerPort ?? null,
-                  },
-                  'Eviction (wake capacity reclamation)',
+              if (shortfalls.length > 0) {
+                const allInstances = await deps.lifecycle.getAllInstances();
+                const inferenceTs = await deps.lifecycle.getLastInferenceTimestamps(
+                  allInstances.map((s) => s.modelName),
                 );
-                if (ok) deps.eviction.recordEviction('wake');
-                return ok;
-              }),
-            );
-            const victimFailures = victimResults.filter(
-              (r) => r.status === 'rejected' || r.value === false,
-            ).length;
-            if (victimFailures > 0) {
-              app.log.error(
-                {
-                  modelName,
-                  instanceId: instance.instanceId,
-                  victimFailures,
-                  totalVictims: victims.length,
-                },
-                'Some eviction victims failed teardown during wake capacity reclamation',
-              );
-            }
-          }
-        }
+                for (const s of allInstances) {
+                  s.lastInferenceAt = inferenceTs.get(s.modelName) ?? s.lastInferenceAt;
+                }
+                const allRecords = await deps.modelRepository.findAll();
+                const pinnedModels = new Set(allRecords.filter((r) => r.pinned).map((r) => r.name));
+                pinnedModels.add(modelName);
+                const memoryByModel = new Map(
+                  allRecords
+                    .filter((r) => r.requiredMemory !== null)
+                    .map((r) => [r.name, r.requiredMemory!]),
+                );
+                // Per-device victim sizing for the per-device shortfalls (#276): the LRU strategy
+                // must compare a device shortfall against what eviction actually frees on THAT
+                // device, so each candidate's figure is requiredMemory / tensorParallel. Built
+                // from the same allRecords snapshot; the `|| 1` keeps the figure finite for a
+                // degenerate 0 record (route validation already enforces >= 1 on deploy/update).
+                const perDeviceMemoryByModel = new Map(
+                  allRecords
+                    .filter((r) => r.requiredMemory !== null)
+                    .map((r) => [r.name, r.requiredMemory! / (r.tensorParallel || 1)]),
+                );
 
-        const runnerClient = deps.createRunnerClient(instance.runnerHost!, instance.runnerPort!);
-        wakeTasks.push(
-          deps.sleepWake
-            .wakeModel(modelName, instance.instanceId, runnerClient)
-            .catch((err: unknown) => {
-              app.log.error(
-                { err, modelName, instanceId: instance.instanceId },
-                'Background wake failed',
-              );
-            }),
-        );
-      }
-      // Wake dispatches above are fire-and-forget; retain the model claim until they all settle.
-      // Each call already has a catch, so the aggregate cannot reject.
-      void Promise.all(wakeTasks).finally(() => modelLifecycleInFlight.delete(modelName));
+                // Victim scope: per shortfall, only the waker's device co-location group (worker-wide
+                // victims tore down healthy co-tenants on other devices for a shortfall on one
+                // device — the same innocent-eviction class the per-device check exposed).
+                const victims = selectWakeVictims(
+                  deps,
+                  instance,
+                  shortfalls,
+                  allInstances,
+                  pinnedModels,
+                  memoryByModel,
+                  perDeviceMemoryByModel,
+                );
+
+                // Isolated per victim, same rationale as deployFromRecord's eviction loop: one
+                // victim's teardown failure must not throw out of the wake task and strand the
+                // remaining `claimed` instances (whose wakeModel dispatch below would then never
+                // run, leaving them stuck in STARTING until reconciliation times out).
+                const victimResults = await Promise.allSettled(
+                  victims.map(async (victim) => {
+                    const vs = await deps.lifecycle.getInstance(
+                      victim.modelName,
+                      victim.instanceId,
+                    );
+                    const ok = await teardownInstance(
+                      app,
+                      deps,
+                      victim.modelName,
+                      {
+                        instanceId: victim.instanceId,
+                        runnerHost: vs?.runnerHost ?? null,
+                        runnerPort: vs?.runnerPort ?? null,
+                      },
+                      'Eviction (wake capacity reclamation)',
+                    );
+                    if (ok) deps.eviction.recordEviction('wake');
+                    return ok;
+                  }),
+                );
+                const victimFailures = victimResults.filter(
+                  (r) => r.status === 'rejected' || r.value === false,
+                ).length;
+                if (victimFailures > 0) {
+                  app.log.error(
+                    {
+                      modelName,
+                      instanceId: instance.instanceId,
+                      victimFailures,
+                      totalVictims: victims.length,
+                    },
+                    'Some eviction victims failed teardown during wake capacity reclamation',
+                  );
+                }
+              }
+            }
+
+            const runnerClient = deps.createRunnerClient(
+              instance.runnerHost!,
+              instance.runnerPort!,
+            );
+            wakeTasks.push(
+              deps.sleepWake
+                .wakeModel(modelName, instance.instanceId, runnerClient)
+                .catch((err: unknown) => {
+                  app.log.error(
+                    { err, modelName, instanceId: instance.instanceId },
+                    'Background wake failed',
+                  );
+                }),
+            );
+          }
+
+          // Each dispatch already has a catch, so this aggregate cannot reject.
+          await Promise.all(wakeTasks);
+        } catch (err) {
+          app.log.error(
+            { err, modelName, claimed: claimed.length },
+            'Background wake orchestration failed',
+          );
+        } finally {
+          modelLifecycleInFlight.delete(modelName);
+        }
+      })();
 
       return reply.code(202).send({
         modelName,
