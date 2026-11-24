@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Control-plane cleanup: dead parking knob removed, listen port validated at boot (#258).** The
+  control plane no longer parses `SARDEENZ_PARKING_TIMEOUT_SECS`: the value was never read, no
+  deployment manifest or `.env.example` entry set it for this service, and the Phase-2 doc no longer
+  lists it — the proxy's own, identically named parking deadline is unaffected.
+  `SARDEENZ_CONTROL_PLANE_LISTEN_ADDR` (and the legacy `SARDEENZ_LISTEN_ADDR`) must now carry an
+  integer port between 1 and 65535, so `0.0.0.0:abc`, `0.0.0.0:`, `:0` and `:65536` fail in
+  `loadConfig` with a message naming both variables instead of reaching `app.listen` as `NaN` or an
+  out-of-range port; a colon-less address still defaults to port 3000. The unused `createSubscriber`
+  export is removed from the control plane's Redis client helper (no runtime behaviour; the dashboard
+  BFF's same-named class method is unrelated).
 - **Proxy request-body cap raised to 32 MiB and made self-explaining (#211).** The
   `SARDEENZ_PROXY_MAX_BODY_BYTES` default rises from 1 MiB to `33554432`, and an over-limit body now
   returns the proxy's own JSON `413` with `type: "request_too_large"`, whose message names the

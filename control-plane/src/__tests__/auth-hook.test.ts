@@ -17,7 +17,6 @@ function makeConfig(apiToken: string): Config {
     leaseName: 'sardeenz-control-plane',
     leaseNamespace: 'default',
     workerHeartbeatTimeoutSecs: 30,
-    parkingTimeoutSecs: 120,
     evictionMaxPerCycle: 3,
     colocationMaxPoolHeadroomPercent: 50,
     poolPressureEnabled: false,

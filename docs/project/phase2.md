@@ -161,7 +161,6 @@ Set up the Fastify application with the foundational infrastructure that all sub
 - `SARDEENZ_LEASE_NAMESPACE` — K8s namespace for Lease (default from downward API)
 - `SARDEENZ_REDIS_KEY_PREFIX` — prefix for Redis keys and pub/sub channels (default `sardeenz`)
 - `SARDEENZ_WORKER_HEARTBEAT_TIMEOUT_SECS` — how long before a silent worker is considered dead (default `30`)
-- `SARDEENZ_PARKING_TIMEOUT_SECS` — timeout for model wake-up before returning 503 (default `120`)
 - `SARDEENZ_EVICTION_MAX_PER_CYCLE` — max models to evict in a single placement cycle (default `3`)
 - `SARDEENZ_SLEEP_TIMEOUT_SECS` — timeout for runner sleep command (default `300`)
 - `SARDEENZ_WAKE_TIMEOUT_SECS` — timeout for runner wake command (default `300`)
