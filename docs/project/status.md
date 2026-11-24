@@ -1,9 +1,9 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-23 (#247 documents the intended platform-image publish + rollout flow and
-makes the four platform Deployments pull `Always`; #287 runner-shim provenance + republish runbook
-also merged. The vLLM image republish and the on-cluster rollout proof for #247 remain pending.)
+Last update: 2026-11-24 (M16 Orchestration Resilience complete — #240, #242, #245, #246 and #254
+plus #258, whose control-plane dead config and proxy hot-path cleanups shipped as two PRs. The vLLM
+image republish and the on-cluster rollout proof for #247 remain pending.)
 
 ## Phases (complete)
 
@@ -118,11 +118,11 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   #287's operational half remains: republish the three vLLM SIFs (`rc2`), bump the digest-pinned
   `runners.yaml` entries on `main`, re-import, and verify `attribution: "device"` from two
   co-located runners.
-- M16 (Orchestration Resilience) is in progress: #242 (model wake returns before victim eviction)
-  and #245 (proxy piggybacked parkers fast-fail on wake-trigger failure) merged, #240
-  (crashed-worker `info`/`memory` Redis keys never expired → join/leave flap), #254 (phantom
-  device-memory gauge series for departed workers and stale reports) and #246 (protocol-family
-  admission) fixed; #258 remains.
+- M16 (Orchestration Resilience) is complete: #242 (model wake returns before victim eviction),
+  #245 (proxy piggybacked parkers fast-fail on wake-trigger failure), #240 (crashed-worker
+  `info`/`memory` Redis keys never expired → join/leave flap), #254 (phantom device-memory gauge
+  series for departed workers and stale reports), #246 (protocol-family admission) and #258
+  (control-plane dead config + proxy hot-path allocations, two PRs) are all fixed and merged.
   #286 and #288 had already merged early as P1/P2 follow-ups.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
