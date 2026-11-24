@@ -78,9 +78,9 @@ sardeenz/
 ## Project Status
 
 Phases 0–5 and milestones M2–M15, M17 and M19's Phase 5 half are complete and merged to `dev`.
-M16 (Orchestration Resilience) is in progress: #242 and #245 are merged and #240 (crashed-worker
-Redis key leak and join/leave flap) is fixed; #246 (proxy protocol/path-prefix enforcement), #254
-(phantom VRAM gauge series) and #258 (control-plane/proxy cleanups) remain. Next: the M19
+M16 (Orchestration Resilience) is in progress: #242 and #245 are merged, and #240 (crashed-worker
+Redis key leak and join/leave flap) and #254 (phantom VRAM gauge series) are fixed; #246 (proxy
+protocol/path-prefix enforcement) and #258 (control-plane/proxy cleanups) remain. Next: the M19
 image/supply-chain half (#266, #267), then the Parking Lot backlog.
 Details and history: [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
