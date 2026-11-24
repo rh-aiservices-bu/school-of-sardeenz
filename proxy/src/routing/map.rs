@@ -55,7 +55,7 @@ impl RoutingMapCache {
     /// Project the routing map through `f` while holding the read guard, cloning
     /// nothing of `RoutingEntry`. Used by the model listings; `get_all` stays for
     /// callers that need a full snapshot (`state/redis_sync.rs:93,195`,
-    /// `routing/map.rs:143,150`). `f` must not call back into the cache
+    /// `routing/map.rs:144,151`). `f` must not call back into the cache
     /// mutatively: the read guard is held throughout, so a write from inside
     /// would deadlock.
     pub async fn project<T>(&self, f: impl Fn(&str, &RoutingEntry) -> T) -> Vec<T> {
