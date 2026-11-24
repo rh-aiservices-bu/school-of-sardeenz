@@ -93,6 +93,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Phantom device-memory series are dropped from `/metrics` (#254).** Reconciliation only ever
+  `.set()` the three `sardeenz_control_plane_device_memory_bytes{worker_id,device_index,state}`
+  series per device, so a worker that left the cluster — or whose memory report stopped arriving
+  — kept its last VRAM values forever. Each pass now diffs the worker/device pairs it wants
+  against the pairs it emitted last time and removes the difference, treating a stale budget (no
+  report within `SARDEENZ_WORKER_HEARTBEAT_TIMEOUT_SECS + SARDEENZ_RECONCILIATION_INTERVAL_SECS`,
+  60 s at the defaults) exactly like absent telemetry: a departed worker or a stale report leaves a
+  gap in `/api/metrics/memory` and `memory-history` instead of a frozen plateau, and the series set
+  no longer grows with the worker flap.
+
 - **Crashed workers no longer flap between joined and lost (#240).** Only a worker's `heartbeat`
   key was volatile; `workers:{id}:info` and `workers:{id}:memory` lived forever, so every
   reconciliation tick re-discovered the corpse from `info`, published `WORKER_JOINED` + "Worker

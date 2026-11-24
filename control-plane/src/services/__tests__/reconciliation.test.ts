@@ -7,7 +7,7 @@ import { ReconciliationService } from '../reconciliation.js';
 import type { ReconciliationConfig } from '../reconciliation.js';
 import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
 import { WorkerPoolService, type WorkerRecord } from '../worker-pool.js';
-import type { MemoryBudgetService } from '../memory-budget.js';
+import type { MemoryBudgetService, WorkerBudget } from '../memory-budget.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { ModelRepository, ModelRecord } from '../model-repository.js';
 import type { EvictionEngine, EvictionCandidate } from '../eviction.js';
@@ -1588,6 +1588,150 @@ describe('ReconciliationService', () => {
       );
 
       setSpy.mockRestore();
+    });
+
+    describe('series removal (#254)', () => {
+      /** A measured worker report in the shape MemoryBudgetService.getAllBudgets returns. */
+      function deviceBudget(
+        workerId: string,
+        devices: Array<{ deviceIndex: number; usedBytes: number }>,
+        stale = false,
+      ): WorkerBudget {
+        return {
+          workerId,
+          lastReportAt: new Date().toISOString(),
+          stale,
+          devices: devices.map((device) => ({
+            deviceIndex: device.deviceIndex,
+            deviceType: 'gpu',
+            totalBytes: 16e9,
+            usedBytes: device.usedBytes,
+            availableBytes: 16e9 - device.usedBytes,
+          })),
+        };
+      }
+
+      /** The real gauge's current series (the device-memory gauge is registry-backed). */
+      async function series(): Promise<
+        Array<{ worker_id: string; device_index: string; state: string; value: number }>
+      > {
+        const { values } = await deviceMemoryBytes.get();
+        return values.map((metric) => {
+          const labels = metric.labels as Record<string, string | number>;
+          return {
+            worker_id: String(labels.worker_id),
+            device_index: String(labels.device_index),
+            state: String(labels.state),
+            value: metric.value,
+          };
+        });
+      }
+
+      beforeEach(() => {
+        deviceMemoryBytes.reset();
+      });
+
+      afterEach(() => {
+        deviceMemoryBytes.reset();
+      });
+
+      it('removes every series once a worker departs', async () => {
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254a', [
+            { deviceIndex: 0, usedBytes: 1e9 },
+            { deviceIndex: 1, usedBytes: 2e9 },
+          ]),
+        ]);
+
+        await service.tick();
+        expect(await series()).toHaveLength(6);
+
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([]);
+        await service.tick();
+
+        expect((await series()).filter((value) => value.worker_id === 'w254a')).toEqual([]);
+      });
+
+      it('removes the series of a worker whose report went stale', async () => {
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254a', [{ deviceIndex: 0, usedBytes: 3e9 }]),
+        ]);
+
+        await service.tick();
+        expect((await series()).filter((value) => value.worker_id === 'w254a')).toHaveLength(3);
+
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254a', [{ deviceIndex: 0, usedBytes: 3e9 }], true),
+        ]);
+        await service.tick();
+
+        expect((await series()).filter((value) => value.worker_id === 'w254a')).toEqual([]);
+      });
+
+      it('removes a device that disappeared from a live worker and updates the survivor', async () => {
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254a', [
+            { deviceIndex: 0, usedBytes: 1e9 },
+            { deviceIndex: 1, usedBytes: 2e9 },
+          ]),
+        ]);
+
+        await service.tick();
+
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254a', [{ deviceIndex: 0, usedBytes: 5e9 }]),
+        ]);
+        await service.tick();
+
+        const after = await series();
+        expect(after.filter((value) => value.device_index === '1')).toEqual([]);
+        expect(
+          after.find((value) => value.device_index === '0' && value.state === 'used')?.value,
+        ).toBe(5e9);
+      });
+
+      it('does not resurrect removed series and stops tracking them', async () => {
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254a', [{ deviceIndex: 0, usedBytes: 1e9 }]),
+        ]);
+        await service.tick();
+
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([]);
+        await service.tick();
+
+        const removeSpy = vi.spyOn(deviceMemoryBytes, 'remove');
+        try {
+          await service.tick();
+          // The tracked set was swapped with the pass that removed the pair, so a further empty
+          // tick has nothing left to remove.
+          expect(removeSpy).not.toHaveBeenCalled();
+        } finally {
+          removeSpy.mockRestore();
+        }
+        expect(await series()).toEqual([]);
+      });
+
+      it('keeps the previous series when the pass throws and removes on the next tick', async () => {
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([
+          deviceBudget('w254b', [{ deviceIndex: 0, usedBytes: 4e9 }]),
+        ]);
+        await service.tick();
+        expect((await series()).filter((value) => value.worker_id === 'w254b')).toHaveLength(3);
+
+        mocks.lifecycle.getAllInstances.mockRejectedValue(new Error('instances unavailable'));
+        await expect(service.tick()).resolves.toBeUndefined();
+        expect(mocks.logger.error).toHaveBeenCalledWith(
+          expect.objectContaining({ step: 'refreshMetrics' }),
+          'Reconciliation step failed',
+        );
+        expect((await series()).filter((value) => value.worker_id === 'w254b')).toHaveLength(3);
+
+        mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+        mocks.memoryBudget.getAllBudgets.mockReturnValue([]);
+        await service.tick();
+
+        expect((await series()).filter((value) => value.worker_id === 'w254b')).toEqual([]);
+      });
     });
   });
 
