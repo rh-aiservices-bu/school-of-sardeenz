@@ -80,6 +80,24 @@ gh workflow run publish-platform-images.yml --ref dev -f tag=latest
 The workflow publishes `linux/amd64` images. It builds the three services in parallel, publishes
 `worker-base`, and then builds `worker` from the exact base digest produced by that run.
 
+Both workflows scan and sign every image (ADR-030). After the push, Trivy scans the pushed digest:
+a **CRITICAL** vulnerability that has a fix fails the run, while CRITICAL-unfixed and HIGH findings
+are uploaded to GitHub code scanning (suppress only via `.trivyignore`, with a dated justification).
+Only if the scan passes is the digest signed — keyless with cosign, so the signature records this
+workflow's OIDC identity and no signing key is stored anywhere.
+
+**An unsigned image is not deployable.** Verify a digest before pinning it into an overlay:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  quay.io/rh-aiservices-bu/sardeenz-proxy@sha256:<digest>
+```
+
+Renaming either publish workflow changes the identity string — that string _is_ the trust anchor.
+Verification needs Fulcio/Rekor reachability; an air-gapped mirror verifies at import time.
+
 Pinning one of these tags — or a digest — in an environment overlay, and rolling the four platform
 Deployments out, is the operator half: see
 [Platform image publishing and rollout](../deployment/README.md#platform-image-publishing-and-rollout)

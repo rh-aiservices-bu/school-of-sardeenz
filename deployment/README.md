@@ -205,6 +205,17 @@ oc image info quay.io/rh-aiservices-bu/sardeenz-proxy:<tag> \
 uses for runner images; the Quay UI/API shows the same manifest digest. Without `--filter-by-os`,
 `oc image info` errors on a manifest list.
 
+Verify the signature before you pin the digest (ADR-030): every platform image is cosign-signed by
+digest in CI, and an unsigned image is not deployable. Note the `<role>` in the repository name —
+the regexp's identity is the same for both publish workflows:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  quay.io/rh-aiservices-bu/sardeenz-proxy@sha256:<manifest-list-digest>
+```
+
 One caveat: the bases set `imagePullPolicy: Always`, which needs registry reachability at pod start.
 For an air-gapped cluster, pin a `digest` and set `imagePullPolicy: IfNotPresent` on that workload in
 the same overlay (patch it, or add a second overlay layer).

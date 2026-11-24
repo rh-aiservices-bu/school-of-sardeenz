@@ -29,3 +29,4 @@
 - [ADR-027](adr-027-shim-memory-device-scope.md) — Shim Memory Figures Are Device-Scope Observations, Not Attributions _(extends ADR-010/ADR-011)_
 - [ADR-028](adr-028-drain-signal-semantics.md) — The Drain Signal Is Two-Valued: Unknown Never Means Drained _(extends ADR-010)_
 - [ADR-029](adr-029-colocation-hold-and-pressure-stop.md) — Co-location Keeps Sleep's Hold, and Pressure Evicts by Stopping _(extends ADR-011/ADR-014; amends ADR-011)_
+- [ADR-030](adr-030-platform-image-signing-and-scanning.md) — Platform Images Are Digest-Pinned, Trivy-Gated and Cosign-Signed in CI _(clarifies ADR-017)_

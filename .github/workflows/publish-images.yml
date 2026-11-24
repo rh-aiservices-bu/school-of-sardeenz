@@ -16,6 +16,12 @@ name: Publish impacted images
 #   containers/worker-base/**                    → worker-base, then worker
 #   containers/worker/**                         → worker (from last worker-base)
 #   nothing matching (docs, CI, CHANGELOG only)  → no build, job exits green
+#
+# Supply chain (ADR-030): each image is scanned by digest after the push (Trivy: a fixed CRITICAL
+# fails the run; CRITICAL-unfixed and HIGH go to GitHub code scanning) and only then signed keyless
+# with cosign by digest. The signature's trust anchor is THIS FILE'S identity:
+#   https://github.com/rh-aiservices-bu/school-of-sardeenz/.github/workflows/publish-images.yml@refs/heads/dev
+# Renaming this file changes the verification identity documented in ADR-030.
 
 run-name: Publish impacted images :${{ github.sha }} from ${{ github.ref_name }}
 
@@ -192,6 +198,10 @@ jobs:
     # matrix context is NOT available in jobs.<job_id>.if (github, needs, vars,
     # inputs only) — the build decision lives in the first step's if instead.
     if: needs.detect.outputs.any == 'true'
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -254,6 +264,7 @@ jobs:
 
       - name: Build and push ${{ matrix.role }}
         if: matrix.build
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ${{ matrix.context }}
@@ -268,6 +279,64 @@ jobs:
           cache-from: type=gha,scope=publish-${{ matrix.role }}
           cache-to: type=gha,mode=max,scope=publish-${{ matrix.role }},ignore-error=true
 
+      # Two scans, one gate: Trivy's severity drives both display and exit code, so a single scan
+      # cannot both gate on a fixable CRITICAL and report HIGH. Scan before sign: a rejected image
+      # must stay unsigned.
+      - name: Scan ${{ matrix.role }} by digest — report CRITICAL + HIGH
+        id: scan-report
+        if: matrix.build
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # trivy-action has no `platform` input; Trivy maps every CLI flag to TRIVY_<FLAG>,
+          # so this is `trivy image --platform linux/amd64 …` (the pushed digest is an index).
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.role }}.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivyignores: .trivyignore
+          version: v0.76.2
+
+      - name: Upload ${{ matrix.role }} vulnerability report
+        if: always() && matrix.build && steps.scan-report.conclusion == 'success'
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: trivy-${{ matrix.role }}.sarif
+          category: trivy-${{ matrix.role }}
+
+      - name: Gate — fail on fixed CRITICAL vulnerabilities (${{ matrix.role }})
+        if: matrix.build
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}@${{ steps.build.outputs.digest }}
+          severity: CRITICAL
+          ignore-unfixed: 'true'
+          exit-code: '1'
+          format: table
+          trivyignores: .trivyignore
+          version: v0.76.2
+
+      - name: Install cosign
+        if: matrix.build
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: v3.1.5
+
+      - name: Sign ${{ matrix.role }} by digest (keyless)
+        if: matrix.build
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/${{ matrix.repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes --registry-referrers-mode legacy "$IMAGE"
+
       - name: Log out of Quay
         if: always() && matrix.build
         run: docker logout "$REGISTRY" || true
@@ -276,6 +345,10 @@ jobs:
     name: Publish worker
     needs: [detect, images]
     if: needs.detect.outputs.worker == 'true'
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -324,6 +397,7 @@ jobs:
           echo "Pairing worker with worker-base@$digest"
 
       - name: Build and push worker
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -339,6 +413,59 @@ jobs:
           push: true
           cache-from: type=gha,scope=publish-worker
           cache-to: type=gha,mode=max,scope=publish-worker,ignore-error=true
+
+      # Two scans, one gate: the report scan feeds code scanning, the gate scan blocks on a fixable
+      # CRITICAL. Scan before sign: a rejected image must stay unsigned.
+      - name: Scan worker by digest — report CRITICAL + HIGH
+        id: scan-report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # trivy-action has no `platform` input; Trivy maps every CLI flag to TRIVY_<FLAG>,
+          # so this is `trivy image --platform linux/amd64 …` (the pushed digest is an index).
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-worker.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivyignores: .trivyignore
+          version: v0.76.2
+
+      - name: Upload worker vulnerability report
+        if: always() && steps.scan-report.conclusion == 'success'
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: trivy-worker.sarif
+          category: trivy-worker
+
+      - name: Gate — fail on fixed CRITICAL vulnerabilities (worker)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker@${{ steps.build.outputs.digest }}
+          severity: CRITICAL
+          ignore-unfixed: 'true'
+          exit-code: '1'
+          format: table
+          trivyignores: .trivyignore
+          version: v0.76.2
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: v3.1.5
+
+      - name: Sign worker by digest (keyless)
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.QUAY_NAMESPACE }}/sardeenz-worker@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes --registry-referrers-mode legacy "$IMAGE"
 
       - name: Log out of Quay
         if: always()

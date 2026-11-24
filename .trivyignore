@@ -1,0 +1,12 @@
+# Trivy ignore file — read by both publish workflows (`trivyignores: .trivyignore`) for the
+# platform images' CRITICAL/HIGH report and the CRITICAL-fixed publish gate (ADR-030).
+#
+# The gate already ignores findings with no upstream fix (`ignore-unfixed: true`). An entry here
+# therefore suppresses a *fixable* finding for every platform image — treat it as an exception that
+# must expire. Every entry is:
+#
+#   CVE-YYYY-NNNNN
+#   # image(s): <repo>[:<tag>]; why: <one line>; added: YYYY-MM-DD; removed by: #<issue>
+#
+# Empty at introduction (#266). The first publish run after merge proves the gate is clean; add an
+# entry only with a maintainer decision and an issue number that removes it.

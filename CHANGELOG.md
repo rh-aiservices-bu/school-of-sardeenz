@@ -972,6 +972,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
   conservative direction); unlabeled sole-resident rows keep displaying.
 
+### Security
+
+- **Platform images are built from digest-pinned bases, Trivy-scanned, and cosign-signed (#266).**
+  All seven base-image `FROM` lines of the images this repository builds now carry the human tag plus
+  a `sha256:` digest — `rust:1.86-bookworm`, `gcr.io/distroless/static-debian12:nonroot`,
+  `node:22-slim` in both service Dockerfiles, `ubi9/ubi:latest`, `nvidia/cuda:12.6.3-runtime-ubi9`,
+  and the previously tag-only `quay.io/vllm/vllm-cuda:0.21.0_rhaiv.8` — so a rebuild can no longer
+  silently inherit a moved tag. Deployable references stay pinned per environment in overlays and
+  Dependabot's existing `docker` entries own freshness. A new
+  `tests/container-images/verify-image-pins.mjs` (`make verify-image-pins`, run in the CI `quality`
+  job) fails on any `FROM` that is unpinned or lacks the human tag. Both publish workflows now scan
+  the pushed digest with Trivy by digest — a CRITICAL finding that has a fix fails the publish,
+  CRITICAL-unfixed and HIGH findings go to GitHub code scanning, and suppressions live in a dated
+  `.trivyignore` — and only then sign it keyless with cosign, so an image can be verified against the
+  publishing workflow's OIDC identity (ADR-030). The worker images also stop running as root:
+  `worker-base` creates uid 1001 / gid 0 and ends with `USER 1001:0`, while the worker's discarded
+  build stages pin `USER 0` and its final stage runs as `1001:0` with a group-writable
+  `/opt/sardeenz` — the posture the worker Deployment's `runAsNonRoot: true` already claimed
+  (OpenShift SCCs still assign their namespace-range uid).
+
 ## [0.2.0] - 2026-09-15
 
 First release of Sardeenz v2, the production-grade successor to the
