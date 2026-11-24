@@ -27,6 +27,17 @@ function assert(condition, message) {
   }
 }
 
+// The last USER wins at runtime: a plain `includes('USER 1001:0')` would still pass if a later
+// `USER 0` were added, so assert the effective identity instead.
+function assertEndsWithNonRootUser(containerfile, label) {
+  const users = [...containerfile.matchAll(/^USER\s+(\S+)\s*$/gm)].map((match) => match[1]);
+  assert(users.length > 0, `${label} must declare a USER instruction`);
+  assert(
+    users.at(-1) === '1001:0',
+    `${label} must end with USER 1001:0, found USER ${users.at(-1)}`,
+  );
+}
+
 assert(runtimeManifest.main === './dist/index.js', 'runtime manifest must use dist/index.js');
 assert(runtimeManifest.types === './dist/index.d.ts', 'runtime manifest must use dist/index.d.ts');
 assert(
@@ -120,6 +131,13 @@ assert(
   workerBaseContainerfile.includes('ARG NODE_MAJOR=22'),
   'worker-base must provide the Node.js major required by the repository and NVML binding',
 );
+assert(
+  workerBaseContainerfile.includes(
+    'useradd --uid 1001 --gid 0 --create-home --shell /sbin/nologin sardeenz',
+  ),
+  'worker-base must create the unprivileged sardeenz user (uid 1001, gid 0)',
+);
+assertEndsWithNonRootUser(workerBaseContainerfile, 'worker-base');
 
 const workerContainerfile = readFileSync(
   join(repositoryRoot, 'containers/worker/Containerfile'),
@@ -131,6 +149,10 @@ const workerDockerignore = readFileSync(
 );
 for (const requiredInstruction of [
   'ARG WORKER_BASE_IMAGE=',
+  'USER 0',
+  'chown 1001:0 /opt/sardeenz',
+  'chmod 0775 /opt/sardeenz',
+  'USER 1001:0',
   'npx tsc --build runners/dev-worker/tsconfig.json',
   'npm ci --omit=dev --workspace=@sardeenz/dev-worker',
   'COPY --from=build /build/runners/dev-worker/dist ./runners/dev-worker/dist',
@@ -141,6 +163,8 @@ for (const requiredInstruction of [
     `worker Containerfile is missing required packaging instruction: ${requiredInstruction}`,
   );
 }
+assertEndsWithNonRootUser(workerContainerfile, 'worker');
+
 for (const requiredInput of [
   'package.json',
   'package-lock.json',

@@ -65,3 +65,8 @@ podman push quay.io/rh-aiservices-bu/sardeenz-worker:latest
 
 Set the resulting `sardeenz-worker` reference in the deployment overlay. The base image alone is
 only a reusable runtime/building block and cannot run the worker Deployment.
+
+The final image runs as `USER 1001:0` (inherited identity, `/opt/sardeenz` owned `1001:0` mode
+`0775`). The two build stages pin `USER 0` explicitly: `worker-base` itself now ends with
+`USER 1001:0`, and `npm ci` / `tsc` write to the root-owned `/build` tree. Those stages are
+discarded, so no runtime process is root.
