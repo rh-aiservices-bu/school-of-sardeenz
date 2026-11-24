@@ -77,10 +77,11 @@ sardeenz/
 
 ## Project Status
 
-Phases 0–4 and milestones M2–M15 are complete and merged to `dev`; M17 (Runner & Shim
-Correctness) is implemented on `milestone/m17-runner-shim-correctness` awaiting its PR to `dev`.
-Next: **Phase 5** (kvcached oversubscription / co-location policy — unblocked by M17's #244 +
-#253), then M19 (image/supply-chain backlog). M16 has resumed (#242 in progress, #245 next).
+Phases 0–5 and milestones M2–M15, M17 and M19's Phase 5 half are complete and merged to `dev`.
+M16 (Orchestration Resilience) is in progress: #242 and #245 are merged and #240 (crashed-worker
+Redis key leak and join/leave flap) is fixed; #246 (proxy protocol/path-prefix enforcement), #254
+(phantom VRAM gauge series) and #258 (control-plane/proxy cleanups) remain. Next: the M19
+image/supply-chain half (#266, #267), then the Parking Lot backlog.
 Details and history: [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 

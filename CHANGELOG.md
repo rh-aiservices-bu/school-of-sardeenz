@@ -93,6 +93,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Crashed workers no longer flap between joined and lost (#240).** Only a worker's `heartbeat`
+  key was volatile; `workers:{id}:info` and `workers:{id}:memory` lived forever, so every
+  reconciliation tick re-discovered the corpse from `info`, published `WORKER_JOINED` + "Worker
+  joined", immediately reaped it again with `WORKER_LEFT` + "Worker lost", and repeated every
+  interval — also keeping a phantom memory budget for the dead worker alive for the dashboard. The
+  worker agent now writes all three keys with the same TTL (four heartbeat intervals,
+  `PEXPIRE`-refreshed on every successful heartbeat tick) and re-registers when its `info` key has
+  vanished, so a worker that recovers from a liveness timeout rejoins instead of staying invisible;
+  the leader additionally deletes a reaped worker's `info`, `heartbeat` and `memory` keys
+  (`WorkerPoolService.deleteWorkerState`), logging a warning and still completing the reap when
+  Redis rejects the delete (the deletion is retried when the next reconciliation tick rediscovers
+  the worker from its `info` key). `worker:{id}:detail` keeps its own
+  120 s TTL. Rolling upgrade: a worker image older than this change cannot re-register after being
+  reaped and needs a restart; an older control plane works unchanged with a new worker. No contract,
+  API, config or metric change; the phantom Prometheus gauge series for departed workers (#254) are
+  untouched.
 - **Piggybacked parkers fast-fail when the wake trigger fails (#245).** The first parker for a
   sleeping model still returns its 503 "wake trigger failed: …" immediately, but it now also
   publishes the failure to the herd: `pending_wakes` entries carry a `watch::Sender<WakeState>`

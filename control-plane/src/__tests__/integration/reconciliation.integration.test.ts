@@ -226,3 +226,73 @@ describe.skipIf(!AVAILABLE)('Reconciliation — unclaimed runner sweep integrati
     }
   });
 });
+
+describe.skipIf(!AVAILABLE)('Reconciliation — dead worker key cleanup integration (#240)', () => {
+  const WORKER_ID = 'w-240';
+
+  let harness: TestHarness;
+
+  beforeEach(async () => {
+    harness = createHarness();
+    await harness.setup();
+  });
+
+  afterEach(async () => {
+    await harness?.teardown();
+  });
+
+  function buildService(): ReconciliationService {
+    return new ReconciliationService(
+      harness.lifecycle,
+      harness.workerPool,
+      harness.memoryBudget,
+      harness.routingMap,
+      { isLeader: true },
+      CONFIG,
+      { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      harness.redis,
+      harness.keyPrefix,
+      undefined,
+      harness.instanceRepository,
+      harness.modelRepository,
+      (baseUrl: string) => new WorkerClient({ baseUrl, timeoutMs: 5000 }),
+    );
+  }
+
+  it('a dead worker is reaped once and its Redis keys are deleted (#240)', async () => {
+    await harness.registerWorker({
+      workerId: WORKER_ID,
+      managementUrl: 'http://w-240:9100',
+      devices: [{ deviceIndex: 0, deviceType: DeviceType.CUDA, memoryTotalBytes: 16_000_000_000 }],
+    });
+    const infoKey = redisKey(harness.keyPrefix, 'workers', WORKER_ID, 'info');
+    const heartbeatKey = redisKey(harness.keyPrefix, 'workers', WORKER_ID, 'heartbeat');
+    const memoryKey = redisKey(harness.keyPrefix, 'workers', WORKER_ID, 'memory');
+
+    const events: ClusterEvent[] = [];
+    const unsubscribe = await harness.subscribeClusterEvents((event) => events.push(event));
+    try {
+      const service = buildService();
+
+      await service.tick(); // fresh heartbeat → ONLINE, no events
+      expect(events.filter((e) => e.type === ClusterEventType.WORKER_LEFT)).toHaveLength(0);
+      expect(await harness.redis.exists(infoKey, heartbeatKey, memoryKey)).toBe(3);
+
+      await harness.redis.del(heartbeatKey); // the crash signature
+
+      await service.tick();
+      // The publish returns before the subscriber's socket delivers the message, so settle on the
+      // event rather than assuming it landed by the time tick() resolves.
+      await vi.waitFor(() => {
+        expect(events.filter((e) => e.type === ClusterEventType.WORKER_LEFT)).toHaveLength(1);
+      });
+      expect(await harness.redis.exists(infoKey, heartbeatKey, memoryKey)).toBe(0);
+
+      await service.tick();
+      expect(events.filter((e) => e.type === ClusterEventType.WORKER_LEFT)).toHaveLength(1);
+      expect(events.filter((e) => e.type === ClusterEventType.WORKER_JOINED)).toHaveLength(0);
+    } finally {
+      await unsubscribe();
+    }
+  });
+});

@@ -64,7 +64,7 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                     |
 | M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238) |
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                              |
-| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; platform publish/rollout documented and pull policy fixed (#247); image/supply-chain half (#266/#267) still open.                                                                           |
+| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; platform publish/rollout documented and pull policy fixed (#247); image/supply-chain half (#266/#267) still open.         |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -118,9 +118,10 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   #287's operational half remains: republish the three vLLM SIFs (`rc2`), bump the digest-pinned
   `runners.yaml` entries on `main`, re-import, and verify `attribution: "device"` from two
   co-located runners.
-- M16 (Orchestration Resilience) has resumed: #242 (model-level wake blocks up to 300 s per
-  eviction victim) is in progress, with #245 (proxy piggybacked parkers not fast-failed on
-  wake-trigger failure) next; #286 and #288 had already merged early as P1/P2 follow-ups.
+- M16 (Orchestration Resilience) is in progress: #242 (model wake returns before victim eviction)
+  and #245 (proxy piggybacked parkers fast-fail on wake-trigger failure) merged, #240
+  (crashed-worker `info`/`memory` Redis keys never expired → join/leave flap) fixed; #246, #254 and
+  #258 remain. #286 and #288 had already merged early as P1/P2 follow-ups.
 
 Full plan: [`overall-plan.md`](overall-plan.md).
 

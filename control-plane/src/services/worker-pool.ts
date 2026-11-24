@@ -27,6 +27,7 @@ export interface WorkerRecord {
 
 const INFO_SUFFIX = 'info';
 const HEARTBEAT_SUFFIX = 'heartbeat';
+const MEMORY_SUFFIX = 'memory';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -279,6 +280,10 @@ export class WorkerPoolService {
     return redisKey(this.keyPrefix, 'workers', workerId, HEARTBEAT_SUFFIX);
   }
 
+  private memoryKey(workerId: string): string {
+    return redisKey(this.keyPrefix, 'workers', workerId, MEMORY_SUFFIX);
+  }
+
   private infoScanPattern(): string {
     return redisKey(this.keyPrefix, 'workers', '*', INFO_SUFFIX);
   }
@@ -436,6 +441,21 @@ export class WorkerPoolService {
    */
   removeWorker(workerId: string): void {
     this.workers.delete(workerId);
+  }
+
+  /**
+   * Delete a departed worker's Redis registration state: `info` (what discoverWorkers rescans),
+   * `heartbeat` and `memory` (what MemoryBudgetService.refreshAll rescans). Does not touch the
+   * in-memory registry (removeWorker's job) nor `{prefix}:worker:{id}:detail`, which has its own
+   * 120 s TTL. Redis errors propagate — the caller logs them and the deletion is retried when the
+   * next reconciliation tick rediscovers the worker from its `info` key. See issue #240.
+   */
+  async deleteWorkerState(workerId: string): Promise<void> {
+    await this.redis.del(
+      this.infoKey(workerId),
+      this.heartbeatKey(workerId),
+      this.memoryKey(workerId),
+    );
   }
 
   // -------------------------------------------------------------------------

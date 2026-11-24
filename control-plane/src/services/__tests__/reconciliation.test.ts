@@ -6,7 +6,7 @@ import type { ControlPlaneComponents } from '@sardeenz/types';
 import { ReconciliationService } from '../reconciliation.js';
 import type { ReconciliationConfig } from '../reconciliation.js';
 import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
-import type { WorkerPoolService, WorkerRecord } from '../worker-pool.js';
+import { WorkerPoolService, type WorkerRecord } from '../worker-pool.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { ModelRepository, ModelRecord } from '../model-repository.js';
@@ -50,6 +50,80 @@ function makeWorker(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
   };
 }
 
+/** A minimal WorkerInfo payload the real WorkerPoolService accepts (see worker-pool.test.ts). */
+function validWorkerInfoPayload(): string {
+  return JSON.stringify({
+    capabilities: [
+      {
+        runnerType: 'vllm',
+        engineName: 'vLLM',
+        supportedModelTypes: ['LLM'],
+        supportedDeviceTypes: ['CUDA'],
+        supportedSleepLevels: ['L1_HOST_RAM'],
+      },
+    ],
+    devices: [{ deviceIndex: 0, deviceType: 'CUDA', memoryTotalBytes: 16_000_000_000 }],
+    managementUrl: 'http://w1:9100',
+  });
+}
+
+/**
+ * Map-backed Redis good enough for a REAL WorkerPoolService: SCAN with a single `*`, pipelines
+ * carrying get/set, and del. Deliberately ignores TTLs — the #240 test deletes keys explicitly
+ * rather than waiting for expiry.
+ */
+function makeFakeWorkerRedis(seed: Record<string, string> = {}) {
+  const store = new Map<string, string>(Object.entries(seed));
+  const matches = (pattern: string, key: string): boolean => {
+    const re = new RegExp(
+      '^' +
+        pattern
+          .split('*')
+          .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.*') +
+        '$',
+    );
+    return re.test(key);
+  };
+  const scan = vi.fn((_cursor: string, _match: string, pattern: string) => {
+    const keys = Array.from(store.keys()).filter((k) => matches(pattern, k));
+    return Promise.resolve(['0', keys] as [string, string[]]);
+  });
+  const pipeline = vi.fn(() => {
+    const ops: Array<() => [null, unknown]> = [];
+    const pipe = {
+      get: vi.fn((key: string) => {
+        ops.push(() => [null, store.get(key) ?? null]);
+        return pipe;
+      }),
+      set: vi.fn((...args: unknown[]) => {
+        const [key, value] = args as [string, string];
+        ops.push(() => {
+          store.set(key, value);
+          return [null, 'OK'];
+        });
+        return pipe;
+      }),
+      exec: vi.fn(() => Promise.resolve(ops.map((op) => op()))),
+    };
+    return pipe;
+  });
+  const del = vi.fn((...keys: string[]) => {
+    let removed = 0;
+    for (const key of keys) if (store.delete(key)) removed += 1;
+    return Promise.resolve(removed);
+  });
+  const redis = { scan, pipeline, del } as unknown as Redis;
+  return { redis, store };
+}
+
+/** Cluster events published on the fake publisher, in publish order. */
+function publishedEvents(mocks: MockDeps, type: ClusterEventType): ClusterEvent[] {
+  return mocks.redis.publish.mock.calls
+    .map((c) => JSON.parse(c[1] as string) as ClusterEvent)
+    .filter((e) => e.type === type);
+}
+
 interface MockDeps {
   instanceRepository: {
     findAll: Mock;
@@ -71,6 +145,7 @@ interface MockDeps {
     getAllWorkers: Mock;
     removeWorker: Mock;
     getWorker: Mock;
+    deleteWorkerState: Mock;
   };
   memoryBudget: {
     refreshAll: Mock;
@@ -192,6 +267,9 @@ function createMocks(): MockDeps {
       // set a runnerId on their fixtures (see makeModelState's default `runnerId: null` below),
       // so the new reap-attempt branch never engages unless a test opts in explicitly.
       getWorker: vi.fn().mockReturnValue(null),
+      // #240: the reap deletes the worker's Redis keys; default "success" so existing dead-worker
+      // tests exercise the normal path, and the #240 DEL-failure test overrides with a rejection.
+      deleteWorkerState: vi.fn().mockResolvedValue(undefined),
     },
     memoryBudget: {
       refreshAll: vi.fn().mockResolvedValue(undefined),
@@ -262,11 +340,12 @@ function createService(
     withEviction?: boolean;
     withInstanceRepository?: boolean;
     config?: ReconciliationConfig;
+    workerPool?: WorkerPoolService;
   } = {},
 ): ReconciliationService {
   return new ReconciliationService(
     mocks.lifecycle as unknown as ModelLifecycleService,
-    mocks.workerPool as unknown as WorkerPoolService,
+    options.workerPool ?? (mocks.workerPool as unknown as WorkerPoolService),
     mocks.memoryBudget as unknown as MemoryBudgetService,
     mocks.routingMap as unknown as RoutingMapService,
     mocks.leaderElection,
@@ -469,6 +548,85 @@ describe('ReconciliationService', () => {
 
       expect(mocks.lifecycle.transition).toHaveBeenCalledTimes(2);
       expect(mocks.routingMap.removeModel).toHaveBeenCalledWith('model-b');
+    });
+  });
+
+  describe('tick — dead worker Redis key cleanup (#240)', () => {
+    const INFO_KEY = 'sardeenz:workers:w1:info';
+    const HEARTBEAT_KEY = 'sardeenz:workers:w1:heartbeat';
+    const MEMORY_KEY = 'sardeenz:workers:w1:memory';
+
+    it('publishes exactly one WORKER_LEFT and never re-joins a worker whose heartbeat expired but whose info key remains (#240)', async () => {
+      const { redis: workerRedis, store } = makeFakeWorkerRedis({
+        [INFO_KEY]: validWorkerInfoPayload(),
+        [HEARTBEAT_KEY]: new Date().toISOString(),
+        [MEMORY_KEY]: JSON.stringify({ devices: [], reportedAt: new Date().toISOString() }),
+      });
+      const pool = new WorkerPoolService(workerRedis, KEY_PREFIX, 300);
+      service = createService(mocks, { workerPool: pool, withNotifications: true });
+
+      // Tick 1: a genuine first sighting — exactly one JOINED, no LEFT, worker ONLINE.
+      await service.tick();
+      expect(pool.getWorker('w1')?.status).toBe(WorkerStatus.ONLINE);
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_JOINED)).toHaveLength(1);
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_LEFT)).toHaveLength(0);
+
+      // The crash: heartbeat gone, info + memory remain (exactly what an ungracefully killed
+      // worker leaves behind).
+      store.delete(HEARTBEAT_KEY);
+
+      // Tick 2: reaped once, its Redis state deleted, no re-join.
+      await service.tick();
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_LEFT)).toHaveLength(1);
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_JOINED)).toHaveLength(1);
+      expect(pool.getWorker('w1')).toBeNull();
+      expect(pool.getDeadWorkers()).toEqual([]);
+      expect(store.has(INFO_KEY)).toBe(false);
+      expect(store.has(HEARTBEAT_KEY)).toBe(false);
+      expect(store.has(MEMORY_KEY)).toBe(false);
+
+      // Tick 3: nothing left to discover or reap — no cluster event of any kind.
+      const publishCallsAfterTick2 = mocks.redis.publish.mock.calls.length;
+      await service.tick();
+      expect(mocks.redis.publish.mock.calls.length).toBe(publishCallsAfterTick2);
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_JOINED)).toHaveLength(1);
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_LEFT)).toHaveLength(1);
+
+      // Notifications: one legitimate "joined" (tick 1) and one "lost" (tick 2) — never a pair
+      // per tick.
+      const titles = mocks.notifications.createNotification.mock.calls.map(
+        (c) => (c[0] as { title: string }).title,
+      );
+      expect(titles.filter((t) => t === 'Worker joined')).toHaveLength(1);
+      expect(titles.filter((t) => t === 'Worker lost')).toHaveLength(1);
+    });
+
+    it('still reaps and publishes WORKER_LEFT when the Redis delete fails (#240)', async () => {
+      mocks.workerPool.getDeadWorkers.mockReturnValue([makeWorker({ workerId: 'w1' })]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      mocks.workerPool.deleteWorkerState.mockRejectedValue(new Error('redis down'));
+
+      await expect(service.tick()).resolves.toBeUndefined();
+
+      expect(publishedEvents(mocks, ClusterEventType.WORKER_LEFT)).toHaveLength(1);
+      expect(mocks.workerPool.deleteWorkerState).toHaveBeenCalledWith('w1');
+      expect(mocks.workerPool.removeWorker).toHaveBeenCalledWith('w1');
+      expect(mocks.memoryBudget.clearWorkerReservations).toHaveBeenCalledWith('w1');
+      expect(mocks.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ workerId: 'w1', err: 'redis down' }),
+        'Failed to delete dead worker Redis state — the next reconciliation tick retries the deletion',
+      );
+      // Ordering: WORKER_LEFT publish → deleteWorkerState → removeWorker.
+      const leftPublishOrder = mocks.redis.publish.mock.calls.findIndex((c: string[]) =>
+        c[1].includes(ClusterEventType.WORKER_LEFT),
+      );
+      expect(leftPublishOrder).toBeGreaterThanOrEqual(0);
+      expect(mocks.redis.publish.mock.invocationCallOrder[leftPublishOrder]).toBeLessThan(
+        mocks.workerPool.deleteWorkerState.mock.invocationCallOrder[0],
+      );
+      expect(mocks.workerPool.deleteWorkerState.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.workerPool.removeWorker.mock.invocationCallOrder[0],
+      );
     });
   });
 
