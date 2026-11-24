@@ -90,6 +90,9 @@ const UNCLAIMED_REAP_CONFIRM_TICKS = 2;
  */
 const UNCLAIMED_REAP_MAX_PER_CYCLE = 5;
 
+/** The three series emitted per device by refreshMetrics (#254). */
+const DEVICE_MEMORY_STATES = ['total', 'used', 'available'] as const;
+
 const TRANSITIONAL_STATES: ReadonlyMap<ModelLifecycleState, 'deploy' | 'sleep'> = new Map([
   [ModelLifecycleState.STARTING, 'deploy'],
   [ModelLifecycleState.DRAINING, 'sleep'],
@@ -115,6 +118,10 @@ export class ReconciliationService {
    * adding one red row per worker per interval; the set is cleared as soon as the divergence
    * clears, so a recurrence is reported again. */
   private readonly massDivergenceReported = new Set<string>();
+  /** Device-memory label series emitted by the previous refreshMetrics pass (#254):
+   * workerId → device indexes as strings. Replaced wholesale at the end of a pass, so a throw
+   * leaves it stale for one tick and the next pass still computes the complete removal set. */
+  private emittedDeviceSeries = new Map<string, Set<string>>();
 
   constructor(
     private readonly lifecycle: ModelLifecycleService,
@@ -1469,7 +1476,15 @@ export class ReconciliationService {
     }
 
     const allBudgets = this.memoryBudget.getAllBudgets();
+    // Series this pass wants (#254): workerId → device indexes. The diff against
+    // emittedDeviceSeries below turns "no longer emitted" into an explicit removal — the gauge
+    // keeps the last value forever otherwise, so a departed worker or a stale budget would leave
+    // phantom VRAM in /metrics and in the Prometheus-scraped /api/metrics/memory and
+    // /api/metrics/memory-history views (a removed series stops being scraped).
+    const desired = new Map<string, Set<string>>();
     for (const budget of allBudgets) {
+      // A stale budget is absent telemetry (same treatment as the pool-pressure evaluator): its
+      // figures may be minutes old, so its series are dropped rather than frozen.
       if (budget.stale) continue;
       for (const device of budget.devices) {
         const deviceIndex = String(device.deviceIndex);
@@ -1485,7 +1500,32 @@ export class ReconciliationService {
           { worker_id: budget.workerId, device_index: deviceIndex, state: 'available' },
           device.availableBytes,
         );
+        let deviceIndexes = desired.get(budget.workerId);
+        if (!deviceIndexes) {
+          deviceIndexes = new Set();
+          desired.set(budget.workerId, deviceIndexes);
+        }
+        deviceIndexes.add(deviceIndex);
       }
+    }
+    for (const [workerId, deviceIndexes] of this.emittedDeviceSeries) {
+      const stillDesired = desired.get(workerId);
+      for (const deviceIndex of deviceIndexes) {
+        if (!stillDesired?.has(deviceIndex)) {
+          this.clearDeviceSeries(workerId, deviceIndex);
+        }
+      }
+    }
+    // Swapped last: a throw above leaves the previous map, so the next pass re-diffs from it and
+    // the removals it missed still happen (removing an absent series is a no-op).
+    this.emittedDeviceSeries = desired;
+  }
+
+  /** Drop every series this gauge emitted for one worker/device (#254). Removing an already
+   * absent series is a silent no-op in prom-client, so retries and repeat ticks are safe. */
+  private clearDeviceSeries(workerId: string, deviceIndex: string): void {
+    for (const state of DEVICE_MEMORY_STATES) {
+      deviceMemoryBytes.remove({ worker_id: workerId, device_index: deviceIndex, state });
     }
   }
 

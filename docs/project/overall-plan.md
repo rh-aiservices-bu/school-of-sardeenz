@@ -404,8 +404,9 @@ Alongside the phases, issues from the full audit (August 2026) are grouped into 
 and executed one milestone per branch, merged to `dev`. M2 through M15 are merged (M15 — Security
 Hardening — Cluster & Auth — via #270/#271), M17 merged via #275, and M19's Phase 5 via #281 with
 its on-cluster Gate 9b run recorded; M16 is in progress — #242 (async wake eviction) and #245
-(parking-herd fast-fail) merged, #240 (crashed-worker Redis key leak / join-leave flap) fixed,
-#246/#254/#258 remaining — after its early P1/P2 merges #286/#288 (via #292/#294), and M19 carries the image/supply-chain remainder plus
+(parking-herd fast-fail) merged, #240 (crashed-worker Redis key leak / join-leave flap) and #254
+(phantom device-memory gauge series) fixed, #246/#258 remaining — after its early P1/P2 merges
+#286/#288 (via #292/#294), and M19 carries the image/supply-chain remainder plus
 the four Gate 9b follow-ups (#286–#289, all fixed; #287's published-image republish is the remaining
 operational step). The
 list of themes and what each delivered is maintained in [`status.md`](status.md).
