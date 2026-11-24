@@ -120,8 +120,9 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
   co-located runners.
 - M16 (Orchestration Resilience) is in progress: #242 (model wake returns before victim eviction)
   and #245 (proxy piggybacked parkers fast-fail on wake-trigger failure) merged, #240
-  (crashed-worker `info`/`memory` Redis keys never expired → join/leave flap) and #254 (phantom
-  device-memory gauge series for departed workers and stale reports) fixed; #246 and #258 remain.
+  (crashed-worker `info`/`memory` Redis keys never expired → join/leave flap), #254 (phantom
+  device-memory gauge series for departed workers and stale reports) and #246 (protocol-family
+  admission) fixed; #258 remains.
   #286 and #288 had already merged early as P1/P2 follow-ups.
 
 Full plan: [`overall-plan.md`](overall-plan.md).

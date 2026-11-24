@@ -1,7 +1,8 @@
 // test_oip_surface: the KServe V2 Open Inference Protocol surface added by
 // #125 — `/oip/v2/models/{model}/infer`, `/oip/v2/models/{model}/ready`, and
-// `/oip/v2/models`. Resolution/parking/wake/forwarding are protocol-agnostic
-// (D8); only the two listing endpoints filter by protocol tag.
+// `/oip/v2/models`. Admission, both listings and readiness enforce the entry's
+// `protocol` tag (#246); parking/wake/forwarding are family-agnostic *after*
+// admission.
 
 use std::time::Duration;
 
