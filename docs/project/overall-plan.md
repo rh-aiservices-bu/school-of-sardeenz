@@ -407,9 +407,10 @@ its on-cluster Gate 9b run recorded; M16 is complete — #242 (async wake evicti
 (parking-herd fast-fail), #240 (crashed-worker Redis key leak / join-leave flap), #254
 (phantom device-memory gauge series), #246 (protocol-family admission) and #258
 (control-plane/proxy cleanups, two PRs) all merged — after its early P1/P2 merges
-#286/#288 (via #292/#294), and M19 carries the image/supply-chain remainder plus
-the four Gate 9b follow-ups (#286–#289, all fixed; #287's published-image republish is the remaining
-operational step). The
+#286/#288 (via #292/#294). In M19 the image/supply-chain half (#266 via #316) and the ADR-016/SCC
+wording (#267 via #318) are merged, the four Gate 9b follow-ups (#286–#289) are all fixed
+(#287's published-image republish is the remaining operational step), and what remains is the
+docs/contracts/security cleanup (#249, #248, #268, #315). The
 list of themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---

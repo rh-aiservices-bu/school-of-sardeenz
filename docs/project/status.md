@@ -1,9 +1,11 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-24 (M16 Orchestration Resilience complete — #240, #242, #245, #246 and #254
-plus #258, whose control-plane dead config and proxy hot-path cleanups shipped as two PRs. The vLLM
-image republish and the on-cluster rollout proof for #247 remain pending.)
+Last update: 2026-11-25 (M19 documentation and release hygiene: release 0.2.1 is recorded in
+`CHANGELOG.md` and in the proxy's Cargo version, and this file, `README.md` and `AGENTS.md` are
+reconciled with the tree. The M19 image/supply-chain half is closed — #266 via #316, #267 via #318.
+The vLLM SIF republish (`rc2` + `runners.yaml` digest bump) and the on-cluster rollout proof for
+#247 remain pending.)
 
 ## Phases (complete)
 
@@ -45,26 +47,29 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 [#288](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/288),
 [#289](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/289)).
 
-## Milestones merged to `dev`
+## Milestones (merged to `dev`, plus the open ones)
 
-| Milestone | Theme                                                                                                                                                                                                                                                                                                                          |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| M2        | Reliable Wake-on-Request                                                                                                                                                                                                                                                                                                       |
-| M3        | Orchestration Correctness                                                                                                                                                                                                                                                                                                      |
-| M4        | Worker & Runner Lifecycle                                                                                                                                                                                                                                                                                                      |
-| M5        | Security & Trust Boundaries                                                                                                                                                                                                                                                                                                    |
-| M6        | Contracts & Docs Accuracy                                                                                                                                                                                                                                                                                                      |
-| M7        | Multi-Instance & Move Foundations ([ADR-019](../architecture/adrs/adr-019-logical-model-vs-instance-split.md))                                                                                                                                                                                                                 |
-| M8        | Dashboard v1 Parity                                                                                                                                                                                                                                                                                                            |
-| M9        | Engine Expansion — MLServer, `/openai` and `/oip` proxy split ([ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md))                                                                                                                                                                                       |
-| M10       | Control-Plane Orchestration Correctness — delete/stop/instance-op claims, 409 `details.reason`                                                                                                                                                                                                                                 |
-| M11       | Dashboard Stability & Test Infrastructure — Playwright e2e green and enforced in CI                                                                                                                                                                                                                                            |
-| M12       | Runner & Engine Hardening — configurable vLLM bind host, per-runner 4-port blocks, Python suites gated in CI                                                                                                                                                                                                                   |
-| M13       | Feature & Resilience Backlog — move-model action (#146), playground stream cap (#149), dashboard notification/e2e follow-ups (#178/#179), proxy→engine NetworkPolicy rule (#181), CI container-image builds (#187)                                                                                                             |
-| M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                     |
-| M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238) |
-| M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                              |
-| M19       | Runner & Image backlog — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; platform publish/rollout documented and pull policy fixed (#247); image/supply-chain half (#266/#267) still open.         |
+| Milestone | Theme                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M2        | Reliable Wake-on-Request                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| M3        | Orchestration Correctness                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| M4        | Worker & Runner Lifecycle                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| M5        | Security & Trust Boundaries                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| M6        | Contracts & Docs Accuracy                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| M7        | Multi-Instance & Move Foundations ([ADR-019](../architecture/adrs/adr-019-logical-model-vs-instance-split.md))                                                                                                                                                                                                                                                                                                                                                            |
+| M8        | Dashboard v1 Parity                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| M9        | Engine Expansion — MLServer, `/openai` and `/oip` proxy split ([ADR-021](../architecture/adrs/adr-021-protocol-family-path-prefixes.md))                                                                                                                                                                                                                                                                                                                                  |
+| M10       | Control-Plane Orchestration Correctness — delete/stop/instance-op claims, 409 `details.reason`                                                                                                                                                                                                                                                                                                                                                                            |
+| M11       | Dashboard Stability & Test Infrastructure — Playwright e2e green and enforced in CI                                                                                                                                                                                                                                                                                                                                                                                       |
+| M12       | Runner & Engine Hardening — configurable vLLM bind host, per-runner 4-port blocks, Python suites gated in CI                                                                                                                                                                                                                                                                                                                                                              |
+| M13       | Feature & Resilience Backlog — move-model action (#146), playground stream cap (#149), dashboard notification/e2e follow-ups (#178/#179), proxy→engine NetworkPolicy rule (#181), CI container-image builds (#187)                                                                                                                                                                                                                                                        |
+| M14       | Dependency Security Remediation — Dependabot alert sweep across npm/cargo: fast-jwt (#224), undici (#225), react-router-dom (#226, → v7 in #229), @fastify/static → v10 (#231), rustls/quinn-proto (#259), vitest → 4 (#228/#262), transitive sweep (#261)                                                                                                                                                                                                                |
+| M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238)                                                                                                                                            |
+| M16       | Orchestration Resilience — Proxy & Control Plane — async wake eviction (#242), piggybacked-parker wake-trigger fast-fail (#245), crashed-worker Redis key flap (#240), phantom device-memory gauges (#254), protocol-family admission (#246), control-plane dead config + proxy hot-path cleanups (#258, two PRs)                                                                                                                                                         |
+| M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                                                                                                                                                                         |
+| M19       | Deployment, Release & Docs Hygiene — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; platform publish/rollout documented and pull policy fixed (#247, #211); image/supply-chain hardening merged (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249). Open: #248, #268 (fix merged via #273), #315 |
+| M18       | CI & Test Infrastructure (open) — CI redesign to drop redundant post-merge runs (#192), control-plane integration suite gated (#251), runner-conformance error paths + `_health_poller` test (#252), dashboard unit-test renderability under root-hoisted React (#176), lint gate scoped off the gitignored mkdocs `site/` output (#314)                                                                                                                                  |
+| M20       | Dashboard Performance & Resilience (open) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + ErrorBoundary route coverage (#256)                                                                                                                                                                                                                                                                                     |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -73,12 +78,21 @@ measured-only VRAM telemetry doctrine (#163/#164, ts-nvml).
 Milestone PR drafts: [`milestone-M3-pr-draft.md`](milestone-M3-pr-draft.md) through
 [`milestone-M9-pr-draft.md`](milestone-M9-pr-draft.md).
 
+## Releases
+
+| Release  | Date       | Record                                                                                                                                                                                         |
+| -------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `v0.2.0` | 2026-09-15 | First v2 release, tagged on the `dev` → `main` merge of #209 (`2088868`). Per-change detail in `CHANGELOG.md` `[0.2.0] - 2026-09-15`.                                                          |
+| `0.2.1`  | 2026-10-29 | Version bump `3c92d45` (`package.json`, an end-to-end PR → image-publish pipeline exercise). Recorded in `CHANGELOG.md` `[0.2.1] - 2026-10-29`; `proxy/Cargo.toml` aligned. **No tag exists.** |
+
 ## M19 — Phase 5 (merged) and the image/supply-chain half
 
 Phase 5 (kvcached oversubscription & co-location policy) merged via PR #281 and its deploy-only
-verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)). The remainder of
-M19 owns the image/supply-chain half (#266/#267) plus the four defects the Gate 9b run raised
-(#286–#289); all four are fixed and merged. #287's code half is merged, but its remedy is operational:
+verification ran on 2026-11-17 ([`phase5-gate9b-run.md`](phase5-gate9b-run.md)). The
+image/supply-chain half of the theme is closed — #266 (digest pins, non-root worker `USER`, Trivy
+scan, cosign sign) merged via #316 and #267 (ADR-016/SCC wording) via #318. The theme also carried
+the four defects the Gate 9b run raised (#286–#289); all four are fixed and merged. #287's code
+half is merged, but its remedy is operational:
 the published vLLM SIFs still predate #275 and must be republished (`rc2`) and re-imported — the
 runbook is in [`../usage/runner-catalog.md`](../usage/runner-catalog.md).
 
@@ -105,11 +119,12 @@ the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
 
 ## Next
 
-- **M19** (Runner & Image backlog) — Phase 5 is merged and verified on-cluster; the platform-image
-  rollout is documented (#247) and still needs one on-cluster rollout proof; the remainder of the
-  M19 theme owns the image/supply-chain half split out of M15's #235 (#266: non-root `USER`,
-  digest pins, cosign sign + scan) and the ADR-016 wording reconciliation (#267); a per-PID
-  NVML follow-up to #244 (option A from its decision) would also belong there.
+- **M19** (Deployment, Release & Docs Hygiene) — the image/supply-chain half is closed (#266 via
+  #316, #267 via #318) and Phase 5 is merged and verified on-cluster; the platform-image rollout
+  is documented (#247) and still needs one on-cluster rollout proof. Remaining in the milestone:
+  #249 (release records — this revision), #248 (undocumented `details.reason` values), #268
+  (whitespace-only token gate — fix merged via #273, issue still open) and #315 (tighten
+  `supplementalGroups`, cluster-only validation).
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
   `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. All four are
   fixed and merged: #289 (worker catalog default), #286 (teardown boundary + `GET /runners`
@@ -205,14 +220,16 @@ From the Phase 5 Gate 9b run (2026-11-17, see [`phase5-gate9b-run.md`](phase5-ga
   fixed: the worker shares the control plane's catalog default and fetches http(s) catalogs, with
   a startup warning naming any unresolved runner type.
 
-From M15 (first two are M19-owned):
+From M15:
 
-- **#266** (M19): image/supply-chain hardening — non-root `USER` in worker images, base-image
-  digest pins, cosign sign + scan for platform images (the #235 split).
-- **#267** (M19): reconcile ADR-016's "no `RunAsAny` / exactly one change" wording with the shipped
-  SCC's second relaxation (`fsGroup: RunAsAny`).
-- **#268**: fail-closed token gate accepts whitespace-only tokens.
-- **#269**: BFF request logger writes `?token=` SSE URLs (including JWTs) into access logs.
+- ~~**#266** (M19): image/supply-chain hardening — non-root `USER` in worker images, base-image
+  digest pins, cosign sign + scan for platform images (the #235 split).~~ — merged via #316.
+- ~~**#267** (M19): reconcile ADR-016's "no `RunAsAny` / exactly one change" wording with the
+  shipped SCC's second relaxation (`fsGroup: RunAsAny`).~~ — merged via #318.
+- **#268**: fail-closed token gate accepts whitespace-only tokens — fix merged via #273; the issue
+  is still open.
+- ~~**#269**: BFF request logger writes `?token=` SSE URLs (including JWTs) into access logs.~~ —
+  closed (fix merged via #274).
 
 From M17 (reviewer-recorded, non-blocking):
 
