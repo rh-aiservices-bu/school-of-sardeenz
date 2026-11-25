@@ -18,6 +18,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shows executed tests and none skipped. The job lands staged (`continue-on-error: true`, advisory
   until its first green run); `docs/development/setup.md` documents the job and adds
   `make test-integration` to its command table.
+- **Dashboard unit tests can render PatternFly, router, i18n and react-query components (#176).**
+  `dashboard/vitest.config.ts` now resolves the test graph ESM-first (`resolve.mainFields`), pins the
+  remaining CJS entrypoints (`react-router-dom`, `react-router`, `react-router/dom`,
+  `react-virtualized-auto-sizer`, `use-sync-external-store`) to their ESM builds, and inlines every
+  React-consuming package family so its `react` imports flow through the React-18 alias table and
+  resolve the dashboard's own React 18.3.1 instead of the hoisted root copy. That cover is
+  per-package: a dependency left out of `inline` still binds the hoisted React 19, which only leaks at
+  first render, so a new `src/__tests__/render-probes.test.tsx` guards the boundary with one case per
+  family (PatternFly core/icons/table/charts,
+  nivo, react-markdown, router, i18next, react-query, plus the app's own `StateLabel`), and the
+  `NotificationProvider` auth-gate tests render the real `ProtectedRoute` — moved from `App.tsx` into
+  `src/components/ProtectedRoute.tsx` — inside a `MemoryRouter` instead of a hand-mirrored gate. No
+  dependency, lockfile or production-build change.
 - **Release records reconciled: 0.2.1 cut, versions aligned, project status refreshed (#249).**
   `CHANGELOG.md` gains the missing `[0.2.1]` section — the entries that had accumulated in
   `[Unreleased]` when the version was bumped to 0.2.1 (`3c92d45`, 2026-10-29) — and each

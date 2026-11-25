@@ -6,7 +6,8 @@
  * 2. The role-check helper correctly identifies admin vs read-only users.
  *
  * We test the logic layer (isAdmin derivation) directly, without rendering
- * PatternFly components, to avoid React version conflicts in the worktree.
+ * PatternFly components; PF renders under Vitest since #176, so this is a
+ * deliberate seam choice rather than a limitation.
  *
  * Rendering-level coverage for the actual hide/show behaviour is provided by
  * the Playwright e2e suite (dashboard/e2e/auth.spec.ts).

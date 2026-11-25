@@ -8,7 +8,7 @@
  *
  * Following the project convention (see role-visibility.test.tsx, ModelDeploy.test.tsx) we test
  * the pure predicates that drive the JSX conditionals rather than rendering PatternFly
- * (PF/React version conflicts in this worktree). Full rendering coverage is left to e2e.
+ * (PF renders under Vitest since #176). Full rendering coverage is left to e2e.
  */
 import { describe, it, expect } from 'vitest';
 import { ModelLifecycleState } from '@sardeenz/types';
