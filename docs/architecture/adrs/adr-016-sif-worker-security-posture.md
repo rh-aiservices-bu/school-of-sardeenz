@@ -31,10 +31,23 @@ Workers run SIFs via **in-container user namespaces** (Apptainer creates its own
 the container, which stays in the host user namespace so RWX volumes mount normally). The
 worker Pod's security posture is:
 
-- **A mild custom SCC** — `restricted-v2` with exactly one change: `seccompProfiles` permits
-  `unconfined`. **No added capabilities, no `RunAsAny`, no `allowPrivilegeEscalation`, no
-  `hostUsers`/`procMount`, not privileged.** The Pod requests `seccompProfile: { type:
-Unconfined }`.
+- **A mild custom SCC** — `restricted-v2` with two deliberate relaxations: (a)
+  `seccompProfiles` permits `unconfined` — the userns unlock, the primary blocker from Context;
+  (b) `fsGroup: RunAsAny`, so the worker/librarian Pods can request `fsGroup: 0` for the
+  group-writable `/scratch`/`/scratch/home` under the arbitrary OpenShift UID (`MustRunAs`
+  without an explicit range derives from the namespace SCC annotation, which excludes gid 0, and
+  would reject the Pods). The identity and group fields keep their stock `restricted-v2` types:
+  `supplementalGroups: RunAsAny` (no Sardeenz pod sets it and nothing here overrides it or
+  depends on a non-stock setting; tightening it below stock would be a deliberate deviation from
+  `restricted-v2` and needs cluster validation, tracked in #315),
+  `runAsUser: MustRunAsRange` and `seLinuxContext: MustRunAs`. The [OKD SCC
+  reference](https://docs.okd.io/latest/authentication/managing-security-context-constraints.html)
+  lists the `restricted-v2` row as `MustRunAs` SELinux, `MustRunAsRange` runAsUser, `MustRunAs`
+  fsGroup, `RunAsAny` supplementalGroups. On capabilities the SCC is **stricter than stock**: no
+  `allowedCapabilities` key at all (`restricted-v2` permits adding `NET_BIND_SERVICE`), while
+  `requiredDropCapabilities: [ALL]` is the stock value. **No `allowPrivilegeEscalation`**, no
+  `hostUsers`/`procMount`, **not privileged**. The Pod requests
+  `seccompProfile: { type: Unconfined }`.
 - **`/dev/fuse` via the CRI-O pod annotation** `io.kubernetes.cri-o.Devices: "/dev/fuse"` — no
   device plugin, no MachineConfig on OpenShift/OKD 4.15+ (available by default on recent
   releases).

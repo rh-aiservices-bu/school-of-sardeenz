@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **SCC posture documented as it ships: two deliberate deltas from `restricted-v2` (#267).**
+  ADR-016, the `sardeenz-sif-runner` SCC header and its `kubernetes.io/description` (shown by
+  `oc describe scc`), the `deployment/sif-runner` README and the deployment-security guide now all
+  name the same two relaxations — seccomp `Unconfined` (the userns unlock) and `fsGroup: RunAsAny`
+  (gid-0 writes to group-writable `/scratch` under the arbitrary UID). All five also record
+  `supplementalGroups: RunAsAny` as what it is — the stock `restricted-v2` value, which no
+  Sardeenz pod sets and nothing here overrides — correcting the earlier framing that counted it as
+  one of the deltas. Documentation and SCC comments only: no SCC field, manifest or runtime
+  behaviour changes, and tightening `supplementalGroups` below stock would be a deliberate
+  deviation from `restricted-v2` needing cluster validation, tracked in #315.
 - **Control-plane cleanup: dead parking knob removed, listen port validated at boot (#258).** The
   control plane no longer parses `SARDEENZ_PARKING_TIMEOUT_SECS`: the value was never read, no
   deployment manifest or `.env.example` entry set it for this service, and the Phase-2 doc no longer
