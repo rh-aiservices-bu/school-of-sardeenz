@@ -169,6 +169,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The lint gate no longer lints the gitignored mkdocs output (#314).** `make docs-build` writes the
+  rendered site to `site/` (`.gitignore:82`), which `eslint .` then descended into: the generated
+  JavaScript produced ~1454 errors unrelated to any change, poisoning the next `make lint`. `site/`
+  is now in the flat config's global `ignores`; nothing else was added, so ordinary build output
+  stays linted. Found during #266 verification.
 - **Cross-family inference and readiness now 404 before any parking, wake or forward (#246).** The
   proxy compared a request's path-prefix family with nothing: an `oip`-tagged model invoked through
   `/openai/v1/...` (or the reverse) was parked, woken and then forwarded to an engine that cannot
