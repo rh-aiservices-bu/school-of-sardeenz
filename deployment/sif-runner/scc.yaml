@@ -1,15 +1,21 @@
 # The mild custom SCC that unlocks in-container user namespaces (ADR-016, spike §5/§9.1).
-# It is restricted-v2 with the single change of permitting seccomp `Unconfined` — that removes the
-# RuntimeDefault seccomp filter that blocks Apptainer's userns creation. NO privilege, NO added
-# caps, NO hostUsers:false. Grant only to the worker ServiceAccount.
+# It is restricted-v2 with two deliberate deltas: seccomp `Unconfined` (the userns unlock —
+# removes the RuntimeDefault filter blocking Apptainer's userns creation) and `fsGroup: RunAsAny`
+# (gid-0 writes to a group-writable /scratch under the arbitrary UID). `supplementalGroups:
+# RunAsAny` is the stock restricted-v2 value, not a delta — nothing here overrides it or depends
+# on a non-stock setting; tightening it needs cluster validation (#315). NO privilege, NO
+# added caps, NO hostUsers:false. Grant only to the worker ServiceAccount.
 apiVersion: security.openshift.io/v1
 kind: SecurityContextConstraints
 metadata:
   name: sardeenz-sif-runner
   annotations:
     kubernetes.io/description: >-
-      restricted-v2 plus seccomp Unconfined, for Sardeenz worker Pods that run Apptainer with an
-      in-container user namespace to exec engine SIFs. No privilege, no added capabilities.
+      restricted-v2 plus two deliberate deltas, for Sardeenz worker Pods that run Apptainer
+      with an in-container user namespace to exec engine SIFs — seccomp Unconfined (the userns
+      unlock) and fsGroup RunAsAny (gid-0 writes to a group-writable /scratch). supplementalGroups
+      RunAsAny is the stock restricted-v2 value, which nothing here overrides or depends on;
+      tightening it needs cluster validation (#315). No privilege, no added capabilities.
 allowHostDirVolumePlugin: false
 allowHostIPC: false
 allowHostNetwork: false
@@ -24,6 +30,9 @@ requiredDropCapabilities: [ALL]
 fsGroup: { type: RunAsAny }
 runAsUser: { type: MustRunAsRange }
 seLinuxContext: { type: MustRunAs }
+# Stock restricted-v2 value (not a relaxation) — nothing here overrides it or depends on a
+# non-stock setting. Tightening below stock (MustRunAs/MustRunAsRange) needs cluster
+# validation, #315.
 supplementalGroups: { type: RunAsAny }
 seccompProfiles: [runtime/default, unconfined]
 readOnlyRootFilesystem: false
