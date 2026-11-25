@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Runner-contract conformance covers the conflict and crash paths, and both shims'
+  `_health_poller` lifecycle is unit-tested (#252).** The shared suite grows from 8 to 13 named
+  cases (25 tests): `/sleep` and `/memory-report` `409` while `STARTING`, vLLM's in-flight-request
+  `/sleep` guard — declared by a per-adapter capability flag, so no case is keyed on a shim name —
+  `ERROR` surfaced in `/health` after the engine dies, and `/wake` from a non-sleeping runner
+  pinned at today's `200`, a deliberate divergence from `engine-runner.yaml` recorded in
+  `runners/conformance/README.md` with the follow-up. Both shims gain three `_health_poller` cases
+  (startup death, post-`READY` death, death while `SLEEPING`) driven directly with the poller's
+  ticks elided, and both engines' real sleep/wake calls are asserted over `httpx.MockTransport`
+  (`POST /sleep?level=1` / `/wake_up`; repository `unload` / `load`). Tests, test-only adapters and
+  docs only — no runner runtime behaviour change.
 - **Release records reconciled: 0.2.1 cut, versions aligned, project status refreshed (#249).**
   `CHANGELOG.md` gains the missing `[0.2.1]` section — the entries that had accumulated in
   `[Unreleased]` when the version was bumped to 0.2.1 (`3c92d45`, 2026-10-29) — and each

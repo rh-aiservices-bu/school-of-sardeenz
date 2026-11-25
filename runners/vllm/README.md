@@ -71,7 +71,11 @@ sardeenz_vllm_runner/
 `cli.py`/`state.py`/`metrics.py` are pure and unit-tested without vLLM/torch; `tests/test_app.py`
 drives the real `create_app` over the conformance doubles through `httpx.ASGITransport` to pin
 where handlers execute — the blocking `memory_report` reads run on the default executor, off the
-event loop that serves `/health` — and the `/sleep` active-request guard's behaviour:
+event loop that serves `/health` — and the `/sleep` active-request guard's behaviour. It also
+drives the real `_health_poller` through its startup-death, post-`READY`-death and
+death-while-`SLEEPING` paths (its ticks elided, so no 2 s waits), and `tests/test_core.py` asserts
+the engine control calls (`POST /sleep?level=1`, `POST /wake_up`) over an `httpx.MockTransport`
+instead of a fake engine:
 
 ```bash
 cd runners/vllm && python3 -m pytest
