@@ -8,17 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Runner-contract conformance covers the conflict and crash paths, and both shims'
-  `_health_poller` lifecycle is unit-tested (#252).** The shared suite grows from 8 to 13 named
-  cases (25 tests): `/sleep` and `/memory-report` `409` while `STARTING`, vLLM's in-flight-request
-  `/sleep` guard — declared by a per-adapter capability flag, so no case is keyed on a shim name —
-  `ERROR` surfaced in `/health` after the engine dies, and `/wake` from a non-sleeping runner
-  pinned at today's `200`, a deliberate divergence from `engine-runner.yaml` recorded in
-  `runners/conformance/README.md` with the follow-up. Both shims gain three `_health_poller` cases
-  (startup death, post-`READY` death, death while `SLEEPING`) driven directly with the poller's
-  ticks elided, and both engines' real sleep/wake calls are asserted over `httpx.MockTransport`
-  (`POST /sleep?level=1` / `/wake_up`; repository `unload` / `load`). Tests, test-only adapters and
-  docs only — no runner runtime behaviour change.
+- **The control-plane integration suite is gated in CI (#251).** `.github/workflows/ci.yml` gains an
+  `integration` job — `postgres:16` + `valkey:8` service containers, the same `triage` gate and
+  pinned-action preamble as the other gates — running what `make test-integration` runs locally, so
+  the real Postgres/Redis paths (reservations, reconciliation, delete/stop claim fencing) fail a PR
+  instead of regressing unnoticed. Because the suite skips itself when it cannot connect and its
+  vitest config sets `passWithNoTests: true`, the job finishes with
+  `control-plane/scripts/verify-integration-report.mjs`, which fails unless the run's JSON report
+  shows executed tests and none skipped. The job lands staged (`continue-on-error: true`, advisory
+  until its first green run); `docs/development/setup.md` documents the job and adds
+  `make test-integration` to its command table.
 - **Release records reconciled: 0.2.1 cut, versions aligned, project status refreshed (#249).**
   `CHANGELOG.md` gains the missing `[0.2.1]` section — the entries that had accumulated in
   `[Unreleased]` when the version was bumped to 0.2.1 (`3c92d45`, 2026-10-29) — and each
@@ -180,6 +179,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Runner-contract conformance covers the conflict and crash paths, and both shims'
+  `_health_poller` lifecycle is unit-tested (#252).** The shared suite grows from 8 to 13 named
+  cases (25 tests): `/sleep` and `/memory-report` `409` while `STARTING`, vLLM's in-flight-request
+  `/sleep` guard — declared by a per-adapter capability flag, so no case is keyed on a shim name —
+  `ERROR` surfaced in `/health` after the engine dies, and `/wake` from a non-sleeping runner
+  pinned at today's `200`, a deliberate divergence from `engine-runner.yaml` recorded in
+  `runners/conformance/README.md` with the follow-up. Both shims gain three `_health_poller` cases
+  (startup death, post-`READY` death, death while `SLEEPING`) driven directly with the poller's
+  ticks elided, and both engines' real sleep/wake calls are asserted over `httpx.MockTransport`
+  (`POST /sleep?level=1` / `/wake_up`; repository `unload` / `load`). Tests, test-only adapters and
+  docs only — no runner runtime behaviour change.
 - **The lint gate no longer lints the gitignored mkdocs output (#314).** `make docs-build` writes the
   rendered site to `site/` (`.gitignore:82`), which `eslint .` then descended into: the generated
   JavaScript produced ~1454 errors unrelated to any change, poisoning the next `make lint`. `site/`
