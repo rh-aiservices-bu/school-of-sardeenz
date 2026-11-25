@@ -169,6 +169,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Cutover barrier now honours an expired proxy presence lease (#322).** Both presence reads in
+  `RoutingMapService.cutoverEndpointAndWait` coerced Redis's `null` (a key whose TTL elapsed) with
+  `Number(null)` → `0`, a finite timestamp "connected at the epoch", so a proxy that had already
+  disconnected still counted as serving: the `SCAN`-then-`GET` snapshot demanded an
+  acknowledgement from a departed process, and the poll loop never dropped it from `outstanding`.
+  A lapsed keepalive therefore turned a healthy move into a 30 s stall ending in a spurious
+  `traffic cutover barrier timed out`. A single `presenceTimestamp()` coercion now maps a missing
+  or empty value to `NaN`, so the barrier returns `true` as soon as the last unacknowledged
+  proxy's lease expires. No timeout, poll cadence, Lua mutation or ack cleanup change.
+
 - **Cross-family inference and readiness now 404 before any parking, wake or forward (#246).** The
   proxy compared a request's path-prefix family with nothing: an `oip`-tagged model invoked through
   `/openai/v1/...` (or the reverse) was parked, woken and then forwarded to an engine that cannot
