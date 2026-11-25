@@ -994,7 +994,6 @@ pipeline. This section was reconstructed from that commit's `CHANGELOG.md`; no t
   `preload_dlls` check only printed), and pins `torch==2.10.0` — the last CUDA 12 torch — since an
   unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. Verified
   on-cluster: an ONNX model now loads with `CUDAExecutionProvider` and reports measured VRAM.
-
 - **Dashboard: Models placement panel redesigned (#163 round two).** Worker cards now sit side
   by side in a responsive grid instead of one full-width collapsible section per worker — with
   one GPU per worker, the old layout left most of each row empty. The per-card model legend
@@ -1002,7 +1001,6 @@ pipeline. This section was reconstructed from that commit's `CHANGELOG.md`; no t
   A header toggle switches between the card view (default) and a compact one-row-per-worker
   view (~48px/worker, aggregate sleep-all/wake-all/stop-all kebab); the choice persists in
   localStorage. Models sort by measured size, largest first.
-
 - **CI: PRs run quality gates only; merges to dev publish impacted images.** PR CI
   (`ci.yml`) now runs typecheck/lint/tests/e2e without building container images. A new
   `publish-images.yml` runs on every merge to `dev`: it maps the merge's changed paths to the
@@ -1016,7 +1014,6 @@ pipeline. This section was reconstructed from that commit's `CHANGELOG.md`; no t
   Fix: the first `publish-images.yml` runs failed at validation because `jobs.<job_id>.if`
   cannot reference the `matrix` context (github, needs, vars, inputs only); the build decision
   now gates each step's `if`, where `matrix` IS available.
-
 - **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
   `/health`, so the control plane's drain loop could never observe drain completion and every
   stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
