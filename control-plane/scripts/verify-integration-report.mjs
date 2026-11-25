@@ -27,6 +27,13 @@ try {
   exit(1);
 }
 
+if (typeof report !== 'object' || report === null || Array.isArray(report)) {
+  error(
+    `No readable vitest JSON report at ${reportPath}: expected a JSON object, got ${JSON.stringify(report)}`,
+  );
+  exit(1);
+}
+
 const total = report.numTotalTests ?? 0;
 const passed = report.numPassedTests ?? 0;
 const pending = report.numPendingTests ?? 0;

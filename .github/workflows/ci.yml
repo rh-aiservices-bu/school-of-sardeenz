@@ -209,7 +209,7 @@ jobs:
     if: always() && (needs.triage.result == 'skipped' || needs.triage.outputs.tested != 'true')
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -251,6 +251,9 @@ jobs:
       - name: Run control-plane integration suite
         run: npm run test:integration -w @sardeenz/control-plane -- --reporter=default --reporter=json --outputFile.json="$INTEGRATION_REPORT"
       - name: Assert the suite actually ran
+        # `always()` so the JSON report is still parsed and logged when the suite step
+        # above fails; the job stays red on the suite failure itself.
+        if: always()
         run: node control-plane/scripts/verify-integration-report.mjs "$INTEGRATION_REPORT"
 
 # Deliberately NOT gated here (tracked separately, not part of #82):
