@@ -18,13 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one of the deltas. Documentation and SCC comments only: no SCC field, manifest or runtime
   behaviour changes, and tightening `supplementalGroups` below stock would be a deliberate
   deviation from `restricted-v2` needing cluster validation, tracked in #315.
-- **409 conflict reasons are now a contract enum (#248).** `ErrorResponse.details.reason`
-  on operation-in-progress conflicts is documented as the new `ConflictReason` enum in the
-  control-plane spec, covering all eight emitted values including the four the spec never
+- **409 conflict reasons are now a contract enum (#248).** The 409 responses are typed by a
+  new `ConflictErrorResponse` schema whose `details.reason` is the `ConflictReason` enum in
+  the control-plane spec, covering all eight emitted values including the four the spec never
   named (`configuration-update-in-progress`, `operation-in-progress`, `move-ownership-lost`,
-  `deployment-cancelled`); the `operationInProgress` seam is typed against the generated
-  enum and a unit test fails on any emitted reason outside it. Types and docs only — no
-  runtime behaviour change.
+  `deployment-cancelled`); the shared `ErrorResponse.details` stays free-form, the
+  `operationInProgress` seam is typed against the generated enum and a unit test fails on
+  any emitted reason outside it. Types and docs only — no runtime behaviour change.
 - **Control-plane cleanup: dead parking knob removed, listen port validated at boot (#258).** The
   control plane no longer parses `SARDEENZ_PARKING_TIMEOUT_SECS`: the value was never read, no
   deployment manifest or `.env.example` entry set it for this service, and the Phase-2 doc no longer

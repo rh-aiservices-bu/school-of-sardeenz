@@ -1682,7 +1682,7 @@ export type components = {
             notifications: components["schemas"]["Notification"][];
         };
         /**
-         * @description Machine-readable reason carried in `ErrorResponse.details.reason` when a
+         * @description Machine-readable reason carried in `ConflictErrorResponse.details.reason` when a
          *     model-level action is refused because another mutating operation is already
          *     backgrounding for the same model (`409`, code `INVALID_STATE`, via
          *     `ControlPlaneError.operationInProgress`).
@@ -1721,6 +1721,17 @@ export type components = {
             /** @description Machine-readable error code for programmatic handling. */
             code?: string;
             /** @description Additional structured error details. */
+            details?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * @description 409 conflict response. Same base shape as `ErrorResponse`; on these responses
+         *     `details.reason` is machine-constrained to the `ConflictReason` enum when present.
+         *     Conflict replies that name no operation (e.g. `MODEL_ALREADY_EXISTS`,
+         *     `MODULE_IN_USE`) simply omit `reason`.
+         */
+        ConflictErrorResponse: components["schemas"]["ErrorResponse"] & {
             details?: {
                 reason?: components["schemas"]["ConflictReason"];
             } & {
@@ -1871,7 +1882,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2005,7 +2016,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2076,7 +2087,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2268,7 +2279,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2327,7 +2338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2389,7 +2400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2469,7 +2480,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2540,7 +2551,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2613,7 +2624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2694,7 +2705,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Corrupt active source endpoint. */
@@ -2764,7 +2775,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2825,7 +2836,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -3219,7 +3230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
