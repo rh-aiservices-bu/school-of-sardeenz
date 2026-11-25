@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The control-plane integration suite is gated in CI (#251).** `.github/workflows/ci.yml` gains an
+  `integration` job — `postgres:16` + `valkey:8` service containers, the same `triage` gate and
+  pinned-action preamble as the other gates — running what `make test-integration` runs locally, so
+  the real Postgres/Redis paths (reservations, reconciliation, delete/stop claim fencing) fail a PR
+  instead of regressing unnoticed. Because the suite skips itself when it cannot connect and its
+  vitest config sets `passWithNoTests: true`, the job finishes with
+  `control-plane/scripts/verify-integration-report.mjs`, which fails unless the run's JSON report
+  shows executed tests and none skipped. The job lands staged (`continue-on-error: true`, advisory
+  until its first green run); `docs/development/setup.md` documents the job and adds
+  `make test-integration` to its command table.
 - **Release records reconciled: 0.2.1 cut, versions aligned, project status refreshed (#249).**
   `CHANGELOG.md` gains the missing `[0.2.1]` section — the entries that had accumulated in
   `[Unreleased]` when the version was bumped to 0.2.1 (`3c92d45`, 2026-10-29) — and each
