@@ -55,7 +55,7 @@ on workers).
 ```bash
 npm run typecheck -w @sardeenz/control-plane
 npm run test -w @sardeenz/control-plane               # vitest unit tests (services/__tests__, routes/__tests__)
-npm run test:integration -w @sardeenz/control-plane   # needs Postgres + Redis (see setup.md "Dev Services")
+npm run test:integration -w @sardeenz/control-plane   # needs Postgres + Redis; with them unreachable it exits 0 with every test skipped (describe.skipIf) — never read a green exit as coverage
 ```
 
 Dev server: `make dev-cp` (or `npm run dev:logged` → `logs/control-plane.log`). Env comes from

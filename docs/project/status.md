@@ -142,10 +142,11 @@ review → verify → acceptance:
   CJS entrypoints (`react-router-dom`, `react-router`, `react-router/dom`,
   `react-virtualized-auto-sizer`, `use-sync-external-store`) to their ESM builds, and inlines every
   React-consuming package family so its `react` imports resolve the dashboard's own React 18.3.1.
-  A 10-case `src/__tests__/render-probes.test.tsx` (one per family, all failing before the change)
-  guards the boundary; `ProtectedRoute` moved out of `App.tsx` so `NotificationProvider`'s tests
-  render the real gate instead of a hand-mirrored one. No dependency, lockfile or production-build
-  change.
+  A 10-case `src/__tests__/render-probes.test.tsx` covering the acceptance families and 8 of the 13
+  inlined package families (all failing before the change) guards the boundary; the remaining
+  inlined entries ride the same mechanism without a dedicated probe. `ProtectedRoute` moved out of
+  `App.tsx` so `NotificationProvider`'s tests render the real gate instead of a hand-mirrored one.
+  No dependency, lockfile or production-build change.
 - **#251** — the control-plane integration suite runs in CI: an `integration` job with `postgres:16`
   - `valkey:8` service containers, the same `triage` gate and pinned-action preamble as the other
     gates, and a final `if: always()` step running
@@ -329,9 +330,10 @@ M18 (branch `milestone/m18-ci-test-infrastructure`, pending merge):
   exact-file ESM aliases for the remaining CJS entrypoints (`react-router-dom`, `react-router`,
   `react-router/dom`, `react-virtualized-auto-sizer`, `use-sync-external-store`), and
   `test.server.deps.inline` per React-consuming package family. New
-  `dashboard/src/__tests__/render-probes.test.tsx` (10 cases) guards each family; `ProtectedRoute`
-  is now its own module (`dashboard/src/components/ProtectedRoute.tsx`) so its tests render the
-  real gate. No dependency, lockfile or production-build change — the hoisted root React 19 stays.
+  `dashboard/src/__tests__/render-probes.test.tsx` (10 cases) guards the acceptance families and
+  most of the inlined set; `ProtectedRoute` is now its own module
+  (`dashboard/src/components/ProtectedRoute.tsx`) so its tests render the real gate. No dependency,
+  lockfile or production-build change — the hoisted root React 19 stays.
 - The conformance test-adapter contract gains `CONFORMANCE_FEATURES`, `APP_MODULE` and
   `PATCHED_SEAMS`, and `build_conformance_app()` gains keyword-only `ready`/`alive` (plus
   `active_requests` for adapters declaring the sleep guard); the zero-argument call is unchanged.

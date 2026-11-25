@@ -64,6 +64,9 @@ sardeenz/
 - Coding standards (TS, Rust, cross-language): [`docs/development/coding-standards.md`](docs/development/coding-standards.md).
 - Contract workflow (edit spec → validate → `make codegen` → fix consumers): [`docs/development/contracts.md`](docs/development/contracts.md).
 - `make lint typecheck test` is the pre-commit gate; `make test-python` covers the Python shims.
+  `make test-integration` (Postgres + Valkey) runs in CI on every PR, staged advisory until its
+  first green run — it self-skips and exits 0 when the services are absent, so use the CI job's
+  executed-count gate as the proof, not a local exit code.
 
 ## Workflow Rules
 

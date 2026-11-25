@@ -27,7 +27,8 @@ SIFs, and the shared contract-conformance suite.
 - **Ports:** each runner gets a 4-port block from `SARDEENZ_RUNNER_PORT_START` (management,
   engine, gRPC, metrics). Never hard-code ports in a shim.
 - **Adding a runner type:** Containerfile in `containers/runners/<engine>/<version>/`, shim package here with
-  a `testing.py` adapter, register it in `conformance/conftest.py` `_BUILDERS`, catalog entry in
+  a `testing.py` adapter declaring its `CONFORMANCE_FEATURES` (plus `APP_MODULE` and `PATCHED_SEAMS`
+  when it patches a seam), registered in `conformance/conftest.py` `_BUILDERS`, catalog entry in
   `runners.yaml`, then follow "Adding a New Runner Type" in the contract doc.
 - **Measured memory:** the worker reports NVML-measured bytes with per-instance attribution
   (`measured-sample.ts`, `nvml.ts`). Do not fabricate memory figures in stubs beyond the

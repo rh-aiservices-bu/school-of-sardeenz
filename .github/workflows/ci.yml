@@ -200,9 +200,10 @@ jobs:
   # (`describe.skipIf(!(await canConnect()))`) and its config sets `passWithNoTests: true`,
   # so the last step parses vitest's JSON report and fails when nothing actually ran.
   #
-  # STAGED GATE (M18 / #251): advisory until this job's first green run on the milestone
-  # branch proves the suite is green in CI. Flipping it to blocking = deleting the single
-  # `continue-on-error` line below.
+  # STAGED GATE (M18 / #251): advisory until the suite is green in CI — blocked on #322 (the
+  # cutover barrier never observes an expired proxy presence lease) today. Flipping it to blocking
+  # = deleting the single `continue-on-error` line below. Note `triage` skips this job on merge
+  # pushes to dev/main, so a green run is only observable on pull_request runs.
   integration:
     name: control-plane integration (Postgres + Valkey)
     needs: triage
