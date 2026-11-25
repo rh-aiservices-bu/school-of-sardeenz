@@ -37,6 +37,14 @@ const ROUTING_BARRIER_ACKS = 'routing-barrier-acks';
 const PROXY_PRESENCE_PREFIX = 'proxies';
 const ROUTING_BARRIER_TIMEOUT_MS = 30_000;
 
+// A presence key whose TTL elapsed between SCAN and GET (or during the barrier) reads back as null.
+// Number(null) is 0 — finite and "connected at the epoch" — which would keep a lapsed lease in the
+// barrier forever. NaN keeps both barrier reads on the same Number.isFinite() "not outstanding" path.
+function presenceTimestamp(raw: string | null): number {
+  if (raw === null || raw.trim() === '') return NaN;
+  return Number(raw);
+}
+
 // Shared Lua: encode a RoutingEntry with `endpoints` ALWAYS a JSON array. cjson.encode
 // serializes an empty Lua table as `{}`, but the proxy consumer types endpoints as an array
 // (RoutingEntry.endpoints: Vec<RunnerEndpoint>, proxy/src/generated/proxy_control_plane.rs:50),
@@ -421,7 +429,7 @@ export class RoutingMapService {
       );
       cursor = nextCursor;
       for (const key of keys) {
-        const connectedAt = Number(await this.redis.get(key));
+        const connectedAt = presenceTimestamp(await this.redis.get(key));
         if (Number.isFinite(connectedAt) && connectedAt <= cutoverStartedMs) {
           requiredProxies.set(key.slice(key.lastIndexOf(':') + 1), key);
         }
@@ -441,7 +449,7 @@ export class RoutingMapService {
         let outstanding = 0;
         for (const [proxyId, presenceKey] of requiredProxies) {
           if (acknowledged.has(proxyId)) continue;
-          const connectedAt = Number(await this.redis.get(presenceKey));
+          const connectedAt = presenceTimestamp(await this.redis.get(presenceKey));
           // Missing means its TTL elapsed; a newer timestamp means this process reconnected and
           // loaded the current weight-zero map before becoming ready.
           if (Number.isFinite(connectedAt) && connectedAt <= cutoverStartedMs) outstanding += 1;
