@@ -580,6 +580,61 @@ async def test_scrape_active_requests_honors_custom_prefix():
     assert active == 4
 
 
+# --- engine control calls (#252): the real MLServerEngine methods over a recording transport ------
+
+
+async def _call_engine(
+    engine: MLServerEngine, name: str, *args: object, status: int = 200
+) -> list[httpx.Request]:
+    """Run one engine control call through ``httpx.MockTransport`` and return what it sent."""
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        await getattr(engine, name)(client, *args)
+    return requests
+
+
+_ENGINE_ARGS = [
+    "--model", "/tmp/test-shim", "--port", "9101", "--", "--served-model-name", "conformance-model",
+]
+
+
+@pytest.mark.anyio
+async def test_engine_sleep_unloads_model_from_repository():
+    engine = MLServerEngine(parse_args(_ENGINE_ARGS), "/tmp/test-repo")
+    requests = await _call_engine(engine, "sleep")
+    assert len(requests) == 1
+    request = requests[0]
+    assert (request.method, request.url.path) == (
+        "POST",
+        "/v2/repository/models/conformance-model/unload",
+    )
+    assert request.url.port == 9102
+
+
+@pytest.mark.anyio
+async def test_engine_wake_loads_model_from_repository():
+    engine = MLServerEngine(parse_args(_ENGINE_ARGS), "/tmp/test-repo")
+    requests = await _call_engine(engine, "wake")
+    assert len(requests) == 1
+    request = requests[0]
+    assert (request.method, request.url.path) == (
+        "POST",
+        "/v2/repository/models/conformance-model/load",
+    )
+
+
+@pytest.mark.anyio
+async def test_engine_sleep_raises_on_engine_error():
+    engine = MLServerEngine(parse_args(_ENGINE_ARGS), "/tmp/test-repo")
+    with pytest.raises(httpx.HTTPStatusError):
+        await _call_engine(engine, "sleep", status=500)
+
+
 # --- onnx_support.missing_providers ---------------------------------------------------------
 
 

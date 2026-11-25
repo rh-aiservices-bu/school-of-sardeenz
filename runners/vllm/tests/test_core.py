@@ -23,6 +23,7 @@ from sardeenz_vllm_runner import kvcached_pools as kp
 from sardeenz_vllm_runner import memory as mem
 from sardeenz_vllm_runner import state as st
 from sardeenz_vllm_runner.cli import build_vllm_command, parse_args
+from sardeenz_vllm_runner.engine import VllmEngine
 from sardeenz_vllm_runner.metrics import sum_metric
 
 
@@ -573,3 +574,51 @@ def test_sleep_proceeds_when_scrape_unknown(monkeypatch: pytest.MonkeyPatch):
         resp = client.post("/sleep", json={"level": st.L1_HOST_RAM})
     assert resp.status_code == 200
     assert engine.sleep_calls == 1
+
+
+# --- engine control calls (#252): the real VllmEngine methods over a recording transport -----
+
+
+async def _call_engine(
+    engine: VllmEngine, name: str, *args: object, status: int = 200
+) -> list[httpx.Request]:
+    """Run one engine control call through ``httpx.MockTransport`` and return what it sent."""
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        await getattr(engine, name)(client, *args)
+    return requests
+
+
+@pytest.mark.anyio
+async def test_engine_sleep_posts_vllm_sleep_with_level_param():
+    engine = VllmEngine(parse_args(["--model", "/tmp/test-shim", "--port", "9101"]))
+    requests = await _call_engine(engine, "sleep", 1)  # 1 == vLLM's level for L1_HOST_RAM
+    assert len(requests) == 1
+    request = requests[0]
+    assert (request.method, request.url.path) == ("POST", "/sleep")
+    assert request.url.params["level"] == "1"
+    assert request.url.port == 9102  # engine_port = --port + 1, loopback inside the SIF
+
+
+@pytest.mark.anyio
+async def test_engine_wake_posts_vllm_wake_up():
+    engine = VllmEngine(parse_args(["--model", "/tmp/test-shim", "--port", "9101"]))
+    requests = await _call_engine(engine, "wake")
+    assert len(requests) == 1
+    request = requests[0]
+    assert (request.method, request.url.path) == ("POST", "/wake_up")
+    assert not request.url.params
+
+
+@pytest.mark.anyio
+async def test_engine_sleep_raises_on_engine_error():
+    # app.py maps httpx.HTTPError → 500 SLEEP_FAILED/WAKE_FAILED; raise_for_status is what
+    # produces it, so a non-2xx must never look like a completed offload.
+    engine = VllmEngine(parse_args(["--model", "/tmp/test-shim", "--port", "9101"]))
+    with pytest.raises(httpx.HTTPStatusError):
+        await _call_engine(engine, "sleep", 1, status=500)

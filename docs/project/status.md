@@ -1,9 +1,10 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-25 (M19 documentation and release hygiene: release 0.2.1 is recorded in
-`CHANGELOG.md` and in the proxy's Cargo version, and this file, `README.md` and `AGENTS.md` are
-reconciled with the tree. The M19 image/supply-chain half is closed — #266 via #316, #267 via #318.
+Last update: 2026-11-25 (M18 CI & test infrastructure implemented on
+`milestone/m18-ci-test-infrastructure` — four issues delivered, the new CI integration job is
+blocking after its first green run (32/32) once #322 was fixed — and the M19 docs/contracts items closed: #249 via #319, #248 via
+#320, #268 via #273. Release 0.2.1 remains recorded in `CHANGELOG.md` and the proxy's Cargo version.
 The vLLM SIF republish (`rc2` + `runners.yaml` digest bump) and the on-cluster rollout proof for
 #247 remain pending.)
 
@@ -67,8 +68,8 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M15       | Security Hardening — Cluster & Auth — Dependabot automation (#233), labeled Namespace prereq (#232), Valkey AUTH + default-deny NetworkPolicies (#230), manifest hardening manifest-half (#235), instanceId validation (#236), fail-closed tokens (#234), SSE-only query-token gate (#237), worker entrypoint allowlist (#238)                                                                                                                                            |
 | M16       | Orchestration Resilience — Proxy & Control Plane — async wake eviction (#242), piggybacked-parker wake-trigger fast-fail (#245), crashed-worker Redis key flap (#240), phantom device-memory gauges (#254), protocol-family admission (#246), control-plane dead config + proxy hot-path cleanups (#258, two PRs)                                                                                                                                                         |
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                                                                                                                                                                         |
-| M19       | Deployment, Release & Docs Hygiene — Phase 5 kvcached co-location policy (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281, Gate 9b run recorded; platform publish/rollout documented and pull policy fixed (#247, #211); image/supply-chain hardening merged (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249). Open: #248, #268 (fix merged via #273), #315 |
-| M18       | CI & Test Infrastructure (open) — CI redesign to drop redundant post-merge runs (#192), control-plane integration suite gated (#251), runner-conformance error paths + `_health_poller` test (#252), dashboard unit-test renderability under root-hoisted React (#176), lint gate scoped off the gitignored mkdocs `site/` output (#314)                                                                                                                                  |
+| M19       | Deployment, Release & Docs Hygiene — Phase 5 co-location (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281 and its Gate 9b run recorded; publish/rollout documented, pull policy fixed (#247/#211); image hardening (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249 via #319), 409 reason enum (#248 via #320), token gate (#268 via #273) closed; #315 open |
+| M18       | CI & Test Infrastructure (implemented on `milestone/m18-ci-test-infrastructure`, not merged) — integration suite gated in CI and blocking after its first green run (32/32) once #322 was fixed via #325 (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                          |
 | M20       | Dashboard Performance & Resilience (open) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + ErrorBoundary route coverage (#256)                                                                                                                                                                                                                                                                                     |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
@@ -102,7 +103,7 @@ Always` on all four platform Deployments); its registry re-resolution and worker
 behaviour are deploy-only and unproven until the first rollout.
 
 In progress:
-nothing else.
+nothing else in M19 (M18's milestone branch is recorded in its own section below).
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -117,14 +118,73 @@ typecheck (dev-worker + control-plane) clean, full vitest + the scoped new suite
 shims + conformance green, contracts validate + codegen reproducibility; per-issue numbers in
 the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
 
+## M18 — CI & Test Infrastructure (implemented on a milestone branch, not merged)
+
+Branch `milestone/m18-ci-test-infrastructure` off `dev@129d5ec`, four issues, each through
+review → verify → acceptance:
+
+- **#314** — `site/` (the gitignored mkdocs output) joins the ESLint flat config's global ignores, so
+  `make docs-build` no longer poisons `make lint`. One line in `eslint.config.js`; no other build
+  output was excluded. The exact ~1454-error repro is CI-only here (no mkdocs in this container); the
+  proof was a synthetic `site/` file with and without a matching ignore.
+- **#252** — the shared engine-runner conformance suite grows 8 → 13 named cases (16 → 25 tests):
+  `409` while `STARTING` on `/sleep` and `/memory-report` (both shims), vLLM's in-flight `/sleep`
+  guard behind a per-adapter `CONFORMANCE_FEATURES` capability set (never a shim name), `ERROR`
+  surfaced in `/health` after the engine dies, `/wake` from a non-sleeping runner pinned at today's
+  `200` (documented divergence from the spec, alignment tracked as #323), and three real
+  `_health_poller` cases per shim (startup death, post-`READY` death, death while `SLEEPING`).
+  Engine control calls are now asserted over `httpx.MockTransport` instead of a substituted fake. A
+  pre-existing seam leak that made the combined `pytest runners/...` invocation order-dependent is
+  fixed. Tests, test-only adapters and docs only — no shim runtime or contract change. The
+  conformance README documents the capability-gating mechanism and the `/wake` divergence.
+- **#176** — dashboard unit tests can render PatternFly, router, i18next and react-query components.
+  `dashboard/vitest.config.ts` resolves the graph ESM-first (`resolve.mainFields`), pins the remaining
+  CJS entrypoints (`react-router-dom`, `react-router`, `react-router/dom`,
+  `react-virtualized-auto-sizer`, `use-sync-external-store`) to their ESM builds, and inlines every
+  React-consuming package family so its `react` imports resolve the dashboard's own React 18.3.1.
+  A 10-case `src/__tests__/render-probes.test.tsx` covering the acceptance families and 8 of the 13
+  inlined package families (all failing before the change) guards the boundary; the remaining
+  inlined entries ride the same mechanism without a dedicated probe. `ProtectedRoute` moved out of
+  `App.tsx` so `NotificationProvider`'s tests render the real gate instead of a hand-mirrored one.
+  No dependency, lockfile or production-build change.
+- **#251** — the control-plane integration suite runs in CI: an `integration` job with `postgres:16`
+  - `valkey:8` service containers, the same `triage` gate and pinned-action preamble as the other
+    gates, and a final `if: always()` step running
+    `control-plane/scripts/verify-integration-report.mjs`. That script reads vitest's JSON report and
+    fails the job when zero tests were collected or any were skipped — without it the suite's
+    `describe.skipIf` + `passWithNoTests: true` exits 0 silently. The job is **blocking**: it
+    landed staged with `continue-on-error: true` and was flipped after its first green run (PR #324,
+    32/32 tests, 2026-11-25) once #322 was fixed in #325. `docs/development/setup.md` documents the
+    job and `make test-integration`.
+
+The job's first CI run executed 32 tests against real services and was **31/32** — the single
+failure is the pre-existing cutover-barrier bug **#322** (`routing-map.integration.test.ts`: an
+expired proxy presence key is read as `0`, so the barrier never observes the lapse and waits its
+full 30 s timeout). #322 was fixed in #325 (`presenceTimestamp()` maps a missing key to `NaN`), and
+the next run on the refreshed branch (head `d46a05e`) was **green: 6/6 files, 32/32 tests, 0
+pending** — the staged `continue-on-error` line was then removed. Draft PR #321 remains a CI proof
+harness for #251, not the delivery PR.
+
+Review/verification ran per issue (blueprint/implement → 2× review → fix → verify → accept);
+cumulative reports in `.omp/reports/` (agent scratchpad, not committed). Cumulative gate: root
+`npx vitest run` green (106 files / 1856 passed + 1 skipped), control-plane unit 807/807, Python
+shims + conformance `138 passed, 1 skipped` in both file orders, `tsc --build` clean, eslint +
+prettier clean on touched files, and the #251 CI run judged gate-by-gate.
+
 ## Next
 
+- **M18** (CI & Test Infrastructure) — implemented on `milestone/m18-ci-test-infrastructure`,
+  awaiting merge to `dev`: #314, #251, #252 and #176 all delivered and accepted on the branch (see
+  the M18 section above). Merge order matters only for the CHANGELOG hunk, which is already
+  resolved on the branch. The integration job is **blocking**: #322 (cutover barrier) is fixed via
+  #325 and the refreshed branch's run was green (32/32), so the staged `continue-on-error` line is
+  gone.
 - **M19** (Deployment, Release & Docs Hygiene) — the image/supply-chain half is closed (#266 via
-  #316, #267 via #318) and Phase 5 is merged and verified on-cluster; the platform-image rollout
-  is documented (#247) and still needs one on-cluster rollout proof. Remaining in the milestone:
-  #249 (release records — this revision), #248 (undocumented `details.reason` values), #268
-  (whitespace-only token gate — fix merged via #273, issue still open) and #315 (tighten
-  `supplementalGroups`, cluster-only validation).
+  #316, #267 via #318), Phase 5 is merged and verified on-cluster, the platform-image rollout is
+  documented (#247) and still needs one on-cluster rollout proof, and the docs/contracts items are
+  closed (#249 via #319, #248 via #320, #268 via #273). Remaining in the milestone: #315 only
+  (tighten `supplementalGroups`, cluster-only validation), plus #287's operational half (vLLM SIF
+  `rc2` republish + re-import).
 - **Gate 9b follow-ups** (#286–#289): the leaked-runner divergence, the duplicate
   `POST /runners`, the stale runner modules, and the worker-catalog deployment gap. All four are
   fixed and merged: #289 (worker catalog default), #286 (teardown boundary + `GET /runners`
@@ -189,6 +249,20 @@ revision except where #278 changed the follow-through:
   2026-11-17**: pre-existing `models` rows survived the upgrade with `allow_co_location`
   defaulting to false, and the flag round-tripped through stop → config-edit → start cycles.
 
+M18's own boundaries (implemented, not merged):
+
+- **#251/#322** — the integration job cannot be flipped to blocking until the pre-existing
+  cutover-barrier bug #322 is fixed; the one green run its staging rule waits for is therefore not
+  obtainable from this milestone.
+- **#323** — the conformance suite pins `/wake` from a non-sleeping runner at today's `200`, which
+  the engine-runner spec describes as `409`. Aligning spec + both shims + the control plane's wake
+  path is a follow-up issue, deliberately not done inside #252.
+- **#176** — the React-18 pin is per package: a new React-consuming dependency omitted from
+  `test.server.deps.inline` still binds the hoisted root React 19 and only fails at first render.
+  The probe file is the guard; the config alone does not make React 19 unreachable.
+- **#314** — the exact ~1454-error repro (mkdocs installed, repo-wide `eslint .`) was not runnable
+  in this container; the evidence is the synthetic-`site/` lint with and without the ignore.
+
 M15 items still pending first deployment exercise (merged to `dev` via #270/#271): Secret
 resolution at pod creation and the Valkey AUTH handshake (#230), CNI admission and enforcement of
 the default-deny + allow NetworkPolicies and the Prometheus scrape of proxy 9099 (#230), VAP
@@ -246,6 +320,35 @@ From M17 (reviewer-recorded, non-blocking):
   (start swallows it, real children exit async). Worth an issue.
 
 ## Notable changes
+
+M18 (branch `milestone/m18-ci-test-infrastructure`, pending merge):
+
+- CI gains another gate job, `integration`, against real `postgres:16` + `valkey:8` service
+  containers. It runs the existing control-plane integration vitest config with a JSON reporter and
+  adds a fail-closed report check (`control-plane/scripts/verify-integration-report.mjs`: zero
+  collected tests, any skipped test, a failed test or a missing/malformed report all red). Blocking
+  since its first green run (32/32, 2026-11-25) after #322 was fixed in #325; it landed staged via a
+  single `continue-on-error: true` until that run existed. The
+  `ci.yml` trailer no longer lists `make test-integration` as deliberately ungated.
+- Dashboard unit tests get a working React-18 render tree: ESM-first `resolve.mainFields`,
+  exact-file ESM aliases for the remaining CJS entrypoints (`react-router-dom`, `react-router`,
+  `react-router/dom`, `react-virtualized-auto-sizer`, `use-sync-external-store`), and
+  `test.server.deps.inline` per React-consuming package family. New
+  `dashboard/src/__tests__/render-probes.test.tsx` (10 cases) guards the acceptance families and
+  most of the inlined set; `ProtectedRoute` is now its own module
+  (`dashboard/src/components/ProtectedRoute.tsx`) so its tests render the real gate. No dependency,
+  lockfile or production-build change — the hoisted root React 19 stays.
+- The conformance test-adapter contract gains `CONFORMANCE_FEATURES`, `APP_MODULE` and
+  `PATCHED_SEAMS`, and `build_conformance_app()` gains keyword-only `ready`/`alive` (plus
+  `active_requests` for adapters declaring the sleep guard); the zero-argument call is unchanged.
+  Fixtures restore patched seams after the app lifespan, so the shared suite no longer leaks its
+  doubles into the shims' own unit suites in a combined `pytest` invocation. The suite is 13 named
+  cases / 25 tests and documents both the capability-gating rule and the `/wake` divergence (#323).
+- The ESLint flat config's global ignores gain `site/`, so the gitignored mkdocs output cannot fail
+  `make lint` after `make docs-build`.
+- Docs: `docs/development/patternfly.md` gains a "Unit testing (Vitest)" section (the three levers,
+  the per-package cover, the jsdom/nivo limits); `docs/development/setup.md` documents the CI
+  integration job and adds `make test-integration` to the command table.
 
 Phase 5 (merged via #281; decisions ratified as
 [ADR-029](../architecture/adrs/adr-029-colocation-hold-and-pressure-stop.md) in #283):

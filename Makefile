@@ -111,7 +111,7 @@ test-deployment: ## Test deployment/publishing shell orchestration (no cluster r
 	./tests/deployment/test-build-sif.sh
 	./tests/deployment/test-build-runner-sif.sh
 
-test-integration: ## Integration tests (requires compose services)
+test-integration: ## Integration tests (needs compose services; self-skips when unavailable — CI asserts executed counts)
 	npm run test:integration -w @sardeenz/control-plane
 
 test-coverage: ## Run tests with V8 coverage

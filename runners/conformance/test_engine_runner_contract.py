@@ -5,7 +5,7 @@ shim's real FastAPI `create_app()` — with a fake engine + canned memory report
 the per-shim `sardeenz_<engine>_runner.testing.build_conformance_app()` adapter — under
 `fastapi.testclient.TestClient`. Assertions are against the contract
 (packages/contracts/specs/engine-runner.yaml), not engine internals: both shims must pass every
-case here identically.
+case here identically, except the capability-gated cases (see `README.md`).
 """
 
 from __future__ import annotations
@@ -131,3 +131,63 @@ def test_error_shape_on_bad_sleep_body(shim_client):
     body = resp.json()
     assert "error" in body
     assert "code" in body
+
+
+# --- conflict / failure paths (#252) -------------------------------------------------------
+
+
+def test_sleep_409_while_starting(starting_client):
+    """A runner still loading must refuse /sleep (contract: 409, "only valid from READY")."""
+    _name, client = starting_client
+    resp = client.post("/sleep", json={"level": "L1_HOST_RAM"})
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["code"] == "NOT_READY"
+    assert "start" in body["error"].lower()
+
+
+def test_memory_report_409_while_starting(starting_client):
+    """Memory is still being allocated: the report is refused, never fabricated."""
+    _name, client = starting_client
+    resp = client.get("/memory-report")
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["code"] == "MEMORY_UNAVAILABLE"
+    assert "start" in body["error"].lower()
+
+
+def test_sleep_409_with_active_requests(active_requests_client):
+    """vLLM-only: a shim declaring `sleep-active-request-guard` refuses to sleep while
+    inference is in flight (MLServer reports the gauge but cannot block — see README)."""
+    _name, client = active_requests_client
+    resp = client.post("/sleep", json={"level": "L1_HOST_RAM"})
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["code"] == "NOT_READY"
+    assert "active requests" in body["error"].lower()
+
+
+def test_health_error_after_engine_death(dying_client):
+    """A dead engine must surface as ERROR + message on /health, never a stale READY."""
+    _name, client = dying_client
+    resp = client.get("/health")
+    assert resp.status_code == 200  # HealthStatus: "200 — runner is in a known state"
+    body = resp.json()
+    assert body["state"] == "ERROR"
+    assert body["message"]
+    assert "exit" in body["message"].lower()
+    assert "progress" not in body  # LoadingProgress is STARTING-only
+
+
+def test_wake_from_non_sleeping_returns_200(shim_client):
+    """Pins today's behaviour, a deliberate divergence from the contract (#252 OQ1=B).
+
+    engine-runner.yaml documents `409 — Runner is not sleeping`; both shims call the engine's
+    wake and answer 200 instead. No shim runtime change in #252 — the deviation, its
+    control-plane consequence and the follow-up are recorded in README "Known divergences".
+    """
+    _name, client = shim_client
+    resp = client.post("/wake")
+    assert resp.status_code == 200
+    assert resp.json() == {"state": "READY"}
+    assert client.get("/sleep-status").json() == {"isSleeping": False}

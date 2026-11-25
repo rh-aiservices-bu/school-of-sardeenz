@@ -4,8 +4,8 @@
  * Following the project convention (see MemoryVisualization.test.tsx,
  * role-visibility.test.tsx), we test the pure helpers that drive the form's
  * option lists and default reconciliation directly, rather than rendering
- * <ModelDeploy> with @testing-library/react (PF/React version conflicts in
- * this worktree). Full rendering coverage is left to the Playwright e2e suite.
+ * <ModelDeploy>. PatternFly renders under Vitest since #176 (see
+ * src/__tests__/render-probes.test.tsx); full-page coverage stays in e2e.
  */
 import { describe, it, expect } from 'vitest';
 import type { ControlPlaneComponents } from '@sardeenz/types';

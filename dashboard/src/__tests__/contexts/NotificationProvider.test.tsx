@@ -1,22 +1,29 @@
 /**
  * Tests for NotificationProvider mount-fetch lifecycle and the ProtectedRoute
- * auth gate (issue #106, #148).
+ * auth gate (issue #106, #148, #176).
  *
- * The auth-gate cases below are real renders of the gate (App.tsx ProtectedRoute
- * logic) with a mocked useAuth — issue #148 pinned @testing-library/react to
- * the dashboard-local React 18.3.1 in vitest.config.ts, so render/renderHook
- * now work in this workspace. The mount-fetch block is retained as a direct
- * test of the effect body (it mirrors NotificationContext.tsx exactly); the
- * logic-simulation convention notes in the other dashboard test files are
- * still accurate for them — only this file has been converted.
+ * The auth-gate cases below render the real `ProtectedRoute`
+ * (src/components/ProtectedRoute.tsx) inside a `MemoryRouter`, with a mocked
+ * `useAuth`. Letting the real gate mount is only possible because
+ * dashboard/vitest.config.ts keeps the router on the dashboard-local React
+ * 18.3.1 (issue #176); before that the router bound the hoisted React 19 copy
+ * and threw "Cannot read properties of null (reading 'useRef')". The
+ * mount-fetch block is retained as a direct test of the effect body (it mirrors
+ * NotificationContext.tsx exactly); the logic-simulation convention notes in
+ * the other dashboard test files are still accurate for them — only this file
+ * has been converted.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../../contexts/AuthContext';
 import type { AuthState } from '../../contexts/AuthContext';
 import { api } from '../../api/client';
 import { NotificationProvider } from '../../contexts/NotificationContext';
+import { ProtectedRoute } from '../../components/ProtectedRoute';
+// Real i18next instance: the gate renders t('loading') into the Spinner's aria-label.
+import '../../i18n';
 
 vi.mock('../../api/client', () => ({
   api: {
@@ -38,24 +45,11 @@ vi.mock('../../contexts/AuthContext', async (importOriginal) => {
 const mockedList = vi.mocked(api.notifications.list);
 
 /**
- * Mirrors App.tsx ProtectedRoute's gating condition exactly (real gate logic,
- * test-local): the same branch order and the same useAuth() inputs
- * (authMode → isLoading → isAuthenticated). The real component additionally
- * calls useLocation() and renders <Navigate to="/login"> for the unauthenticated
- * branch; those are router-navigation concerns, not gate logic, so the test
- * gate renders a plain marker element instead. No Router wrapper is used: the
- * gate deliberately exercises only the auth-context logic, not routing (issue
- * #148's render-tree split concern is gone with react-router-dom v7 — an ESM
- * re-export shim of react-router that resolves the same React instance).
+ * Renders the real ProtectedRoute (src/components/ProtectedRoute.tsx) inside a
+ * MemoryRouter with a mocked useAuth. `initialEntries` pins the origin the gate
+ * remembers in `state.from`; the `/login` route stands in for the app's login
+ * page so the unauthenticated redirect is observable.
  */
-function Gate({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading, authMode } = useAuth();
-  if (authMode === 'none') return <>{children}</>;
-  if (isLoading) return <div data-testid="gate-loading" />;
-  if (!isAuthenticated) return <div data-testid="gate-login" />;
-  return <>{children}</>;
-}
-
 function renderGate(auth: Partial<AuthState>, children: ReactNode) {
   const state: AuthState = {
     isAuthenticated: false,
@@ -71,7 +65,12 @@ function renderGate(auth: Partial<AuthState>, children: ReactNode) {
   vi.mocked(useAuth).mockReturnValue(state);
   return render(
     <AuthProvider>
-      <Gate>{children}</Gate>
+      <MemoryRouter initialEntries={['/gpu-memory']}>
+        <Routes>
+          <Route path="/gpu-memory" element={<ProtectedRoute>{children}</ProtectedRoute>} />
+          <Route path="/login" element={<div data-testid="login-route" />} />
+        </Routes>
+      </MemoryRouter>
     </AuthProvider>,
   );
 }
@@ -184,7 +183,7 @@ describe('NotificationProvider auth gate (real render)', () => {
       { authMode: 'simple', isAuthenticated: false },
       <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>,
     );
-    expect(await screen.findByTestId('gate-login')).toBeInTheDocument();
+    expect(await screen.findByTestId('login-route')).toBeInTheDocument();
     expect(screen.queryByText('PROVIDER_MOUNTED')).not.toBeInTheDocument();
     expect(mockedList).not.toHaveBeenCalled();
   });
@@ -194,7 +193,7 @@ describe('NotificationProvider auth gate (real render)', () => {
       { authMode: 'oauth', isAuthenticated: false },
       <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>,
     );
-    expect(await screen.findByTestId('gate-login')).toBeInTheDocument();
+    expect(await screen.findByTestId('login-route')).toBeInTheDocument();
     expect(mockedList).not.toHaveBeenCalled();
   });
 
@@ -217,5 +216,15 @@ describe('NotificationProvider auth gate (real render)', () => {
     renderGate({ authMode: 'none' }, <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>);
     expect(await screen.findByText('PROVIDER_MOUNTED')).toBeInTheDocument();
     await vi.waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+  });
+
+  it('renders the loading spinner (not the children) while auth state is loading', async () => {
+    renderGate(
+      { isLoading: true, isAuthenticated: false },
+      <NotificationProvider>PROVIDER_MOUNTED</NotificationProvider>,
+    );
+    expect(await screen.findByRole('progressbar')).toBeInTheDocument();
+    expect(screen.queryByText('PROVIDER_MOUNTED')).not.toBeInTheDocument();
+    expect(mockedList).not.toHaveBeenCalled();
   });
 });

@@ -2,13 +2,14 @@ name: CI
 
 # Quality gates only — no image builds. It enforces every gate that previously
 # ran only manually: typecheck, ESLint, clippy, OpenAPI spec validation
-# (redocly), unit tests (vitest + cargo test), and contract-codegen drift.
+# (redocly), unit tests (vitest + cargo test), contract-codegen drift, and the
+# control-plane integration suite (real Postgres + Valkey).
 #
 # PR runs (event=pull_request) always execute. Push runs (merges to dev/main)
 # execute only when the pushed tree has not already been tested green by the
 # PR run: `triage` compares the pushed sha against the merged PR's head sha
 # (same git tree ⇒ identical content ⇒ the tests just passed on it) and skips
-# the three gate jobs when a green pull_request run exists. A direct push to
+# the gate jobs when a green pull_request run exists. A direct push to
 # dev, or a merge whose head never turned green, always runs CI.
 on:
   pull_request:
@@ -193,10 +194,72 @@ jobs:
       - name: Run Python test suites
         run: make test-python
 
+  # The control-plane integration suite against real Postgres + Valkey, so the boundary
+  # paths its correctness fixes live in (reservations, reconciliation, delete/stop claim
+  # fencing) fail a PR. The suite skips itself whenever its services are unreachable
+  # (`describe.skipIf(!(await canConnect()))`) and its config sets `passWithNoTests: true`,
+  # so the last step parses vitest's JSON report and fails when nothing actually ran.
+  #
+  # M18 / #251: BLOCKING since its first green run (2026-11-25, PR #324 job 139517230135:
+  # 6/6 files, 32/32 tests, 0 pending). It landed staged with `continue-on-error: true` until that
+  # run cleared the #322 blocker (cutover barrier never observed an expired proxy presence lease);
+  # a red integration job now fails the workflow. Note `triage` skips this job on merge pushes to
+  # dev/main, so it only gates pull_request runs.
+  integration:
+    name: control-plane integration (Postgres + Valkey)
+    needs: triage
+    if: always() && (needs.triage.result == 'skipped' || needs.triage.outputs.tested != 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sardeenz
+          POSTGRES_PASSWORD: sardeenz
+          POSTGRES_DB: sardeenz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sardeenz"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: valkey/valkey:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # The harness reaches this server and derives `sardeenz_test` (+ Redis logical DB 1).
+      # POSTGRES_USER is the postgres image's superuser, so its CREATE DATABASE succeeds.
+      SARDEENZ_DATABASE_URL: postgresql://sardeenz:sardeenz@127.0.0.1:5432/sardeenz
+      SARDEENZ_REDIS_URL: redis://127.0.0.1:6379
+      INTEGRATION_REPORT: ${{ github.workspace }}/control-plane/integration-results.json
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Run control-plane integration suite
+        run: npm run test:integration -w @sardeenz/control-plane -- --reporter=default --reporter=json --outputFile.json="$INTEGRATION_REPORT"
+      - name: Assert the suite actually ran
+        # `always()` so the JSON report is still parsed and logged when the suite step
+        # above fails; the job stays red on the suite failure itself.
+        if: always()
+        run: node control-plane/scripts/verify-integration-report.mjs "$INTEGRATION_REPORT"
+
 # Deliberately NOT gated here (tracked separately, not part of #82):
 #   - `make format-check`: `npx prettier --check .` fails on 34 files today; it
 #     is not in `make all`, so excluding it does not weaken this pipeline.
-#   - `make test-integration`: remains a separate application integration suite.
 #   - index-completeness check (#81).
 # Container image builds run only in publish-images.yml, on merges to dev: it
 # detects the impacted images from the changed paths, builds just those, and

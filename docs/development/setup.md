@@ -172,24 +172,38 @@ name doesn't end in `_test`**.
 | Override test Redis                  | `SARDEENZ_TEST_REDIS_URL`    | `<SARDEENZ_REDIS_URL>` on logical DB `1`    |
 | Bypass the `_test` guard (dangerous) | `SARDEENZ_ALLOW_NON_TEST_DB` | unset (guard active)                        |
 
+#### In CI
+
+Every PR runs this suite in the `integration` job of `.github/workflows/ci.yml`: the job runs the
+same vitest integration config through the control-plane package script (adding a JSON reporter)
+and brings its own `postgres:16` and `valkey:8` service containers instead of the compose stack,
+so it needs no local services. Because the suite skips itself when it cannot connect (and the
+vitest config allows an empty run), a final `if: always()` step runs
+`node control-plane/scripts/verify-integration-report.mjs` on that JSON report and **fails when no
+test executed or any test was skipped** — a green integration job therefore means the tests ran,
+not that they were skipped. Rollout: the job landed staged with `continue-on-error: true` and is
+now **blocking** — its first green run (32/32 tests, 2026-11-25) followed the #322 cutover-barrier
+fix (#325), and that one line was deleted.
+
 ## Common Commands
 
-| Command              | Description                                                                                                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `make` / `make help` | List all targets with descriptions                                                                                                                                       |
-| `make all`           | Type-check and lint everything                                                                                                                                           |
-| `make lint`          | ESLint + clippy + OpenAPI spec validation                                                                                                                                |
-| `make lint-specs`    | Validate OpenAPI specs only (Redocly)                                                                                                                                    |
-| `make format`        | Auto-format all files                                                                                                                                                    |
-| `make format-check`  | Check formatting (CI-safe)                                                                                                                                               |
-| `make typecheck`     | TypeScript `tsc --build` + `cargo check`                                                                                                                                 |
-| `make test`          | Run all test suites (Vitest + cargo test)                                                                                                                                |
-| `make test-python`   | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
-| `make test-coverage` | Run tests with V8 coverage                                                                                                                                               |
-| `make codegen`       | Regenerate types from OpenAPI specs                                                                                                                                      |
-| `make services`      | Start dev services (Redis + Postgres)                                                                                                                                    |
-| `make services-stop` | Stop dev services                                                                                                                                                        |
-| `make clean`         | Remove all build artifacts                                                                                                                                               |
+| Command                 | Description                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `make` / `make help`    | List all targets with descriptions                                                                                                                                       |
+| `make all`              | Type-check and lint everything                                                                                                                                           |
+| `make lint`             | ESLint + clippy + OpenAPI spec validation                                                                                                                                |
+| `make lint-specs`       | Validate OpenAPI specs only (Redocly)                                                                                                                                    |
+| `make format`           | Auto-format all files                                                                                                                                                    |
+| `make format-check`     | Check formatting (CI-safe)                                                                                                                                               |
+| `make typecheck`        | TypeScript `tsc --build` + `cargo check`                                                                                                                                 |
+| `make test`             | Run all test suites (Vitest + cargo test)                                                                                                                                |
+| `make test-python`      | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
+| `make test-coverage`    | Run tests with V8 coverage                                                                                                                                               |
+| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 32/32 since 2026-11-25) |
+| `make codegen`          | Regenerate types from OpenAPI specs                                                                                                                                      |
+| `make services`         | Start dev services (Redis + Postgres)                                                                                                                                    |
+| `make services-stop`    | Stop dev services                                                                                                                                                        |
+| `make clean`            | Remove all build artifacts                                                                                                                                               |
 
 ## Logs
 

@@ -1,10 +1,10 @@
 /**
  * DeployLogsModal behaviour tests.
  *
- * Following the project convention (see role-visibility.test.tsx and
- * MemoryVisualization.test.tsx), we test the state-derivation logic directly,
- * mirroring DeployLogsModal.tsx exactly, rather than rendering PatternFly
- * components — full rendering coverage is left to the Playwright e2e suite.
+ * Following the project convention (see role-visibility.test.tsx), we test the
+ * state-derivation logic directly, mirroring DeployLogsModal.tsx exactly,
+ * rather than rendering the modal; PF render probes live in
+ * src/__tests__/render-probes.test.tsx (#176) and full coverage in e2e.
  */
 import { describe, it, expect } from 'vitest';
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+import types
 from typing import Any, Awaitable, Callable, Iterator
 
 import httpx
@@ -25,15 +26,7 @@ import pytest
 
 from sardeenz_mlserver_runner import app as app_module
 from sardeenz_mlserver_runner import state as st
-from sardeenz_mlserver_runner.testing import build_conformance_app
-
-# The app-module seams build_conformance_app() patches (testing.py restores nothing).
-_PATCHED_SEAMS = (
-    "MLServerEngine",
-    "memory_report",
-    "build_model_settings",
-    "write_model_repository",
-)
+from sardeenz_mlserver_runner.testing import PATCHED_SEAMS, build_conformance_app
 
 
 @pytest.fixture()
@@ -44,11 +37,13 @@ def conformance_app() -> Iterator[Any]:
     each seam on the ``MonkeyPatch`` *before* the build records the pre-fixture values as undo
     targets, so even a build that fails mid-patch is rolled back in ``finally`` — which matters
     because this file collects before ``test_core.py`` in the same session and that suite reads
-    the real ``memory_report`` / engine seams off the app module.
+    the real ``memory_report`` / engine seams off the app module. The seam list itself is the
+    adapter's ``PATCHED_SEAMS``, declared next to the patching in ``testing`` so it cannot drift
+    from what ``build_conformance_app()`` replaces.
     """
     mp = pytest.MonkeyPatch()
     try:
-        for name in _PATCHED_SEAMS:
+        for name in PATCHED_SEAMS:
             mp.setattr(app_module, name, getattr(app_module, name))
         app = build_conformance_app()
         yield app
@@ -210,3 +205,77 @@ def test_sleep_bad_level_400(conformance_app: Any) -> None:
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(app_module, "memory_report", _never_called)
         _drive(conformance_app, scenario)
+
+
+# --- _health_poller crash paths (#252) -----------------------------------------------------
+
+
+class _DeadEngine:
+    """The engine surface the poller touches on a dead process.
+
+    ``poll_ready`` must never be reached in these phases (a dead process fails ``is_alive``
+    first), so reaching it is a test failure rather than a silent pass — and ``client`` is
+    ``None`` because these paths never use it.
+    """
+
+    def is_alive(self) -> bool:
+        return False
+
+    async def poll_ready(self, client: object) -> bool:
+        raise AssertionError("poller must not poll readiness for a dead process")
+
+
+def _run_poller(monkeypatch: pytest.MonkeyPatch, status: st.RunnerStatus) -> None:
+    """Drive the real ``_health_poller`` with its ticks elided (#252 / S3).
+
+    The poller's only ``asyncio`` use on these paths is ``asyncio.sleep`` (1 s startup poll,
+    2 s liveness tick), so the *app module's* ``asyncio`` name is swapped for a stub whose
+    sleep returns at once — the global asyncio module and this test's ``asyncio.run`` are
+    untouched, and each case costs ~0 ms instead of 2 s (CI's python job is 10 min,
+    ci.yml:181). The stub fails after 10 ticks so a fake engine that never died would fail
+    fast instead of spinning a zero-length loop forever. No lifespan/portal, so no
+    pytest-asyncio (not installed in .venv).
+    """
+    ticks = 0
+
+    async def _tick(_delay: float) -> None:
+        nonlocal ticks
+        ticks += 1
+        assert ticks <= 10, "poller is spinning: the fake engine never died"
+
+    app = types.SimpleNamespace(
+        state=types.SimpleNamespace(engine=_DeadEngine(), status=status, client=None)
+    )
+    monkeypatch.setattr(app_module, "asyncio", types.SimpleNamespace(sleep=_tick))
+    asyncio.run(app_module._health_poller(app))
+
+
+def test_poller_marks_error_when_engine_dies_during_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = st.RunnerStatus()  # STARTING
+    _run_poller(monkeypatch, status)
+    assert status.health(active_requests=None) == {
+        "state": st.ERROR,
+        "message": "MLServer engine process exited during startup",
+    }
+
+
+def test_poller_marks_error_when_engine_dies_after_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = st.RunnerStatus()
+    status.mark_ready()
+    _run_poller(monkeypatch, status)
+    assert status.health(active_requests=None) == {
+        "state": st.ERROR,
+        "message": "MLServer engine process exited",
+    }
+
+
+def test_poller_marks_error_when_engine_dies_while_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = st.RunnerStatus()
+    status.mark_ready()
+    status.mark_sleeping(st.L1_HOST_RAM)  # process alive while sleeping — the case the guard is for
+    _run_poller(monkeypatch, status)
+    assert status.health(active_requests=None) == {
+        "state": st.ERROR,
+        "message": "MLServer engine process exited",
+    }
+    assert status.sleep_status()["isSleeping"] is False

@@ -128,7 +128,10 @@ sardeenz_mlserver_runner/
 unit-tested without MLServer, torch or a GPU. `tests/test_app.py` drives the real `create_app`
 over the conformance doubles through `httpx.ASGITransport` to pin where handlers execute — the
 blocking `memory_report` reads run on the default executor, off the event loop that serves
-`/health` (the conformance suite already covers the handlers' shapes under `TestClient`):
+`/health` (the conformance suite already covers the handlers' shapes under `TestClient`). It also
+drives the real `_health_poller` through its startup-death, post-`READY`-death and
+death-while-`SLEEPING` paths (its ticks elided, so no 2 s waits), and `tests/test_core.py` asserts
+the engine's repository `unload` / `load` control calls over an `httpx.MockTransport`:
 
 ```bash
 cd runners/mlserver && python3 -m pytest
@@ -142,4 +145,6 @@ runtime or the pinned `onnxruntime-gpu` changes.
 This suite plus the vLLM shim's and the shared `runners/conformance` suite run together in CI
 (the `python` job) and via `make test-python` (after `make test-python-deps`).
 
-The engine + HTTP layers are exercised by the Phase 4-style cluster integration gates (Unit D).
+The engine subprocess itself is exercised by the Phase 4-style cluster integration gates (Unit D);
+its control-call URLs and the handler layers are asserted in `tests/test_core.py` /
+`tests/test_app.py` and the conformance suite.

@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The control-plane integration suite is gated in CI (#251).** `.github/workflows/ci.yml` gains an
+  `integration` job — `postgres:16` + `valkey:8` service containers, the same `triage` gate and
+  pinned-action preamble as the other gates — running what `make test-integration` runs locally, so
+  the real Postgres/Redis paths (reservations, reconciliation, delete/stop claim fencing) fail a PR
+  instead of regressing unnoticed. Because the suite skips itself when it cannot connect and its
+  vitest config sets `passWithNoTests: true`, the job finishes with
+  `control-plane/scripts/verify-integration-report.mjs`, which fails unless the run's JSON report
+  shows executed tests and none skipped. The job is blocking: it landed staged
+  (`continue-on-error: true`) and was flipped after its first green run (PR #324, 32/32 tests) once
+  #322 was fixed in #325; `docs/development/setup.md` documents the job and adds
+  `make test-integration` to its command table.
+- **Dashboard unit tests can render PatternFly, router, i18n and react-query components (#176).**
+  `dashboard/vitest.config.ts` now resolves the test graph ESM-first (`resolve.mainFields`), pins the
+  remaining CJS entrypoints (`react-router-dom`, `react-router`, `react-router/dom`,
+  `react-virtualized-auto-sizer`, `use-sync-external-store`) to their ESM builds, and inlines every
+  React-consuming package family so its `react` imports flow through the React-18 alias table and
+  resolve the dashboard's own React 18.3.1 instead of the hoisted root copy. That cover is
+  per-package: a dependency left out of `inline` still binds the hoisted React 19, which only leaks at
+  first render, so a new `src/__tests__/render-probes.test.tsx` guards the boundary with one case per
+  family (PatternFly core/icons/table/charts,
+  nivo, react-markdown, router, i18next, react-query, plus the app's own `StateLabel`), and the
+  `NotificationProvider` auth-gate tests render the real `ProtectedRoute` — moved from `App.tsx` into
+  `src/components/ProtectedRoute.tsx` — inside a `MemoryRouter` instead of a hand-mirrored gate. No
+  dependency, lockfile or production-build change.
 - **Release records reconciled: 0.2.1 cut, versions aligned, project status refreshed (#249).**
   `CHANGELOG.md` gains the missing `[0.2.1]` section — the entries that had accumulated in
   `[Unreleased]` when the version was bumped to 0.2.1 (`3c92d45`, 2026-10-29) — and each
@@ -169,6 +193,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Runner-contract conformance covers the conflict and crash paths, and both shims'
+  `_health_poller` lifecycle is unit-tested (#252).** The shared suite grows from 8 to 13 named
+  cases (25 tests): `/sleep` and `/memory-report` `409` while `STARTING`, vLLM's in-flight-request
+  `/sleep` guard — declared by a per-adapter capability flag, so no case is keyed on a shim name —
+  `ERROR` surfaced in `/health` after the engine dies, and `/wake` from a non-sleeping runner
+  pinned at today's `200`, a deliberate divergence from `engine-runner.yaml` recorded in
+  `runners/conformance/README.md` with the follow-up. Both shims gain three `_health_poller` cases
+  (startup death, post-`READY` death, death while `SLEEPING`) driven directly with the poller's
+  ticks elided, and both engines' real sleep/wake calls are asserted over `httpx.MockTransport`
+  (`POST /sleep?level=1` / `/wake_up`; repository `unload` / `load`). Tests, test-only adapters and
+  docs only — no runner runtime behaviour change.
+- **The lint gate no longer lints the gitignored mkdocs output (#314).** `make docs-build` writes the
+  rendered site to `site/` (`.gitignore:82`), which `eslint .` then descended into: the generated
+  JavaScript produced ~1454 errors unrelated to any change, poisoning the next `make lint`. `site/`
+  is now in the flat config's global `ignores`; nothing else was added, so ordinary build output
+  stays linted. Found during #266 verification.
 - **Cutover barrier now honours an expired proxy presence lease (#322).** Both presence reads in
   `RoutingMapService.cutoverEndpointAndWait` coerced Redis's `null` (a key whose TTL elapsed) with
   `Number(null)` → `0`, a finite timestamp "connected at the epoch", so a proxy that had already
@@ -178,7 +218,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `traffic cutover barrier timed out`. A single `presenceTimestamp()` coercion now maps a missing
   or empty value to `NaN`, so the barrier returns `true` as soon as the last unacknowledged
   proxy's lease expires. No timeout, poll cadence, Lua mutation or ack cleanup change.
-
 - **Cross-family inference and readiness now 404 before any parking, wake or forward (#246).** The
   proxy compared a request's path-prefix family with nothing: an `oip`-tagged model invoked through
   `/openai/v1/...` (or the reverse) was parked, woken and then forwarded to an engine that cannot

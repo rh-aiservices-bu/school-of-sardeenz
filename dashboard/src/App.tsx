@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Bullseye, EmptyState, EmptyStateBody, PageSection, Spinner } from '@patternfly/react-core';
 import { useTranslation, withTranslation, type WithTranslation } from 'react-i18next';
 import { useAuth } from './contexts/AuthContext';
@@ -8,6 +8,7 @@ import { NotificationProvider } from './contexts/NotificationContext';
 import { InferenceWorkspaceProvider } from './contexts/InferenceWorkspaceContext';
 import { DegradedBanner } from './components/DegradedBanner';
 import { AppLayout } from './components/AppLayout';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { EventStreamContext, useEventStreamConnection } from './hooks/useEventStream';
 import { ClusterOverview } from './pages/ClusterOverview/ClusterOverview';
 import { ModelList } from './pages/Models/ModelList';
@@ -64,30 +65,6 @@ class ErrorBoundaryBase extends Component<
 }
 
 const ErrorBoundary = withTranslation('common')(ErrorBoundaryBase);
-
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading, authMode } = useAuth();
-  const location = useLocation();
-  const { t } = useTranslation('common');
-
-  // Auth disabled — always pass
-  if (authMode === 'none') return <>{children}</>;
-
-  // Still loading auth state
-  if (isLoading) {
-    return (
-      <Bullseye>
-        <Spinner size="xl" aria-label={t('loading')} />
-      </Bullseye>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
-  }
-
-  return <>{children}</>;
-}
 
 /** Restricts a route to users with the `admin` role. Read-only users are redirected to `/models`. */
 function AdminRoute({ children }: { children: ReactNode }) {

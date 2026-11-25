@@ -64,6 +64,9 @@ sardeenz/
 - Coding standards (TS, Rust, cross-language): [`docs/development/coding-standards.md`](docs/development/coding-standards.md).
 - Contract workflow (edit spec → validate → `make codegen` → fix consumers): [`docs/development/contracts.md`](docs/development/contracts.md).
 - `make lint typecheck test` is the pre-commit gate; `make test-python` covers the Python shims.
+  `make test-integration` (Postgres + Valkey) runs in CI on every PR as a blocking gate — it
+  self-skips and exits 0 when the services are absent, so use the CI job's executed-count gate as
+  the proof, not a local exit code.
 
 ## Workflow Rules
 
@@ -78,8 +81,12 @@ sardeenz/
 ## Project Status
 
 Phases 0–5 and milestones M2–M17 are complete and merged to `dev`, as are M19's Phase 5 track and
-its image/supply-chain half (#266 via #316, #267 via #318). Next: the remaining M19
-docs/contracts/security items (#249, #248, #268, #315), then the Parking Lot backlog.
+its image/supply-chain half (#266 via #316, #267 via #318) plus the M19 docs/contracts items (#249
+via #319, #248 via #320, #268 via #273), and #322 (cutover barrier) is fixed via #325. M18 (CI &
+Test Infrastructure) is **implemented on `milestone/m18-ci-test-infrastructure`, awaiting merge** —
+its integration job is now blocking, after its first green run (32/32 tests) cleared the #322
+blocker. Next: merge M18, then M19's
+remaining #315 (cluster-only), the vLLM SIF republish/rollout, M20, and the Parking Lot backlog.
 Details and history: [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
