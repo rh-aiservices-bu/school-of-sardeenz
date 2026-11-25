@@ -46,8 +46,13 @@ runner SIFs. To serve predictive or Hugging Face models, follow
 
 ## Project Status
 
-Phases 0–4 and milestones M2–M14 are merged to `dev`; M15 (Security Hardening) is implemented on
-its milestone branch awaiting PR. See [`docs/project/status.md`](docs/project/status.md) for details and the [overall plan](docs/project/overall-plan.md) for the delivery phases.
+Phases 0–5 and milestones M2–M17 are complete and merged to `dev`. M19 (Deployment, Release & Docs
+Hygiene) is nearly done — its Phase 5 track, the image/supply-chain hardening (#266) and the ADR-016
+wording reconciliation (#267) are merged, with the remaining docs/contracts/security items (#248,
+#268, #315) and one deploy-only image rollout proof outstanding; M18 (CI & test infrastructure) and
+M20 (dashboard performance) are open. Releases: `v0.2.0` (2026-09-15) and 0.2.1 (2026-10-29, not yet
+tagged, recorded in [`CHANGELOG.md`](CHANGELOG.md)). See
+[`docs/project/status.md`](docs/project/status.md) for details and the [overall plan](docs/project/overall-plan.md) for the delivery phases.
 
 ## License
 

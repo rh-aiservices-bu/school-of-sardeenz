@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Release records reconciled: 0.2.1 cut, versions aligned, project status refreshed (#249).**
+  `CHANGELOG.md` gains the missing `[0.2.1]` section — the entries that had accumulated in
+  `[Unreleased]` when the version was bumped to 0.2.1 (`3c92d45`, 2026-10-29) — and each
+  `[Unreleased]` type now has exactly one heading (`### Changed`, `### Added`, `### Fixed`,
+  `### Security`). `proxy/Cargo.toml` and its `Cargo.lock` entry move to 0.2.1, matching the
+  `package.json`/`package-lock.json` version the bump set. `docs/project/status.md` gains M16
+  (complete), M18 and M20 (open) in its milestone table, records the `v0.2.0` (2026-09-15) and
+  0.2.1 (2026-10-29) releases, and lists what remains in M19 after #266/#267 shipped via
+  #316/#318; the root `AGENTS.md` and `README.md` status paragraphs now match. No tag is created
+  here: `v0.2.1` is still outstanding.
 - **SCC posture documented as it ships: two deliberate deltas from `restricted-v2` (#267).**
   ADR-016, the `sardeenz-sif-runner` SCC header and its `kubernetes.io/description` (shown by
   `oc describe scc`), the `deployment/sif-runner` README and the deployment-security guide now all
@@ -64,6 +74,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   publishes.
   `containers/README.md`, `deployment/control-plane/README.md`, and the runner-SIF runbooks are
   cross-linked rather than duplicated.
+- **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
+  pre-tool safety hook imported from the agents-jukebox project kept their orchestration method
+  (Direct/Light/Full pipelines, role agents, report-scratchpad custody) but every
+  repository-specific reference was rewritten for sardeenz: role models resolve through
+  `modelRoles` aliases (`plan`/`slow`) instead of nonexistent explicit IDs, npm instead of pnpm,
+  Kustomize instead of Helm (helm block rule dropped from the safety hook), JWT auth on
+  `dashboard/server/plugins/auth.ts` instead of Keycloak, Playwright e2e specs in
+  `dashboard/e2e/` instead of `dev-tools/e2e-scenarios/`, and `.omp/RULES.md` pointing at
+  `docs/development/setup.md`. The boundary reviewer and `domain-rules`/`test-ui`/`verify`
+  skills were rewritten wholesale (OpenAPI contract drift, proxy↔control-plane↔BFF shapes,
+  DB migrations, runner contract); the duplicate `work-item-template.md` under
+  `plan-milestone/references/` was deleted in favour of the `implement/` copy. The previously
+  missing `docs/development/agent-profile.md` (required by the milestone skills) was created
+  from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
+  (`reports/`, `plans/`, `worktrees/`, `profiles`).
 
 ### Added
 
@@ -120,6 +145,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (duplicate `POST /runners` per instance), #289 (stock `deployment/` cannot advertise
   `kvCacheElasticSharing`). `docs/project/status.md` flips its Gate 9b and migration-008
   deploy-only entries accordingly.
+
+- **vLLM 0.26 runner image (`containers/runners/vllm/0.26.0/`).** A second current vLLM line,
+  built from `quay.io/vllm/vllm-cuda:0.26.0_rhaiv.9` pinned to the OCI index digest
+  `sha256:a16d7271…` (amd64 runtime plus attestation, as with 0.24), with Python 3.12, CUDA
+  toolkit 13.0.2 and torch 2.11.0+cu130. kvcached is pinned to v0.1.6 (`2235a9ec…`), the first
+  release that supports vLLM 0.26 and later. This base no longer ships kvcached's `posix_ipc` and
+  `wrapt` dependencies (the 0.24 base did), so the builder also emits their wheels
+  (`posix_ipc 1.3.2`, `wrapt 2.4.0`) and the runtime stage keeps installing `--no-index` from
+  `/wheels`. Build-time assertions cover `cuda-toolkit 13.0.2`, vLLM `0.26.0`, torch's CUDA 13.0
+  build, the compiler/Ninja toolchain and `Python.h`; the driver-stub RPM pin is unchanged
+  (`cuda-driver-devel-13-0-13.0.96-1`). `VLLM_USE_V2_MODEL_RUNNER=0` is baked into the SIF, and the
+  worker now forces Model Runner V1 for every kvcached module in the 0.24+ range (`vllm-0.24`,
+  `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The catalog entry is
+  pinned to the published `vllm:0.26-rc1` SIF (`sha256:075b3057…`).
 
 ### Fixed
 
@@ -353,6 +392,143 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   zero pool totals never trigger. The whole evaluator is off until
   `SARDEENZ_POOL_PRESSURE_ENABLED=true` (shipped `'false'` in `deployment/`; leader failover
   resets the in-memory debounce counters — the conservative direction).
+
+- **vLLM runner shim: the active-request scrape now matches real `/metrics` text (issue #239).**
+  It matched `"vllm:num_requests_running "` with a trailing space, but vLLM exports these gauges
+  with labels (`vllm:num_requests_running{model_name="…",engine="0"} 8.0`), so the line never
+  matched: `GET /health` reported `activeRequests: 0` whenever metrics were reachable, and the
+  `POST /sleep` guard (`active > 0` → 409) never tripped — a sleep offloaded weights out from
+  under in-flight generations. A new pure parser (`metrics.py`) matches the metric name followed
+  by `{` or whitespace (never a `_`-suffixed sibling such as `_total`/`_bucket`), sums every
+  label series (TP/DP emit several), requires **both** the running and waiting series to be
+  present (a half-parsed scrape is not a drain signal), maps any non-finite sample to `None`
+  before the final `int()`, and leaves the existing fail-open rule untouched: an unreadable
+  scrape is still `None`, which skips the guard and lets the sleep proceed. Two consequences are
+  user-visible and accepted: a request that starts in the control plane's drain→sleep window now
+  turns a previously "successful" sleep into a 409 → instance ERROR (a loud failure instead of
+  destroyed generations; no CP-side drain retry is in scope), and a scrape that returns 200 with
+  an unrecognized body now behaves like a failed scrape — the control plane drains until
+  `sleepTimeoutMs` expires and the sleep then fails with a 504, landing the instance in ERROR.
+  **Release gate:** capture a live vLLM 0.26 `/metrics` body on a GPU runner and confirm the
+  parser's shape assumptions before relying on the drain behaviour in production.
+
+- **Dev worker: a runner that accepts the `/health` connection but never answers can no longer
+  hang the serialized cold-start chain (issue #243).**
+  `defaultHealthCheck` now forwards an `AbortSignal` into its `fetch`, and `waitUntilHealthy`
+  races every probe against an abortable per-probe timer (`healthProbeTimeoutMs`, default 5 s on
+  the launcher config — no new `SARDEENZ_*` env var) before treating it as a null (not-yet)
+  result, so a wedged probe can never exceed the budget and the 15-minute health deadline keeps
+  being re-evaluated (deadline granularity degrades to ≤ `healthProbeTimeoutMs` +
+  `healthIntervalMs`, ~6 s — immaterial at 15 minutes). A `hasExited()` re-check after each null
+  probe fails fast on an exit observed while a probe was wedged. Previously the first hung probe
+  bypassed both the exit check and the deadline forever, and with `serializeColdStarts = true`
+  one wedged start blocked every subsequent launch on the worker.
+
+- **Dev worker: `startRunner` reserves the instance slot before its first await, the fire-and-
+  forget memory-report push no longer risks an `unhandledRejection`, and multi-device
+  start/stop/exit pushes one coalesced memory report per tick (issue #257).**
+  The "reserve up-front" comment was not true: the `has()` conflict check was followed by the
+  awaited port allocation before the slot was written, so two concurrent `POST /runners` calls
+  for one `instanceId` both passed, both launched, and the second overwrote the first — leaking
+  its record, ports and ledger memory. The reservation (and the model-set registration) now
+  happens synchronously before `allocatePorts()`, inside a `try` extended to cover the
+  allocation phase, so a port-allocation failure rolls the just-reserved slot back instead of
+  stranding the `instanceId` behind a permanent `ConflictError`; the catch's `usedPorts` delete
+  is guarded on nullable pre-declared port bindings so it cannot mask the original error.
+  `allocateMemory`/`freeMemory` are ledger-only now; the publish moved to a new
+  `WorkerRegistration.pushMemoryReportOnce()` — a microtask-coalesced (never a timer, keeping
+  the staleness-check freshness) single push per tick with a logged `.catch` instead of an
+  unhandled rejection. A tensor-parallel start across N devices builds and pushes one report
+  carrying the final ledger state (per-device `floor(requiredMemory / devices.length)`
+  arithmetic unchanged) instead of N near-identical reports.
+
+- **Fail-closed token gate rejects whitespace-only tokens (issue #268).** The #234 startup
+  checks used plain truthiness, so `SARDEENZ_API_TOKEN=" "` (a Secret created with a blank
+  value) booted a service whose bearer auth was effectively a one-character guess. Both gates —
+  the control plane's `SARDEENZ_API_TOKEN`/`SARDEENZ_WORKER_TOKEN` pair and the dev worker's
+  `SARDEENZ_WORKER_TOKEN` — now test `token.trim()`. The stored value is deliberately not
+  trimmed, so a token configured with surrounding whitespace keeps matching byte-for-byte.
+
+- **Dashboard: models placement — single model list per GPU card.** The card previously
+  listed every model twice: once as the legend chips under the stacked bar, again as the
+  per-model action rows. The legend chips row is removed; the action-row list is the single
+  list and renders for every user (the sleep/wake/move/stop dropdown is admin-only). "Other"
+  and "Free" ride at the bottom of that list as legend rows without a kebab, styled like the
+  model rows. The now-unused `legend.segments`/`legend.viewModel` i18n keys are dropped.
+
+- **Dashboard: Models placement tooltips — model name only, no instance id (#206).** The card
+  view's stacked bar now uses a custom tooltip that strips the `#instanceId` suffix from the
+  nivo segment key, so hovering a colored segment shows the model name and measured bytes only.
+  The compact view's inline bar gains the same hover tooltip as the cards: every model with its
+  color, sleeping moon and bytes, plus Other/Free when present. Compact segments carry the
+  served display name (`WorkerModelInfo.displayName`) instead of the raw model key.
+
+- **Models placement legend tooltip (cards view).** Hovering the model legend showed the raw
+  i18n key `overview.modelsPlacement.legend.segments` as its title: `cluster.json` carried two
+  duplicate `"legend"` blocks and JSON parsing keeps the last duplicate, which lacked the
+  `"segments"` entry. The duplicate block is removed (the survivor keeps all keys). The tooltip
+  is also anchored per legend chip now — one Tooltip per chip/Other/Free entry — so the full
+  VRAM breakdown appears right above the hovered chip, matching the stacked-bar tooltip
+  behavior, instead of top-center of the legend row.
+
+- **Runner shims: `/memory-report` reports the whole-device used memory with a machine-readable
+  scope (issue #244).**
+  The shim process never allocates CUDA memory through torch's caching allocator (the engine is a
+  child subprocess), so `torch.cuda.memory_reserved()` was effectively always 0 and the
+  "prefer this process's reserved pool" branch was dead by construction in the two-process
+  topology — the figure was silently the whole-device read, double-counting co-located runners.
+  The dead branch is deleted; both shims report `max(0, total − free)` from `mem_get_info` with
+  the new optional `attribution: "runner" | "device"` field on `DeviceMemoryUsage`
+  (engine-runner contract), emitting `"device"`. The runner-stub emits `"runner"` for its
+  own-ledger figure. No in-repo consumer reads `attribution` yet — an absent value means unknown
+  scope (legacy images), and the per-runner display rule it enables belongs to Phase 5; the
+  worker's NVML path remains the process-attributed authority and is unchanged.
+
+- **Runner shims: blocking torch/kvcached memory reads move off the event loop (issue #253).**
+  Both shims' `GET /memory-report` and `POST /sleep` handlers called the synchronous
+  `memory_report()` inline from `async` code, so a slow `torch.cuda.mem_get_info` query under
+  device contention, or a contended kvcached shared-memory
+  `flock`, froze the event loop — stalling `/health` for the launcher probe and the shim's own
+  liveness poller (a stalled shim could read as wedged and trip restart logic). The four call
+  sites now hand it to the default executor —
+  `await loop.run_in_executor(None, functools.partial(memory_report, args.device_type))` — the
+  same pattern as the ONNX `session.run` offload. `memory_report` itself stays synchronous and is still
+  called exactly once per request; the 409 paths, response shapes and `deviceMemoryFreedBytes`
+  value are unchanged. The shims' app-level test coverage is also tightened (`tests/test_app.py`:
+  the real `create_app` over the conformance doubles, `httpx.ASGITransport` on the test's own
+  loop, no new dependency). Both shims already had app-level coverage — `runners/conformance/`
+  builds each real `create_app` over the same doubles under `TestClient` — so what is new is
+  narrower and stated as such: `ASGITransport` runs the loop on the test's own thread, where
+  `TestClient`'s anyio portal thread hides it, making the executing thread observable for the
+  first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239. The harness pins the off-loop thread
+  identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
+  read.
+
+- **Per-model VRAM display no longer double-counts device-scope memory under co-location
+  (issue #278 — closes the #244 residual).** `attribution` (M17, ADR-027) gains its first
+  executable consumers, and none of them sums a device-scope memory row into a per-instance
+  figure. The worker-agent contract's `InstanceMemoryMeasurement` gains the same optional
+  `attribution: "runner" | "device"` field the engine-runner contract has had since M17, so a
+  per-instance row can state its own scope; the worker's no-NVML ledger path
+  (`getLedgerInstanceShares`) promotes a whole-device figure into an instance row only while its
+  runner is the device's sole record and drops it once anything co-resident claims the device
+  (residency decided from runner records, never bytes — a sleeping co-tenant still blocks
+  promotion), and NVML rows are stamped `"runner"` at report assembly. The control plane
+  scope-checks every per-instance summation site through one shared helper
+  (`sumInstanceMeasurementsByInstance`): `runner`-scope rows sum; a `device`- or unknown-scope
+  row is kept only while it is its device's sole >0-byte row, else dropped — so the two route
+  loops (`/api/v1/cluster/memory`, `/api/v1/workers/:workerId`) and `getMeasuredByInstance`
+  (which feeds the models routes' `currentMemory`) emit figures that can never double-count, and
+  a malformed `attribution` drops the field (row kept, treated unknown → device-conservative)
+  instead of rejecting the report, and the worker clamps a malformed runner-supplied
+  `attribution` to absent so its outbound report stays schema-valid. The dashboard renders the
+  already-deduped figures: dropped
+  bytes surface in "Other", whose clamp keeps the bar honest. User-visible effect: two
+  co-located models on a worker without NVML used to render two ~whole-device bars on one card
+  (e.g. 20 GB of "model" on a 16 GB GPU with Other clamped to 0); the shared device now shows
+  only the genuinely per-runner figures plus the residual in "Other". Legacy workers that do not
+  label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
+  conservative direction); unlabeled sole-resident rows keep displaying.
 
 ### Security
 
@@ -783,39 +959,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   worker-agent contract's `entrypoint` description gained the constraint sentence (generated
   types regenerated — description-only, no shape change).
 
-### Changed
+## [0.2.1] - 2026-10-29
 
-- **Agent config triaged and adapted from another project.** The `.omp/` agents, skills and
-  pre-tool safety hook imported from the agents-jukebox project kept their orchestration method
-  (Direct/Light/Full pipelines, role agents, report-scratchpad custody) but every
-  repository-specific reference was rewritten for sardeenz: role models resolve through
-  `modelRoles` aliases (`plan`/`slow`) instead of nonexistent explicit IDs, npm instead of pnpm,
-  Kustomize instead of Helm (helm block rule dropped from the safety hook), JWT auth on
-  `dashboard/server/plugins/auth.ts` instead of Keycloak, Playwright e2e specs in
-  `dashboard/e2e/` instead of `dev-tools/e2e-scenarios/`, and `.omp/RULES.md` pointing at
-  `docs/development/setup.md`. The boundary reviewer and `domain-rules`/`test-ui`/`verify`
-  skills were rewritten wholesale (OpenAPI contract drift, proxy↔control-plane↔BFF shapes,
-  DB migrations, runner contract); the duplicate `work-item-template.md` under
-  `plan-milestone/references/` was deleted in favour of the `implement/` copy. The previously
-  missing `docs/development/agent-profile.md` (required by the milestone skills) was created
-  from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
-  (`reports/`, `plans/`, `worktrees/`, `profiles`).
+Records what had accumulated in `[Unreleased]` when the application version was bumped to 0.2.1
+(`3c92d45`, 2026-10-29) — a deliberate end-to-end exercise of the pull-request → image-publish
+pipeline. This section was reconstructed from that commit's `CHANGELOG.md`; no tag exists for it.
 
 ### Added
-
-- **vLLM 0.26 runner image (`containers/runners/vllm/0.26.0/`).** A second current vLLM line,
-  built from `quay.io/vllm/vllm-cuda:0.26.0_rhaiv.9` pinned to the OCI index digest
-  `sha256:a16d7271…` (amd64 runtime plus attestation, as with 0.24), with Python 3.12, CUDA
-  toolkit 13.0.2 and torch 2.11.0+cu130. kvcached is pinned to v0.1.6 (`2235a9ec…`), the first
-  release that supports vLLM 0.26 and later. This base no longer ships kvcached's `posix_ipc` and
-  `wrapt` dependencies (the 0.24 base did), so the builder also emits their wheels
-  (`posix_ipc 1.3.2`, `wrapt 2.4.0`) and the runtime stage keeps installing `--no-index` from
-  `/wheels`. Build-time assertions cover `cuda-toolkit 13.0.2`, vLLM `0.26.0`, torch's CUDA 13.0
-  build, the compiler/Ninja toolchain and `Python.h`; the driver-stub RPM pin is unchanged
-  (`cuda-driver-devel-13-0-13.0.96-1`). `VLLM_USE_V2_MODEL_RUNNER=0` is baked into the SIF, and the
-  worker now forces Model Runner V1 for every kvcached module in the 0.24+ range (`vllm-0.24`,
-  `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The catalog entry is
-  pinned to the published `vllm:0.26-rc1` SIF (`sha256:075b3057…`).
 
 - **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
   `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last PyPI build for CUDA 12) and the shim ships its own
@@ -835,67 +985,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **vLLM runner shim: the active-request scrape now matches real `/metrics` text (issue #239).**
-  It matched `"vllm:num_requests_running "` with a trailing space, but vLLM exports these gauges
-  with labels (`vllm:num_requests_running{model_name="…",engine="0"} 8.0`), so the line never
-  matched: `GET /health` reported `activeRequests: 0` whenever metrics were reachable, and the
-  `POST /sleep` guard (`active > 0` → 409) never tripped — a sleep offloaded weights out from
-  under in-flight generations. A new pure parser (`metrics.py`) matches the metric name followed
-  by `{` or whitespace (never a `_`-suffixed sibling such as `_total`/`_bucket`), sums every
-  label series (TP/DP emit several), requires **both** the running and waiting series to be
-  present (a half-parsed scrape is not a drain signal), maps any non-finite sample to `None`
-  before the final `int()`, and leaves the existing fail-open rule untouched: an unreadable
-  scrape is still `None`, which skips the guard and lets the sleep proceed. Two consequences are
-  user-visible and accepted: a request that starts in the control plane's drain→sleep window now
-  turns a previously "successful" sleep into a 409 → instance ERROR (a loud failure instead of
-  destroyed generations; no CP-side drain retry is in scope), and a scrape that returns 200 with
-  an unrecognized body now behaves like a failed scrape — the control plane drains until
-  `sleepTimeoutMs` expires and the sleep then fails with a 504, landing the instance in ERROR.
-  **Release gate:** capture a live vLLM 0.26 `/metrics` body on a GPU runner and confirm the
-  parser's shape assumptions before relying on the drain behaviour in production.
-
-- **Dev worker: a runner that accepts the `/health` connection but never answers can no longer
-  hang the serialized cold-start chain (issue #243).**
-  `defaultHealthCheck` now forwards an `AbortSignal` into its `fetch`, and `waitUntilHealthy`
-  races every probe against an abortable per-probe timer (`healthProbeTimeoutMs`, default 5 s on
-  the launcher config — no new `SARDEENZ_*` env var) before treating it as a null (not-yet)
-  result, so a wedged probe can never exceed the budget and the 15-minute health deadline keeps
-  being re-evaluated (deadline granularity degrades to ≤ `healthProbeTimeoutMs` +
-  `healthIntervalMs`, ~6 s — immaterial at 15 minutes). A `hasExited()` re-check after each null
-  probe fails fast on an exit observed while a probe was wedged. Previously the first hung probe
-  bypassed both the exit check and the deadline forever, and with `serializeColdStarts = true`
-  one wedged start blocked every subsequent launch on the worker.
-- **Dev worker: `startRunner` reserves the instance slot before its first await, the fire-and-
-  forget memory-report push no longer risks an `unhandledRejection`, and multi-device
-  start/stop/exit pushes one coalesced memory report per tick (issue #257).**
-  The "reserve up-front" comment was not true: the `has()` conflict check was followed by the
-  awaited port allocation before the slot was written, so two concurrent `POST /runners` calls
-  for one `instanceId` both passed, both launched, and the second overwrote the first — leaking
-  its record, ports and ledger memory. The reservation (and the model-set registration) now
-  happens synchronously before `allocatePorts()`, inside a `try` extended to cover the
-  allocation phase, so a port-allocation failure rolls the just-reserved slot back instead of
-  stranding the `instanceId` behind a permanent `ConflictError`; the catch's `usedPorts` delete
-  is guarded on nullable pre-declared port bindings so it cannot mask the original error.
-  `allocateMemory`/`freeMemory` are ledger-only now; the publish moved to a new
-  `WorkerRegistration.pushMemoryReportOnce()` — a microtask-coalesced (never a timer, keeping
-  the staleness-check freshness) single push per tick with a logged `.catch` instead of an
-  unhandled rejection. A tensor-parallel start across N devices builds and pushes one report
-  carrying the final ledger state (per-device `floor(requiredMemory / devices.length)`
-  arithmetic unchanged) instead of N near-identical reports.
-- **Fail-closed token gate rejects whitespace-only tokens (issue #268).** The #234 startup
-  checks used plain truthiness, so `SARDEENZ_API_TOKEN=" "` (a Secret created with a blank
-  value) booted a service whose bearer auth was effectively a one-character guess. Both gates —
-  the control plane's `SARDEENZ_API_TOKEN`/`SARDEENZ_WORKER_TOKEN` pair and the dev worker's
-  `SARDEENZ_WORKER_TOKEN` — now test `token.trim()`. The stored value is deliberately not
-  trimmed, so a token configured with surrounding whitespace keeps matching byte-for-byte.
-
-- **Dashboard: models placement — single model list per GPU card.** The card previously
-  listed every model twice: once as the legend chips under the stacked bar, again as the
-  per-model action rows. The legend chips row is removed; the action-row list is the single
-  list and renders for every user (the sleep/wake/move/stop dropdown is admin-only). "Other"
-  and "Free" ride at the bottom of that list as legend rows without a kebab, styled like the
-  model rows. The now-unused `legend.segments`/`legend.viewModel` i18n keys are dropped.
-
 - **MLServer SIF: ONNX models silently ran on CPU.** The `1.7.1-rc3` image installed the
   `nvidia-*-cu12` wheels for `onnxruntime-gpu`, but RHEL-family Python places those pure wheels
   under `/usr/local/lib/...` while `onnxruntime-gpu` sits under `/usr/local/lib64/...`, so
@@ -905,6 +994,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `preload_dlls` check only printed), and pins `torch==2.10.0` — the last CUDA 12 torch — since an
   unpinned torch pulled `nvidia-cudnn-cu13`, whose files clobber the cu12 cuDNN. Verified
   on-cluster: an ONNX model now loads with `CUDAExecutionProvider` and reports measured VRAM.
+
 - **Dashboard: Models placement panel redesigned (#163 round two).** Worker cards now sit side
   by side in a responsive grid instead of one full-width collapsible section per worker — with
   one GPU per worker, the old layout left most of each row empty. The per-card model legend
@@ -912,12 +1002,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   A header toggle switches between the card view (default) and a compact one-row-per-worker
   view (~48px/worker, aggregate sleep-all/wake-all/stop-all kebab); the choice persists in
   localStorage. Models sort by measured size, largest first.
-- **Dashboard: Models placement tooltips — model name only, no instance id (#206).** The card
-  view's stacked bar now uses a custom tooltip that strips the `#instanceId` suffix from the
-  nivo segment key, so hovering a colored segment shows the model name and measured bytes only.
-  The compact view's inline bar gains the same hover tooltip as the cards: every model with its
-  color, sleeping moon and bytes, plus Other/Free when present. Compact segments carry the
-  served display name (`WorkerModelInfo.displayName`) instead of the raw model key.
+
 - **CI: PRs run quality gates only; merges to dev publish impacted images.** PR CI
   (`ci.yml`) now runs typecheck/lint/tests/e2e without building container images. A new
   `publish-images.yml` runs on every merge to `dev`: it maps the merge's changed paths to the
@@ -931,81 +1016,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Fix: the first `publish-images.yml` runs failed at validation because `jobs.<job_id>.if`
   cannot reference the `matrix` context (github, needs, vars, inputs only); the build decision
   now gates each step's `if`, where `matrix` IS available.
+
 - **MLServer runner draining stalls (#206):** the MLServer shim omitted `activeRequests` from
   `/health`, so the control plane's drain loop could never observe drain completion and every
   stop/sleep of an MLServer model burned the full sleep timeout (300s default) before timing out.
   The shim now scrapes MLServer's metrics listener for the REST server's
   `rest_server_requests_in_progress` gauge and reports it as `activeRequests` (unknown/omitted
   only when the scrape fails, never a fake 0), matching the vLLM shim's behavior.
-
-### Fixed
-
-- **Models placement legend tooltip (cards view).** Hovering the model legend showed the raw
-  i18n key `overview.modelsPlacement.legend.segments` as its title: `cluster.json` carried two
-  duplicate `"legend"` blocks and JSON parsing keeps the last duplicate, which lacked the
-  `"segments"` entry. The duplicate block is removed (the survivor keeps all keys). The tooltip
-  is also anchored per legend chip now — one Tooltip per chip/Other/Free entry — so the full
-  VRAM breakdown appears right above the hovered chip, matching the stacked-bar tooltip
-  behavior, instead of top-center of the legend row.
-
-- **Runner shims: `/memory-report` reports the whole-device used memory with a machine-readable
-  scope (issue #244).**
-  The shim process never allocates CUDA memory through torch's caching allocator (the engine is a
-  child subprocess), so `torch.cuda.memory_reserved()` was effectively always 0 and the
-  "prefer this process's reserved pool" branch was dead by construction in the two-process
-  topology — the figure was silently the whole-device read, double-counting co-located runners.
-  The dead branch is deleted; both shims report `max(0, total − free)` from `mem_get_info` with
-  the new optional `attribution: "runner" | "device"` field on `DeviceMemoryUsage`
-  (engine-runner contract), emitting `"device"`. The runner-stub emits `"runner"` for its
-  own-ledger figure. No in-repo consumer reads `attribution` yet — an absent value means unknown
-  scope (legacy images), and the per-runner display rule it enables belongs to Phase 5; the
-  worker's NVML path remains the process-attributed authority and is unchanged.
-
-- **Runner shims: blocking torch/kvcached memory reads move off the event loop (issue #253).**
-  Both shims' `GET /memory-report` and `POST /sleep` handlers called the synchronous
-  `memory_report()` inline from `async` code, so a slow `torch.cuda.mem_get_info` query under
-  device contention, or a contended kvcached shared-memory
-  `flock`, froze the event loop — stalling `/health` for the launcher probe and the shim's own
-  liveness poller (a stalled shim could read as wedged and trip restart logic). The four call
-  sites now hand it to the default executor —
-  `await loop.run_in_executor(None, functools.partial(memory_report, args.device_type))` — the
-  same pattern as the ONNX `session.run` offload. `memory_report` itself stays synchronous and is still
-  called exactly once per request; the 409 paths, response shapes and `deviceMemoryFreedBytes`
-  value are unchanged. The shims' app-level test coverage is also tightened (`tests/test_app.py`:
-  the real `create_app` over the conformance doubles, `httpx.ASGITransport` on the test's own
-  loop, no new dependency). Both shims already had app-level coverage — `runners/conformance/`
-  builds each real `create_app` over the same doubles under `TestClient` — so what is new is
-  narrower and stated as such: `ASGITransport` runs the loop on the test's own thread, where
-  `TestClient`'s anyio portal thread hides it, making the executing thread observable for the
-  first time; vLLM's `test_core.py` has driven the guards through `TestClient` since #239. The harness pins the off-loop thread
-  identity, the single `/sleep` read, and `/health` staying responsive behind a 150 ms report
-  read.
-
-- **Per-model VRAM display no longer double-counts device-scope memory under co-location
-  (issue #278 — closes the #244 residual).** `attribution` (M17, ADR-027) gains its first
-  executable consumers, and none of them sums a device-scope memory row into a per-instance
-  figure. The worker-agent contract's `InstanceMemoryMeasurement` gains the same optional
-  `attribution: "runner" | "device"` field the engine-runner contract has had since M17, so a
-  per-instance row can state its own scope; the worker's no-NVML ledger path
-  (`getLedgerInstanceShares`) promotes a whole-device figure into an instance row only while its
-  runner is the device's sole record and drops it once anything co-resident claims the device
-  (residency decided from runner records, never bytes — a sleeping co-tenant still blocks
-  promotion), and NVML rows are stamped `"runner"` at report assembly. The control plane
-  scope-checks every per-instance summation site through one shared helper
-  (`sumInstanceMeasurementsByInstance`): `runner`-scope rows sum; a `device`- or unknown-scope
-  row is kept only while it is its device's sole >0-byte row, else dropped — so the two route
-  loops (`/api/v1/cluster/memory`, `/api/v1/workers/:workerId`) and `getMeasuredByInstance`
-  (which feeds the models routes' `currentMemory`) emit figures that can never double-count, and
-  a malformed `attribution` drops the field (row kept, treated unknown → device-conservative)
-  instead of rejecting the report, and the worker clamps a malformed runner-supplied
-  `attribution` to absent so its outbound report stays schema-valid. The dashboard renders the
-  already-deduped figures: dropped
-  bytes surface in "Other", whose clamp keeps the bar honest. User-visible effect: two
-  co-located models on a worker without NVML used to render two ~whole-device bars on one card
-  (e.g. 20 GB of "model" on a 16 GB GPU with Other clamped to 0); the shared device now shows
-  only the genuinely per-runner figures plus the residual in "Other". Legacy workers that do not
-  label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
-  conservative direction); unlabeled sole-resident rows keep displaying.
 
 ## [0.2.0] - 2026-09-15
 

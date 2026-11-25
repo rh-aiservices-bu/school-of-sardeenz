@@ -77,8 +77,9 @@ sardeenz/
 
 ## Project Status
 
-Phases 0–5 and milestones M2–M16, M17 and M19's Phase 5 half are complete and merged to `dev`.
-Next: the M19 image/supply-chain half (#266, #267), then the Parking Lot backlog.
+Phases 0–5 and milestones M2–M17 are complete and merged to `dev`, as are M19's Phase 5 track and
+its image/supply-chain half (#266 via #316, #267 via #318). Next: the remaining M19
+docs/contracts/security items (#249, #248, #268, #315), then the Parking Lot backlog.
 Details and history: [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
