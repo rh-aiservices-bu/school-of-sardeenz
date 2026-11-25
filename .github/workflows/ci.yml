@@ -200,16 +200,16 @@ jobs:
   # (`describe.skipIf(!(await canConnect()))`) and its config sets `passWithNoTests: true`,
   # so the last step parses vitest's JSON report and fails when nothing actually ran.
   #
-  # STAGED GATE (M18 / #251): advisory until the suite is green in CI — blocked on #322 (the
-  # cutover barrier never observes an expired proxy presence lease) today. Flipping it to blocking
-  # = deleting the single `continue-on-error` line below. Note `triage` skips this job on merge
-  # pushes to dev/main, so a green run is only observable on pull_request runs.
+  # M18 / #251: BLOCKING since its first green run (2026-11-25, PR #324 job 139517230135:
+  # 6/6 files, 32/32 tests, 0 pending). It landed staged with `continue-on-error: true` until that
+  # run cleared the #322 blocker (cutover barrier never observed an expired proxy presence lease);
+  # a red integration job now fails the workflow. Note `triage` skips this job on merge pushes to
+  # dev/main, so it only gates pull_request runs.
   integration:
     name: control-plane integration (Postgres + Valkey)
     needs: triage
     if: always() && (needs.triage.result == 'skipped' || needs.triage.outputs.tested != 'true')
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 30
     services:
       postgres:

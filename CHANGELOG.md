@@ -15,8 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of regressing unnoticed. Because the suite skips itself when it cannot connect and its
   vitest config sets `passWithNoTests: true`, the job finishes with
   `control-plane/scripts/verify-integration-report.mjs`, which fails unless the run's JSON report
-  shows executed tests and none skipped. The job lands staged (`continue-on-error: true`, advisory
-  until its first green run); `docs/development/setup.md` documents the job and adds
+  shows executed tests and none skipped. The job is blocking: it landed staged
+  (`continue-on-error: true`) and was flipped after its first green run (PR #324, 32/32 tests) once
+  #322 was fixed in #325; `docs/development/setup.md` documents the job and adds
   `make test-integration` to its command table.
 - **Dashboard unit tests can render PatternFly, router, i18n and react-query components (#176).**
   `dashboard/vitest.config.ts` now resolves the test graph ESM-first (`resolve.mainFields`), pins the

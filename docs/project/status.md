@@ -3,7 +3,7 @@
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
 Last update: 2026-11-25 (M18 CI & test infrastructure implemented on
 `milestone/m18-ci-test-infrastructure` — four issues delivered, the new CI integration job is
-staged advisory until #322 lands — and the M19 docs/contracts items closed: #249 via #319, #248 via
+blocking after its first green run (32/32) once #322 was fixed — and the M19 docs/contracts items closed: #249 via #319, #248 via
 #320, #268 via #273. Release 0.2.1 remains recorded in `CHANGELOG.md` and the proxy's Cargo version.
 The vLLM SIF republish (`rc2` + `runners.yaml` digest bump) and the on-cluster rollout proof for
 #247 remain pending.)
@@ -69,7 +69,7 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M16       | Orchestration Resilience — Proxy & Control Plane — async wake eviction (#242), piggybacked-parker wake-trigger fast-fail (#245), crashed-worker Redis key flap (#240), phantom device-memory gauges (#254), protocol-family admission (#246), control-plane dead config + proxy hot-path cleanups (#258, two PRs)                                                                                                                                                         |
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                                                                                                                                                                         |
 | M19       | Deployment, Release & Docs Hygiene — Phase 5 co-location (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281 and its Gate 9b run recorded; publish/rollout documented, pull policy fixed (#247/#211); image hardening (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249 via #319), 409 reason enum (#248 via #320), token gate (#268 via #273) closed; #315 open |
-| M18       | CI & Test Infrastructure (implemented on `milestone/m18-ci-test-infrastructure`, not merged) — integration suite gated in CI, staged advisory pending #322 (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                                                                        |
+| M18       | CI & Test Infrastructure (implemented on `milestone/m18-ci-test-infrastructure`, not merged) — integration suite gated in CI and blocking after its first green run (32/32) once #322 was fixed via #325 (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                          |
 | M20       | Dashboard Performance & Resilience (open) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + ErrorBoundary route coverage (#256)                                                                                                                                                                                                                                                                                     |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
@@ -152,14 +152,17 @@ review → verify → acceptance:
     gates, and a final `if: always()` step running
     `control-plane/scripts/verify-integration-report.mjs`. That script reads vitest's JSON report and
     fails the job when zero tests were collected or any were skipped — without it the suite's
-    `describe.skipIf` + `passWithNoTests: true` exits 0 silently. The job is **staged**:
-    `continue-on-error: true` (red job visible, non-blocking) until it has a green run, then that one
-    line is deleted. `docs/development/setup.md` documents the job and `make test-integration`.
+    `describe.skipIf` + `passWithNoTests: true` exits 0 silently. The job is **blocking**: it
+    landed staged with `continue-on-error: true` and was flipped after its first green run (PR #324,
+    32/32 tests, 2026-11-25) once #322 was fixed in #325. `docs/development/setup.md` documents the
+    job and `make test-integration`.
 
 The job's first CI run executed 32 tests against real services and was **31/32** — the single
 failure is the pre-existing cutover-barrier bug **#322** (`routing-map.integration.test.ts`: an
 expired proxy presence key is read as `0`, so the barrier never observes the lapse and waits its
-full 30 s timeout). The staged flag therefore stays until #322 lands. Draft PR #321 is the CI proof
+full 30 s timeout). #322 was fixed in #325 (`presenceTimestamp()` maps a missing key to `NaN`), and
+the next run on the refreshed branch (head `d46a05e`) was **green: 6/6 files, 32/32 tests, 0
+pending** — the staged `continue-on-error` line was then removed. Draft PR #321 remains a CI proof
 harness for #251, not the delivery PR.
 
 Review/verification ran per issue (blueprint/implement → 2× review → fix → verify → accept);
@@ -173,9 +176,9 @@ prettier clean on touched files, and the #251 CI run judged gate-by-gate.
 - **M18** (CI & Test Infrastructure) — implemented on `milestone/m18-ci-test-infrastructure`,
   awaiting merge to `dev`: #314, #251, #252 and #176 all delivered and accepted on the branch (see
   the M18 section above). Merge order matters only for the CHANGELOG hunk, which is already
-  resolved on the branch. The integration job stays advisory until **#322** (cutover barrier never
-  observes an expired presence lease) is fixed and the job has a green run; flipping it to blocking
-  is deleting the `continue-on-error` line.
+  resolved on the branch. The integration job is **blocking**: #322 (cutover barrier) is fixed via
+  #325 and the refreshed branch's run was green (32/32), so the staged `continue-on-error` line is
+  gone.
 - **M19** (Deployment, Release & Docs Hygiene) — the image/supply-chain half is closed (#266 via
   #316, #267 via #318), Phase 5 is merged and verified on-cluster, the platform-image rollout is
   documented (#247) and still needs one on-cluster rollout proof, and the docs/contracts items are
@@ -323,8 +326,9 @@ M18 (branch `milestone/m18-ci-test-infrastructure`, pending merge):
 - CI gains another gate job, `integration`, against real `postgres:16` + `valkey:8` service
   containers. It runs the existing control-plane integration vitest config with a JSON reporter and
   adds a fail-closed report check (`control-plane/scripts/verify-integration-report.mjs`: zero
-  collected tests, any skipped test, a failed test or a missing/malformed report all red). Staged
-  advisory via a single `continue-on-error: true` until #322 is fixed and the job is green. The
+  collected tests, any skipped test, a failed test or a missing/malformed report all red). Blocking
+  since its first green run (32/32, 2026-11-25) after #322 was fixed in #325; it landed staged via a
+  single `continue-on-error: true` until that run existed. The
   `ci.yml` trailer no longer lists `make test-integration` as deliberately ungated.
 - Dashboard unit tests get a working React-18 render tree: ESM-first `resolve.mainFields`,
   exact-file ESM aliases for the remaining CJS entrypoints (`react-router-dom`, `react-router`,

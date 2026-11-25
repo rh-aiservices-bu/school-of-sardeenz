@@ -181,10 +181,9 @@ so it needs no local services. Because the suite skips itself when it cannot con
 vitest config allows an empty run), a final `if: always()` step runs
 `node control-plane/scripts/verify-integration-report.mjs` on that JSON report and **fails when no
 test executed or any test was skipped** — a green integration job therefore means the tests ran,
-not that they were skipped. Rollout is staged: the job carries `continue-on-error: true` (red job
-visible, non-blocking) until it has a green run, then that one line is deleted. It cannot be green
-yet: the suite is 31/32 in CI because of the pre-existing cutover-barrier bug #322, so the staged
-flag stays until #322 lands.
+not that they were skipped. Rollout: the job landed staged with `continue-on-error: true` and is
+now **blocking** — its first green run (32/32 tests, 2026-11-25) followed the #322 cutover-barrier
+fix (#325), and that one line was deleted.
 
 ## Common Commands
 
@@ -200,7 +199,7 @@ flag stays until #322 lands.
 | `make test`             | Run all test suites (Vitest + cargo test)                                                                                                                                |
 | `make test-python`      | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
 | `make test-coverage`    | Run tests with V8 coverage                                                                                                                                               |
-| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its `integration` job, staged advisory until #322 lands        |
+| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 32/32 since 2026-11-25) |
 | `make codegen`          | Regenerate types from OpenAPI specs                                                                                                                                      |
 | `make services`         | Start dev services (Redis + Postgres)                                                                                                                                    |
 | `make services-stop`    | Stop dev services                                                                                                                                                        |
