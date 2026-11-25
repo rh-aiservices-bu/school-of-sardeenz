@@ -335,8 +335,8 @@ paths:
             the model (a delete, a stop, or an instance-scoped op). All use code
             `INVALID_STATE`; the transient-state body names the offending instance
             and its state, and the in-progress-operation body carries a
-            `details.reason` (`delete-in-progress` / `stop-in-progress` /
-            `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them.
+            `details.reason` drawn from the `ConflictReason` enum so a client can
+            distinguish them.
             A move in replacement cleanup is already failed and can be superseded
             by deletion; force deletion can supersede a stranded move in any phase.
           content:
@@ -723,8 +723,8 @@ paths:
           description: >-
             Model already has runtime state (running or transitioning), or a
             delete is already in progress for the model. Both use code
-            `INVALID_STATE`; an in-progress operation carries `details.reason`
-            (`delete-in-progress` or `move-in-progress`).
+            `INVALID_STATE`; an in-progress operation carries a `details.reason`
+            from the `ConflictReason` enum.
           content:
             application/json:
               schema:
@@ -795,8 +795,8 @@ paths:
           description: >-
             A delete is already in progress for the model — a new instance
             cannot be minted for a model whose teardown is backgrounding, or a move
-            is in progress. Code `INVALID_STATE`, `details.reason: delete-in-progress`
-            or `move-in-progress`.
+            is in progress. Code `INVALID_STATE`, with a `details.reason` from the
+            `ConflictReason` enum.
           content:
             application/json:
               schema:
@@ -872,7 +872,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: "Instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`)"
+          description: "Instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason` from the `ConflictReason` enum)"
           content:
             application/json:
               schema:
@@ -947,7 +947,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Source is not active or another mutating operation/move is in progress (`INVALID_STATE`, with `details.reason` for an in-progress move).
+          description: Source is not active or another mutating operation/move is in progress (`INVALID_STATE`, with a `details.reason` from the `ConflictReason` enum).
           content:
             application/json:
               schema:
@@ -3157,6 +3157,48 @@ components:
     # Common
     # -------------------------------------------------------------------------
 
+    ConflictReason:
+      type: string
+      description: |
+        Machine-readable reason carried in `ErrorResponse.details.reason` when a
+        model-level action is refused because another mutating operation is already
+        backgrounding for the same model (`409`, code `INVALID_STATE`, via
+        `ControlPlaneError.operationInProgress`).
+
+        - `delete-in-progress` — a model DELETE is backgrounding; launches (deploy,
+          add-instance, start) and further deletes are refused until teardown settles.
+        - `move-in-progress` — a move (durable transaction or process-local claim) is
+          running for the model; conflicting moves, deletes, and launches are refused.
+        - `configuration-update-in-progress` — a configuration update is backgrounding
+          for the model; launches and deletes are refused until it settles.
+        - `stop-in-progress` — a stop (force or graceful) is claimed; concurrent
+          deletes and stops are refused.
+        - `instance-operation-in-progress` — an instance-scoped operation
+          (delete/sleep/wake) is running on one replica; model-level deletes that
+          would teardown that same instance are refused.
+        - `operation-in-progress` — any other mutating lifecycle operation (launch,
+          sleep/wake drain, config update, instance op) is in flight; moves, config
+          updates, sleeps and wakes are refused.
+        - `move-ownership-lost` — the durable move transaction is no longer owned by
+          this request (e.g. a leader handoff removed it); the replacement launch is
+          refused before a runner is created.
+        - `deployment-cancelled` — a stop/delete/instance-op claimed the model in the
+          window between placement and worker dispatch; the runner launch throws
+          instead of dispatching.
+
+        Non-conflict responses may also set a free-form `details.reason` — move-target
+        validation (`400`), missing model/instance (`404`), and placement failures
+        (`503`, `PLACEMENT_FAILED`). Those values are deliberately outside this enum.
+      enum:
+        - configuration-update-in-progress
+        - delete-in-progress
+        - deployment-cancelled
+        - instance-operation-in-progress
+        - move-in-progress
+        - move-ownership-lost
+        - operation-in-progress
+        - stop-in-progress
+
     ErrorResponse:
       type: object
       description: Error response returned by any endpoint on failure.
@@ -3173,3 +3215,6 @@ components:
           type: object
           description: Additional structured error details.
           additionalProperties: true
+          properties:
+            reason:
+              $ref: "#/components/schemas/ConflictReason"

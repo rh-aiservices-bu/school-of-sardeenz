@@ -1,3 +1,5 @@
+import type { ControlPlaneComponents } from '@sardeenz/types';
+
 export type ErrorCode =
   | 'MODEL_NOT_FOUND'
   | 'MODEL_ALREADY_EXISTS'
@@ -23,6 +25,14 @@ export interface ErrorDetail {
   readonly code: ErrorCode;
   readonly details?: Record<string, unknown>;
 }
+
+/**
+ * Closed set of `details.reason` values emitted on 409 `INVALID_STATE` operation-in-progress
+ * conflicts — the value space of the contract's `ConflictReason` enum (#248). The template-literal
+ * derivation accepts the bare string literals at every call site; a plain enum-typed parameter
+ * would reject all of them (string literals are not assignable to string enums in TypeScript).
+ */
+type ConflictReason = `${ControlPlaneComponents['schemas']['ConflictReason']}`;
 
 export class ControlPlaneError extends Error {
   readonly code: ErrorCode;
@@ -106,7 +116,7 @@ export class ControlPlaneError extends Error {
   static operationInProgress(
     modelName: string,
     action: string,
-    reason: string,
+    reason: ConflictReason,
     detail: string,
   ): ControlPlaneError {
     return new ControlPlaneError(
