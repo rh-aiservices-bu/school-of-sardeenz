@@ -1681,6 +1681,39 @@ export type components = {
         NotificationList: {
             notifications: components["schemas"]["Notification"][];
         };
+        /**
+         * @description Machine-readable reason carried in `ConflictErrorResponse.details.reason` when a
+         *     model-level action is refused because another mutating operation is already
+         *     backgrounding for the same model (`409`, code `INVALID_STATE`, via
+         *     `ControlPlaneError.operationInProgress`).
+         *
+         *     - `delete-in-progress` — a model DELETE is backgrounding; launches (deploy,
+         *       add-instance, start) and further deletes are refused until teardown settles.
+         *     - `move-in-progress` — a move (durable transaction or process-local claim) is
+         *       running for the model; conflicting moves, deletes, and launches are refused.
+         *     - `configuration-update-in-progress` — a configuration update is backgrounding
+         *       for the model; launches and deletes are refused until it settles.
+         *     - `stop-in-progress` — a stop (force or graceful) is claimed; concurrent
+         *       deletes and stops are refused.
+         *     - `instance-operation-in-progress` — an instance-scoped operation
+         *       (delete/sleep/wake) is running on one replica; model-level deletes that
+         *       would teardown that same instance are refused.
+         *     - `operation-in-progress` — any other mutating lifecycle operation (launch,
+         *       sleep/wake drain, config update, instance op) is in flight; moves, config
+         *       updates, sleeps and wakes are refused.
+         *     - `move-ownership-lost` — the durable move transaction is no longer owned by
+         *       this request (e.g. a leader handoff removed it); the replacement launch is
+         *       refused before a runner is created.
+         *     - `deployment-cancelled` — a stop/delete/instance-op claimed the model in the
+         *       window between placement and worker dispatch; the runner launch throws
+         *       instead of dispatching.
+         *
+         *     Non-conflict responses may also set a free-form `details.reason` — move-target
+         *     validation (`400`), missing model/instance (`404`), and placement failures
+         *     (`503`, `PLACEMENT_FAILED`). Those values are deliberately outside this enum.
+         * @enum {string}
+         */
+        ConflictReason: ConflictReason;
         /** @description Error response returned by any endpoint on failure. */
         ErrorResponse: {
             /** @description Human-readable error message. */
@@ -1689,6 +1722,19 @@ export type components = {
             code?: string;
             /** @description Additional structured error details. */
             details?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * @description 409 conflict response. Same base shape as `ErrorResponse`; on these responses
+         *     `details.reason` is machine-constrained to the `ConflictReason` enum when present.
+         *     Conflict replies that name no operation (e.g. `MODEL_ALREADY_EXISTS`,
+         *     `MODULE_IN_USE`) simply omit `reason`.
+         */
+        ConflictErrorResponse: components["schemas"]["ErrorResponse"] & {
+            details?: {
+                reason?: components["schemas"]["ConflictReason"];
+            } & {
                 [key: string]: unknown;
             };
         };
@@ -1836,7 +1882,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -1970,7 +2016,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2035,13 +2081,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description An instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` (`delete-in-progress` / `stop-in-progress` / `instance-operation-in-progress` / `move-in-progress`) so a client can distinguish them. A move in replacement cleanup is already failed and can be superseded by deletion; force deletion can supersede a stranded move in any phase. */
+            /** @description An instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), or another mutating operation is already in progress for the model (a delete, a stop, or an instance-scoped op). All use code `INVALID_STATE`; the transient-state body names the offending instance and its state, and the in-progress-operation body carries a `details.reason` drawn from the `ConflictReason` enum so a client can distinguish them. A move in replacement cleanup is already failed and can be superseded by deletion; force deletion can supersede a stranded move in any phase. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2233,7 +2279,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2292,7 +2338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2354,7 +2400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2428,13 +2474,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Model already has runtime state (running or transitioning), or a delete is already in progress for the model. Both use code `INVALID_STATE`; an in-progress operation carries `details.reason` (`delete-in-progress` or `move-in-progress`). */
+            /** @description Model already has runtime state (running or transitioning), or a delete is already in progress for the model. Both use code `INVALID_STATE`; an in-progress operation carries a `details.reason` from the `ConflictReason` enum. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2499,13 +2545,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A delete is already in progress for the model — a new instance cannot be minted for a model whose teardown is backgrounding, or a move is in progress. Code `INVALID_STATE`, `details.reason: delete-in-progress` or `move-in-progress`. */
+            /** @description A delete is already in progress for the model — a new instance cannot be minted for a model whose teardown is backgrounding, or a move is in progress. Code `INVALID_STATE`, with a `details.reason` from the `ConflictReason` enum. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2572,13 +2618,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason: move-in-progress`) */
+            /** @description Instance is in a non-cancellable transient state (PENDING, DRAINING, or STOPPING), a delete is already in progress, or a move is in progress (`details.reason` from the `ConflictReason` enum) */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2653,13 +2699,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Source is not active or another mutating operation/move is in progress (`INVALID_STATE`, with `details.reason` for an in-progress move). */
+            /** @description Source is not active or another mutating operation/move is in progress (`INVALID_STATE`, with a `details.reason` from the `ConflictReason` enum). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Corrupt active source endpoint. */
@@ -2729,7 +2775,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -2790,7 +2836,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -3184,7 +3230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConflictErrorResponse"];
                 };
             };
             /** @description Internal control plane error */
@@ -3558,6 +3604,16 @@ export enum CatalogEntryProtocol {
 export enum RunnerLogLineStream {
     stdout = "stdout",
     stderr = "stderr"
+}
+export enum ConflictReason {
+    configuration_update_in_progress = "configuration-update-in-progress",
+    delete_in_progress = "delete-in-progress",
+    deployment_cancelled = "deployment-cancelled",
+    instance_operation_in_progress = "instance-operation-in-progress",
+    move_in_progress = "move-in-progress",
+    move_ownership_lost = "move-ownership-lost",
+    operation_in_progress = "operation-in-progress",
+    stop_in_progress = "stop-in-progress"
 }
 export enum ModelType {
     LLM = "LLM",
