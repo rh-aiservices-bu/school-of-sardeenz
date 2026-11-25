@@ -5,7 +5,10 @@
 Accepted. Defines the build/provisioning half of [ADR-015](adr-015-sif-runtime-packaging.md).
 Amended by [ADR-018](adr-018-runner-catalog-oras-distribution.md), which distributes pre-built
 signed SIFs via ORAS and adds the **control plane** as a second module-store writer (importing via
-`apptainer pull`, not build) alongside the librarian.
+`apptainer pull`, not build) alongside the librarian. Clarified by
+[ADR-030](adr-030-platform-image-signing-and-scanning.md): the scan/sign half of Decision 2 is
+implemented for the five platform images (Trivy + keyless cosign); runner SIFs stay
+apptainer-keypair signed.
 
 ## Context
 
@@ -39,8 +42,13 @@ RWX volume. Three facts from the Phase 4 spike shape how those SIFs are produced
      `ENABLE_KVCACHED`/`KVCACHED_AUTOPATCH`). One directory per engine version; versioned and
      reviewed.
 2. **Build the OCI images in CI** with the container toolchain (including the CUDA devel
-   toolchain where a runner needs to compile a wheel), scan them, and push to a registry — the
-   normal, admission-covered image pipeline.
+   toolchain where a runner needs to compile a wheel) from **digest-pinned bases**, **scan** the
+   pushed digest with Trivy and **cosign-sign** it keyless — the normal, admission-covered image
+   pipeline ([ADR-030](adr-030-platform-image-signing-and-scanning.md)). The five platform images
+   are published by `publish-images.yml` / `publish-platform-images.yml` and carry that scan+sign
+   pair today; runner images are built by the OpenShift Docker build and inherit their trust from
+   the SIF signature (Decision 3), with cosign verification of the runner source still
+   [#138](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/138).
 3. **Convert image → SIF once in a librarian job** (a Kubernetes `Job`/CronJob or CI step) that
    mounts the module PVC read-write, has node-local scratch (`emptyDir`) for `APPTAINER_TMPDIR`
    and enough RAM, runs `apptainer pull`/`build`, **`apptainer sign`**s the result, makes it
@@ -74,9 +82,15 @@ at exec (node-local scratch), because the SIF root is read-only.
 
 ## Consequences
 
-- **The supply-chain gap is closed** by construction: Sardeenz builds, scans, and signs; workers
-  verify. Combined with the module-PVC write-protection mechanism above (admission policy,
-  two-PVC split, or documented convention), the admission-bypass concern is answered.
+- **The supply-chain gap is closed by construction, per artifact class.** The five **platform
+  images** are built from digest-pinned bases, scanned by digest (a fixed CRITICAL fails the
+  publish) and cosign-signed keyless in CI, so an operator verifies the exact bytes before pinning
+  a digest into an overlay (ADR-030). **Runner artifacts** keep the SIF path: the SIF is signed at
+  conversion with the apptainer keypair and verified at exec (Decision 3-4); the runner _source
+  image_ is not cosign-signed and cosign verification of it stays
+  [#138](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/138). Combined with the
+  module-PVC write-protection mechanism above (admission policy, two-PVC split, or documented
+  convention), the admission-bypass concern is answered.
 - **`containers/` is the home for all runner image definitions.** Adding a runner type = adding
   a `containers/runners/<engine>/<version>/` directory with a `Containerfile` and building it —
   not writing an easyconfig. `easyconfigs/` is removed (see

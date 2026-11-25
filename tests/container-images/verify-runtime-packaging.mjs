@@ -27,6 +27,95 @@ function assert(condition, message) {
   }
 }
 
+// The last USER wins at runtime: a plain `includes('USER 1001:0')` would still pass if a later
+// `USER 0` were added, so assert the effective identity instead.
+function assertEndsWithNonRootUser(containerfile, label) {
+  const users = [...containerfile.matchAll(/^USER\s+(\S+)\s*$/gm)].map((match) => match[1]);
+  assert(users.length > 0, `${label} must declare a USER instruction`);
+  assert(
+    users.at(-1) === '1001:0',
+    `${label} must end with USER 1001:0, found USER ${users.at(-1)}`,
+  );
+}
+
+// `.trivyignore.yaml` suppressions silence *fixable* findings in the publish gate, so each entry
+// must carry an expiry: Trivy stops honouring an `expired_at` date, but it accepts an entry
+// without one, which would hide a fixable CRITICAL forever. The schema is enforced with a plain
+// line scan — this guard takes no YAML dependency.
+const trivyEntryStartPattern = /^\s*-\s+id:\s*(\S+)/;
+const trivyExpiredAtFieldPattern = /^\s+expired_at\s*:/;
+const trivyExpiryDatePattern = /^\s+expired_at:\s*\d{4}-\d{2}-\d{2}\s*$/;
+
+function assertTrivySuppressionsExpire(source, label) {
+  const lines = source.split(/\r?\n/);
+  assert(
+    lines.some((line) => /^vulnerabilities\s*:/.test(line)),
+    `${label} must declare a top-level vulnerabilities: key`,
+  );
+  for (let start = 0; start < lines.length; start += 1) {
+    const entry = trivyEntryStartPattern.exec(lines[start]);
+    if (!entry) {
+      continue;
+    }
+    const id = entry[1];
+    let end = start + 1;
+    while (end < lines.length && !trivyEntryStartPattern.test(lines[end])) {
+      end += 1;
+    }
+    // Blank and comment lines carry no schema meaning, so a commented-out `expired_at` never
+    // satisfies the check.
+    const entryLines = lines.slice(start + 1, end).filter((line) => {
+      const trimmed = line.trim();
+      return trimmed !== '' && !trimmed.startsWith('#');
+    });
+    const declared = entryLines.filter((line) => trivyExpiredAtFieldPattern.test(line));
+    const valid = entryLines.filter((line) => trivyExpiryDatePattern.test(line));
+    assert(declared.length > 0, `${label} suppression ${id} must declare expired_at: YYYY-MM-DD`);
+    assert(
+      valid.length > 0,
+      `${label} suppression ${id} must declare expired_at: YYYY-MM-DD, found: ${declared[0].trim()}`,
+    );
+    assert(
+      valid.length === 1,
+      `${label} suppression ${id} declares expired_at: YYYY-MM-DD more than once`,
+    );
+    start = end - 1;
+  }
+}
+
+function expectTrivySuppressionRejected(source, expectedFragment) {
+  try {
+    assertTrivySuppressionsExpire(source, '<fixture>');
+  } catch (error) {
+    assert(
+      error.message.includes(expectedFragment),
+      `trivy suppression fixture was rejected with an unexpected message: ${error.message}`,
+    );
+    return;
+  }
+  throw new Error(`trivy suppression fixture must be rejected: ${expectedFragment}`);
+}
+
+// Negative and positive controls for the scan above, so the guard cannot rot into a no-op.
+expectTrivySuppressionRejected(
+  ['vulnerabilities:', '  - id: CVE-2024-0001', '    statement: no expiry'].join('\n'),
+  'suppression CVE-2024-0001 must declare expired_at: YYYY-MM-DD',
+);
+expectTrivySuppressionRejected(
+  ['vulnerabilities:', '  - id: CVE-2024-0003', '    # expired_at: 2026-12-31'].join('\n'),
+  'suppression CVE-2024-0003 must declare expired_at: YYYY-MM-DD',
+);
+assertTrivySuppressionsExpire(
+  ['vulnerabilities:', '  - id: CVE-2024-0002', '    expired_at: 2026-12-31'].join('\n'),
+  '<fixture>',
+);
+assertTrivySuppressionsExpire('vulnerabilities: []', '<fixture>');
+
+assertTrivySuppressionsExpire(
+  readFileSync(join(repositoryRoot, '.trivyignore.yaml'), 'utf8'),
+  '.trivyignore.yaml',
+);
+
 assert(runtimeManifest.main === './dist/index.js', 'runtime manifest must use dist/index.js');
 assert(runtimeManifest.types === './dist/index.d.ts', 'runtime manifest must use dist/index.d.ts');
 assert(
@@ -120,6 +209,13 @@ assert(
   workerBaseContainerfile.includes('ARG NODE_MAJOR=22'),
   'worker-base must provide the Node.js major required by the repository and NVML binding',
 );
+assert(
+  workerBaseContainerfile.includes(
+    'useradd --uid 1001 --gid 0 --create-home --shell /sbin/nologin sardeenz',
+  ),
+  'worker-base must create the unprivileged sardeenz user (uid 1001, gid 0)',
+);
+assertEndsWithNonRootUser(workerBaseContainerfile, 'worker-base');
 
 const workerContainerfile = readFileSync(
   join(repositoryRoot, 'containers/worker/Containerfile'),
@@ -131,6 +227,9 @@ const workerDockerignore = readFileSync(
 );
 for (const requiredInstruction of [
   'ARG WORKER_BASE_IMAGE=',
+  'USER 0',
+  'chmod 0755 /opt/sardeenz',
+  'USER 1001:0',
   'npx tsc --build runners/dev-worker/tsconfig.json',
   'npm ci --omit=dev --workspace=@sardeenz/dev-worker',
   'COPY --from=build /build/runners/dev-worker/dist ./runners/dev-worker/dist',
@@ -141,6 +240,14 @@ for (const requiredInstruction of [
     `worker Containerfile is missing required packaging instruction: ${requiredInstruction}`,
   );
 }
+// The agent's code directory is root-owned and not group-writable: nothing writes there at runtime,
+// and the engine SIF processes share uid 1001/gid 0 with the agent.
+assert(
+  !workerContainerfile.includes('0775'),
+  'worker Containerfile must not make /opt/sardeenz group-writable',
+);
+assertEndsWithNonRootUser(workerContainerfile, 'worker');
+
 for (const requiredInput of [
   'package.json',
   'package-lock.json',

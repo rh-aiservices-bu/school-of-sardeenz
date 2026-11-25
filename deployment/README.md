@@ -168,8 +168,11 @@ gh workflow run publish-platform-images.yml --ref dev -f tag=<sha>
 release tag such as `0.2.0`). `-f tag=<sha>` publishes **only** that sha tag: it does not move
 `latest`, which matters for the worker-base prerequisite under "Prerequisites and failure modes".
 Re-running replaces the tag; the digest may change when the rebuilt manifest differs (digests are
-content-addressed), which is why a settled release pins the digest. With `imagePullPolicy: Always`,
-the next rollout picks up whatever the tag now points at (see "Roll out").
+content-addressed), which is why a settled release pins the digest. Each run pushes to
+`<tag>-staging` first and promotes the requested tag by digest only after the Trivy gate and the
+cosign signature, so a failed run leaves the tag untouched and the staging tag behind for
+inspection. With `imagePullPolicy: Always`, the next rollout picks up whatever the tag now points at
+(see "Roll out").
 
 ### Pin a tag or digest
 
@@ -204,6 +207,19 @@ oc image info quay.io/rh-aiservices-bu/sardeenz-proxy:<tag> \
 `skopeo inspect` is the same form [`docs/usage/runner-catalog.md`](../docs/usage/runner-catalog.md)
 uses for runner images; the Quay UI/API shows the same manifest digest. Without `--filter-by-os`,
 `oc image info` errors on a manifest list.
+
+Verify the signature before you pin the digest (ADR-030): every platform image is cosign-signed by
+digest in CI before the requested tag moves — each push goes to `<tag>-staging`, Trivy gates it, the
+digest is signed, and only then is the tag promoted by digest — so a tag published by the workflow
+always points at a scanned, signed digest. Note the `<role>` in the repository name — the regexp's
+identity is the same for both publish workflows:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  quay.io/rh-aiservices-bu/sardeenz-proxy@sha256:<manifest-list-digest>
+```
 
 One caveat: the bases set `imagePullPolicy: Always`, which needs registry reachability at pod start.
 For an air-gapped cluster, pin a `digest` and set `imagePullPolicy: IfNotPresent` on that workload in
@@ -265,11 +281,15 @@ readiness-gated handover with no planned outage, subject to the image pull succe
 
 ### Prerequisites and failure modes
 
-**`worker-base:latest` must exist.** The per-merge worker job builds `FROM worker-base:<sha7>` when
-the base was rebuilt in the same run, otherwise it resolves `worker-base:latest`
-(`.github/workflows/publish-images.yml`, "Resolve worker-base digest"). A worker-only merge
-therefore fails at that step when `:latest` has never been published. Seed it once (and again after
-any base change you want worker-only merges to pair with):
+**`worker-base:latest` must exist and be signed.** The per-merge worker job builds
+`FROM worker-base:<sha7>` when the base was rebuilt in the same run, otherwise it resolves
+`worker-base:latest` (`.github/workflows/publish-images.yml`, "Resolve worker-base digest") and then
+verifies that digest's cosign signature against this repository's publish workflows on `dev`
+("Verify worker-base signature"). A worker-only merge therefore fails at that step when `:latest`
+has never been published, and it fails the same way when `:latest` carries no signature or a
+foreign one — a moved tag cannot be laundered into a signed worker. A `latest` published before
+#266 predates signing, so republish it before the first worker-only merge. Seed it once (and again
+after any base change you want worker-only merges to pair with):
 
 ```bash
 gh workflow run publish-platform-images.yml --ref dev -f tag=latest

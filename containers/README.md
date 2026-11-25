@@ -35,6 +35,30 @@ For future engines, use `sardeenz-runner-images/<engine>` for the intermediate O
 `sardeenz-runners/<engine>` for the distributed SIF artifacts. These are nested Quay repository
 names, not filesystem directories.
 
+### Base-image pinning
+
+Two layers, two rules — do not mix them:
+
+- **Build inputs.** Every `FROM` in a `Dockerfile`/`Containerfile` this repository builds is pinned
+  by **tag plus digest**: `FROM node:22-slim@sha256:<64 hex> AS base`. The human tag stays in front
+  of the digest so a reader knows what is pinned. Stage aliases (`FROM base AS deps`), `ARG`-driven
+  references (`FROM ${WORKER_BASE_IMAGE}`) and `scratch` are not pinnable and are exempt. Any other
+  unpinned `FROM` fails `tests/container-images/verify-image-pins.mjs`
+  (`make verify-image-pins`; CI runs it in the `quality` job).
+- **Deployable references.** Tags and digests are pinned in the environment **overlay only** — see
+  [Pin a tag or digest](../deployment/README.md#pin-a-tag-or-digest). The base manifests keep
+  `:latest` on purpose (#247).
+
+Freshness is Dependabot's job: the existing `docker` entries cover every pinned directory
+([`.github/dependabot.yml`](../.github/dependabot.yml); the fetcher recognises `Containerfile` too).
+Two manual-bump exceptions have **no** Dependabot entry by decision —
+`containers/runners/vllm/0.21.0/` (the catalog is retiring that image) and
+`containers/runners/vllm/0.24.0/` (the runner entries track the catalog's current versions per the
+#233 decision) — so their base digests move by hand on the next catalog change; and `node:22-slim`
+is pinned identically in `containers/control-plane/Dockerfile` and
+`containers/dashboard/Dockerfile`, so one bump must touch both files (Dependabot opens one PR per
+directory).
+
 ### Publishing platform images from GitHub
 
 The manually triggered `Publish platform images` workflow builds and pushes the five lightweight
@@ -56,7 +80,35 @@ gh workflow run publish-platform-images.yml --ref dev -f tag=latest
 ```
 
 The workflow publishes `linux/amd64` images. It builds the three services in parallel, publishes
-`worker-base`, and then builds `worker` from the exact base digest produced by that run.
+`worker-base`, and then builds `worker` from the exact base digest produced by that run — after
+verifying that digest's cosign signature.
+
+Both workflows scan and sign every image (ADR-030). In the manual workflow every push lands on a
+staging tag, `<tag>-staging`: Trivy scans that digest, and a **CRITICAL** vulnerability that has a
+fix fails the run, while CRITICAL-unfixed and HIGH findings are uploaded to GitHub code scanning
+(suppress only via `.trivyignore.yaml`, where every entry must declare an `expired_at` date — Trivy
+enforces it and the packaging guard rejects an entry without one). Only if the scan passes is the
+digest signed — keyless with cosign, so the signature records this workflow's OIDC identity and no
+signing key is stored anywhere — and only then does the requested tag move onto that exact digest
+with `docker buildx imagetools create` (a manifest copy, so the digest and the signature over it are
+unchanged). **The requested tag therefore only moves after the scan gate and the signature**: a
+rejected run leaves it pointing at the previous image and leaves `<tag>-staging` behind for
+inspection. The per-merge workflow keeps its immutable 7-char sha tags — those are not a deployed
+reference. The worker job verifies the cosign signature of the worker-base it builds from and aborts
+on an unsigned or foreign base.
+
+**A tag published by the workflow points at a scanned, signed digest.** Verify it before pinning it
+into an overlay:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/rh-aiservices-bu/school-of-sardeenz/\.github/workflows/publish-(platform-)?images\.yml@refs/heads/dev$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  quay.io/rh-aiservices-bu/sardeenz-proxy@sha256:<digest>
+```
+
+Renaming either publish workflow changes the identity string — that string _is_ the trust anchor.
+Verification needs Fulcio/Rekor reachability; an air-gapped mirror verifies at import time.
 
 Pinning one of these tags — or a digest — in an environment overlay, and rolling the four platform
 Deployments out, is the operator half: see
@@ -120,7 +172,8 @@ Key rules:
 - Keep each version's `Containerfile`, dependency pins, and compatibility notes together. Shared
   runner-contract shim code remains in `runners/<engine>/` at the repository root.
 - Pin external inputs (base image tag, kvcached commit) in each runner's `Containerfile` and
-  `README.md`; re-run the kvcached co-tenancy gate on any bump.
+  `README.md`; re-run the kvcached co-tenancy gate on any bump. Every base image is additionally
+  pinned by digest (see "Base-image pinning" above).
 
 ## Adding a runner type
 

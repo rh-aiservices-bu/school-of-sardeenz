@@ -179,7 +179,9 @@ missing or behind (#287).
    `"attribution": "device"` and the dashboard shows deduped bars plus an "Other" residual. A stale
    shim reports device-wide consumption as if each runner owned it.
 
-Related: platform runner image tags (#247) and supply-chain / cosign signing (#266).
+Related: platform runner image tags (#247). Platform **images** are Trivy-scanned and cosign-signed
+by digest in CI ([ADR-030](../architecture/adrs/adr-030-platform-image-signing-and-scanning.md));
+runner **SIFs** are signed with the apptainer keypair (ADR-017), not with cosign.
 
 ## Unsigned SIFs (experimentation only)
 

@@ -27,6 +27,11 @@ Per [ADR-016](../../docs/architecture/adrs/adr-016-sif-worker-security-posture.m
 - Mounts: `/modules` (RWX module store, **readOnly**), `/weights` (RWX), `/scratch` (`emptyDir`,
   node-local — used for `APPTAINER_TMPDIR`/cache and writable engine caches), `/dev/shm`
   (`emptyDir` `medium: Memory`)
+- Identity: the image ships `USER 1001:0` (uid 1001, primary group 0). Group 0 — not the uid — is
+  what keeps the `fsGroup: 0` volumes writable; on OpenShift the SCC's
+  `runAsUser: MustRunAsRange` assigns a namespace-range uid instead, so the numeric uid is only
+  meaningful on vanilla Kubernetes/Docker. The worker manifest sets `HOME=/scratch/home`; the
+  image's `/home/sardeenz` is never the runtime HOME.
 
 The exact Deployment/SCC manifests are a Phase 4 deliverable (`deployment/`, Task 8). The spike's
 §5/§8 manifests are the validated starting point.

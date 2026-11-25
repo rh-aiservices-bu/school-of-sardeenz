@@ -123,6 +123,9 @@ jobs:
       - name: Verify service runtime package resolution
         run: node tests/container-images/verify-runtime-packaging.mjs
 
+      - name: Verify container base images are digest-pinned
+        run: node tests/container-images/verify-image-pins.mjs
+
       - name: Codegen drift
         run: |
           npm run codegen -w @sardeenz/types

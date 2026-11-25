@@ -16,16 +16,15 @@
 # offsets (runners/mlserver/sardeenz_mlserver_runner/cli.py) and re-run the shim's pytest suite
 # (including tests/test_onnx_runtime.py from a venv that has mlserver + onnxruntime + onnx).
 #
-# BASE IMAGE — NOT YET PINNED BY DIGEST: select a vetted CUDA+Python base matching the cluster's
-# CUDA line (mlserver-huggingface needs CUDA + torch for GPU-backed models), e.g.
-# `nvidia/cuda:12.6.x-runtime-ubi9` or the RHAIV Python-CUDA base, then pin it `@sha256:...` before
-# publishing — same discipline as runner-vllm's base, set when that image was first built
-# on-cluster (see the `@sha256:0000…` placeholder in runners.yaml for this runner's own image ref).
+# BASE IMAGE — PINNED BY DIGEST: a vetted CUDA+Python base matching the cluster's CUDA line
+# (mlserver-huggingface needs CUDA + torch for GPU-backed models). The tag is kept in front of the
+# digest for readability; a bump re-resolves both together (Dependabot's docker entry for this
+# directory opens the PR). Same discipline as runner-vllm's base.
 
 # ---------------------------------------------------------------------------------------------
-# Stage 0: base — CUDA-runtime + Python 3.12 UBI (placeholder tag; pin @sha256 before publishing)
+# Stage 0: base — CUDA-runtime + Python 3.12 UBI (tag + digest pinned)
 # ---------------------------------------------------------------------------------------------
-FROM nvidia/cuda:12.6.3-runtime-ubi9 AS runtime
+FROM nvidia/cuda:12.6.3-runtime-ubi9@sha256:60dc14408613c439c2197b40e0ce81f84ba61e02bc1b9a018abcfb25d886ca08 AS runtime
 USER 0
 # UBI 9 publishes Python 3.12 directly in AppStream; unlike RHEL application streams, there is no
 # python312 module to enable in the UBI repositories.

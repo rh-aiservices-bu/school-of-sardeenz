@@ -7,7 +7,7 @@
 #     docs/architecture/adrs/adr-016-sif-worker-security-posture.md (SCC / userns / /dev/fuse),
 #     docs/project/phase4-apptainer-spike.md §4 (the validated image).
 
-FROM registry.access.redhat.com/ubi9/ubi:latest
+FROM registry.access.redhat.com/ubi9/ubi:latest@sha256:6636b79fba9e5044360366f189333c30b5ce528efd92c40c68b074592b971fcd
 
 # Node.js for the TypeScript worker agent (Phase 4 Task 4 decision: reuse the Phase 3.6 agent via
 # a RunnerLauncher; ApptainerLauncher runs in prod). The agent build output is layered on top of
@@ -34,6 +34,13 @@ RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.n
     ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
     dnf clean all
 
+# Unprivileged runtime identity (uid 1001, primary group 0). Group 0 is what makes the
+# fsGroup-0 managed volumes (`/scratch`, `/weights`) writable for this uid; OpenShift SCCs
+# replace the numeric uid with a namespace-range uid, so nothing depends on 1001 being free
+# there. `--create-home` gives `oc debug`/`apptainer` a real passwd entry; the worker manifest
+# overrides HOME=/scratch/home, so this home directory is never the runtime HOME.
+RUN useradd --uid 1001 --gid 0 --create-home --shell /sbin/nologin sardeenz
+
 # NOTES:
 # - We install "apptainer" (rootless), NOT "apptainer-suid": the worker runs unprivileged under a
 #   mild custom SCC (seccomp Unconfined, no privileged/caps) and Apptainer creates its own user
@@ -46,5 +53,7 @@ RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.n
 # - Node.js is installed for the TypeScript worker agent. The agent (runners/dev-worker, run with
 #   --mode=apptainer) is layered on top of this base — this image stays engine-agnostic and does
 #   not bake in any inference engine.
+
+USER 1001:0
 
 CMD ["sleep", "infinity"]

@@ -356,6 +356,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Platform images are built from digest-pinned bases, Trivy-scanned, and cosign-signed (#266).**
+  All seven base-image `FROM` lines of the images this repository builds now carry the human tag plus
+  a `sha256:` digest — `rust:1.86-bookworm`, `gcr.io/distroless/static-debian12:nonroot`,
+  `node:22-slim` in both service Dockerfiles, `ubi9/ubi:latest`, `nvidia/cuda:12.6.3-runtime-ubi9`,
+  and the previously tag-only `quay.io/vllm/vllm-cuda:0.21.0_rhaiv.8` — so a rebuild can no longer
+  silently inherit a moved tag. Deployable references stay pinned per environment in overlays and
+  Dependabot's existing `docker` entries own freshness. A new
+  `tests/container-images/verify-image-pins.mjs` (`make verify-image-pins`, run in the CI `quality`
+  job) fails on any `FROM` that is unpinned or lacks the human tag. Both publish workflows now scan
+  the pushed digest with Trivy by digest — a CRITICAL finding that has a fix fails the publish,
+  CRITICAL-unfixed and HIGH findings go to GitHub code scanning, and suppressions live in
+  `.trivyignore.yaml`, where every entry must declare the `expired_at` date Trivy enforces (the
+  packaging guard rejects an entry without one) — and only then sign it keyless with
+  cosign, so an image can be verified against the publishing workflow's OIDC identity (ADR-030). The
+  manual workflow promotes by digest: every push lands on `<tag>-staging`, and the requested tag is
+  moved onto the scanned, signed digest with `docker buildx imagetools create` only after the gate
+  and the signature, so a rejected run never leaves the deployed tag on an unsigned image. Both
+  workflows' worker job verifies the worker-base digest's signature (this repository's publish
+  workflows on `dev`) before building from it, so a moved tag cannot launder an unsigned base into a
+  signed worker. The worker images also stop running as root: `worker-base` creates uid 1001 / gid 0
+  and ends with `USER 1001:0`, while the worker's discarded build stages pin `USER 0` and its final
+  stage runs as `1001:0` with the agent's `/opt/sardeenz` root-owned mode `0755` (readable, not
+  writable, by that identity; nothing writes there at runtime) — the posture the worker
+  Deployment's `runAsNonRoot: true` already claimed (OpenShift SCCs still assign their
+  namespace-range uid).
 - **Dev tooling: `@redocly/cli` 1.x → 2.78.0 clears the last alert reachable from `dev`.**
   The 1.x CLI pins `@faker-js/faker` exactly at 7.6.0 (via `@redocly/respect-core`), inside
   the `GHSA-qxc2-j82w-r537` / CVE-2026-73231 range `<= 10.4.0` (high; `faker.helpers.fake`
