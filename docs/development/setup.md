@@ -174,14 +174,17 @@ name doesn't end in `_test`**.
 
 #### In CI
 
-Every PR runs this suite in the `integration` job of `.github/workflows/ci.yml`: the job brings its
-own `postgres:16` and `valkey:8` service containers instead of the compose stack, so it needs no
-local services. Because the suite skips itself when it cannot connect (and the vitest config allows
-an empty run), the job ends with `node control-plane/scripts/verify-integration-report.mjs`, which
-reads vitest's JSON report and **fails when no test executed** — a green integration job therefore
-means the tests ran, not that they were skipped. Rollout is staged: the job carries
-`continue-on-error: true` (red job visible, non-blocking) until its first green run, then that line
-is deleted.
+Every PR runs this suite in the `integration` job of `.github/workflows/ci.yml`: the job runs the
+same vitest integration config through the control-plane package script (adding a JSON reporter)
+and brings its own `postgres:16` and `valkey:8` service containers instead of the compose stack,
+so it needs no local services. Because the suite skips itself when it cannot connect (and the
+vitest config allows an empty run), a final `if: always()` step runs
+`node control-plane/scripts/verify-integration-report.mjs` on that JSON report and **fails when no
+test executed or any test was skipped** — a green integration job therefore means the tests ran,
+not that they were skipped. Rollout is staged: the job carries `continue-on-error: true` (red job
+visible, non-blocking) until it has a green run, then that one line is deleted. It cannot be green
+yet: the suite is 31/32 in CI because of the pre-existing cutover-barrier bug #322, so the staged
+flag stays until #322 lands.
 
 ## Common Commands
 
@@ -197,7 +200,7 @@ is deleted.
 | `make test`             | Run all test suites (Vitest + cargo test)                                                                                                                                |
 | `make test-python`      | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
 | `make test-coverage`    | Run tests with V8 coverage                                                                                                                                               |
-| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); must actually run in CI                                                                  |
+| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its `integration` job, staged advisory until #322 lands        |
 | `make codegen`          | Regenerate types from OpenAPI specs                                                                                                                                      |
 | `make services`         | Start dev services (Redis + Postgres)                                                                                                                                    |
 | `make services-stop`    | Stop dev services                                                                                                                                                        |

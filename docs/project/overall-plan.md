@@ -30,7 +30,7 @@ Phase 0          Phase 1          Phase 2          Phase 3        Phase 3.5     
 Contracts   ──►  Proxy       ──►  Control Plane ──►  Dashboard  ──►  UI Polish  ──►  Dev Worker  ──►  SIF Runners ──►  kvcached
 (spec only)      (Rust)           (TypeScript)       (React)        (chrome)        (dev tooling)    (Apptainer)      co-location
                                                                                                           │
-                                                                                          Milestones M2 … M17 (backlog track)
+                                                                                          Milestones M2 … M20 (backlog track)
 ```
 
 Phases are sequential because each depends on the output of the previous one. Phases 3 and 4 have limited overlap potential (the dashboard can begin while the runtime work starts), but the critical path runs through Phases 0 → 1 → 2.
@@ -409,8 +409,10 @@ its on-cluster Gate 9b run recorded; M16 is complete — #242 (async wake evicti
 (control-plane/proxy cleanups, two PRs) all merged — after its early P1/P2 merges
 #286/#288 (via #292/#294). In M19 the image/supply-chain half (#266 via #316) and the ADR-016/SCC
 wording (#267 via #318) are merged, the four Gate 9b follow-ups (#286–#289) are all fixed
-(#287's published-image republish is the remaining operational step), and what remains is the
-docs/contracts/security cleanup (#249, #248, #268, #315). The
+(#287's published-image republish is the remaining operational step), and the docs/contracts items
+merged too (#249 via #319, #248 via #320, #268 closed — fix via #273). What remains is #315
+(cluster-only) and the deploy-only vLLM SIF republish/rollout. M18 (CI & test infrastructure) is
+implemented on its milestone branch and awaiting merge. The
 list of themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---
@@ -425,11 +427,11 @@ All inter-component communication is defined by OpenAPI specs in `packages/contr
 
 ### Testing Strategy
 
-| Level       | Scope                              | Tooling                                                                 |
-| ----------- | ---------------------------------- | ----------------------------------------------------------------------- |
-| Unit        | Individual functions and modules   | Vitest (TypeScript), `cargo test` (Rust)                                |
-| Integration | Component against real data stores | Vitest + test containers (TypeScript), integration test harness (Rust)  |
-| E2E         | Full system workflows              | Playwright (dashboard), custom harness (proxy + control plane + runner) |
+| Level       | Scope                              | Tooling                                                                                                            |
+| ----------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Unit        | Individual functions and modules   | Vitest (TypeScript), `cargo test` (Rust)                                                                           |
+| Integration | Component against real data stores | Vitest against real Postgres + Valkey (compose locally, service containers in CI), integration test harness (Rust) |
+| E2E         | Full system workflows              | Playwright (dashboard), custom harness (proxy + control plane + runner)                                            |
 
 Integration tests use real Redis and PostgreSQL instances — no mocks for data stores.
 
@@ -439,7 +441,11 @@ Every component exposes a Prometheus scrape endpoint from Phase 1 onward. Key me
 
 ### CI/CD
 
-The monorepo uses a unified Makefile. CI runs `make all` (typecheck + lint) and `make test` on every PR. OpenAPI validation (`redocly lint`) is part of the lint step. Generated types are committed to the repo so consumers don't need to run codegen.
+The monorepo uses a unified Makefile. CI (`.github/workflows/ci.yml`) runs the typecheck + lint
+quality job, unit tests, the Playwright e2e suite, the Python shim/conformance job, contract-codegen
+drift, and — since M18 — the control-plane integration suite against real Postgres + Valkey (staged
+advisory until its first green run). OpenAPI validation (`redocly lint`) is part of the lint step.
+Generated types are committed to the repo so consumers don't need to run codegen.
 
 ### Security Boundaries
 

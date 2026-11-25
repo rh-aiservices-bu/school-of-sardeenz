@@ -138,7 +138,11 @@ belongs in a decision record; put the pointer here.
 - **Full gate** (Full): root `make lint typecheck test` (+ `make
   test-python` when the Python shims changed and a venv exists; `cargo
   check`/`cargo test` in `proxy/` when Rust changed and cargo is
-  available; Postgres integration tests need `TEST_DATABASE_URL`).
+  available; `make test-integration` when the control-plane data-store
+  paths changed — needs `make services` up, or a reachable Postgres/Redis
+  via `SARDEENZ_TEST_DATABASE_URL`/`SARDEENZ_TEST_REDIS_URL`, and the
+  vitest summary must show the suite executed: it exits 0 with every test
+  skipped when its services are unreachable).
 - **Infra completeness:** Kustomize manifests render
   (`kustomize build deployment/overlays/school-of-sardeenz`), prereq
   manifests updated together with the component overlay, and
