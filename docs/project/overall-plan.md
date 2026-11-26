@@ -412,8 +412,7 @@ wording (#267 via #318) are merged, the four Gate 9b follow-ups (#286–#289) ar
 (#287's published-image republish is the remaining operational step), and the docs/contracts items
 merged too (#249 via #319, #248 via #320, #268 closed — fix via #273). What remains is #315
 (cluster-only) and the deploy-only vLLM SIF republish/rollout. M18 (CI & test infrastructure)
-merged via #324, and M20 (Dashboard Performance & Resilience) is implemented on its milestone
-branch awaiting merge. The
+merged via #324, and M20 (Dashboard Performance & Resilience) merged via #326. The
 list of themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---

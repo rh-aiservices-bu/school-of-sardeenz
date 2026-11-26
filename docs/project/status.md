@@ -1,11 +1,10 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-26 (M20 — Dashboard Performance & Resilience — implemented on
-`milestone/m20-dashboard-perf-resilience`, both issues delivered and accepted, awaiting merge to
-`dev`; M18 merged to `dev` via #324 (`27a8742`) after #325 fixed the #322 cutover barrier. Next
-open work: M19's #315 (cluster-only), the Parking Lot backlog, and the deploy-only vLLM SIF
-republish/rollout steps.)
+Last update: 2026-11-26 (M20 — Dashboard Performance & Resilience — merged to `dev` via #326
+(`5fc0332`), with #255, #256 and the M20 milestone closed; M18 merged via #324 (`27a8742`) after
+#325 fixed the #322 cutover barrier. Next open work: M19's #315 (cluster-only), the Parking Lot
+backlog, and the deploy-only vLLM SIF republish/rollout steps.)
 
 ## Phases (complete)
 
@@ -69,7 +68,7 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                                                                                                                                                                         |
 | M19       | Deployment, Release & Docs Hygiene — Phase 5 co-location (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281 and its Gate 9b run recorded; publish/rollout documented, pull policy fixed (#247/#211); image hardening (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249 via #319), 409 reason enum (#248 via #320), token gate (#268 via #273) closed; #315 open |
 | M18       | CI & Test Infrastructure (merged via #324 → `27a8742`, after #325 fixed the #322 cutover barrier) — blocking integration job in CI (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                                                                                                |
-| M20       | Dashboard Performance & Resilience (implemented on `milestone/m20-dashboard-perf-resilience`, awaiting merge) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + hijacked-stream shutdown + ErrorBoundary route coverage (#256)                                                                                                                                                                                      |
+| M20       | Dashboard Performance & Resilience (merged via #326 → `5fc0332`) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + hijacked-stream shutdown + ErrorBoundary route coverage (#256)                                                                                                                                                                                                                                   |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -172,10 +171,11 @@ cumulative reports in `.omp/reports/` (agent scratchpad, not committed). Cumulat
 shims + conformance `138 passed, 1 skipped` in both file orders, `tsc --build` clean, eslint +
 prettier clean on touched files, and the #251 CI run judged gate-by-gate.
 
-## M20 — Dashboard Performance & Resilience (implemented on a milestone branch, awaiting merge)
+## M20 — Dashboard Performance & Resilience (merged to `dev` via #326)
 
-Branch `milestone/m20-dashboard-perf-resilience` off `dev@27a8742`, two issues (#255 Light
-pipeline, #256 Full), each through review → fix → verify → acceptance:
+Landed via PR #326 (squash `5fc0332`, 2026-11-26) from `milestone/m20-dashboard-perf-resilience`
+off `dev@27a8742`. Two issues (#255 Light pipeline, #256 Full), each through review → fix →
+verify → acceptance:
 
 - **#255** (render/bundle efficiency) — the EventStream context splits into a status context
   (a `ConnectionStatus` primitive, consumed by the polling data hooks and the degraded banner) and
@@ -223,10 +223,9 @@ fallback, placement bars, `/login` intact).
 
 - ~~**M18** (CI & Test Infrastructure)~~ — **merged to `dev` via #324** (`27a8742`, after #325
   fixed #322) and closed. See the M18 section below for what shipped.
-- **M20** (Dashboard Performance & Resilience) — implemented on
-  `milestone/m20-dashboard-perf-resilience`, both issues delivered and accepted, awaiting merge to
-  `dev` (see the M20 section below). After merge, close #255, #256 and the M20 milestone manually —
-  dev-targeted PRs never auto-close issues (default branch is `main`).
+- ~~**M20** (Dashboard Performance & Resilience)~~ — **merged to `dev` via #326**
+  (`5fc0332`) and closed; #255, #256 and the M20 milestone were closed manually after the merge
+  (dev-targeted PRs never auto-close issues — default branch is `main`). See the M20 section below.
 - **M19** (Deployment, Release & Docs Hygiene) — the image/supply-chain half is closed (#266 via
   #316, #267 via #318), Phase 5 is merged and verified on-cluster, the platform-image rollout is
   documented (#247) and still needs one on-cluster rollout proof, and the docs/contracts items are
@@ -354,7 +353,8 @@ From the Parking Lot:
   M20's #256 (as a superset): every buffered upstream call is bounded by
   `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (default 20000) and composed with client-disconnect abort;
   a timeout is the 504 `UPSTREAM_TIMEOUT` gateway error, streaming/SSE routes are explicitly
-  exempt, and the env var is documented in `.env.example` and the dashboard docs. Close on merge.
+  exempt, and the env var is documented in `.env.example` and the dashboard docs. Closed after the
+  M20 merge (#326).
 
 From M15:
 
@@ -383,7 +383,7 @@ From M17 (reviewer-recorded, non-blocking):
 
 ## Notable changes
 
-M20 (branch `milestone/m20-dashboard-perf-resilience`, awaiting merge):
+M20 (merged via #326 → `5fc0332`):
 
 - The dashboard's frontend render scope and bundle cost are cut on three axes (#255): the
   EventStream context split (status primitive vs. events array), `React.lazy` route chunks for
