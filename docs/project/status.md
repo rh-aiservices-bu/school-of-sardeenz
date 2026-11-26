@@ -1,12 +1,11 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-25 (M18 CI & test infrastructure implemented on
-`milestone/m18-ci-test-infrastructure` — four issues delivered, the new CI integration job is
-blocking after its first green run (32/32) once #322 was fixed — and the M19 docs/contracts items closed: #249 via #319, #248 via
-#320, #268 via #273. Release 0.2.1 remains recorded in `CHANGELOG.md` and the proxy's Cargo version.
-The vLLM SIF republish (`rc2` + `runners.yaml` digest bump) and the on-cluster rollout proof for
-#247 remain pending.)
+Last update: 2026-11-26 (M20 — Dashboard Performance & Resilience — implemented on
+`milestone/m20-dashboard-perf-resilience`, both issues delivered and accepted, awaiting merge to
+`dev`; M18 merged to `dev` via #324 (`27a8742`) after #325 fixed the #322 cutover barrier. Next
+open work: M19's #315 (cluster-only), the Parking Lot backlog, and the deploy-only vLLM SIF
+republish/rollout steps.)
 
 ## Phases (complete)
 
@@ -69,8 +68,8 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M16       | Orchestration Resilience — Proxy & Control Plane — async wake eviction (#242), piggybacked-parker wake-trigger fast-fail (#245), crashed-worker Redis key flap (#240), phantom device-memory gauges (#254), protocol-family admission (#246), control-plane dead config + proxy hot-path cleanups (#258, two PRs)                                                                                                                                                         |
 | M17       | Runner & Shim Correctness — vLLM labeled-metric scrape (#239), launcher health-probe timeout (#243), device-scope memory attribution (#244), executor offload of blocking reads (#253), worker start fixes (#257); per-issue detail in that milestone's CHANGELOG entry and Notable changes below                                                                                                                                                                         |
 | M19       | Deployment, Release & Docs Hygiene — Phase 5 co-location (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281 and its Gate 9b run recorded; publish/rollout documented, pull policy fixed (#247/#211); image hardening (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249 via #319), 409 reason enum (#248 via #320), token gate (#268 via #273) closed; #315 open |
-| M18       | CI & Test Infrastructure (implemented on `milestone/m18-ci-test-infrastructure`, not merged) — integration suite gated in CI and blocking after its first green run (32/32) once #322 was fixed via #325 (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                          |
-| M20       | Dashboard Performance & Resilience (open) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + ErrorBoundary route coverage (#256)                                                                                                                                                                                                                                                                                     |
+| M18       | CI & Test Infrastructure (merged via #324 → `27a8742`, after #325 fixed the #322 cutover barrier) — blocking integration job in CI (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                                                                                                |
+| M20       | Dashboard Performance & Resilience (implemented on `milestone/m20-dashboard-perf-resilience`, awaiting merge) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + hijacked-stream shutdown + ErrorBoundary route coverage (#256)                                                                                                                                                                                      |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -102,8 +101,8 @@ overlay's `images:` block, roll out — and removes the mutable-tag footgun (`im
 Always` on all four platform Deployments); its registry re-resolution and worker-restart
 behaviour are deploy-only and unproven until the first rollout.
 
-In progress:
-nothing else in M19 (M18's milestone branch is recorded in its own section below).
+Remaining open in M19: #315 only (SCC `supplementalGroups` tightening, cluster-only validation),
+plus #287's operational half (the vLLM SIF `rc2` republish + re-import above).
 
 | Issue | Delivered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -118,9 +117,10 @@ typecheck (dev-worker + control-plane) clean, full vitest + the scoped new suite
 shims + conformance green, contracts validate + codegen reproducibility; per-issue numbers in
 the `.omp/reports/build-27*.md` / `review-*` / `verify-*` / `accept-*` files.
 
-## M18 — CI & Test Infrastructure (implemented on a milestone branch, not merged)
+## M18 — CI & Test Infrastructure (merged to `dev` via #324)
 
-Branch `milestone/m18-ci-test-infrastructure` off `dev@129d5ec`, four issues, each through
+Branch `milestone/m18-ci-test-infrastructure` off `dev@129d5ec`, merged as squash `27a8742`
+after #325 (the #322 cutover-barrier fix) landed; four issues, each through
 review → verify → acceptance:
 
 - **#314** — `site/` (the gitignored mkdocs output) joins the ESLint flat config's global ignores, so
@@ -162,8 +162,9 @@ failure is the pre-existing cutover-barrier bug **#322** (`routing-map.integrati
 expired proxy presence key is read as `0`, so the barrier never observes the lapse and waits its
 full 30 s timeout). #322 was fixed in #325 (`presenceTimestamp()` maps a missing key to `NaN`), and
 the next run on the refreshed branch (head `d46a05e`) was **green: 6/6 files, 32/32 tests, 0
-pending** — the staged `continue-on-error` line was then removed. Draft PR #321 remains a CI proof
-harness for #251, not the delivery PR.
+pending** — the staged `continue-on-error` line was then removed. Draft PR #321 (a CI proof
+harness for #251, not the delivery PR) was closed at merge time; its remote branch
+`wt/251-integration-ci` is deletion-pending.
 
 Review/verification ran per issue (blueprint/implement → 2× review → fix → verify → accept);
 cumulative reports in `.omp/reports/` (agent scratchpad, not committed). Cumulative gate: root
@@ -171,14 +172,61 @@ cumulative reports in `.omp/reports/` (agent scratchpad, not committed). Cumulat
 shims + conformance `138 passed, 1 skipped` in both file orders, `tsc --build` clean, eslint +
 prettier clean on touched files, and the #251 CI run judged gate-by-gate.
 
+## M20 — Dashboard Performance & Resilience (implemented on a milestone branch, awaiting merge)
+
+Branch `milestone/m20-dashboard-perf-resilience` off `dev@27a8742`, two issues (#255 Light
+pipeline, #256 Full), each through review → fix → verify → acceptance:
+
+- **#255** (render/bundle efficiency) — the EventStream context splits into a status context
+  (a `ConnectionStatus` primitive, consumed by the polling data hooks and the degraded banner) and
+  a separate events context (only `RecentEvents` reads the appended array), so SSE messages stop
+  re-rendering the whole data-hook tree; a render-count test pins the isolation. The Metrics page
+  and the Playground become route-level `React.lazy` chunks behind one `Suspense` fallback (the
+  chart core stays eager — the ClusterOverview donut uses it). The placement panel's stacked VRAM
+  bars are re-rendered with PatternFly charts (`ChartStack`/`ChartBar`, the app's single charting
+  stack); `@nivo/bar` and the dead direct `victory` dependency are removed, and the sleeping-model
+  hatch becomes a 0.55-opacity fill (matching the compact view's CSS bar). Entry bundle 1,634 →
+  1,158 kB (497 → 345 kB gzip), CSS 1,572 → 1,344 kB.
+- **#256** (BFF resilience) — every buffered-JSON BFF upstream call is bounded by
+  `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (default **20000 ms**, deliberately above the control plane's
+  own 15 s catalog-source fetch bound) composed with client-disconnect abort
+  (`dashboard/server/clients/upstream-signal.ts`, `AbortSignal.any`; the disconnect half hangs off
+  `reply.raw` because `request.raw` 'close' fires at POST body consumption). A timeout maps to the
+  existing 504 `UPSTREAM_TIMEOUT` — putting a stalled control plane on the read routes' Redis
+  fallback instead of hanging for undici's ~300 s default — a client disconnect rethrows without a
+  5xx (logged at info), and genuine network faults keep their 502. Streaming routes (SSE relay,
+  chat completions, model logs) stay untimed on purpose. The dashboard's `ErrorBoundary` moves to
+  `src/components/ErrorBoundary.tsx` and gains a second, hoisted instance around the whole
+  `<Routes>` tree (auth pages, providers, `AppLayout`), keeping the page-level boundary inside
+  `AppLayout`. Follow-up fix in the same milestone: every hijacked stream (the `/api/events` SSE
+  relay, the model/startup-log tail, the streaming chat proxy) registers its cleanup in
+  `dashboard/server/routes/hijacked-streams.ts`, and one `preClose` hook ends all three on
+  shutdown — before it, `server.close()` waited on open SSE clients until the pod grace period,
+  which was also the deterministic e2e teardown hang (`models.spec.ts`).
+
+Deferred / out of scope (recorded in the blueprint's non-goals): no retry policy added
+(timeout + Redis fallback is the failure story); `main.tsx`-level providers sit above the hoisted
+boundary (a render exception there still blanks — wrapping them needs a boundary with no router);
+ErrorBoundary crash-recovery keying (`resetKeys`) unchanged; deployment manifests do not set the
+new env var (the default is safe; operators may set it for a slow Prometheus — documented in the
+env table).
+
+Review/verification ran per issue; cumulative reports in `.omp/reports/` (agent scratchpad, not
+committed). Cumulative gate at head `5ed4d4c`: `make typecheck` clean, root vitest 110 files / 1895
+passed + 1 skipped, dashboard e2e 107/107 (Playwright chromium in-container), scoped eslint clean
+(repo-wide eslint OOM is pre-existing), plus live runtime proofs — 504 within a shrunk knob,
+default 20000 confirmed, disconnect abort at 296 ms with no error-level logs, SIGTERM-to-exit
+~15 ms per stream type, and a browser pass on a mock-stack harness (lazy chunk + Suspense
+fallback, placement bars, `/login` intact).
+
 ## Next
 
-- **M18** (CI & Test Infrastructure) — implemented on `milestone/m18-ci-test-infrastructure`,
-  awaiting merge to `dev`: #314, #251, #252 and #176 all delivered and accepted on the branch (see
-  the M18 section above). Merge order matters only for the CHANGELOG hunk, which is already
-  resolved on the branch. The integration job is **blocking**: #322 (cutover barrier) is fixed via
-  #325 and the refreshed branch's run was green (32/32), so the staged `continue-on-error` line is
-  gone.
+- ~~**M18** (CI & Test Infrastructure)~~ — **merged to `dev` via #324** (`27a8742`, after #325
+  fixed #322) and closed. See the M18 section below for what shipped.
+- **M20** (Dashboard Performance & Resilience) — implemented on
+  `milestone/m20-dashboard-perf-resilience`, both issues delivered and accepted, awaiting merge to
+  `dev` (see the M20 section below). After merge, close #255, #256 and the M20 milestone manually —
+  dev-targeted PRs never auto-close issues (default branch is `main`).
 - **M19** (Deployment, Release & Docs Hygiene) — the image/supply-chain half is closed (#266 via
   #316, #267 via #318), Phase 5 is merged and verified on-cluster, the platform-image rollout is
   documented (#247) and still needs one on-cluster rollout proof, and the docs/contracts items are
@@ -249,11 +297,11 @@ revision except where #278 changed the follow-through:
   2026-11-17**: pre-existing `models` rows survived the upgrade with `allow_co_location`
   defaulting to false, and the flag round-tripped through stop → config-edit → start cycles.
 
-M18's own boundaries (implemented, not merged):
+M18's own boundaries (merged to `dev`):
 
-- **#251/#322** — the integration job cannot be flipped to blocking until the pre-existing
-  cutover-barrier bug #322 is fixed; the one green run its staging rule waits for is therefore not
-  obtainable from this milestone.
+- ~~**#251/#322** — the integration job cannot be flipped to blocking until the pre-existing
+  cutover-barrier bug #322 is fixed~~ — resolved: #325 fixed #322, the refreshed branch's run was
+  green (32/32), and the `continue-on-error` line was removed before the #324 merge.
 - **#323** — the conformance suite pins `/wake` from a non-sleeping runner at today's `200`, which
   the engine-runner spec describes as `409`. Aligning spec + both shims + the control plane's wake
   path is a follow-up issue, deliberately not done inside #252.
@@ -294,6 +342,20 @@ From the Phase 5 Gate 9b run (2026-11-17, see [`phase5-gate9b-run.md`](phase5-ga
   fixed: the worker shares the control plane's catalog default and fetches http(s) catalogs, with
   a startup warning naming any unresolved runner type.
 
+Untracked candidates surfaced by M20 verification (not yet issues): `MockControlPlane`
+(`dashboard/e2e/mocks/control-plane.ts`) has no `/api/v1/models/:name/startup-logs` route, so any
+browser session that opens a model detail page logs 404 console errors against the mock stack
+(contract + BFF route both exist); the M20 browser pass's one failing check was exactly this,
+pre-existing and unrelated to #255.
+
+From the Parking Lot:
+
+- ~~**#302**: the dashboard BFF's control-plane client has no request timeout.~~ — delivered by
+  M20's #256 (as a superset): every buffered upstream call is bounded by
+  `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (default 20000) and composed with client-disconnect abort;
+  a timeout is the 504 `UPSTREAM_TIMEOUT` gateway error, streaming/SSE routes are explicitly
+  exempt, and the env var is documented in `.env.example` and the dashboard docs. Close on merge.
+
 From M15:
 
 - ~~**#266** (M19): image/supply-chain hardening — non-root `USER` in worker images, base-image
@@ -321,7 +383,30 @@ From M17 (reviewer-recorded, non-blocking):
 
 ## Notable changes
 
-M18 (branch `milestone/m18-ci-test-infrastructure`, pending merge):
+M20 (branch `milestone/m20-dashboard-perf-resilience`, awaiting merge):
+
+- The dashboard's frontend render scope and bundle cost are cut on three axes (#255): the
+  EventStream context split (status primitive vs. events array), `React.lazy` route chunks for
+  Metrics and Playground behind one `Suspense` fallback, and one charting stack —
+  `@patternfly/react-charts/victory` only, with `@nivo/bar` and the dead direct `victory`
+  dependency removed (the sleeping-model hatch becomes a 0.55-opacity fill). Entry bundle
+  1,634 → 1,158 kB.
+- The BFF's buffered upstream calls are bounded and disconnect-aware (#256):
+  `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (default 20000, above the control plane's own 15 s
+  catalog-source bound) composed with a `reply.raw`-based client-disconnect signal; timeout →
+  504 `UPSTREAM_TIMEOUT` (read routes then take the Redis fallback), disconnect → info log, no
+  5xx; streaming routes stay untimed. The `ErrorBoundary` is its own module with a second,
+  route-tree-hoisted instance.
+- Hijacked-stream shutdown (#256 follow-up): every `reply.hijack()` route registers its cleanup
+  in `dashboard/server/routes/hijacked-streams.ts`; one `preClose` hook (each closer in its own
+  try/catch) ends the SSE relay, the log tail and the streaming chat proxy on shutdown, so
+  `server.close()` no longer waits for open dashboard tabs — this was also the deterministic e2e
+  teardown hang. The contract for future hijacked routes: register a closer or SIGTERM hangs.
+- Docs: `docs/architecture/components/dashboard.md` gains the streaming-shutdown section, the
+  timeout env var and the context-split/lazy-routing notes; `docs/development/patternfly.md`
+  gains the one-charting-stack rule; `dashboard/AGENTS.md` gains the shutdown and signal rules.
+
+M18 (merged to `dev` via #324, `27a8742`):
 
 - CI gains another gate job, `integration`, against real `postgres:16` + `valkey:8` service
   containers. It runs the existing control-plane integration vitest config with a JSON reporter and
@@ -347,8 +432,8 @@ M18 (branch `milestone/m18-ci-test-infrastructure`, pending merge):
 - The ESLint flat config's global ignores gain `site/`, so the gitignored mkdocs output cannot fail
   `make lint` after `make docs-build`.
 - Docs: `docs/development/patternfly.md` gains a "Unit testing (Vitest)" section (the three levers,
-  the per-package cover, the jsdom/nivo limits); `docs/development/setup.md` documents the CI
-  integration job and adds `make test-integration` to the command table.
+  the per-package cover, the jsdom measurement limits); `docs/development/setup.md` documents the
+  CI integration job and adds `make test-integration` to the command table.
 
 Phase 5 (merged via #281; decisions ratified as
 [ADR-029](../architecture/adrs/adr-029-colocation-hold-and-pressure-stop.md) in #283):

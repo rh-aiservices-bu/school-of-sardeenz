@@ -138,14 +138,30 @@ The frontend never constructs PromQL queries. The BFF owns the query templates a
 | `/workers/:workerId` | `WorkerDetail`     | Per-worker GPU memory breakdown                                                   |
 | `/gpu-memory`        | `GpuMemory`        | Cluster-wide measured GPU memory view                                             |
 | `/catalog`           | `RunnerCatalog`    | Runner catalog: browse and import runner SIFs                                     |
-| `/playground`        | `Playground`       | Chat playground against the inference endpoint (admin only)                       |
-| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts                                              |
+| `/playground`        | `Playground`       | Chat playground against the inference endpoint (admin only; lazy chunk)           |
+| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts (lazy chunk)                                 |
 
 ### State management
 
 The frontend uses **TanStack Query for all server state** (data fetching, caching, mutations). There is no global client-side state store. UI-only state (sidebar open/closed, filter selections, modal visibility) lives in component-local `useState`.
 
 Query invalidation is event-driven: the `useEventStream` hook listens for SSE events and invalidates the relevant query keys. For example, a `MODEL_STATE_CHANGED` event invalidates both `['models']` and `['cluster']` query keys, triggering a refetch only for components currently mounted and subscribed to those queries.
+
+The event-stream context is deliberately split in two (#255): `useEventStreamStatus()` exposes a
+`ConnectionStatus` primitive that only changes on connection transitions, while
+`useEventStreamEvents()` exposes the appended event array that grows on every SSE message. A single
+combined context re-rendered every data hook and the degraded banner per message; with the split,
+only `RecentEvents` (which re-renders per message by design) reads the events context.
+
+### Route-level code splitting and error containment
+
+The Metrics page and the Playground are `React.lazy` route chunks behind one `Suspense` fallback —
+they drag in `@patternfly/react-charts/victory` and `@patternfly/chatbot` (+ its CSS) respectively,
+none of which the rest of the app uses (the chart core stays eager: the ClusterOverview donut uses
+it). Pages keep named exports; the `lazy()` wrappers map them to defaults. A render exception
+anywhere in the route tree (login, OAuth callback, providers, `AppLayout`, or a page) shows the
+`ErrorBoundary` fallback instead of a blank screen: one boundary instance is hoisted over the whole
+`<Routes>` tree and a second stays inside `AppLayout` for page-crash containment.
 
 ### SSE reconnection and degraded mode
 
@@ -168,12 +184,13 @@ In degraded state, the `DegradedBanner` component shows a persistent warning: "R
 
 ### Shared components
 
-| Component             | Purpose                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------- |
-| `AppLayout`           | PF6 Page shell with masthead, sidebar nav, active highlighting                                    |
-| `StateLabel`          | Model lifecycle state as a colored PF6 Label with state-appropriate icons                         |
-| `MemoryVisualization` | Stacked memory bar (used / reserved / available) with tooltips and expandable inline detail panel |
-| `DegradedBanner`      | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state     |
+| Component              | Purpose                                                                                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AppLayout`            | PF6 Page shell with masthead, sidebar nav, active highlighting                                                                                                                    |
+| `StateLabel`           | Model lifecycle state as a colored PF6 Label with state-appropriate icons                                                                                                         |
+| `ModelsPlacementPanel` | Stacked measured-VRAM bars per GPU (PatternFly charts, one series per segment) with tooltips and per-model action rows                                                            |
+| `DegradedBanner`       | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state                                                                                     |
+| `ErrorBoundary`        | Render-crash containment (own module, `src/components/ErrorBoundary.tsx`); one instance hoisted over the whole route tree, one kept inside `AppLayout` for page-level containment |
 
 ### State color mapping
 
@@ -234,6 +251,15 @@ try {
 The `source: "redis-fallback"` field signals to the frontend that the response is from the fallback path. The `DegradedBanner` component detects this field across all active queries and shows a persistent warning: "Control plane unreachable — showing cached data". The banner auto-dismisses as soon as fresh data resumes.
 
 Write routes (POST, DELETE) never fall back. They return the upstream error to the client, since Redis is a read-only mirror.
+
+Every buffered upstream call is bounded by `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (see the env table)
+composed with the browser request's own disconnection
+(`dashboard/server/clients/upstream-signal.ts` — the disconnect half hangs off `reply.raw`, because
+`request.raw` 'close' fires when a POST body finishes being consumed). A timeout surfaces as the
+existing 504 `UPSTREAM_TIMEOUT` — which is what puts a stalled control plane on the read routes'
+Redis fallback path instead of hanging for undici's ~300 s default — a client disconnect rethrows
+without a 5xx, and genuine network faults keep their 502. The streaming routes (SSE relay, chat
+completions, model logs) are deliberately untimed.
 
 ### Fallback coverage
 

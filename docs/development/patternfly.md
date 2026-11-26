@@ -43,6 +43,19 @@ import { Chart, ChartBar } from '@patternfly/react-charts/victory';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 ```
 
+## Charts
+
+One charting stack: `@patternfly/react-charts/victory` only. `@nivo/*` and a direct `victory`
+dependency were removed in #255 (entry bundle 1,634 → 1,158 kB); do not reintroduce either —
+PatternFly's `victory-*` peers come through the lockfile. Import charts through the `/victory`
+subpath (the bare specifier's `module` field points at a file that does not exist upstream).
+
+Charts must render without a second library's responsiveness wrappers: size from the container
+yourself (the placement panel's `ModelsPlacementPanel.tsx` measures a wrapper with a
+`ResizeObserver`) and pass explicit `width`/`height`. Where the v1 nivo build used a hatch pattern
+(sleeping-model segments), use a reduced-opacity fill instead (`opacity: 0.55`, matching the compact
+view's CSS bar) — PF victory has no built-in hatch and the opacity treatment reads at both sizes.
+
 ## Layout Patterns
 
 - Use `Page`, `PageSection`, and `PageSidebar` for top-level layout

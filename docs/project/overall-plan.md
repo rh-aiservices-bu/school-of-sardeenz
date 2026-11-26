@@ -411,8 +411,9 @@ its on-cluster Gate 9b run recorded; M16 is complete — #242 (async wake evicti
 wording (#267 via #318) are merged, the four Gate 9b follow-ups (#286–#289) are all fixed
 (#287's published-image republish is the remaining operational step), and the docs/contracts items
 merged too (#249 via #319, #248 via #320, #268 closed — fix via #273). What remains is #315
-(cluster-only) and the deploy-only vLLM SIF republish/rollout. M18 (CI & test infrastructure) is
-implemented on its milestone branch and awaiting merge. The
+(cluster-only) and the deploy-only vLLM SIF republish/rollout. M18 (CI & test infrastructure)
+merged via #324, and M20 (Dashboard Performance & Resilience) is implemented on its milestone
+branch awaiting merge. The
 list of themes and what each delivered is maintained in [`status.md`](status.md).
 
 ---
@@ -443,8 +444,8 @@ Every component exposes a Prometheus scrape endpoint from Phase 1 onward. Key me
 
 The monorepo uses a unified Makefile. CI (`.github/workflows/ci.yml`) runs the typecheck + lint
 quality job, unit tests, the Playwright e2e suite, the Python shim/conformance job, contract-codegen
-drift, and — since M18 — the control-plane integration suite against real Postgres + Valkey (staged
-advisory until its first green run). OpenAPI validation (`redocly lint`) is part of the lint step.
+drift, and — since M18 — the control-plane integration suite against real Postgres + Valkey
+(blocking since its first green run). OpenAPI validation (`redocly lint`) is part of the lint step.
 Generated types are committed to the repo so consumers don't need to run codegen.
 
 ### Security Boundaries
