@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PrometheusClient } from '../../clients/prometheus.js';
+import { ClientDisconnectedError } from '../../clients/upstream-signal.js';
 import { BffError } from '../../errors.js';
 import type { Config } from '../../config.js';
 
@@ -20,6 +21,7 @@ const baseConfig: Config = {
   prometheusTenantNamespace: '',
   inferenceUrl: 'http://inference.test',
   maxConcurrentInferenceRequestsPerUser: 4,
+  upstreamTimeoutMs: 15_000,
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -244,6 +246,117 @@ describe('PrometheusClient', () => {
         code: 'PROMETHEUS_ERROR',
         message: 'Prometheus returned 503',
       });
+    });
+  });
+
+  describe('upstream signal', () => {
+    it('queryInstant passes the provided signal through to fetch', async () => {
+      const client = new PrometheusClient(baseConfig);
+      fetchSpy.mockResolvedValue(makeFetchResponse(200));
+      const controller = new AbortController();
+
+      await client.queryInstant('up', undefined, controller.signal);
+
+      expect(firstCallInit().signal).toBe(controller.signal);
+    });
+
+    it('queryRange passes the provided signal through to fetch', async () => {
+      const client = new PrometheusClient(baseConfig);
+      fetchSpy.mockResolvedValue(makeFetchResponse(200));
+      const controller = new AbortController();
+
+      await client.queryRange('up', '0', '100', '15s', controller.signal);
+
+      expect(firstCallInit().signal).toBe(controller.signal);
+    });
+
+    it('maps a TimeoutError abort to 504 UPSTREAM_TIMEOUT', async () => {
+      const client = new PrometheusClient(baseConfig);
+      fetchSpy.mockRejectedValue(
+        new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+      );
+
+      await expect(client.queryInstant('up')).rejects.toMatchObject({
+        statusCode: 504,
+        code: 'UPSTREAM_TIMEOUT',
+        details: { service: 'prometheus' },
+      });
+    });
+
+    it('rethrows ClientDisconnectedError untouched', async () => {
+      const client = new PrometheusClient(baseConfig);
+      const reason = new ClientDisconnectedError();
+      fetchSpy.mockRejectedValue(reason);
+
+      await expect(client.queryInstant('up')).rejects.toBe(reason);
+    });
+
+    it('maps a TimeoutError during the body read to 504 UPSTREAM_TIMEOUT', async () => {
+      const client = new PrometheusClient(baseConfig);
+      // The composed signal covers the body read: headers arrive, then the abort lands.
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.reject(
+            new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+          ),
+      });
+
+      await expect(client.queryInstant('up')).rejects.toMatchObject({
+        statusCode: 504,
+        code: 'UPSTREAM_TIMEOUT',
+        details: { service: 'prometheus' },
+      });
+    });
+
+    it('rethrows a ClientDisconnectedError raised during the body read untouched', async () => {
+      const client = new PrometheusClient(baseConfig);
+      const reason = new ClientDisconnectedError();
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(reason),
+      });
+
+      await expect(client.queryInstant('up')).rejects.toBe(reason);
+    });
+
+    it('keeps a non-abort body-read fault a 502 PROMETHEUS_ERROR', async () => {
+      const client = new PrometheusClient(baseConfig);
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+      });
+
+      await expect(client.queryInstant('up')).rejects.toMatchObject({
+        statusCode: 502,
+        code: 'PROMETHEUS_ERROR',
+        message: 'Prometheus returned a non-JSON response',
+      });
+    });
+
+    it('isHealthy bare-fetch branch carries the timeout signal', async () => {
+      // Emulate real fetch: a hung request rejects with the signal's abort reason.
+      // (Promise.withResolvers is not in the ES2022 lib this project typechecks against.)
+      fetchSpy.mockImplementation(
+        (_url: string, init: RequestInit & { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener(
+              'abort',
+              () =>
+                reject(
+                  init.signal?.reason instanceof Error ? init.signal.reason : new Error('aborted'),
+                ),
+              { once: true },
+            );
+          }),
+      );
+      const client = new PrometheusClient({ ...baseConfig, upstreamTimeoutMs: 30 });
+
+      await expect(client.isHealthy()).resolves.toBe(false);
+      expect(firstCallInit().signal).toBeInstanceOf(AbortSignal);
     });
   });
 });

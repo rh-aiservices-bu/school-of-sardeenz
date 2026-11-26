@@ -97,6 +97,12 @@ The two-channel design keeps the proxy's hot path (`routing-updates`) free of ev
 
 Model/endpoint events flow even during control plane restarts, since `RoutingMapService` publishes to Redis as part of its state transitions. Worker/memory events are published by the reconciliation loop and are therefore only emitted while a leader instance is running.
 
+### Streaming shutdown
+
+Three BFF routes take over the raw socket with `reply.hijack()`: the `/api/events` SSE relay above, the control-plane log tail (`/api/models/:name/logs` and `/api/models/:name/instances/:instanceId/startup-logs`, which pipes upstream `log`/`end` frames through unchanged) and the streaming chat proxy (`/api/inference/chat/completions`). A hijacked response is invisible to Fastify's request lifecycle — the handler awaits the client, not the other way round — so `server.close()` waits for the client to disconnect, indefinitely for an open dashboard tab. A rolling restart would sit on `SIGTERM` until the pod's grace period expired.
+
+`dashboard/server/routes/hijacked-streams.ts` keeps one closers set per Fastify instance. Each of the three routes registers its existing per-stream cleanup in it when the stream starts and removes it when the cleanup runs, so the set only ever holds live streams. A single `preClose` hook — which Fastify runs before the listener stops, while the sockets are still writable — runs every remaining closer: unsubscribe the Redis subscriber, destroy the upstream pipe, release the inference concurrency slot, end the response. Every closer runs inside its own `try`/`catch` (a throw is logged at `warn`) so one wedged stream cannot skip the rest and hang the close. Clients see the stream end and reconnect to whichever replica is serving.
+
 ### Metrics path
 
 ```
@@ -132,14 +138,30 @@ The frontend never constructs PromQL queries. The BFF owns the query templates a
 | `/workers/:workerId` | `WorkerDetail`     | Per-worker GPU memory breakdown                                                   |
 | `/gpu-memory`        | `GpuMemory`        | Cluster-wide measured GPU memory view                                             |
 | `/catalog`           | `RunnerCatalog`    | Runner catalog: browse and import runner SIFs                                     |
-| `/playground`        | `Playground`       | Chat playground against the inference endpoint (admin only)                       |
-| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts                                              |
+| `/playground`        | `Playground`       | Chat playground against the inference endpoint (admin only; lazy chunk)           |
+| `/metrics`           | `MetricsDashboard` | Prometheus-backed performance charts (lazy chunk)                                 |
 
 ### State management
 
 The frontend uses **TanStack Query for all server state** (data fetching, caching, mutations). There is no global client-side state store. UI-only state (sidebar open/closed, filter selections, modal visibility) lives in component-local `useState`.
 
 Query invalidation is event-driven: the `useEventStream` hook listens for SSE events and invalidates the relevant query keys. For example, a `MODEL_STATE_CHANGED` event invalidates both `['models']` and `['cluster']` query keys, triggering a refetch only for components currently mounted and subscribed to those queries.
+
+The event-stream context is deliberately split in two (#255): `useEventStreamStatus()` exposes a
+`ConnectionStatus` primitive that only changes on connection transitions, while
+`useEventStreamEvents()` exposes the appended event array that grows on every SSE message. A single
+combined context re-rendered every data hook and the degraded banner per message; with the split,
+only `RecentEvents` (which re-renders per message by design) reads the events context.
+
+### Route-level code splitting and error containment
+
+The Metrics page and the Playground are `React.lazy` route chunks behind one `Suspense` fallback —
+they drag in `@patternfly/react-charts/victory` and `@patternfly/chatbot` (+ its CSS) respectively,
+none of which the rest of the app uses (the chart core stays eager: the ClusterOverview donut uses
+it). Pages keep named exports; the `lazy()` wrappers map them to defaults. A render exception
+anywhere in the route tree (login, OAuth callback, providers, `AppLayout`, or a page) shows the
+`ErrorBoundary` fallback instead of a blank screen: one boundary instance is hoisted over the whole
+`<Routes>` tree and a second stays inside `AppLayout` for page-crash containment.
 
 ### SSE reconnection and degraded mode
 
@@ -162,12 +184,13 @@ In degraded state, the `DegradedBanner` component shows a persistent warning: "R
 
 ### Shared components
 
-| Component             | Purpose                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------- |
-| `AppLayout`           | PF6 Page shell with masthead, sidebar nav, active highlighting                                    |
-| `StateLabel`          | Model lifecycle state as a colored PF6 Label with state-appropriate icons                         |
-| `MemoryVisualization` | Stacked memory bar (used / reserved / available) with tooltips and expandable inline detail panel |
-| `DegradedBanner`      | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state     |
+| Component              | Purpose                                                                                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AppLayout`            | PF6 Page shell with masthead, sidebar nav, active highlighting                                                                                                                    |
+| `StateLabel`           | Model lifecycle state as a colored PF6 Label with state-appropriate icons                                                                                                         |
+| `ModelsPlacementPanel` | Stacked measured-VRAM bars per GPU (PatternFly charts, one series per segment) with tooltips and per-model action rows                                                            |
+| `DegradedBanner`       | Persistent warning banner shown when control plane is unreachable or SSE is in degraded state                                                                                     |
+| `ErrorBoundary`        | Render-crash containment (own module, `src/components/ErrorBoundary.tsx`); one instance hoisted over the whole route tree, one kept inside `AppLayout` for page-level containment |
 
 ### State color mapping
 
@@ -229,6 +252,15 @@ The `source: "redis-fallback"` field signals to the frontend that the response i
 
 Write routes (POST, DELETE) never fall back. They return the upstream error to the client, since Redis is a read-only mirror.
 
+Every buffered upstream call is bounded by `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (see the env table)
+composed with the browser request's own disconnection
+(`dashboard/server/clients/upstream-signal.ts` — the disconnect half hangs off `reply.raw`, because
+`request.raw` 'close' fires when a POST body finishes being consumed). A timeout surfaces as the
+existing 504 `UPSTREAM_TIMEOUT` — which is what puts a stalled control plane on the read routes'
+Redis fallback path instead of hanging for undici's ~300 s default — a client disconnect rethrows
+without a 5xx, and genuine network faults keep their 502. The streaming routes (SSE relay, chat
+completions, model logs) are deliberately untimed.
+
 ### Fallback coverage
 
 | Route                       | Fallback | Degraded behavior                           |
@@ -258,31 +290,32 @@ In production (`NODE_ENV=production`), the BFF serves the frontend's static asse
 
 ### BFF environment variables
 
-| Variable                                                  | Default                                                  | Description                                                                                             |
-| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`                                           | BFF listen address and port                                                                             |
-| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`                                  | Control plane base URL                                                                                  |
-| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379`                                 | Redis/Valkey connection string                                                                          |
-| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`                                               | Prefix for all Redis keys                                                                               |
-| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`                                  | Prometheus (or Thanos Querier) base URL                                                                 |
-| `SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH`                   | _(empty)_                                                | Path to a token file sent as `Authorization: Bearer …` on every Prometheus request, re-read per request |
-| `SARDEENZ_PROMETHEUS_CA_PATH`                             | _(empty)_                                                | PEM CA bundle used to validate the Prometheus endpoint's TLS certificate                                |
-| `SARDEENZ_PROMETHEUS_TENANT_NAMESPACE`                    | _(empty)_                                                | Sent as the `namespace` query parameter on every Prometheus request (Thanos Querier tenancy)            |
-| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`                                  | Proxy inference base URL used by the Playground                                                         |
-| `SARDEENZ_REPO_STATS_URL`                                 | GitHub API URL for `rh-aiservices-bu/school-of-sardeenz` | Repo API URL polled for the sidebar star/fork counts; empty string disables the lookup                  |
-| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                                                      | Maximum active chat-completions responses for one identity, per BFF replica                             |
-| `SARDEENZ_LOG_LEVEL`                                      | `info`                                                   | Pino log level                                                                                          |
-| `AUTH_MODE`                                               | `none`                                                   | Authentication mode: `none`, `simple`, or `oauth`                                                       |
-| `ADMIN_USERNAME`                                          | `admin`                                                  | Admin username for `simple` auth mode                                                                   |
-| `ADMIN_PASSWORD`                                          | _(empty)_                                                | Admin password for `simple` auth mode                                                                   |
-| `JWT_SECRET`                                              | _(empty)_                                                | JWT signing secret (required when `AUTH_MODE` is not `none`)                                            |
-| `JWT_EXPIRATION_HOURS`                                    | `8`                                                      | JWT token expiration in hours                                                                           |
-| `OAUTH_CLIENT_ID`                                         | `sardeenz`                                               | OAuth client ID (for `oauth` mode)                                                                      |
-| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                                                | OAuth client secret (for `oauth` mode)                                                                  |
-| `OAUTH_ISSUER_URL`                                        | _(empty)_                                                | OAuth OIDC issuer URL (for `oauth` mode)                                                                |
-| `K8S_API_URL`                                             | _(empty)_                                                | Kubernetes API URL for namespace-scoped OAuth RBAC role resolution (required in `oauth` mode)           |
-| `SERVICE_ACCOUNT_TOKEN`                                   | _(mounted token)_                                        | ServiceAccount token override for OAuth RBAC checks outside Kubernetes                                  |
-| `NAMESPACE`                                               | `sardeenz`                                               | Kubernetes namespace for RBAC scope (for `oauth` mode)                                                  |
+| Variable                                                  | Default                                                  | Description                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SARDEENZ_BFF_LISTEN_ADDR`                                | `0.0.0.0:4000`                                           | BFF listen address and port                                                                                                                                                                                                                                                                                                                                                                |
+| `SARDEENZ_CONTROL_PLANE_URL`                              | `http://localhost:3000`                                  | Control plane base URL                                                                                                                                                                                                                                                                                                                                                                     |
+| `SARDEENZ_REDIS_URL`                                      | `redis://localhost:6379`                                 | Redis/Valkey connection string                                                                                                                                                                                                                                                                                                                                                             |
+| `SARDEENZ_REDIS_KEY_PREFIX`                               | `sardeenz`                                               | Prefix for all Redis keys                                                                                                                                                                                                                                                                                                                                                                  |
+| `SARDEENZ_PROMETHEUS_URL`                                 | `http://localhost:9090`                                  | Prometheus (or Thanos Querier) base URL                                                                                                                                                                                                                                                                                                                                                    |
+| `SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH`                   | _(empty)_                                                | Path to a token file sent as `Authorization: Bearer …` on every Prometheus request, re-read per request                                                                                                                                                                                                                                                                                    |
+| `SARDEENZ_PROMETHEUS_CA_PATH`                             | _(empty)_                                                | PEM CA bundle used to validate the Prometheus endpoint's TLS certificate                                                                                                                                                                                                                                                                                                                   |
+| `SARDEENZ_PROMETHEUS_TENANT_NAMESPACE`                    | _(empty)_                                                | Sent as the `namespace` query parameter on every Prometheus request (Thanos Querier tenancy)                                                                                                                                                                                                                                                                                               |
+| `SARDEENZ_INFERENCE_URL`                                  | `http://localhost:8080`                                  | Proxy inference base URL used by the Playground                                                                                                                                                                                                                                                                                                                                            |
+| `SARDEENZ_REPO_STATS_URL`                                 | GitHub API URL for `rh-aiservices-bu/school-of-sardeenz` | Repo API URL polled for the sidebar star/fork counts; empty string disables the lookup                                                                                                                                                                                                                                                                                                     |
+| `SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER` | `4`                                                      | Maximum active chat-completions responses for one identity, per BFF replica                                                                                                                                                                                                                                                                                                                |
+| `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS`                        | `20000`                                                  | Timeout in ms for the BFF's buffered JSON upstream calls (control plane, Prometheus, inference health). Must stay above the longest bounded operation it drives — the control plane's own 15 s catalog-source fetch — otherwise slow-but-valid catalog refreshes 504 at the BFF after the control plane already succeeded. Streaming routes (SSE, chat completions, model logs) are exempt |
+| `SARDEENZ_LOG_LEVEL`                                      | `info`                                                   | Pino log level                                                                                                                                                                                                                                                                                                                                                                             |
+| `AUTH_MODE`                                               | `none`                                                   | Authentication mode: `none`, `simple`, or `oauth`                                                                                                                                                                                                                                                                                                                                          |
+| `ADMIN_USERNAME`                                          | `admin`                                                  | Admin username for `simple` auth mode                                                                                                                                                                                                                                                                                                                                                      |
+| `ADMIN_PASSWORD`                                          | _(empty)_                                                | Admin password for `simple` auth mode                                                                                                                                                                                                                                                                                                                                                      |
+| `JWT_SECRET`                                              | _(empty)_                                                | JWT signing secret (required when `AUTH_MODE` is not `none`)                                                                                                                                                                                                                                                                                                                               |
+| `JWT_EXPIRATION_HOURS`                                    | `8`                                                      | JWT token expiration in hours                                                                                                                                                                                                                                                                                                                                                              |
+| `OAUTH_CLIENT_ID`                                         | `sardeenz`                                               | OAuth client ID (for `oauth` mode)                                                                                                                                                                                                                                                                                                                                                         |
+| `OAUTH_CLIENT_SECRET`                                     | _(empty)_                                                | OAuth client secret (for `oauth` mode)                                                                                                                                                                                                                                                                                                                                                     |
+| `OAUTH_ISSUER_URL`                                        | _(empty)_                                                | OAuth OIDC issuer URL (for `oauth` mode)                                                                                                                                                                                                                                                                                                                                                   |
+| `K8S_API_URL`                                             | _(empty)_                                                | Kubernetes API URL for namespace-scoped OAuth RBAC role resolution (required in `oauth` mode)                                                                                                                                                                                                                                                                                              |
+| `SERVICE_ACCOUNT_TOKEN`                                   | _(mounted token)_                                        | ServiceAccount token override for OAuth RBAC checks outside Kubernetes                                                                                                                                                                                                                                                                                                                     |
+| `NAMESPACE`                                               | `sardeenz`                                               | Kubernetes namespace for RBAC scope (for `oauth` mode)                                                                                                                                                                                                                                                                                                                                     |
 
 ### Frontend environment variables
 
@@ -302,7 +335,7 @@ The BFF serves both the API and the frontend from a single port (4000). This sim
 
 ### Inference request lifecycle
 
-`POST /api/inference/chat/completions` takes a per-user slot before it begins an upstream request and holds it until the response body ends, including a non-streaming response. In `simple` and `oauth` modes the identity is the verified JWT `username`; in `none` mode all requests share `anonymous`. Excess requests receive `429 RATE_LIMITED` without contacting the inference proxy. Disconnects abort the upstream request and release the slot. The limiter is an in-memory, per-replica guard, so it protects each BFF process but does not create a cluster-wide cap.
+`POST /api/inference/chat/completions` takes a per-user slot before it begins an upstream request and holds it until the response body ends, including a non-streaming response. In `simple` and `oauth` modes the identity is the verified JWT `username`; in `none` mode all requests share `anonymous`. Excess requests receive `429 RATE_LIMITED` without contacting the inference proxy. Disconnects abort the upstream request and release the slot, and the shutdown hook ends the stream the same way (see [Streaming shutdown](#streaming-shutdown)). The limiter is an in-memory, per-replica guard, so it protects each BFF process but does not create a cluster-wide cap.
 
 ## Testing Strategy
 

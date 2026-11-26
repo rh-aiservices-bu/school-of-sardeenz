@@ -20,7 +20,7 @@ export interface UseModelLogsResult {
 /**
  * Opens a transient SSE connection to one instance's durable startup-log history.
  *
- * This is deliberately NOT merged into the app-scope `useEventStream` singleton — every
+ * This is deliberately NOT merged into the app-scope event stream (`useEventStream` module) — every
  * consumer (deploy modal, "View logs" action) mounts its own connection scoped to a single
  * model, and the connection is torn down whenever `enabled` goes false, the component
  * unmounts, or `modelName` changes.

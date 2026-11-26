@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Dashboard render and bundle cost cut on three axes (#255).** The EventStream context is split
+  into a stable status context (a `ConnectionStatus` primitive) and a separate events context, so
+  the polling data hooks, the degraded banner and the metrics page no longer re-render on every SSE
+  message — only `RecentEvents` reads the appended array, and a render-count test pins the
+  isolation. The Metrics page and the Playground are route-level `React.lazy` chunks behind one
+  `Suspense` fallback (inside the existing `ErrorBoundary`), taking the `@patternfly/chatbot`
+  library plus its CSS and the metrics page code off the entry chunk (the chart core stays eager:
+  the ClusterOverview donut uses it). And the placement panel's two stacked VRAM
+  bars are re-rendered with PatternFly charts (`ChartStack`/`ChartBar`, the app's single charting
+  stack) instead of `@nivo/bar`, which is removed along with its `@react-spring`/d3 tree and the
+  now-dead direct `victory` dependency (PatternFly's `victory-*` optional peers come from the
+  lockfile); the sleeping-model hatch becomes the compact view's 55 % opacity. Built entry bundle:
+  1,634 kB → 1,158 kB (497 kB → 345 kB gzip) and CSS 1,572 kB → 1,344 kB (137 kB → 114 kB gzip).
 - **The control-plane integration suite is gated in CI (#251).** `.github/workflows/ci.yml` gains an
   `integration` job — `postgres:16` + `valkey:8` service containers, the same `triage` gate and
   pinned-action preamble as the other gates — running what `make test-integration` runs locally, so
@@ -193,6 +206,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The BFF ends every hijacked stream on shutdown, so `app.close()` no longer waits for a client
+  that never hangs up (#256 follow-up).** The three routes that take over the raw socket —
+  `/api/events` (Redis-backed SSE relay), `/api/models/:name/logs` +
+  `/api/models/:name/instances/:instanceId/startup-logs` (control-plane log tail) and
+  `/api/inference/chat/completions` (streaming chat proxy) — are invisible to Fastify's request
+  lifecycle: `server.close()` waited for the client to disconnect, which an open dashboard tab never
+  does, so a rolling restart would sit on `SIGTERM` until the pod's grace period expired.
+  `dashboard/server/routes/hijacked-streams.ts` now exposes one per-instance closers set that each
+  of the three routes registers its existing cleanup in (and removes it again when the stream ends);
+  a single `preClose` hook runs them — unsubscribing the Redis subscriber, destroying the upstream
+  pipe, releasing the inference concurrency slot and ending the response — before the listener
+  stops, each closer in its own try/catch so one failure cannot skip the rest and hang the close.
+  Clients see the stream end and reconnect to whichever replica takes over. This was also the
+  deterministic e2e failure: `dashboard/e2e` tears the fixture BFF down with `SIGTERM` and waits 2 s,
+  so a BFF that never exited stayed alive holding the connection the new disconnect-abort path
+  leaves in undici's pool — a socket dialled for a cancelled request that never carried one, which a
+  server cannot reap — and `MockControlPlane.close()` then blocked on it until the 30 s test deadline
+  (`models.spec.ts:379`, `Tearing down "mockControlPlane" exceeded the test timeout`). Shutdown now
+  completes in ~15 ms per stream type; regression coverage in `server/__tests__/server.test.ts`.
+- **BFF buffered upstream calls now time out and abort on client disconnect, and the
+  ErrorBoundary covers the auth pages and providers (#256).** Every buffered-JSON BFF upstream
+  call — control plane, Prometheus, the inference health probe — is bounded by the new
+  `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (default `20000`, deliberately above the control plane's
+  own 15 s catalog-source fetch bound so a slow-but-valid catalog refresh is not aborted at the
+  BFF after the control plane already succeeded) and by the browser request's own
+  disconnection: `dashboard/server/clients/upstream-signal.ts` composes both with
+  `AbortSignal.any` (the disconnect half hangs off `reply.raw` 'close'/'error', because
+  `request.raw` 'close' fires when a POST body finishes being consumed), and every buffered
+  handler in `routes/models|cluster|workers|catalog|notifications|weights|metrics` threads the
+  signal through its client call. A timeout maps to the existing 504 `UPSTREAM_TIMEOUT` (and so
+  now triggers the read routes' Redis fallback instead of hanging for undici's ~300 s default),
+  a client disconnect rethrows without a 5xx, and genuine network faults keep their 502. The
+  inference/SSE streaming routes — including `model-logs`' `proxyRequest` passthrough — stay
+  untimed on purpose. The dashboard's `ErrorBoundary` also moves to
+  `src/components/ErrorBoundary.tsx` and gains a second, hoisted instance around the whole
+  `<Routes>` tree: a render exception in `/login`, `/oauth/callback`, `ProtectedRoute`, the
+  Degraded/EventStream/Notification/InferenceWorkspace providers or `AppLayout` now shows the
+  fallback instead of a blank screen, while the page-level boundary inside `AppLayout` is kept
+  for page-crash containment.
 - **Runner-contract conformance covers the conflict and crash paths, and both shims'
   `_health_poller` lifecycle is unit-tested (#252).** The shared suite grows from 8 to 13 named
   cases (25 tests): `/sleep` and `/memory-report` `409` while `STARTING`, vLLM's in-flight-request

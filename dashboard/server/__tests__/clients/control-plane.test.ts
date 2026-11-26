@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ControlPlaneClient } from '../../clients/control-plane.js';
+import { ClientDisconnectedError } from '../../clients/upstream-signal.js';
 import { BffError } from '../../errors.js';
 import type { Config } from '../../config.js';
 
@@ -17,6 +18,7 @@ const mockConfig: Config = {
   prometheusTenantNamespace: '',
   inferenceUrl: 'http://inference.test',
   maxConcurrentInferenceRequestsPerUser: 4,
+  upstreamTimeoutMs: 15_000,
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -272,6 +274,77 @@ describe('ControlPlaneClient', () => {
       const result = await client.isHealthy();
 
       expect(result).toBe(false);
+    });
+
+    it('passes a timeout signal and reports unhealthy when the probe hangs', async () => {
+      // Emulate real fetch: a hung request rejects with the signal's abort reason.
+      // (Promise.withResolvers is not in the ES2022 lib this project typechecks against.)
+      fetchSpy.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener(
+              'abort',
+              () =>
+                reject(
+                  init.signal?.reason instanceof Error ? init.signal.reason : new Error('aborted'),
+                ),
+              { once: true },
+            );
+          }),
+      );
+      const slowClient = new ControlPlaneClient({ ...mockConfig, upstreamTimeoutMs: 30 });
+
+      await expect(slowClient.isHealthy()).resolves.toBe(false);
+      expect(firstCallInit().signal).toBeInstanceOf(AbortSignal);
+    });
+  });
+
+  describe('upstream signal', () => {
+    it('request() passes the provided signal to fetch', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { models: [] }));
+      const controller = new AbortController();
+
+      await client.request('GET', '/api/v1/models', undefined, controller.signal);
+
+      expect(firstCallInit().signal).toBe(controller.signal);
+    });
+
+    it('request() with no signal does not set one', async () => {
+      // The model-logs route streams through proxyRequest without a signal; the optional
+      // parameter must not leak a default timeout onto that path.
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { models: [] }));
+
+      await client.listModels();
+
+      expect(firstCallInit().signal).toBeUndefined();
+    });
+
+    it('proxyRequest() with a signal passes it through', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, {}));
+      const controller = new AbortController();
+
+      await client.proxyRequest('GET', '/api/v1/models', undefined, controller.signal);
+
+      expect(firstCallInit().signal).toBe(controller.signal);
+    });
+
+    it('request() maps a TimeoutError abort to 504 UPSTREAM_TIMEOUT', async () => {
+      fetchSpy.mockRejectedValue(
+        new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+      );
+
+      await expect(client.request('GET', '/api/v1/models')).rejects.toMatchObject({
+        statusCode: 504,
+        code: 'UPSTREAM_TIMEOUT',
+        details: { service: 'control-plane' },
+      });
+    });
+
+    it('request() rethrows ClientDisconnectedError untouched', async () => {
+      const reason = new ClientDisconnectedError();
+      fetchSpy.mockRejectedValue(reason);
+
+      await expect(client.request('GET', '/api/v1/models')).rejects.toBe(reason);
     });
   });
 });

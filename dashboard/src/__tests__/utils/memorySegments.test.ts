@@ -27,7 +27,7 @@ describe('colorTokenForModel — stability', () => {
   });
 });
 
-describe('colorHexForModel — nivo-compatible concrete colors', () => {
+describe('colorHexForModel — concrete SVG-fill colors', () => {
   it('is stable for the same modelName across repeated calls', () => {
     expect(colorHexForModel('llama-3-8b')).toBe(colorHexForModel('llama-3-8b'));
   });
@@ -45,7 +45,7 @@ describe('colorHexForModel — nivo-compatible concrete colors', () => {
     expect(tokenIndex).toBe(hexIndex);
   });
 
-  it('every hex value is a valid #RRGGBB literal (nivo requires a concrete color)', () => {
+  it('every hex value is a valid #RRGGBB literal (an SVG fill needs a concrete color)', () => {
     for (const hex of MODEL_PALETTE_HEX) {
       expect(hex).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }

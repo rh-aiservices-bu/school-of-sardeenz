@@ -6,9 +6,9 @@
  * legacy WorkerGpuSection component. That component (and the whole "reserved" concept) was
  * removed in the measured-only doctrine round — device memory now has exactly one number
  * (measured `memoryUsedBytes`), so there is nothing left to compute segments from. Only the
- * color utilities survive, extended with a concrete hex palette: nivo's ResponsiveBar renders to
- * SVG/canvas and does not resolve PatternFly `var(--pf-t--...)` custom properties, so it needs
- * literal hex colors rather than the CSS var tokens PF6 components consume directly.
+ * color utilities survive, extended with a concrete hex palette: chart segments render as SVG
+ * `fill`s, which do not resolve PatternFly `var(--pf-t--...)` custom properties, so the charts
+ * need literal hex colors rather than the CSS var tokens PF6 components consume directly.
  *
  * Two ways to pick a color:
  * - `colorHexForModel` / `colorTokenForModel`: a pure hash of the name. Stable forever, but two
@@ -52,7 +52,7 @@ export function colorTokenForModel(modelName: string): string {
   return MODEL_PALETTE[hashIndex(modelName, MODEL_PALETTE.length)];
 }
 
-// --- same palette, as concrete hex values (for SVG/canvas contexts like nivo) ---
+// --- same palette, as concrete hex values (for SVG fills: chart segments) ---
 export const MODEL_PALETTE_HEX: readonly string[] = [
   '#0066CC', // blue 200
   '#63993D', // green 200

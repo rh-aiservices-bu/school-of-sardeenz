@@ -1,7 +1,7 @@
 /**
  * Pure logic for ModelsPlacementPanel (#163 — v1 GpuMemoryPanel port).
  *
- * Kept separate from the component so it's testable without rendering PatternFly/nivo (the
+ * Kept separate from the component so it's testable without rendering PatternFly charts (the
  * project's established pure-logic-test convention — see MemoryVisualization.test.tsx's
  * predecessor and ModelList.test.ts).
  */
@@ -13,7 +13,20 @@ type WorkerModelInfo = ControlPlaneComponents['schemas']['WorkerModelInfo'];
 
 export const OTHER_COLOR_HEX = '#8B8D8F';
 export const FREE_COLOR_HEX = '#D2D2D2';
-export const SLEEPING_PATTERN_ID = 'sleeping-pattern';
+
+/**
+ * One segment of a stacked bar, chart-library agnostic (#255: the panel renders these with
+ * PatternFly charts / victory, one bar series per segment).
+ */
+export interface StackedBarSegment {
+  /** Segment identity: `${modelName}#${instanceId}`, `Other`, `Free`, or a KVCache key. */
+  key: string;
+  /** Measured bytes — the segment's stacked length. */
+  bytes: number;
+  color: string;
+  /** Sleeping model: drawn at reduced opacity (same treatment as the compact view's CSS bar). */
+  sleeping: boolean;
+}
 
 /**
  * KVCache mini-bar segment colors.
@@ -31,9 +44,8 @@ export const KVCACHE_COLORS: Record<'Prealloc' | 'Used' | 'Free', string> = {
 };
 
 export interface KvcacheBarData {
-  /** Single-row nivo dataset for the KVCache sub-bar (v1 buildKvcacheData port, #165). */
-  data: [{ id: 'KVCache'; Prealloc: number; Used: number; Free: number }];
-  keys: ['Prealloc', 'Used', 'Free'];
+  /** Prealloc → Used → Free, in render order (v1 buildKvcacheData port, #165). */
+  segments: StackedBarSegment[];
   totalBytes: number;
   usedBytes: number;
   preallocBytes: number;
@@ -41,7 +53,7 @@ export interface KvcacheBarData {
 }
 
 /**
- * Build the nivo dataset for one device's KVCache sub-bar (issue #165, v1 `buildKvcacheData`
+ * Build the stacked segments for one device's KVCache sub-bar (issue #165, v1 `buildKvcacheData`
  * port). Renders only when the device carries a kvcached pool report with capacity > 0 AND the
  * worker actually has models on it (a pool with nothing serving is not interesting — same
  * guard as v1). Returns null when the sub-bar should be omitted.
@@ -50,34 +62,22 @@ export function buildKvcacheData(device: DeviceInfo, hasModels: boolean): Kvcach
   const kvcache = device.kvCache;
   if (!kvcache || kvcache.totalBytes <= 0 || !hasModels) return null;
   return {
-    data: [
+    segments: [
       {
-        id: 'KVCache',
-        Prealloc: kvcache.preallocBytes,
-        Used: kvcache.usedBytes,
-        Free: kvcache.freeBytes,
+        key: 'Prealloc',
+        bytes: kvcache.preallocBytes,
+        color: KVCACHE_COLORS.Prealloc,
+        sleeping: false,
       },
+      { key: 'Used', bytes: kvcache.usedBytes, color: KVCACHE_COLORS.Used, sleeping: false },
+      { key: 'Free', bytes: kvcache.freeBytes, color: KVCACHE_COLORS.Free, sleeping: false },
     ],
-    keys: ['Prealloc', 'Used', 'Free'],
     totalBytes: kvcache.totalBytes,
     usedBytes: kvcache.usedBytes,
     preallocBytes: kvcache.preallocBytes,
     freeBytes: kvcache.freeBytes,
   };
 }
-
-/** nivo `defs`/`fill` pattern for sleeping model segments (diagonal hatching, v1 parity). */
-export const SLEEPING_PATTERN_DEFS = [
-  {
-    id: SLEEPING_PATTERN_ID,
-    type: 'patternLines' as const,
-    background: 'inherit',
-    color: 'rgba(0, 0, 0, 0.3)',
-    rotation: -45,
-    lineWidth: 3,
-    spacing: 8,
-  },
-];
 
 export interface AttributedModelBytes {
   /** Unique key for this attribution: `${modelName}#${instanceId}` when instanceId is known
@@ -141,11 +141,8 @@ export function attributeModelsToDevice(
 }
 
 export interface DeviceBarData {
-  /** Single-row nivo dataset — one object with one key per stacked segment. */
-  data: [Record<string, number | string>];
-  keys: string[];
-  colors: Record<string, string>;
-  fill: Array<{ match: { id: string }; id: string }>;
+  /** Stacked segments in render order: models (stable) → Other → Free. */
+  segments: StackedBarSegment[];
   /** Ordered attribution entries actually rendered (bytes > 0), for building the legend. */
   entries: AttributedModelBytes[];
   otherBytes: number;
@@ -153,7 +150,7 @@ export interface DeviceBarData {
 }
 
 /**
- * Build the nivo ResponsiveBar props for one device's stacked VRAM bar (v1 port).
+ * Build the stacked segments for one device's VRAM bar (v1 port).
  *
  * Segment order: attributed models (stable: by modelName, then instanceId) → Other (used bytes
  * not accounted for by any attributed model) → Free (total − used). All doctrine-measured: every
@@ -167,11 +164,6 @@ export function buildDeviceBarData(
    * assignment (`assignModelColors`) so co-displayed models never share a color. */
   colorFor: (modelName: string) => string = colorHexForModel,
 ): DeviceBarData {
-  const dataObj: Record<string, number | string> = { id: 'GPU' };
-  const keys: string[] = [];
-  const colors: Record<string, string> = {};
-  const fill: Array<{ match: { id: string }; id: string }> = [];
-
   const ordered = [...attributed]
     .filter((m) => m.bytes > 0)
     .sort(
@@ -180,28 +172,25 @@ export function buildDeviceBarData(
         (a.instanceId ?? '').localeCompare(b.instanceId ?? ''),
     );
 
-  for (const model of ordered) {
-    dataObj[model.key] = model.bytes;
-    keys.push(model.key);
-    colors[model.key] = colorFor(model.modelName);
-    if (model.sleeping) fill.push({ match: { id: model.key }, id: SLEEPING_PATTERN_ID });
-  }
+  const segments: StackedBarSegment[] = ordered.map((model) => ({
+    key: model.key,
+    bytes: model.bytes,
+    color: colorFor(model.modelName),
+    sleeping: model.sleeping,
+  }));
 
   const attributedTotal = ordered.reduce((sum, m) => sum + m.bytes, 0);
   const otherBytes = Math.max(0, device.memoryUsedBytes - attributedTotal);
   if (otherBytes > 0) {
-    dataObj['Other'] = otherBytes;
-    keys.push('Other');
-    colors['Other'] = OTHER_COLOR_HEX;
+    segments.push({ key: 'Other', bytes: otherBytes, color: OTHER_COLOR_HEX, sleeping: false });
   }
 
   const freeBytes = Math.max(0, device.memoryTotalBytes - device.memoryUsedBytes);
-  dataObj['Free'] = freeBytes;
-  keys.push('Free');
-  colors['Free'] = FREE_COLOR_HEX;
+  segments.push({ key: 'Free', bytes: freeBytes, color: FREE_COLOR_HEX, sleeping: false });
 
-  return { data: [dataObj], keys, colors, fill, entries: ordered, otherBytes, freeBytes };
+  return { segments, entries: ordered, otherBytes, freeBytes };
 }
+
 /**
  * One inline segment of the worker-level bar (compact view): a co-located model grouping, or
  * Other/Free rendered separately by the caller.

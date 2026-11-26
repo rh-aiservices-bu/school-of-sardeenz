@@ -3,9 +3,9 @@
  *
  * One case per React-consuming package family that the test config has to keep
  * on a single React copy (the dashboard-local 18.3.1): PatternFly core, icons,
- * table and charts (victory), nivo (+ @react-spring), react-markdown (the
- * chatbot's renderer, not yet imported by `src/`), react-router, react-i18next
- * and @tanstack/react-query, plus a real app component. The assertions are
+ * table and charts (victory), react-markdown (the chatbot's renderer, not yet
+ * imported by `src/`), react-router, react-i18next and @tanstack/react-query,
+ * plus a real app component. The assertions are
  * deliberately shallow — the guard is that the render does not throw a
  * cross-version error ("Objects are not valid as a React child", "Cannot read
  * properties of null (reading 'useX')").
@@ -23,7 +23,6 @@ import { Button } from '@patternfly/react-core';
 import { RhUiCheckCircleFillIcon } from '@patternfly/react-icons';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 import { Chart, ChartBar } from '@patternfly/react-charts/victory';
-import { Bar } from '@nivo/bar';
 import Markdown from 'react-markdown';
 import { ModelLifecycleState } from '@sardeenz/types';
 import { StateLabel } from '../components/StateLabel';
@@ -71,24 +70,6 @@ describe('render probes: PatternFly', () => {
           ]}
         />
       </Chart>,
-    );
-    expect(container.querySelector('svg')).not.toBeNull();
-  });
-});
-
-describe('render probes: nivo', () => {
-  it('renders a Bar with explicit dimensions (@nivo/bar + @react-spring)', () => {
-    const { container } = render(
-      <Bar
-        width={400}
-        height={300}
-        data={[
-          { label: 'a', value: 1 },
-          { label: 'b', value: 2 },
-        ]}
-        keys={['value']}
-        indexBy="label"
-      />,
     );
     expect(container.querySelector('svg')).not.toBeNull();
   });

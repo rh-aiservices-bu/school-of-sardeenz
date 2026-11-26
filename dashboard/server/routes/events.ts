@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ClusterEventType, RoutingMapUpdateType, type ModelLifecycleState } from '@sardeenz/types';
 import type { ControlPlaneComponents, ProxyControlPlaneComponents } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
+import { hijackedStreamClosers } from './hijacked-streams.js';
 
 type RoutingMapUpdate = ProxyControlPlaneComponents['schemas']['RoutingMapUpdate'];
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
@@ -57,6 +58,9 @@ export function toClusterEvent(update: RoutingMapUpdate): ClusterEvent {
 }
 
 export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  // Ended from the shared preClose hook; see routes/hijacked-streams.ts for why that is needed.
+  const activeStreams = hijackedStreamClosers(app);
+
   // Design note: each connected SSE client gets its own dedicated Redis subscriber.
   // This is the simplest approach and is correct at admin-dashboard scale (tens of
   // concurrent connections). A shared-subscriber fan-out pattern would be needed if
@@ -137,6 +141,7 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
       const cleanup = (): void => {
         if (cleanedUp) return;
         cleanedUp = true;
+        activeStreams.delete(cleanup);
         clearInterval(pingTimer);
         subscriber
           .unsubscribe(routingChannel, clusterChannel, notificationsChannel)
@@ -146,6 +151,7 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
         app.log.debug('SSE client disconnected — Redis subscriber cleaned up');
       };
 
+      activeStreams.add(cleanup);
       request.raw.on('close', cleanup);
       request.raw.on('error', cleanup);
 

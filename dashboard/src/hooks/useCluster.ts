@@ -2,11 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { api } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
-import { useEventStream } from './useEventStream';
+import { useEventStreamStatus } from './useEventStream';
 
 export function useClusterStatus() {
   const { reportFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   const query = useQuery({
     queryKey: ['cluster', 'status'],
     queryFn: ({ signal }) => api.cluster.getStatus(signal),
@@ -32,7 +32,7 @@ export function useClusterStatus() {
  */
 export function useClusterMemory(refetchIntervalOverride?: number | false) {
   const { reportFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   const defaultInterval = sseStatus === 'degraded' ? 2_000 : 10_000;
   const query = useQuery({
     queryKey: ['cluster', 'memory'],

@@ -1,6 +1,6 @@
 import { Alert } from '@patternfly/react-core';
 import { useDegraded } from '../contexts/DegradedContext';
-import { useEventStream } from '../hooks/useEventStream';
+import { useEventStreamStatus } from '../hooks/useEventStream';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
  */
 export function DegradedBanner() {
   const { isDegraded: isRedisFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   const { t } = useTranslation('common');
   const isSseDegraded = sseStatus === 'degraded';
 

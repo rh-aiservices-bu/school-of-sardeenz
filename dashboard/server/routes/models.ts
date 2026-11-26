@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ControlPlaneComponents } from '@sardeenz/types';
+import { composeUpstreamSignal } from '../clients/upstream-signal.js';
 import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
@@ -9,8 +10,13 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.deployModel(request.body);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.deployModel(request.body, upstream.signal);
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -19,16 +25,21 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const query = request.query as Record<string, string>;
-      const state = query['state'];
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
       try {
-        const { status, data } = await deps.controlPlane.listModels(state);
-        return reply.code(status).send(data);
-      } catch (err) {
-        if (!(err instanceof BffError)) throw err;
-        app.log.warn('Control plane unavailable for listModels, falling back to Redis');
-        const models = await deps.redis.listModels();
-        return reply.code(200).send({ models, source: 'redis-fallback' });
+        const query = request.query as Record<string, string>;
+        const state = query['state'];
+        try {
+          const { status, data } = await deps.controlPlane.listModels(state, upstream.signal);
+          return reply.code(status).send(data);
+        } catch (err) {
+          if (!(err instanceof BffError)) throw err;
+          app.log.warn('Control plane unavailable for listModels, falling back to Redis');
+          const models = await deps.redis.listModels();
+          return reply.code(200).send({ models, source: 'redis-fallback' });
+        }
+      } finally {
+        upstream.done();
       }
     },
   );
@@ -38,21 +49,26 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const { name } = request.params;
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
       try {
-        const { status, data } = await deps.controlPlane.getModel(name);
-        return reply.code(status).send(data);
-      } catch (err) {
-        if (!(err instanceof BffError)) throw err;
-        app.log.warn(
-          { modelName: name },
-          'Control plane unavailable for getModel, falling back to Redis',
-        );
-        const model = await deps.redis.getModel(name);
-        if (model === null) {
-          throw BffError.notFound(name);
+        const { name } = request.params;
+        try {
+          const { status, data } = await deps.controlPlane.getModel(name, upstream.signal);
+          return reply.code(status).send(data);
+        } catch (err) {
+          if (!(err instanceof BffError)) throw err;
+          app.log.warn(
+            { modelName: name },
+            'Control plane unavailable for getModel, falling back to Redis',
+          );
+          const model = await deps.redis.getModel(name);
+          if (model === null) {
+            throw BffError.notFound(name);
+          }
+          return reply.code(200).send({ ...model, source: 'redis-fallback' });
         }
-        return reply.code(200).send({ ...model, source: 'redis-fallback' });
+      } finally {
+        upstream.done();
       }
     },
   );
@@ -61,11 +77,18 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/startup-logs',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.request(
-        'GET',
-        `/api/v1/models/${encodeURIComponent(request.params.name)}/startup-logs`,
-      );
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.request(
+          'GET',
+          `/api/v1/models/${encodeURIComponent(request.params.name)}/startup-logs`,
+          undefined,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -74,9 +97,18 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const force = request.query.force === true || request.query.force === 'true';
-      const { status, data } = await deps.controlPlane.deleteModel(request.params.name, force);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const force = request.query.force === true || request.query.force === 'true';
+        const { status, data } = await deps.controlPlane.deleteModel(
+          request.params.name,
+          force,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -85,11 +117,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.updateModel(
-        request.params.name,
-        request.body,
-      );
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.updateModel(
+          request.params.name,
+          request.body,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -98,8 +136,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/sleep',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.sleepModel(request.params.name);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.sleepModel(
+          request.params.name,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -108,8 +154,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/wake',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.wakeModel(request.params.name);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.wakeModel(
+          request.params.name,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -118,9 +172,18 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/stop',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const force = request.query.force === true || request.query.force === 'true';
-      const { status, data } = await deps.controlPlane.stopModel(request.params.name, force);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const force = request.query.force === true || request.query.force === 'true';
+        const { status, data } = await deps.controlPlane.stopModel(
+          request.params.name,
+          force,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -129,8 +192,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/start',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.startModel(request.params.name);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.startModel(
+          request.params.name,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -139,8 +210,16 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/instances',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.createInstance(request.params.name);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.createInstance(
+          request.params.name,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -149,11 +228,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/instances/:instanceId',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.deleteInstance(
-        request.params.name,
-        request.params.instanceId,
-      );
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.deleteInstance(
+          request.params.name,
+          request.params.instanceId,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -162,11 +247,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/instances/:instanceId/sleep',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.sleepInstance(
-        request.params.name,
-        request.params.instanceId,
-      );
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.sleepInstance(
+          request.params.name,
+          request.params.instanceId,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -175,11 +266,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/instances/:instanceId/wake',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.wakeInstance(
-        request.params.name,
-        request.params.instanceId,
-      );
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.wakeInstance(
+          request.params.name,
+          request.params.instanceId,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -188,12 +285,18 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
     '/api/models/:name/instances/:instanceId/move',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.moveInstance(
-        request.params.name,
-        request.params.instanceId,
-        request.body as ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
-      );
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.moveInstance(
+          request.params.name,
+          request.params.instanceId,
+          request.body as ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 }

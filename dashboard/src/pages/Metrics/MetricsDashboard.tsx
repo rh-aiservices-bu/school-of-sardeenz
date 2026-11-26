@@ -51,7 +51,7 @@ import {
   type TimeRange,
   type CustomRange,
 } from '../../hooks/useMetrics';
-import { useEventStream } from '../../hooks/useEventStream';
+import { useEventStreamStatus } from '../../hooks/useEventStream';
 import { formatBytes } from '../../utils/format';
 import type { OperationDurationsResponse, OperationName } from '../../api/client';
 
@@ -551,7 +551,7 @@ export function MetricsDashboard() {
   const { t } = useTranslation('metrics');
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1h');
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
 
   // Custom range state
   const defaultEnd = new Date();

@@ -80,13 +80,13 @@ sardeenz/
 
 ## Project Status
 
-Phases 0–5 and milestones M2–M17 are complete and merged to `dev`, as are M19's Phase 5 track and
-its image/supply-chain half (#266 via #316, #267 via #318) plus the M19 docs/contracts items (#249
-via #319, #248 via #320, #268 via #273), and #322 (cutover barrier) is fixed via #325. M18 (CI &
-Test Infrastructure) is **implemented on `milestone/m18-ci-test-infrastructure`, awaiting merge** —
-its integration job is now blocking, after its first green run (32/32 tests) cleared the #322
-blocker. Next: merge M18, then M19's
-remaining #315 (cluster-only), the vLLM SIF republish/rollout, M20, and the Parking Lot backlog.
+Phases 0–5 and milestones M2–M18 are complete and merged to `dev` (M18 via #324, after #325
+fixed the #322 cutover barrier), as are M19's Phase 5 track and its image/supply-chain half (#266
+via #316, #267 via #318) plus the M19 docs/contracts items (#249 via #319, #248 via #320, #268 via
+#273). M20 (Dashboard Performance & Resilience) is **implemented on
+`milestone/m20-dashboard-perf-resilience`, awaiting merge** — both issues delivered and accepted.
+Next: merge M20, then M19's remaining #315 (cluster-only), the vLLM SIF republish/rollout, and the
+Parking Lot backlog.
 Details and history: [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 

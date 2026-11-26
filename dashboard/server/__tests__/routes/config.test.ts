@@ -23,6 +23,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     prometheusTenantNamespace: '',
     inferenceUrl: 'http://inference.test:8080',
     maxConcurrentInferenceRequestsPerUser: 4,
+    upstreamTimeoutMs: 15_000,
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: 'admin-secret-should-never-leak',
