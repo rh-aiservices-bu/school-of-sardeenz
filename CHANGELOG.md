@@ -206,6 +206,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The BFF ends its SSE streams on shutdown, so `app.close()` no longer waits for a browser tab
+  (#256 follow-up).** A hijacked SSE response is invisible to Fastify's request lifecycle: with
+  `/api/events` connected, `server.close()` waited for the browser to hang up, which a dashboard
+  tab never does — a rolling restart would sit on `SIGTERM` until the pod's grace period expired.
+  `routes/events.ts` now keeps each stream's cleanup in a per-instance set and runs it from a
+  `preClose` hook, unsubscribing the Redis subscriber and ending the response before the listener
+  stops (browsers reconnect to the next replica). This was also the deterministic e2e failure:
+  `dashboard/e2e` tears the fixture BFF down with `SIGTERM` and waits 2 s, so the BFF stayed alive
+  holding the connections the new disconnect-abort path leaves in undici's pool — a socket dialled
+  for a cancelled request that never carried a request, which a server cannot reap —
+  and `MockControlPlane.close()` then blocked on it until the 30 s test deadline
+  (`models.spec.ts:379`, `Tearing down "mockControlPlane" exceeded the test timeout`). Shutdown now
+  completes in ~15 ms with streams open; regression coverage in `server/__tests__/server.test.ts`.
 - **BFF buffered upstream calls now time out and abort on client disconnect, and the
   ErrorBoundary covers the auth pages and providers (#256).** Every buffered-JSON BFF upstream
   call — control plane, Prometheus, the inference health probe — is bounded by the new

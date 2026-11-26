@@ -183,3 +183,54 @@ describe('global error handler — client disconnect', () => {
     process.removeListener('unhandledRejection', onUnhandled);
   });
 });
+
+describe('graceful shutdown — open SSE streams', () => {
+  /**
+   * Regression for the #256 e2e teardown hang: a hijacked SSE response is invisible to Fastify's
+   * request lifecycle, so `server.close()` waited for the browser to hang up. Every e2e fixture
+   * starts a BFF pointing at a mock control plane and tears the BFF down with SIGTERM; a BFF that
+   * never exited kept its upstream sockets open, and the mock's `app.close()` then blocked on a
+   * connection it could not reap until the Playwright test deadline expired.
+   */
+  it('ends open streams so app.close() resolves without the client hanging up', async () => {
+    const deps = buildDeps();
+    const subscriber = {
+      on: vi.fn(),
+      subscribe: vi.fn(() => Promise.resolve()),
+      unsubscribe: vi.fn(() => Promise.resolve()),
+      disconnect: vi.fn(),
+    };
+    Object.assign(deps.redis, { createSubscriber: () => subscriber });
+
+    const app = await buildApp(deps);
+    spyLogs(app);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+
+    // A real HTTP client that keeps the stream open, like a dashboard tab: nothing in the test
+    // ever closes it, so only the server can release the connection.
+    const req = httpRequest({ host: '127.0.0.1', port, path: '/api/events', method: 'GET' });
+    const clientEvents: string[] = [];
+    req.on('response', (res) => {
+      clientEvents.push(`response:${String(res.statusCode)}`);
+      res.on('end', () => clientEvents.push('stream-end'));
+      res.resume();
+    });
+    req.on('error', (error: NodeJS.ErrnoException) => {
+      clientEvents.push(`error:${error.code ?? ''}`);
+    });
+    req.end();
+    await vi.waitFor(() => expect(clientEvents).toContain('response:200'));
+
+    const closed = await Promise.race([
+      app.close().then(() => 'closed' as const),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+    ]);
+
+    expect(closed).toBe('closed');
+    expect(subscriber.disconnect).toHaveBeenCalled();
+    await vi.waitFor(() => expect(clientEvents).toContain('stream-end'));
+    req.destroy();
+  });
+});

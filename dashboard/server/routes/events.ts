@@ -57,6 +57,21 @@ export function toClusterEvent(update: RoutingMapUpdate): ClusterEvent {
 }
 
 export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  /**
+   * Closers for the SSE streams that are open right now. A hijacked response is invisible to
+   * Fastify's request lifecycle, so `server.close()` waits for the browser to hang up — which
+   * for a dashboard tab can be never, leaving a rolling restart stuck until the grace period
+   * kills the pod. `preClose` runs before the listener stops, so ending each stream here lets
+   * `app.close()` finish; the browsers reconnect to whichever replica takes over.
+   */
+  const activeStreams = new Set<() => void>();
+
+  app.addHook('preClose', (done) => {
+    for (const end of [...activeStreams]) end();
+    activeStreams.clear();
+    done();
+  });
+
   // Design note: each connected SSE client gets its own dedicated Redis subscriber.
   // This is the simplest approach and is correct at admin-dashboard scale (tens of
   // concurrent connections). A shared-subscriber fan-out pattern would be needed if
@@ -137,6 +152,7 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
       const cleanup = (): void => {
         if (cleanedUp) return;
         cleanedUp = true;
+        activeStreams.delete(cleanup);
         clearInterval(pingTimer);
         subscriber
           .unsubscribe(routingChannel, clusterChannel, notificationsChannel)
@@ -146,6 +162,7 @@ export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void
         app.log.debug('SSE client disconnected — Redis subscriber cleaned up');
       };
 
+      activeStreams.add(cleanup);
       request.raw.on('close', cleanup);
       request.raw.on('error', cleanup);
 
