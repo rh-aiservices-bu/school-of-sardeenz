@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useEventStream } from './useEventStream';
+import { useEventStreamStatus } from './useEventStream';
 
 // The runner catalog merged with import state. Import progress arrives via the SSE stream
 // (CATALOG_* events invalidate ['catalog'] in useEventStream), so we poll gently otherwise.
 export function useCatalog() {
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   return useQuery({
     queryKey: ['catalog'],
     queryFn: ({ signal }) => api.catalog.list(signal),

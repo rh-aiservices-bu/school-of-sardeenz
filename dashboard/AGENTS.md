@@ -41,7 +41,7 @@ Redis fallback when the control plane is down).
   (`server/log-redaction.ts`) that writes `token=[REDACTED]`. Route a new secret-bearing
   parameter through it instead of logging `request.url` directly.
 - **Dual-React caveat (#148, recipe proven in #176):** the root lockfile still hoists React 19.3.1
-  beside the app's nested React 18.3.1 (a peer fill for the hoisted PatternFly/nivo/victory stack —
+  beside the app's nested React 18.3.1 (a peer fill for the hoisted PatternFly/victory stack —
   Redocly stopped depending on React when it went to v2, so it is no longer the cause).
   `vitest.config.ts` keeps the render tree on React 18.3.1 with three levers (`mainFields` ESM-first,
   exact-file ESM aliases, `server.deps.inline` per package family); a new React-consuming test

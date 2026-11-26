@@ -26,7 +26,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
 import { useClusterStatus } from '../../hooks/useCluster';
-import { useEventStream } from '../../hooks/useEventStream';
+import { useEventStreamEvents, useEventStreamStatus } from '../../hooks/useEventStream';
 import { StateLabel } from '../../components/StateLabel';
 import { ModelsPlacementPanel } from '../../components/ModelsPlacementPanel';
 import { InferenceUrlBanner } from '../../components/InferenceUrlBanner';
@@ -295,7 +295,7 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 'var(--pf-t--global--spacer--xl)' }}
         >
-          <div style={{ height: '200px', width: '200px'}}>
+          <div style={{ height: '200px', width: '200px' }}>
             <ChartDonut
               ariaDesc={t('overview.vramUsage.ariaDesc')}
               ariaTitle={t('overview.vramUsage.title')}
@@ -306,7 +306,6 @@ function MemoryDonutChart({ status }: { status: ClusterStatus }) {
               title={`${percent}%`}
               subTitle={primaryLabel.trim()}
               colorScale={colorScale}
-
             />
           </div>
           <div
@@ -577,7 +576,8 @@ function EventEntry({ event }: { event: ClusterEvent }) {
 
 function RecentEvents() {
   const { t } = useTranslation('cluster');
-  const { status: connectionStatus, events } = useEventStream();
+  const connectionStatus = useEventStreamStatus();
+  const events = useEventStreamEvents();
   const recent = events.slice(0, 20);
 
   const connectionColor: 'green' | 'orange' | 'red' =

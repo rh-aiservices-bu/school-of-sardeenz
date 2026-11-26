@@ -80,16 +80,6 @@ export default defineConfig({
         find: /^react-router$/,
         replacement: resolve(__dirname, '../node_modules/react-router/dist/development/index.mjs'),
       },
-      // Same reason: the exports map's "import" branch is a CJS interop shim
-      // (react-virtualized-auto-sizer.cjs.mjs), so nivo's responsive wrappers
-      // would bind React 19. Pin the package's real ESM build.
-      {
-        find: /^react-virtualized-auto-sizer$/,
-        replacement: resolve(
-          __dirname,
-          '../node_modules/react-virtualized-auto-sizer/dist/react-virtualized-auto-sizer.esm.js',
-        ),
-      },
       // react-i18next imports useSyncExternalStore from this package, whose
       // shim is CJS (`require('react')`) → React 19. React 18.3 exports the
       // same hook natively, so point the shim at React itself.
@@ -120,13 +110,10 @@ export default defineConfig({
           /node_modules\/react-i18next\//,
           /node_modules\/@tanstack\//,
           /node_modules\/react-router/,
-          /node_modules\/@nivo\//,
-          /node_modules\/@react-spring\//,
           /node_modules\/victory/,
           /node_modules\/react-markdown\//,
           /node_modules\/react-dropzone\//,
           /node_modules\/use-debounce\//,
-          /node_modules\/react-virtualized-auto-sizer\//,
           /node_modules\/posthog-js\//,
           /node_modules\/@monaco-editor\//,
         ],

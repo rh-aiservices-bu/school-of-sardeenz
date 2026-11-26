@@ -2,9 +2,10 @@
  * ModelsPlacementPanel — v1 GpuMemoryPanel port (#163, measured-only doctrine round).
  *
  * Replaces the old ledger-based PlacementBoard/WorkerGpuSection/MemoryVisualization trio.
- * Renders every worker's GPUs as a v1-style card: a nivo stacked bar (per-model colored
- * segments + Other + Free), a model chip row with colored dots and sleeping-moon icons, and a
- * GPU header showing device name/utilization/temperature when the worker reports them.
+ * Renders every worker's GPUs as a v1-style card: a stacked bar (per-model colored segments +
+ * Other + Free; PatternFly charts / victory — the app's single charting stack, #255), a model chip
+ * row with colored dots and sleeping-moon icons, and a GPU header showing device name/utilization/
+ * temperature when the worker reports them.
  *
  * Two views, switchable in the card header and persisted in localStorage:
  *  - "cards" (default): one card per worker placed side by side in a responsive grid. Since the
@@ -24,7 +25,7 @@
  *  - KVCache mini-bar: activated (#165) — renders a Prealloc/Used/Free sub-bar per GPU when the
  *    worker reports a kvcached pool for that device (DeviceInfo.kvCache), v1 parity.
  */
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardHeader,
@@ -57,7 +58,7 @@ import {
   ServerIcon,
   ThLargeIcon,
 } from '@patternfly/react-icons';
-import { ResponsiveBar, type BarTooltipProps } from '@nivo/bar';
+import { ChartBar, ChartStack, ChartTooltip } from '@patternfly/react-charts/victory';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ModelLifecycleState, WorkerStatus, type ControlPlaneComponents } from '@sardeenz/types';
@@ -65,7 +66,6 @@ import { useClusterMemory } from '../hooks/useCluster';
 import { useWorkers } from '../hooks/useWorkers';
 import { formatBytes } from '../utils/format';
 import { getWorkerStatusColor } from '../utils/state-colors';
-import { getNivoTooltipTheme } from '../chartTheme';
 import { useAuth } from '../contexts/AuthContext';
 import { useDeleteInstance, useSleepInstance, useWakeInstance } from '../hooks/useModels';
 import { MoveModelModal, type MoveSource } from './MoveModelModal';
@@ -75,8 +75,7 @@ import {
   buildKvcacheData,
   buildWorkerBarData,
   summarizeWorkerVram,
-  SLEEPING_PATTERN_DEFS,
-  KVCACHE_COLORS,
+  type StackedBarSegment,
   type WorkerBarSegment,
 } from '../utils/gpuMemoryPanel';
 import { assignModelColors, colorHexForModel, hexForColorIndex } from '../utils/memorySegments';
@@ -165,45 +164,93 @@ function WorkerInlineBar({
           }}
         />
       ))}
-      {otherBytes > 0 && (
-        <div style={{ width: pct(otherBytes), background: '#8B8D8F' }} />
-      )}
+      {otherBytes > 0 && <div style={{ width: pct(otherBytes), background: '#8B8D8F' }} />}
       {freeBytes > 0 && <div style={{ width: pct(freeBytes), background: '#D2D2D2' }} />}
     </div>
   );
 }
 
 /**
- * Custom nivo tooltip for both views' stacked bars (#206): the default renders the raw nivo
- * key — for the cards view that key is `modelName#instanceId`, leaking an internal instance
- * id — so both label and value are rebuilt here: served name (instance id stripped) plus the
- * measured byte figure. Applies to the model segments; Other/Free keep the default tooltip
- * (their keys are already plain "Other"/"Free" labels).
+ * Measures a bar container's pixel width. Victory lays out in user units and scales its svg
+ * `viewBox` to the container, so the chart has to be told the container's real width or the
+ * stacked segments letterbox inside it. jsdom has no ResizeObserver: the width stays 0 there and
+ * the chart is not rendered (the wrapper keeps its fixed height, so nothing shifts).
  */
-function ModelTooltip({
-  datum,
+function useMeasuredWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
+  const containerRef = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const next = Math.floor(entries[0].contentRect.width);
+      setWidth((current) => (current === next ? current : next));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return [containerRef, width];
+}
+
+/**
+ * One horizontal stacked bar rendered with PatternFly charts (victory), the app's single charting
+ * stack (#255). Each segment is one `ChartBar` series with a single datum, so victory stacks them
+ * along the value axis; the tooltip label keeps the #206 rule — served name (the `#instanceId`
+ * suffix stripped from the segment key) plus the measured byte figure.
+ */
+function StackedBar({
+  segments,
+  height,
+  cornerRadius,
+  onSegmentClick,
 }: {
-  datum: BarTooltipProps<Record<string, number | string>>;
+  segments: StackedBarSegment[];
+  height: number;
+  cornerRadius: number;
+  onSegmentClick?: (segment: StackedBarSegment) => void;
 }) {
-  const label = String(datum.id).split('#')[0];
+  const [containerRef, width] = useMeasuredWidth<HTMLDivElement>();
+  const total = segments.reduce((sum, segment) => sum + segment.bytes, 0);
+
   return (
-    <div
-      style={{
-        background: 'var(--pf-t--global--background--color--primary--default)',
-        color: 'var(--pf-t--global--text--color--default)',
-        border: '1px solid var(--pf-t--global--border--color--default)',
-        borderRadius: '4px',
-        padding: '8px 12px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
-      }}
-    >
-      <strong>{label}</strong>: {formatBytes(datum.value)}
+    <div ref={containerRef} style={{ height: `${height}px` }}>
+      {width > 0 && total > 0 && (
+        <ChartStack horizontal width={width} height={height} padding={0}>
+          {segments.map((segment) => (
+            <ChartBar
+              key={segment.key}
+              data={[{ x: 'segment', y: segment.bytes }]}
+              barWidth={height}
+              cornerRadius={cornerRadius}
+              style={{ data: { fill: segment.color, opacity: segment.sleeping ? 0.55 : 1 } }}
+              labels={() => `${segment.key.split('#')[0]}: ${formatBytes(segment.bytes)}`}
+              labelComponent={<ChartTooltip constrainToVisibleArea />}
+              {...(onSegmentClick && {
+                events: [
+                  {
+                    target: 'data',
+                    eventHandlers: {
+                      // Empty mutation list: the click is a navigation side effect, not chart state.
+                      onClick: () => {
+                        onSegmentClick(segment);
+                        return [];
+                      },
+                    },
+                  },
+                ],
+              })}
+            />
+          ))}
+        </ChartStack>
+      )}
     </div>
   );
 }
 
 /** Legend row for Other/Free — same look as a model row, no kebab. */
-function ModelLegendRow({ color, children }: { color: string; children: React.ReactNode }) {
+function ModelLegendRow({ color, children }: { color?: string; children: React.ReactNode }) {
   return (
     <div
       style={{
@@ -272,6 +319,12 @@ function GpuCard({
     for (const entry of bar.entries) map.set(entry.key, entry);
     return map;
   }, [bar.entries]);
+
+  /** Legend dot colors: the same color the segment renders with (undefined for a zero-byte row). */
+  const colorByKey = useMemo(
+    () => new Map(bar.segments.map((segment) => [segment.key, segment.color])),
+    [bar.segments],
+  );
 
   // Every model with an instance — ERROR/STARTING models carry no NVML bytes (measured-only
   // doctrine) but must still get action rows (Stop an ERROR instance).
@@ -359,35 +412,16 @@ function GpuCard({
         })}
       </div>
 
-      {/* Stacked VRAM bar */}
-      <div style={{ height: '24px' }}>
-        <ResponsiveBar
-          data={bar.data}
-          keys={bar.keys}
-          indexBy="id"
-          layout="horizontal"
-          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-          padding={0}
-          valueFormat={formatBytes}
-          tooltip={(datum) => <ModelTooltip datum={datum} />}
-          colors={(datum) => bar.colors[datum.id as string] || '#ccc'}
-          defs={SLEEPING_PATTERN_DEFS}
-          fill={bar.fill}
-          borderRadius={4}
-          enableLabel={false}
-          enableGridY={false}
-          enableGridX={false}
-          axisTop={null}
-          axisRight={null}
-          axisBottom={null}
-          axisLeft={null}
-          onClick={(datum) => {
-            const model = keyToModel.get(datum.id as string);
-            if (model) void navigate(`/models/${encodeURIComponent(model.modelName)}`);
-          }}
-        />
-      </div>
-
+      {/* Stacked VRAM bar — clicking a model segment opens that model's detail page (#163) */}
+      <StackedBar
+        segments={bar.segments}
+        height={24}
+        cornerRadius={4}
+        onSegmentClick={(segment) => {
+          const model = keyToModel.get(segment.key);
+          if (model) void navigate(`/models/${encodeURIComponent(model.modelName)}`);
+        }}
+      />
 
       {/*
         Per-model rows — the single list (one line per model, kebab for admins). Rendered for
@@ -422,7 +456,11 @@ function GpuCard({
               setActionError(null);
               const variables = { modelName: model.modelName, instanceId: model.instanceId };
               const mutation =
-                action === 'sleep' ? sleepInstance : action === 'wake' ? wakeInstance : stopInstance;
+                action === 'sleep'
+                  ? sleepInstance
+                  : action === 'wake'
+                    ? wakeInstance
+                    : stopInstance;
               mutation.mutate(variables, {
                 onError: (error) =>
                   setActionError(
@@ -454,7 +492,7 @@ function GpuCard({
                     opacity: model.sleeping ? 0.7 : 1,
                   }}
                 >
-                  <span style={{ color: bar.colors[model.key] }}>●</span>{' '}
+                  <span style={{ color: colorByKey.get(model.key) }}>●</span>{' '}
                   {model.displayName ?? model.modelName}
                   {model.sleeping && <SleepingMoon />} ({formatBytes(model.bytes)})
                 </span>
@@ -474,9 +512,7 @@ function GpuCard({
                         aria-label={t('overview.modelsPlacement.actions.ariaLabel', {
                           model: model.displayName ?? model.modelName,
                         })}
-                        onClick={() =>
-                          setOpenMenuKey(openMenuKey === model.key ? null : model.key)
-                        }
+                        onClick={() => setOpenMenuKey(openMenuKey === model.key ? null : model.key)}
                       >
                         <EllipsisVIcon />
                       </MenuToggle>
@@ -506,10 +542,9 @@ function GpuCard({
                             modelName: model.modelName,
                             instanceId: model.instanceId,
                             workerId: '',
-                            deviceIndices:
-                              models?.find(
-                                (candidate) => candidate.instanceId === model.instanceId,
-                              )?.deviceIndices ?? [device.deviceIndex],
+                            deviceIndices: models?.find(
+                              (candidate) => candidate.instanceId === model.instanceId,
+                            )?.deviceIndices ?? [device.deviceIndex],
                           });
                         }}
                       >
@@ -530,11 +565,11 @@ function GpuCard({
             );
           })}
           {bar.otherBytes > 0 && (
-            <ModelLegendRow color={bar.colors['Other']}>
+            <ModelLegendRow color={colorByKey.get('Other')}>
               {t('overview.modelsPlacement.legend.other')} ({formatBytes(bar.otherBytes)})
             </ModelLegendRow>
           )}
-          <ModelLegendRow color={bar.colors['Free']}>
+          <ModelLegendRow color={colorByKey.get('Free')}>
             {t('overview.modelsPlacement.legend.free', { value: formatBytes(bar.freeBytes) })}
           </ModelLegendRow>
         </div>
@@ -577,27 +612,7 @@ function GpuCard({
               total: formatBytes(kvcache.totalBytes),
             })}
           </div>
-          <div style={{ height: '12px' }}>
-            <ResponsiveBar
-              data={kvcache.data}
-              keys={kvcache.keys}
-              indexBy="id"
-              layout="horizontal"
-              margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-              padding={0}
-              valueFormat={formatBytes}
-              colors={(bar) => KVCACHE_COLORS[bar.id as keyof typeof KVCACHE_COLORS] || '#ccc'}
-              borderRadius={3}
-              enableLabel={false}
-              enableGridY={false}
-              enableGridX={false}
-              axisTop={null}
-              axisRight={null}
-              axisBottom={null}
-              axisLeft={null}
-              theme={getNivoTooltipTheme()}
-            />
-          </div>
+          <StackedBar segments={kvcache.segments} height={12} cornerRadius={3} />
         </div>
       )}
     </div>
@@ -821,8 +836,7 @@ function WorkerRow({
               <div>
                 {bar.segments.map((segment) => (
                   <div key={segment.key}>
-                    <span style={{ color: segment.color }}>●</span>{' '}
-                    {segment.displayName}
+                    <span style={{ color: segment.color }}>●</span> {segment.displayName}
                     {segment.sleeping && ' ☾'} — {formatBytes(segment.bytes)}
                   </div>
                 ))}

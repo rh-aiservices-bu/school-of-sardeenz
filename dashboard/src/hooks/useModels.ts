@@ -10,13 +10,13 @@ import {
   type ModelDeploymentResponse,
 } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
-import { useEventStream } from './useEventStream';
+import { useEventStreamStatus } from './useEventStream';
 
 type ModelListData = { models: ModelInfo[] };
 
 export function useModels(state?: string) {
   const { reportFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   const raw = useQuery({
     queryKey: ['models', { state }],
     queryFn: ({ signal }) => api.models.list(state, signal),
@@ -37,7 +37,7 @@ export function useModels(state?: string) {
 
 export function useModel(name: string) {
   const { reportFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
 
   const query = useQuery({
     queryKey: ['models', name],

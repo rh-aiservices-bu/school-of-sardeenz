@@ -67,8 +67,7 @@ levers, all in that file:
   (PatternFly's `dist/js`) and inlined CJS bypasses the alias table.
 - `resolve.alias` (array form; anchored `find` regexes for the new entries) pins React, react-dom,
   `@testing-library/react` (root-hoisted, so its ESM build) **and** the packages whose consumed entry is
-  CJS: `react-router-dom`, `react-router`, `react-router/dom`, `react-virtualized-auto-sizer`,
-  `use-sync-external-store`.
+  CJS: `react-router-dom`, `react-router`, `react-router/dom`, `use-sync-external-store`.
 - `test.server.deps.inline` lists every React-consuming package family, so their `import 'react'` goes
   through the alias table. Externalized modules are loaded natively by Node and bind the monorepo-root
   React 19 copy no matter what the aliases say.
@@ -78,14 +77,15 @@ its `react-styles` imports.
 
 Adding a React-consuming dependency: add its family to `test.server.deps.inline` and a case to
 `src/__tests__/render-probes.test.tsx`. A package that only ships CJS also needs an ESM-entry alias —
-`inline` cannot fix it (inlined CJS runs with a native `require`). Bumping PatternFly, nivo, TanStack or
+`inline` cannot fix it (inlined CJS runs with a native `require`). Bumping PatternFly, TanStack or
 router majors means re-checking the alias targets (`dist/index.mjs`, `dist/development/*.mjs`, `…esm.js`).
 
 Two jsdom limits that are not React problems:
 
-- nivo `Responsive*` wrappers (and `react-virtualized-auto-sizer` directly) never measure in jsdom
-  (`offsetWidth`/`offsetHeight` are 0), so the render prop is never called: give `Bar`/`Line` explicit
-  `width`/`height`, or mock the auto-sizer.
+- Nothing measures in jsdom (`offsetWidth`/`clientWidth` are 0 and `ResizeObserver` is absent), so a
+  component that sizes a chart from its container renders no chart there: give the chart explicit
+  `width`/`height` in the test, or assert on the surrounding UI instead (the placement panel's
+  measured-width stacked bars, `ModelsPlacementPanel.tsx`, are the example).
 - `@patternfly/react-charts` must be imported through its `/victory` subpath (as the app does): the bare
   specifier's `module` field points at a file that does not exist upstream.
 

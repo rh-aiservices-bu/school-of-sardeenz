@@ -1,7 +1,7 @@
 /**
  * Pure-logic tests for ModelsPlacementPanel's attribution/bar-data helpers (#163 — v1
  * GpuMemoryPanel port). Kept separate from the component per the project's established
- * convention of testing logic directly rather than rendering PatternFly/nivo.
+ * convention of testing logic directly rather than rendering PatternFly charts.
  */
 import { describe, it, expect } from 'vitest';
 import { ModelLifecycleState, type ControlPlaneComponents } from '@sardeenz/types';
@@ -11,7 +11,6 @@ import {
   buildKvcacheData,
   buildWorkerBarData,
   summarizeWorkerVram,
-  SLEEPING_PATTERN_ID,
   KVCACHE_COLORS,
 } from '../../utils/gpuMemoryPanel';
 import { MODEL_PALETTE_HEX } from '../../utils/memorySegments';
@@ -100,7 +99,7 @@ describe('buildDeviceBarData', () => {
     ]);
     const bar = buildDeviceBarData(device, attributed);
     expect(bar.otherBytes).toBe(3 * 1024 ** 3);
-    expect(bar.keys).toContain('Other');
+    expect(bar.segments.map((segment) => segment.key)).toContain('Other');
   });
 
   it('clamps Other to 0 when attributed models exceed the device used bytes (never negative)', () => {
@@ -110,7 +109,7 @@ describe('buildDeviceBarData', () => {
     ]);
     const bar = buildDeviceBarData(device, attributed);
     expect(bar.otherBytes).toBe(0);
-    expect(bar.keys).not.toContain('Other');
+    expect(bar.segments.map((segment) => segment.key)).not.toContain('Other');
   });
 
   it('computes Free as total minus used, clamped to 0', () => {
@@ -139,7 +138,7 @@ describe('buildDeviceBarData', () => {
     expect(bar.entries.map((e) => e.modelName)).toEqual(['real-model']);
   });
 
-  it('adds a sleeping-pattern fill entry for sleeping models only', () => {
+  it('marks the sleeping model segment and only that one', () => {
     const device = makeDevice();
     const attributed = attributeModelsToDevice(device, 1, [
       makeModel({
@@ -156,9 +155,10 @@ describe('buildDeviceBarData', () => {
       }),
     ]);
     const bar = buildDeviceBarData(device, attributed);
-    expect(bar.fill).toHaveLength(1);
-    expect(bar.fill[0].id).toBe(SLEEPING_PATTERN_ID);
-    expect(bar.fill[0].match.id).toBe('sleepy#i1');
+    const sleepingKeys = bar.segments
+      .filter((segment) => segment.sleeping)
+      .map((segment) => segment.key);
+    expect(sleepingKeys).toEqual(['sleepy#i1']);
   });
 
   it('orders entries by modelName then instanceId for stable rendering', () => {
@@ -171,14 +171,14 @@ describe('buildDeviceBarData', () => {
     expect(bar.entries.map((e) => e.modelName)).toEqual(['a-model', 'b-model']);
   });
 
-  it('every model gets a distinct color key mapped in bar.colors', () => {
+  it('every segment carries its color, models and Free included', () => {
     const device = makeDevice();
     const attributed = attributeModelsToDevice(device, 1, [
       makeModel({ modelName: 'model-a', memoryUsedBytes: 1024 }),
     ]);
     const bar = buildDeviceBarData(device, attributed);
-    expect(bar.colors['model-a']).toBeDefined();
-    expect(bar.colors['Free']).toBeDefined();
+    expect(bar.segments.find((segment) => segment.key === 'model-a')?.color).toBeDefined();
+    expect(bar.segments.find((segment) => segment.key === 'Free')?.color).toBeDefined();
   });
 });
 
@@ -265,7 +265,7 @@ describe('deduped route figures (CP scope rule, issue #278)', () => {
     const deviceBar = buildDeviceBarData(device, attributeModelsToDevice(device, 1, models));
     expect(deviceBar.entries[0].bytes).toBe(14 * 1024 ** 3);
     expect(deviceBar.otherBytes).toBe(0);
-    expect(deviceBar.keys).not.toContain('Other');
+    expect(deviceBar.segments.map((segment) => segment.key)).not.toContain('Other');
 
     const workerBar = buildWorkerBarData([device], models);
     expect(workerBar.segments[0].bytes).toBe(14 * 1024 ** 3);
@@ -281,18 +281,14 @@ describe('buildKvcacheData (issue #165)', () => {
     freeBytes: 6 * 1024 ** 3,
   };
 
-  it('builds the single-row Prealloc/Used/Free dataset from the device kvCache block', () => {
+  it('builds the Prealloc/Used/Free segments from the device kvCache block', () => {
     const bar = buildKvcacheData(makeDevice({ kvCache }), true);
     expect(bar).not.toBeNull();
-    expect(bar!.data).toEqual([
-      {
-        id: 'KVCache',
-        Prealloc: kvCache.preallocBytes,
-        Used: kvCache.usedBytes,
-        Free: kvCache.freeBytes,
-      },
+    expect(bar!.segments.map(({ key, bytes, color }) => ({ key, bytes, color }))).toEqual([
+      { key: 'Prealloc', bytes: kvCache.preallocBytes, color: KVCACHE_COLORS.Prealloc },
+      { key: 'Used', bytes: kvCache.usedBytes, color: KVCACHE_COLORS.Used },
+      { key: 'Free', bytes: kvCache.freeBytes, color: KVCACHE_COLORS.Free },
     ]);
-    expect(bar!.keys).toEqual(['Prealloc', 'Used', 'Free']);
     expect(bar!.totalBytes).toBe(kvCache.totalBytes);
   });
 

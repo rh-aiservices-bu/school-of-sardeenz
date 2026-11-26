@@ -4,7 +4,7 @@ import type { ControlPlaneComponents } from '@sardeenz/types';
 import { WorkerStatus } from '@sardeenz/types';
 import { api } from '../api/client';
 import { useDegraded } from '../contexts/DegradedContext';
-import { useEventStream } from './useEventStream';
+import { useEventStreamStatus } from './useEventStream';
 
 type WorkerInfo = ControlPlaneComponents['schemas']['WorkerInfo'];
 type WorkerRunnerCapability = ControlPlaneComponents['schemas']['WorkerRunnerCapability'];
@@ -110,7 +110,7 @@ export function reconcileDeviceType(current: string, options: SelectOption[]): s
 
 export function useWorkers() {
   const { reportFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   const raw = useQuery({
     queryKey: ['workers'],
     queryFn: ({ signal }) => api.workers.list(signal),
@@ -153,7 +153,7 @@ export function useRunnerTypes(): { options: SelectOption[]; isFallback: boolean
 
 export function useWorker(id: string) {
   const { reportFallback } = useDegraded();
-  const { status: sseStatus } = useEventStream();
+  const sseStatus = useEventStreamStatus();
   const query = useQuery({
     queryKey: ['workers', id],
     queryFn: ({ signal }) => api.workers.get(id, signal),

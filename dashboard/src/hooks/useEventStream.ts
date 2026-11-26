@@ -27,10 +27,15 @@ export interface EventStreamState {
   events: ClusterEvent[];
 }
 
-export const EventStreamContext = createContext<EventStreamState>({
-  status: 'reconnecting',
-  events: [],
-});
+/**
+ * Two contexts, not one (#255): `events` grows on every SSE message, so a single combined
+ * context value re-rendered every data hook and banner on every message even though only
+ * `RecentEvents` reads the array. `status` is a primitive that changes on connection
+ * transitions only, so status-only consumers stop re-rendering under live telemetry;
+ * `events` stays a separate surface consumed by `RecentEvents` alone.
+ */
+export const EventStreamStatusContext = createContext<ConnectionStatus>('reconnecting');
+export const EventStreamEventsContext = createContext<ClusterEvent[]>([]);
 
 /**
  * Internal hook that manages the SSE connection and query invalidation.
@@ -169,9 +174,17 @@ export function useEventStreamConnection(): EventStreamState {
 }
 
 /**
- * Consumer hook — reads event-stream state from the nearest
- * `EventStreamContext.Provider`.
+ * Consumer hook — the connection status only. Safe for the polling data hooks: its value is a
+ * primitive, so an SSE message (which only appends to `events`) does not re-render them.
  */
-export function useEventStream(): EventStreamState {
-  return useContext(EventStreamContext);
+export function useEventStreamStatus(): ConnectionStatus {
+  return useContext(EventStreamStatusContext);
+}
+
+/**
+ * Consumer hook — the recent-events ring buffer (`RecentEvents` is the only consumer; it
+ * re-renders per message by design).
+ */
+export function useEventStreamEvents(): ClusterEvent[] {
+  return useContext(EventStreamEventsContext);
 }

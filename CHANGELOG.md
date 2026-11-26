@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Dashboard render and bundle cost cut on three axes (#255).** The EventStream context is split
+  into a stable status context (a `ConnectionStatus` primitive) and a separate events context, so
+  the polling data hooks, the degraded banner and the metrics page no longer re-render on every SSE
+  message — only `RecentEvents` reads the appended array, and a render-count test pins the
+  isolation. The Metrics page and the Playground are route-level `React.lazy` chunks behind one
+  `Suspense` fallback (inside the existing `ErrorBoundary`), taking the `@patternfly/chatbot`
+  library plus its CSS and the metrics page code off the entry chunk (the chart core stays eager:
+  the ClusterOverview donut uses it). And the placement panel's two stacked VRAM
+  bars are re-rendered with PatternFly charts (`ChartStack`/`ChartBar`, the app's single charting
+  stack) instead of `@nivo/bar`, which is removed along with its `@react-spring`/d3 tree and the
+  now-dead direct `victory` dependency (PatternFly's `victory-*` optional peers come from the
+  lockfile); the sleeping-model hatch becomes the compact view's 55 % opacity. Built entry bundle:
+  1,634 kB → 1,158 kB (497 kB → 345 kB gzip) and CSS 1,572 kB → 1,344 kB (137 kB → 114 kB gzip).
 - **The control-plane integration suite is gated in CI (#251).** `.github/workflows/ci.yml` gains an
   `integration` job — `postgres:16` + `valkey:8` service containers, the same `triage` gate and
   pinned-action preamble as the other gates — running what `make test-integration` runs locally, so
