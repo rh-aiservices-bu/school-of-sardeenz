@@ -93,11 +93,15 @@ The BFF's SSE relay subscribes to two Redis pub/sub channels:
 
 The two-channel design keeps the proxy's hot path (`routing-updates`) free of events it doesn't consume. Each connected browser client gets its own dedicated Redis subscriber connection; the subscriber is created on SSE handshake and cleaned up when the client disconnects.
 
-A hijacked SSE response is invisible to Fastify's request lifecycle, so a graceful shutdown has to end the open streams itself: `routes/events.ts` keeps each stream's cleanup in a per-instance set and runs it from a `preClose` hook, which unsubscribes the Redis subscriber and ends the response before the listener stops. Without that step `app.close()` waits for the browser to hang up — indefinitely for an open dashboard tab, so a rolling restart would sit on `SIGTERM` until the pod's grace period expired. The browsers see the stream end and reconnect to whichever replica is serving.
-
 **Design note — per-client subscribers vs. shared fan-out:** This implementation uses one Redis subscriber per connected SSE client rather than a single shared subscriber that fans out to all clients. For an admin dashboard with tens of concurrent connections, the per-client model is simpler and entirely adequate — each subscriber is a lightweight pub/sub connection. A shared-subscriber architecture (one Redis connection, in-process fan-out to all SSE responses) would be needed if connection counts grew to hundreds or more, where the per-client approach would create excessive Redis connections. Refactoring to shared fan-out is straightforward if that threshold is ever reached.
 
 Model/endpoint events flow even during control plane restarts, since `RoutingMapService` publishes to Redis as part of its state transitions. Worker/memory events are published by the reconciliation loop and are therefore only emitted while a leader instance is running.
+
+### Streaming shutdown
+
+Three BFF routes take over the raw socket with `reply.hijack()`: the `/api/events` SSE relay above, the control-plane log tail (`/api/models/:name/logs` and `/api/models/:name/instances/:instanceId/startup-logs`, which pipes upstream `log`/`end` frames through unchanged) and the streaming chat proxy (`/api/inference/chat/completions`). A hijacked response is invisible to Fastify's request lifecycle — the handler awaits the client, not the other way round — so `server.close()` waits for the client to disconnect, indefinitely for an open dashboard tab. A rolling restart would sit on `SIGTERM` until the pod's grace period expired.
+
+`dashboard/server/routes/hijacked-streams.ts` keeps one closers set per Fastify instance. Each of the three routes registers its existing per-stream cleanup in it when the stream starts and removes it when the cleanup runs, so the set only ever holds live streams. A single `preClose` hook — which Fastify runs before the listener stops, while the sockets are still writable — runs every remaining closer: unsubscribe the Redis subscriber, destroy the upstream pipe, release the inference concurrency slot, end the response. Every closer runs inside its own `try`/`catch` (a throw is logged at `warn`) so one wedged stream cannot skip the rest and hang the close. Clients see the stream end and reconnect to whichever replica is serving.
 
 ### Metrics path
 
@@ -305,7 +309,7 @@ The BFF serves both the API and the frontend from a single port (4000). This sim
 
 ### Inference request lifecycle
 
-`POST /api/inference/chat/completions` takes a per-user slot before it begins an upstream request and holds it until the response body ends, including a non-streaming response. In `simple` and `oauth` modes the identity is the verified JWT `username`; in `none` mode all requests share `anonymous`. Excess requests receive `429 RATE_LIMITED` without contacting the inference proxy. Disconnects abort the upstream request and release the slot. The limiter is an in-memory, per-replica guard, so it protects each BFF process but does not create a cluster-wide cap.
+`POST /api/inference/chat/completions` takes a per-user slot before it begins an upstream request and holds it until the response body ends, including a non-streaming response. In `simple` and `oauth` modes the identity is the verified JWT `username`; in `none` mode all requests share `anonymous`. Excess requests receive `429 RATE_LIMITED` without contacting the inference proxy. Disconnects abort the upstream request and release the slot, and the shutdown hook ends the stream the same way (see [Streaming shutdown](#streaming-shutdown)). The limiter is an in-memory, per-replica guard, so it protects each BFF process but does not create a cluster-wide cap.
 
 ## Testing Strategy
 

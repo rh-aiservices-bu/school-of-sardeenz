@@ -206,19 +206,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **The BFF ends its SSE streams on shutdown, so `app.close()` no longer waits for a browser tab
-  (#256 follow-up).** A hijacked SSE response is invisible to Fastify's request lifecycle: with
-  `/api/events` connected, `server.close()` waited for the browser to hang up, which a dashboard
-  tab never does — a rolling restart would sit on `SIGTERM` until the pod's grace period expired.
-  `routes/events.ts` now keeps each stream's cleanup in a per-instance set and runs it from a
-  `preClose` hook, unsubscribing the Redis subscriber and ending the response before the listener
-  stops (browsers reconnect to the next replica). This was also the deterministic e2e failure:
-  `dashboard/e2e` tears the fixture BFF down with `SIGTERM` and waits 2 s, so the BFF stayed alive
-  holding the connections the new disconnect-abort path leaves in undici's pool — a socket dialled
-  for a cancelled request that never carried a request, which a server cannot reap —
-  and `MockControlPlane.close()` then blocked on it until the 30 s test deadline
+- **The BFF ends every hijacked stream on shutdown, so `app.close()` no longer waits for a client
+  that never hangs up (#256 follow-up).** The three routes that take over the raw socket —
+  `/api/events` (Redis-backed SSE relay), `/api/models/:name/logs` +
+  `/api/models/:name/instances/:instanceId/startup-logs` (control-plane log tail) and
+  `/api/inference/chat/completions` (streaming chat proxy) — are invisible to Fastify's request
+  lifecycle: `server.close()` waited for the client to disconnect, which an open dashboard tab never
+  does, so a rolling restart would sit on `SIGTERM` until the pod's grace period expired.
+  `dashboard/server/routes/hijacked-streams.ts` now exposes one per-instance closers set that each
+  of the three routes registers its existing cleanup in (and removes it again when the stream ends);
+  a single `preClose` hook runs them — unsubscribing the Redis subscriber, destroying the upstream
+  pipe, releasing the inference concurrency slot and ending the response — before the listener
+  stops, each closer in its own try/catch so one failure cannot skip the rest and hang the close.
+  Clients see the stream end and reconnect to whichever replica takes over. This was also the
+  deterministic e2e failure: `dashboard/e2e` tears the fixture BFF down with `SIGTERM` and waits 2 s,
+  so a BFF that never exited stayed alive holding the connection the new disconnect-abort path
+  leaves in undici's pool — a socket dialled for a cancelled request that never carried one, which a
+  server cannot reap — and `MockControlPlane.close()` then blocked on it until the 30 s test deadline
   (`models.spec.ts:379`, `Tearing down "mockControlPlane" exceeded the test timeout`). Shutdown now
-  completes in ~15 ms with streams open; regression coverage in `server/__tests__/server.test.ts`.
+  completes in ~15 ms per stream type; regression coverage in `server/__tests__/server.test.ts`.
 - **BFF buffered upstream calls now time out and abort on client disconnect, and the
   ErrorBoundary covers the auth pages and providers (#256).** Every buffered-JSON BFF upstream
   call — control plane, Prometheus, the inference health probe — is bounded by the new

@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
 import type { FastifyInstance } from 'fastify';
 import type { RouteDeps } from './deps.js';
+import { hijackedStreamClosers } from './hijacked-streams.js';
 
 /**
  * Streams legacy live model logs or durable instance startup logs to the browser.
@@ -20,6 +21,9 @@ import type { RouteDeps } from './deps.js';
  * route does.
  */
 export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  // Ended from the shared preClose hook; see routes/hijacked-streams.ts for why that is needed.
+  const activeStreams = hijackedStreamClosers(app);
+
   const registerStream = (
     path: string,
     controlPlanePath: (name: string, instanceId?: string) => string,
@@ -80,11 +84,14 @@ export function registerModelLogRoutes(app: FastifyInstance, deps: RouteDeps): v
         const cleanup = (): void => {
           if (cleanedUp) return;
           cleanedUp = true;
+          activeStreams.delete(cleanup);
           upstreamStream.destroy();
           if (!reply.raw.writableEnded) {
             reply.raw.end();
           }
         };
+
+        activeStreams.add(cleanup);
 
         // Pipe with `end: false` so we control when the reply ends via `cleanup`, keeping
         // the end-of-stream and error/close paths identical.

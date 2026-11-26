@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, type ClientRequest } from 'node:http';
+import { PassThrough, Readable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../server.js';
 import { ClientDisconnectedError } from '../clients/upstream-signal.js';
@@ -184,15 +185,73 @@ describe('global error handler — client disconnect', () => {
   });
 });
 
-describe('graceful shutdown — open SSE streams', () => {
+describe('graceful shutdown — hijacked streams', () => {
   /**
-   * Regression for the #256 e2e teardown hang: a hijacked SSE response is invisible to Fastify's
+   * Regression for the #256 e2e teardown hang: a hijacked response is invisible to Fastify's
    * request lifecycle, so `server.close()` waited for the browser to hang up. Every e2e fixture
    * starts a BFF pointing at a mock control plane and tears the BFF down with SIGTERM; a BFF that
    * never exited kept its upstream sockets open, and the mock's `app.close()` then blocked on a
    * connection it could not reap until the Playwright test deadline expired.
+   *
+   * The three hijacked routes — `/api/events`, the model-log tail and the streaming chat proxy —
+   * all register in the same closers set, so this covers the class rather than one route.
    */
-  it('ends open streams so app.close() resolves without the client hanging up', async () => {
+  interface HeldStream {
+    req: ClientRequest;
+    events: string[];
+  }
+
+  function openHeldStream(
+    port: number,
+    path: string,
+    options: { method?: string; body?: string } = {},
+  ): HeldStream {
+    const events: string[] = [];
+    const req = httpRequest({
+      host: '127.0.0.1',
+      port,
+      path,
+      method: options.method ?? 'GET',
+      ...(options.body ? { headers: { 'content-type': 'application/json' } } : {}),
+    });
+    req.on('response', (res) => {
+      events.push(`response:${String(res.statusCode)}`);
+      res.on('data', (chunk: Buffer) => events.push(`data:${String(chunk.length)}`));
+      res.on('end', () => events.push('stream-end'));
+    });
+    req.on('error', (error: NodeJS.ErrnoException) => {
+      events.push(`error:${error.code ?? ''}`);
+    });
+    if (options.body) req.write(options.body);
+    req.end();
+    return { req, events };
+  }
+
+  /** Upstream body that emits one frame and stays open, like a live log/chat backend. */
+  function heldUpstreamBody(frame: string): { response: Response; finish: () => void } {
+    const pass = new PassThrough();
+    pass.write(frame);
+    const response = new Response(Readable.toWeb(pass) as unknown as ReadableStream<Uint8Array>, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+    return { response, finish: () => pass.end() };
+  }
+
+  async function listen(app: FastifyInstance): Promise<number> {
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    return typeof address === 'object' && address ? address.port : 0;
+  }
+
+  async function closeBounded(app: FastifyInstance): Promise<'closed' | 'timeout'> {
+    return Promise.race([
+      app.close().then(() => 'closed' as const),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+    ]);
+  }
+
+  it('ends an open SSE stream so app.close() resolves without the client hanging up', async () => {
     const deps = buildDeps();
     const subscriber = {
       on: vi.fn(),
@@ -203,34 +262,75 @@ describe('graceful shutdown — open SSE streams', () => {
     Object.assign(deps.redis, { createSubscriber: () => subscriber });
 
     const app = await buildApp(deps);
-    spyLogs(app);
-    await app.listen({ port: 0, host: '127.0.0.1' });
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
+    const logs = spyLogs(app);
+    const port = await listen(app);
 
     // A real HTTP client that keeps the stream open, like a dashboard tab: nothing in the test
     // ever closes it, so only the server can release the connection.
-    const req = httpRequest({ host: '127.0.0.1', port, path: '/api/events', method: 'GET' });
-    const clientEvents: string[] = [];
-    req.on('response', (res) => {
-      clientEvents.push(`response:${String(res.statusCode)}`);
-      res.on('end', () => clientEvents.push('stream-end'));
-      res.resume();
-    });
-    req.on('error', (error: NodeJS.ErrnoException) => {
-      clientEvents.push(`error:${error.code ?? ''}`);
-    });
-    req.end();
-    await vi.waitFor(() => expect(clientEvents).toContain('response:200'));
+    const client = openHeldStream(port, '/api/events');
+    await vi.waitFor(() => expect(client.events).toContain('response:200'));
 
-    const closed = await Promise.race([
-      app.close().then(() => 'closed' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
-    ]);
+    // Still a live relay while serving: the Redis message the route subscribed to reaches the
+    // browser as an SSE frame.
+    const onMessage = subscriber.on.mock.calls.find((call) => call[0] === 'message')?.[1] as
+      ((channel: string, message: string) => void) | undefined;
+    expect(onMessage).toBeDefined();
+    onMessage?.(
+      'sardeenz:routing-updates',
+      JSON.stringify({
+        type: 'MODEL_ADDED',
+        modelName: 'llama-3',
+        state: 'ACTIVE',
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    await vi.waitFor(() => expect(client.events.some((e) => e.startsWith('data:'))).toBe(true));
 
-    expect(closed).toBe('closed');
+    expect(await closeBounded(app)).toBe('closed');
+    expect(subscriber.unsubscribe).toHaveBeenCalledWith(
+      'sardeenz:routing-updates',
+      'sardeenz:cluster-events',
+      'sardeenz:notifications',
+    );
     expect(subscriber.disconnect).toHaveBeenCalled();
-    await vi.waitFor(() => expect(clientEvents).toContain('stream-end'));
-    req.destroy();
+    await vi.waitFor(() => expect(client.events).toContain('stream-end'));
+    // No closer failed: the warn channel stays empty (one throwing closer must not block the rest).
+    expect(logs.warn.mock.calls).toEqual([]);
+    client.req.destroy();
+  });
+
+  it('ends an open model-log tail and an open chat stream, not just the SSE relay', async () => {
+    const deps = buildDeps();
+    const modelLog = heldUpstreamBody('log: warmup starting\n\n');
+    const chat = heldUpstreamBody('data: {"choices":[]}\n\n');
+    Object.assign(deps.controlPlane, {
+      proxyRequest: vi.fn(() => Promise.resolve(modelLog.response)),
+    });
+    Object.assign(deps.inference, { chatCompletions: vi.fn(() => Promise.resolve(chat.response)) });
+
+    const app = await buildApp(deps);
+    const logs = spyLogs(app);
+    const port = await listen(app);
+
+    const logClient = openHeldStream(port, '/api/models/llama-3/logs');
+    const chatClient = openHeldStream(port, '/api/inference/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'llama-3', messages: [], stream: true }),
+    });
+    await vi.waitFor(() => expect(logClient.events).toContain('response:200'));
+    await vi.waitFor(() => expect(chatClient.events).toContain('response:200'));
+    // Both are streaming while serving — the shutdown path is the only thing being changed.
+    await vi.waitFor(() => expect(logClient.events.some((e) => e.startsWith('data:'))).toBe(true));
+    await vi.waitFor(() => expect(chatClient.events.some((e) => e.startsWith('data:'))).toBe(true));
+
+    expect(await closeBounded(app)).toBe('closed');
+    await vi.waitFor(() => expect(logClient.events).toContain('stream-end'));
+    await vi.waitFor(() => expect(chatClient.events).toContain('stream-end'));
+    expect(logs.warn.mock.calls).toEqual([]);
+
+    modelLog.finish();
+    chat.finish();
+    logClient.req.destroy();
+    chatClient.req.destroy();
   });
 });

@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { JwtPayload } from '../plugins/auth.js';
 import { InferenceConcurrencyLimiter } from '../inference-concurrency-limiter.js';
 import type { RouteDeps } from './deps.js';
+import { hijackedStreamClosers } from './hijacked-streams.js';
 
 function inferenceUsername(
   request: FastifyRequest,
@@ -16,6 +17,9 @@ function inferenceUsername(
 
 /** Registers the BFF's authenticated, streaming OpenAI chat-completions proxy. */
 export function registerInferenceRoutes(app: FastifyInstance, deps: RouteDeps): void {
+  // Ended from the shared preClose hook; see routes/hijacked-streams.ts for why that is needed.
+  const activeStreams = hijackedStreamClosers(app);
+
   const limiter = new InferenceConcurrencyLimiter(
     deps.config.maxConcurrentInferenceRequestsPerUser,
   );
@@ -51,6 +55,7 @@ export function registerInferenceRoutes(app: FastifyInstance, deps: RouteDeps): 
       const cleanup = (): void => {
         if (cleanedUp) return;
         cleanedUp = true;
+        activeStreams.delete(cleanup);
         controller.abort();
         upstreamStream?.destroy();
         release();
@@ -107,6 +112,7 @@ export function registerInferenceRoutes(app: FastifyInstance, deps: RouteDeps): 
 
         reply.hijack();
         hijacked = true;
+        activeStreams.add(cleanup);
         reply.raw.writeHead(200, {
           'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
           'Cache-Control': 'no-cache',

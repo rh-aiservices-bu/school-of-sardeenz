@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ClusterEventType, RoutingMapUpdateType, type ModelLifecycleState } from '@sardeenz/types';
 import type { ControlPlaneComponents, ProxyControlPlaneComponents } from '@sardeenz/types';
 import type { RouteDeps } from './deps.js';
+import { hijackedStreamClosers } from './hijacked-streams.js';
 
 type RoutingMapUpdate = ProxyControlPlaneComponents['schemas']['RoutingMapUpdate'];
 type ClusterEvent = ControlPlaneComponents['schemas']['ClusterEvent'];
@@ -57,20 +58,8 @@ export function toClusterEvent(update: RoutingMapUpdate): ClusterEvent {
 }
 
 export function registerEventRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  /**
-   * Closers for the SSE streams that are open right now. A hijacked response is invisible to
-   * Fastify's request lifecycle, so `server.close()` waits for the browser to hang up — which
-   * for a dashboard tab can be never, leaving a rolling restart stuck until the grace period
-   * kills the pod. `preClose` runs before the listener stops, so ending each stream here lets
-   * `app.close()` finish; the browsers reconnect to whichever replica takes over.
-   */
-  const activeStreams = new Set<() => void>();
-
-  app.addHook('preClose', (done) => {
-    for (const end of [...activeStreams]) end();
-    activeStreams.clear();
-    done();
-  });
+  // Ended from the shared preClose hook; see routes/hijacked-streams.ts for why that is needed.
+  const activeStreams = hijackedStreamClosers(app);
 
   // Design note: each connected SSE client gets its own dedicated Redis subscriber.
   // This is the simplest approach and is correct at admin-dashboard scale (tens of
