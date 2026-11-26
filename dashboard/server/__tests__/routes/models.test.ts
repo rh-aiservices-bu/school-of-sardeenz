@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { request as httpRequest } from 'node:http';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerModelRoutes } from '../../routes/models.js';
 import { authPlugin } from '../../plugins/auth.js';
+import { ClientDisconnectedError } from '../../clients/upstream-signal.js';
 import { BffError } from '../../errors.js';
 import type { RouteDeps } from '../../routes/deps.js';
 import type { Config } from '../../config.js';
@@ -25,6 +27,7 @@ const mockConfig: Config = {
   prometheusTenantNamespace: '',
   inferenceUrl: 'http://inference.test',
   maxConcurrentInferenceRequestsPerUser: 4,
+  upstreamTimeoutMs: 15_000,
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -139,7 +142,7 @@ describe('GET /api/models', () => {
     await app.inject({ method: 'GET', url: '/api/models?state=ACTIVE' });
     await app.close();
 
-    expect(listModelsFn).toHaveBeenCalledWith('ACTIVE');
+    expect(listModelsFn).toHaveBeenCalledWith('ACTIVE', expect.any(AbortSignal));
   });
 
   it('falls back to Redis when control plane throws', async () => {
@@ -243,7 +246,7 @@ describe('DELETE /api/models/:name', () => {
     await app.close();
 
     expect(res.statusCode).toBe(202);
-    expect(deleteModel).toHaveBeenCalledWith('stalled/model', true);
+    expect(deleteModel).toHaveBeenCalledWith('stalled/model', true, expect.any(AbortSignal));
   });
 });
 
@@ -273,7 +276,7 @@ describe('PUT /api/models/:name', () => {
     await app.close();
 
     expect(res.statusCode).toBe(200);
-    expect(updateModel).toHaveBeenCalledWith('org/model', payload);
+    expect(updateModel).toHaveBeenCalledWith('org/model', payload, expect.any(AbortSignal));
   });
 });
 
@@ -293,7 +296,7 @@ describe('POST /api/models/:name/stop', () => {
     await app.close();
 
     expect(res.statusCode).toBe(202);
-    expect(stopModel).toHaveBeenCalledWith('org/model', true);
+    expect(stopModel).toHaveBeenCalledWith('org/model', true, expect.any(AbortSignal));
   });
 });
 
@@ -313,10 +316,176 @@ describe('POST /api/models/:name/instances/:instanceId/move', () => {
     });
     await app.close();
     expect(res.statusCode).toBe(202);
-    expect(moveInstanceFn).toHaveBeenCalledWith('org/model', 'inst/a', {
-      targetWorkerId: 'worker-2',
-      targetDeviceIndices: [1],
-    });
+    expect(moveInstanceFn).toHaveBeenCalledWith(
+      'org/model',
+      'inst/a',
+      {
+        targetWorkerId: 'worker-2',
+        targetDeviceIndices: [1],
+      },
+      expect.any(AbortSignal),
+    );
     expect(listRedisModelsFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('buffered upstream calls — timeout and client disconnect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** Real socket so the test can destroy the client connection (inject() cannot). */
+  async function listen(app: FastifyInstance): Promise<number> {
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    return typeof address === 'object' && address ? address.port : 0;
+  }
+
+  /** Mock control-plane call that hangs until the composed signal aborts, then rejects. */
+  function hangUntilAbort(capture: (signal: AbortSignal) => void, onAbort: () => void) {
+    return (_state: string | undefined, signal: AbortSignal) => {
+      capture(signal);
+      return new Promise<never>((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            onAbort();
+            reject(new ClientDisconnectedError());
+          },
+          { once: true },
+        );
+      });
+    };
+  }
+
+  it('client disconnect aborts the upstream control-plane call', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let resolveAbort: (() => void) | undefined;
+    const aborted = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+    listModelsFn.mockImplementation(
+      hangUntilAbort(
+        (signal) => {
+          capturedSignal = signal;
+        },
+        () => resolveAbort?.(),
+      ),
+    );
+
+    const app = await buildApp(buildDeps());
+    const port = await listen(app);
+    const req = httpRequest({ host: '127.0.0.1', port, path: '/api/models', method: 'GET' });
+    req.on('error', () => {
+      // Expected: the client socket is destroyed deliberately once the upstream call starts.
+    });
+    req.end();
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+    req.destroy();
+    await aborted;
+
+    listModelsFn.mockReset();
+    listModelsFn.mockResolvedValue({ status: 200, data: { models: [sampleModel] } });
+    const followUp = await app.inject({ method: 'GET', url: '/api/models' });
+    await app.close();
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(followUp.statusCode).toBe(200);
+  });
+
+  it('client disconnect does not produce a 500 for the next client', async () => {
+    let resolveAbort: (() => void) | undefined;
+    const aborted = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+    listModelsFn.mockResolvedValue({ status: 200, data: { models: [sampleModel] } });
+    listModelsFn.mockImplementationOnce(
+      hangUntilAbort(
+        () => {},
+        () => resolveAbort?.(),
+      ),
+    );
+
+    const app = await buildApp(buildDeps());
+    const port = await listen(app);
+    const req = httpRequest({ host: '127.0.0.1', port, path: '/api/models', method: 'GET' });
+    req.on('error', () => {
+      // Expected once the client socket is destroyed.
+    });
+    req.end();
+    await vi.waitFor(() => expect(listModelsFn).toHaveBeenCalledTimes(1));
+    req.destroy();
+    await aborted;
+
+    // The abandoned request's error path must not poison the server: the next client is served.
+    const followUp = await app.inject({ method: 'GET', url: '/api/models' });
+    await app.close();
+
+    expect(followUp.statusCode).toBe(200);
+    expect(followUp.json()).toMatchObject({ models: [{ modelName: 'llama-3' }] });
+  });
+
+  it('client disconnect after a POST body is consumed aborts the upstream control-plane call', async () => {
+    // POST bodies are the reason the disconnect half hangs off `reply.raw`: on a body-carrying
+    // request `request.raw` 'close' fires when the body finishes being consumed — at/just
+    // before this handler starts — so a request.raw-based wiring either aborts immediately or
+    // never sees the real disconnect. This case fails under that wiring; the GET cases cannot
+    // tell the two apart.
+    const deps = buildDeps();
+    let capturedSignal: AbortSignal | undefined;
+    deployModelFn.mockImplementation((_body: unknown, signal: AbortSignal) => {
+      capturedSignal = signal;
+      return new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new ClientDisconnectedError()), {
+          once: true,
+        });
+      });
+    });
+
+    const app = await buildApp(deps);
+    const port = await listen(app);
+    const payload = JSON.stringify({
+      modelName: 'llama-3',
+      runnerType: 'vllm',
+      requiredMemory: '10Gi',
+    });
+    const req = httpRequest({
+      host: '127.0.0.1',
+      port,
+      path: '/api/models',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+      },
+    });
+    req.on('error', () => {
+      // Expected once the client socket is destroyed.
+    });
+    req.end(payload);
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+
+    // The body-phase close must not be mistaken for a client disconnect.
+    expect(capturedSignal?.aborted).toBe(false);
+
+    req.destroy();
+    await vi.waitFor(() => expect(capturedSignal?.aborted).toBe(true), {
+      timeout: 2000,
+      interval: 10,
+    });
+    expect(deployModelFn).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('control-plane timeout falls back to Redis on the list route', async () => {
+    listModelsFn.mockRejectedValue(BffError.upstreamTimeout('control-plane'));
+    listRedisModelsFn.mockResolvedValue([sampleModel]);
+
+    const app = await buildApp(buildDeps());
+    const res = await app.inject({ method: 'GET', url: '/api/models' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ source: 'redis-fallback' });
   });
 });

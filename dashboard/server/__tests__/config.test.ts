@@ -21,6 +21,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     prometheusTenantNamespace: '',
     inferenceUrl: 'http://localhost:8080',
     maxConcurrentInferenceRequestsPerUser: 4,
+    upstreamTimeoutMs: 15_000,
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: '',
@@ -239,6 +240,7 @@ describe('loadConfig auth defaults', () => {
     'SARDEENZ_PUBLIC_URL',
     'SARDEENZ_INFERENCE_URL',
     'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
+    'SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS',
     'SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH',
     'SARDEENZ_PROMETHEUS_CA_PATH',
     'SARDEENZ_PROMETHEUS_TENANT_NAMESPACE',
@@ -345,6 +347,25 @@ describe('loadConfig auth defaults', () => {
       process.env['SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER'] = value;
       expect(() => loadConfig()).toThrow(
         'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER must be a positive safe integer.',
+      );
+    },
+  );
+
+  it('defaults the upstream timeout to 20000', () => {
+    expect(loadConfig().upstreamTimeoutMs).toBe(20_000);
+  });
+
+  it('reads a valid upstream timeout from the environment', () => {
+    process.env['SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS'] = '20000';
+    expect(loadConfig().upstreamTimeoutMs).toBe(20_000);
+  });
+
+  it.each(['0', '-1', '1.5', 'not-a-number', '', '9007199254740992'])(
+    'rejects an invalid upstream timeout of %j',
+    (value) => {
+      process.env['SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS'] = value;
+      expect(() => loadConfig()).toThrow(
+        'SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS must be a positive safe integer.',
       );
     },
   );

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { composeUpstreamSignal } from '../clients/upstream-signal.js';
 import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
@@ -42,31 +43,39 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/latency',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const start = q['start'] ?? defaultStart();
-      const end = q['end'] ?? defaultEnd();
-      const step = q['step'] ?? DEFAULT_STEP;
-      const [p50, p95, p99] = await Promise.all([
-        deps.prometheus.queryRange(
-          'histogram_quantile(0.50, sum by (le) (rate(sardeenz_proxy_request_duration_seconds_bucket[5m])))',
-          start,
-          end,
-          step,
-        ),
-        deps.prometheus.queryRange(
-          'histogram_quantile(0.95, sum by (le) (rate(sardeenz_proxy_request_duration_seconds_bucket[5m])))',
-          start,
-          end,
-          step,
-        ),
-        deps.prometheus.queryRange(
-          'histogram_quantile(0.99, sum by (le) (rate(sardeenz_proxy_request_duration_seconds_bucket[5m])))',
-          start,
-          end,
-          step,
-        ),
-      ]);
-      return reply.send({ p50, p95, p99 });
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const start = q['start'] ?? defaultStart();
+        const end = q['end'] ?? defaultEnd();
+        const step = q['step'] ?? DEFAULT_STEP;
+        const [p50, p95, p99] = await Promise.all([
+          deps.prometheus.queryRange(
+            'histogram_quantile(0.50, sum by (le) (rate(sardeenz_proxy_request_duration_seconds_bucket[5m])))',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+          deps.prometheus.queryRange(
+            'histogram_quantile(0.95, sum by (le) (rate(sardeenz_proxy_request_duration_seconds_bucket[5m])))',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+          deps.prometheus.queryRange(
+            'histogram_quantile(0.99, sum by (le) (rate(sardeenz_proxy_request_duration_seconds_bucket[5m])))',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+        ]);
+        return reply.send({ p50, p95, p99 });
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -75,14 +84,20 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/throughput',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const result = await deps.prometheus.queryRange(
-        'rate(sardeenz_proxy_requests_total[5m])',
-        q['start'] ?? defaultStart(),
-        q['end'] ?? defaultEnd(),
-        q['step'] ?? DEFAULT_STEP,
-      );
-      return reply.send(result);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const result = await deps.prometheus.queryRange(
+          'rate(sardeenz_proxy_requests_total[5m])',
+          q['start'] ?? defaultStart(),
+          q['end'] ?? defaultEnd(),
+          q['step'] ?? DEFAULT_STEP,
+          upstream.signal,
+        );
+        return reply.send(result);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -91,10 +106,17 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/memory',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (_request, reply) => {
-      const result = await deps.prometheus.queryInstant(
-        'sardeenz_control_plane_device_memory_bytes',
-      );
-      return reply.send(result);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const result = await deps.prometheus.queryInstant(
+          'sardeenz_control_plane_device_memory_bytes',
+          undefined,
+          upstream.signal,
+        );
+        return reply.send(result);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -103,15 +125,32 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/connections',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const start = q['start'] ?? defaultStart();
-      const end = q['end'] ?? defaultEnd();
-      const step = q['step'] ?? DEFAULT_STEP;
-      const [active, parked] = await Promise.all([
-        deps.prometheus.queryRange('sardeenz_proxy_active_connections', start, end, step),
-        deps.prometheus.queryRange('sardeenz_proxy_parked_connections', start, end, step),
-      ]);
-      return reply.send({ active, parked });
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const start = q['start'] ?? defaultStart();
+        const end = q['end'] ?? defaultEnd();
+        const step = q['step'] ?? DEFAULT_STEP;
+        const [active, parked] = await Promise.all([
+          deps.prometheus.queryRange(
+            'sardeenz_proxy_active_connections',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+          deps.prometheus.queryRange(
+            'sardeenz_proxy_parked_connections',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+        ]);
+        return reply.send({ active, parked });
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -120,25 +159,32 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/parking-duration',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const start = q['start'] ?? defaultStart();
-      const end = q['end'] ?? defaultEnd();
-      const step = q['step'] ?? DEFAULT_STEP;
-      const [p50, p95] = await Promise.all([
-        deps.prometheus.queryRange(
-          'histogram_quantile(0.50, sum by (le) (rate(sardeenz_proxy_parking_duration_seconds_bucket[5m])))',
-          start,
-          end,
-          step,
-        ),
-        deps.prometheus.queryRange(
-          'histogram_quantile(0.95, sum by (le) (rate(sardeenz_proxy_parking_duration_seconds_bucket[5m])))',
-          start,
-          end,
-          step,
-        ),
-      ]);
-      return reply.send({ p50, p95 });
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const start = q['start'] ?? defaultStart();
+        const end = q['end'] ?? defaultEnd();
+        const step = q['step'] ?? DEFAULT_STEP;
+        const [p50, p95] = await Promise.all([
+          deps.prometheus.queryRange(
+            'histogram_quantile(0.50, sum by (le) (rate(sardeenz_proxy_parking_duration_seconds_bucket[5m])))',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+          deps.prometheus.queryRange(
+            'histogram_quantile(0.95, sum by (le) (rate(sardeenz_proxy_parking_duration_seconds_bucket[5m])))',
+            start,
+            end,
+            step,
+            upstream.signal,
+          ),
+        ]);
+        return reply.send({ p50, p95 });
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -147,14 +193,20 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/wake-triggers',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const result = await deps.prometheus.queryRange(
-        'rate(sardeenz_control_plane_wake_triggers_total[5m])',
-        q['start'] ?? defaultStart(),
-        q['end'] ?? defaultEnd(),
-        q['step'] ?? DEFAULT_STEP,
-      );
-      return reply.send(result);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const result = await deps.prometheus.queryRange(
+          'rate(sardeenz_control_plane_wake_triggers_total[5m])',
+          q['start'] ?? defaultStart(),
+          q['end'] ?? defaultEnd(),
+          q['step'] ?? DEFAULT_STEP,
+          upstream.signal,
+        );
+        return reply.send(result);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -163,14 +215,20 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/state-transitions',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const result = await deps.prometheus.queryRange(
-        'rate(sardeenz_control_plane_state_transitions_total[5m])',
-        q['start'] ?? defaultStart(),
-        q['end'] ?? defaultEnd(),
-        q['step'] ?? DEFAULT_STEP,
-      );
-      return reply.send(result);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const result = await deps.prometheus.queryRange(
+          'rate(sardeenz_control_plane_state_transitions_total[5m])',
+          q['start'] ?? defaultStart(),
+          q['end'] ?? defaultEnd(),
+          q['step'] ?? DEFAULT_STEP,
+          upstream.signal,
+        );
+        return reply.send(result);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -179,14 +237,20 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/evictions',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const result = await deps.prometheus.queryRange(
-        'rate(sardeenz_control_plane_evictions_total[5m])',
-        q['start'] ?? defaultStart(),
-        q['end'] ?? defaultEnd(),
-        q['step'] ?? DEFAULT_STEP,
-      );
-      return reply.send(result);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const result = await deps.prometheus.queryRange(
+          'rate(sardeenz_control_plane_evictions_total[5m])',
+          q['start'] ?? defaultStart(),
+          q['end'] ?? defaultEnd(),
+          q['step'] ?? DEFAULT_STEP,
+          upstream.signal,
+        );
+        return reply.send(result);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -195,14 +259,20 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/memory-history',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const result = await deps.prometheus.queryRange(
-        'sardeenz_control_plane_device_memory_bytes',
-        q['start'] ?? defaultStart(),
-        q['end'] ?? defaultEnd(),
-        q['step'] ?? DEFAULT_STEP,
-      );
-      return reply.send(result);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const result = await deps.prometheus.queryRange(
+          'sardeenz_control_plane_device_memory_bytes',
+          q['start'] ?? defaultStart(),
+          q['end'] ?? defaultEnd(),
+          q['step'] ?? DEFAULT_STEP,
+          upstream.signal,
+        );
+        return reply.send(result);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -211,46 +281,53 @@ export function registerMetricsRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/metrics/operations',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (request, reply) => {
-      const q = request.query as Record<string, string>;
-      const startStr = q['start'] ?? defaultStart();
-      const endStr = q['end'] ?? defaultEnd();
-      const startMs = Date.parse(startStr);
-      const endMs = Date.parse(endStr);
-      if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
-        throw BffError.invalidRequest('start and end must be valid dates');
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const q = request.query as Record<string, string>;
+        const startStr = q['start'] ?? defaultStart();
+        const endStr = q['end'] ?? defaultEnd();
+        const startMs = Date.parse(startStr);
+        const endMs = Date.parse(endStr);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+          throw BffError.invalidRequest('start and end must be valid dates');
+        }
+        const windowSeconds = Math.max(
+          Math.round((endMs - startMs) / 1000),
+          MIN_OPERATIONS_WINDOW_SECONDS,
+        );
+        const window = `${windowSeconds.toString()}s`;
+
+        const results = await Promise.all(
+          OPERATIONS.map(async (operation) => {
+            const [sumResult, countResult] = await Promise.all([
+              deps.prometheus.queryInstant(
+                `sum(increase(sardeenz_control_plane_${operation}_duration_seconds_sum[${window}]))`,
+                endStr,
+                upstream.signal,
+              ),
+              deps.prometheus.queryInstant(
+                `sum(increase(sardeenz_control_plane_${operation}_duration_seconds_count[${window}]))`,
+                endStr,
+                upstream.signal,
+              ),
+            ]);
+            const sum = scalarFromInstant(sumResult);
+            // increase() extrapolates over the window, so the count can be fractional; the
+            // average uses the raw ratio while the reported count is a whole number of operations.
+            const rawCount = scalarFromInstant(countResult);
+            const operationDuration: OperationDuration = {
+              operation,
+              averageSeconds: rawCount > 0 ? sum / rawCount : null,
+              count: rawCount > 0 ? Math.max(1, Math.round(rawCount)) : 0,
+            };
+            return operationDuration;
+          }),
+        );
+
+        return reply.send({ operations: results });
+      } finally {
+        upstream.done();
       }
-      const windowSeconds = Math.max(
-        Math.round((endMs - startMs) / 1000),
-        MIN_OPERATIONS_WINDOW_SECONDS,
-      );
-      const window = `${windowSeconds.toString()}s`;
-
-      const results = await Promise.all(
-        OPERATIONS.map(async (operation) => {
-          const [sumResult, countResult] = await Promise.all([
-            deps.prometheus.queryInstant(
-              `sum(increase(sardeenz_control_plane_${operation}_duration_seconds_sum[${window}]))`,
-              endStr,
-            ),
-            deps.prometheus.queryInstant(
-              `sum(increase(sardeenz_control_plane_${operation}_duration_seconds_count[${window}]))`,
-              endStr,
-            ),
-          ]);
-          const sum = scalarFromInstant(sumResult);
-          // increase() extrapolates over the window, so the count can be fractional; the
-          // average uses the raw ratio while the reported count is a whole number of operations.
-          const rawCount = scalarFromInstant(countResult);
-          const operationDuration: OperationDuration = {
-            operation,
-            averageSeconds: rawCount > 0 ? sum / rawCount : null,
-            count: rawCount > 0 ? Math.max(1, Math.round(rawCount)) : 0,
-          };
-          return operationDuration;
-        }),
-      );
-
-      return reply.send({ operations: results });
     },
   );
 }

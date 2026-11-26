@@ -21,6 +21,7 @@ const mockConfig: Config = {
   prometheusTenantNamespace: '',
   inferenceUrl: 'http://inference.test',
   maxConcurrentInferenceRequestsPerUser: 4,
+  upstreamTimeoutMs: 15_000,
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -114,7 +115,11 @@ describe('GET /api/metrics/memory', () => {
 
     // The query must use the control-plane-prefixed name that the control plane actually exports.
     // The old bug used 'sardeenz_device_memory_bytes' which does not exist in the control plane.
-    expect(queryInstantFn).toHaveBeenCalledWith('sardeenz_control_plane_device_memory_bytes');
+    expect(queryInstantFn).toHaveBeenCalledWith(
+      'sardeenz_control_plane_device_memory_bytes',
+      undefined,
+      expect.any(AbortSignal),
+    );
     expect(queryInstantFn).not.toHaveBeenCalledWith('sardeenz_device_memory_bytes');
   });
 
@@ -708,12 +713,14 @@ describe('GET /api/metrics/operations', () => {
           `sum(increase(sardeenz_control_plane_${op}_duration_seconds_sum[3600s]))`,
         ),
         '2026-01-01T01:00:00Z',
+        expect.any(AbortSignal),
       );
       expect(queryInstantFn).toHaveBeenCalledWith(
         expect.stringContaining(
           `sum(increase(sardeenz_control_plane_${op}_duration_seconds_count[3600s]))`,
         ),
         '2026-01-01T01:00:00Z',
+        expect.any(AbortSignal),
       );
     }
   });
@@ -731,6 +738,7 @@ describe('GET /api/metrics/operations', () => {
     expect(queryInstantFn).toHaveBeenCalledWith(
       expect.stringContaining('[60s]'),
       expect.any(String),
+      expect.any(AbortSignal),
     );
   });
 

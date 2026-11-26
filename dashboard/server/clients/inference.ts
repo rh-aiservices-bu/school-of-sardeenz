@@ -9,9 +9,11 @@ import type { Config } from '../config.js';
  */
 export class InferenceClient {
   private readonly baseUrl: string;
+  private readonly upstreamTimeoutMs: number;
 
   constructor(config: Config) {
     this.baseUrl = config.inferenceUrl;
+    this.upstreamTimeoutMs = config.upstreamTimeoutMs;
   }
 
   /**
@@ -33,7 +35,9 @@ export class InferenceClient {
   // talks to (proxy/src/main.rs), so probe the inference-port /v1/models instead.
   async isHealthy(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/openai/v1/models`);
+      const res = await fetch(`${this.baseUrl}/openai/v1/models`, {
+        signal: AbortSignal.timeout(this.upstreamTimeoutMs),
+      });
       return res.ok;
     } catch {
       return false;

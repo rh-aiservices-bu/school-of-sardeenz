@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { composeUpstreamSignal } from '../clients/upstream-signal.js';
 import { BffError } from '../errors.js';
 import type { RouteDeps } from './deps.js';
 
@@ -8,8 +9,13 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/catalog',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (_request, reply) => {
-      const { status, data } = await deps.controlPlane.listCatalog();
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.listCatalog(upstream.signal);
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -19,8 +25,13 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/catalog/refresh',
     { preHandler: [app.authenticate, app.requireRole('admin-readonly')] },
     async (_request, reply) => {
-      const { status, data } = await deps.controlPlane.refreshCatalog();
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.refreshCatalog(upstream.signal);
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -29,9 +40,17 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/catalog/:id/import',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      if (!request.params.id) throw BffError.notFound('catalog entry');
-      const { status, data } = await deps.controlPlane.importRunner(request.params.id);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        if (!request.params.id) throw BffError.notFound('catalog entry');
+        const { status, data } = await deps.controlPlane.importRunner(
+          request.params.id,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 
@@ -40,8 +59,16 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     '/api/catalog/:id',
     { preHandler: [app.authenticate, app.requireRole('admin')] },
     async (request, reply) => {
-      const { status, data } = await deps.controlPlane.uninstallRunner(request.params.id);
-      return reply.code(status).send(data);
+      const upstream = composeUpstreamSignal(deps.config.upstreamTimeoutMs, reply);
+      try {
+        const { status, data } = await deps.controlPlane.uninstallRunner(
+          request.params.id,
+          upstream.signal,
+        );
+        return reply.code(status).send(data);
+      } finally {
+        upstream.done();
+      }
     },
   );
 }

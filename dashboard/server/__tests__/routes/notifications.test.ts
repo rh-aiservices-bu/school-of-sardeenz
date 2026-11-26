@@ -21,6 +21,7 @@ const mockConfig: Config = {
   prometheusTenantNamespace: '',
   inferenceUrl: 'http://inference.test',
   maxConcurrentInferenceRequestsPerUser: 4,
+  upstreamTimeoutMs: 15_000,
   authMode: 'none',
   adminUsername: 'admin',
   adminPassword: '',
@@ -145,7 +146,7 @@ describe('GET /api/notifications', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ notifications });
-    expect(listNotificationsFn).toHaveBeenCalledWith(undefined, undefined);
+    expect(listNotificationsFn).toHaveBeenCalledWith(undefined, undefined, expect.any(AbortSignal));
   });
 
   it('passes limit and offset query parameters to control plane', async () => {
@@ -155,7 +156,7 @@ describe('GET /api/notifications', () => {
     await app.inject({ method: 'GET', url: '/api/notifications?limit=10&offset=5' });
     await app.close();
 
-    expect(listNotificationsFn).toHaveBeenCalledWith(10, 5);
+    expect(listNotificationsFn).toHaveBeenCalledWith(10, 5, expect.any(AbortSignal));
   });
 });
 
@@ -175,7 +176,7 @@ describe('POST /api/notifications/:id/read', () => {
     await app.close();
 
     expect(res.statusCode).toBe(204);
-    expect(markNotificationReadFn).toHaveBeenCalledWith('test-id-123');
+    expect(markNotificationReadFn).toHaveBeenCalledWith('test-id-123', expect.any(AbortSignal));
   });
 });
 
@@ -209,7 +210,7 @@ describe('DELETE /api/notifications/:id', () => {
     await app.close();
 
     expect(res.statusCode).toBe(204);
-    expect(removeNotificationFn).toHaveBeenCalledWith('test-id-456');
+    expect(removeNotificationFn).toHaveBeenCalledWith('test-id-456', expect.any(AbortSignal));
   });
 });
 
@@ -347,7 +348,7 @@ describe('notification route role enforcement', () => {
     await app.close();
 
     expect(res.statusCode).toBe(204);
-    expect(removeNotificationFn).toHaveBeenCalledWith('n1');
+    expect(removeNotificationFn).toHaveBeenCalledWith('n1', expect.any(AbortSignal));
   });
 
   it('admin can DELETE /api/notifications', async () => {

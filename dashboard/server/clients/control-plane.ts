@@ -1,6 +1,6 @@
 import type { Config } from '../config.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
-import { BffError } from '../errors.js';
+import { BffError, rethrowUpstreamAbort } from '../errors.js';
 
 export interface ProxyResult {
   status: number;
@@ -10,13 +10,20 @@ export interface ProxyResult {
 export class ControlPlaneClient {
   private readonly baseUrl: string;
   private readonly token: string;
+  private readonly upstreamTimeoutMs: number;
 
   constructor(config: Config) {
     this.baseUrl = config.controlPlaneUrl;
     this.token = config.controlPlaneApiToken;
+    this.upstreamTimeoutMs = config.upstreamTimeoutMs;
   }
 
-  async proxyRequest(method: string, path: string, body?: unknown): Promise<Response> {
+  async proxyRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
     const init: RequestInit = { method };
     // Only send a JSON content-type when there is actually a body. Setting it on
@@ -31,14 +38,25 @@ export class ControlPlaneClient {
       headers['Authorization'] = `Bearer ${this.token}`;
       init.headers = headers;
     }
+    // No timeout here on purpose: the model-logs route streams through this method and must
+    // stay untimed. Buffered callers pass a composed signal from `request()`'s call sites.
+    if (signal) {
+      init.signal = signal;
+    }
     return fetch(url, init);
   }
 
-  async request(method: string, path: string, body?: unknown): Promise<ProxyResult> {
+  async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<ProxyResult> {
     let res: Response;
     try {
-      res = await this.proxyRequest(method, path, body);
+      res = await this.proxyRequest(method, path, body, signal);
     } catch (cause) {
+      rethrowUpstreamAbort(cause, 'control-plane');
       throw BffError.upstreamError('Control plane unreachable', {
         path,
         cause: cause instanceof Error ? cause.message : String(cause),
@@ -52,7 +70,10 @@ export class ControlPlaneClient {
     let data: unknown;
     try {
       data = await res.json();
-    } catch {
+    } catch (cause) {
+      // The composed signal covers the body read too: a timeout or client disconnect that
+      // lands mid-body must keep its timeout/502-vs-disconnect classification.
+      rethrowUpstreamAbort(cause, 'control-plane');
       throw BffError.upstreamError('Control plane returned non-JSON response', {
         path,
         status: res.status,
@@ -61,67 +82,113 @@ export class ControlPlaneClient {
     return { status: res.status, data };
   }
 
-  async listModels(state?: string): Promise<ProxyResult> {
+  async listModels(state?: string, signal?: AbortSignal): Promise<ProxyResult> {
     const path = state ? `/api/v1/models?state=${encodeURIComponent(state)}` : '/api/v1/models';
-    return this.request('GET', path);
+    return this.request('GET', path, undefined, signal);
   }
 
-  async getModel(name: string): Promise<ProxyResult> {
-    return this.request('GET', `/api/v1/models/${encodeURIComponent(name)}`);
+  async getModel(name: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('GET', `/api/v1/models/${encodeURIComponent(name)}`, undefined, signal);
   }
 
-  async deployModel(body: unknown): Promise<ProxyResult> {
-    return this.request('POST', '/api/v1/models', body);
+  async deployModel(body: unknown, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/models', body, signal);
   }
 
-  async updateModel(name: string, body: unknown): Promise<ProxyResult> {
-    return this.request('PUT', `/api/v1/models/${encodeURIComponent(name)}`, body);
+  async updateModel(name: string, body: unknown, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('PUT', `/api/v1/models/${encodeURIComponent(name)}`, body, signal);
   }
 
-  async deleteModel(name: string, force = false): Promise<ProxyResult> {
+  async deleteModel(name: string, force = false, signal?: AbortSignal): Promise<ProxyResult> {
     const query = force ? '?force=true' : '';
-    return this.request('DELETE', `/api/v1/models/${encodeURIComponent(name)}${query}`);
+    return this.request(
+      'DELETE',
+      `/api/v1/models/${encodeURIComponent(name)}${query}`,
+      undefined,
+      signal,
+    );
   }
 
-  async sleepModel(name: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/sleep`);
+  async sleepModel(name: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/sleep`,
+      undefined,
+      signal,
+    );
   }
 
-  async wakeModel(name: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/wake`);
+  async wakeModel(name: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/wake`,
+      undefined,
+      signal,
+    );
   }
 
-  async stopModel(name: string, force = false): Promise<ProxyResult> {
+  async stopModel(name: string, force = false, signal?: AbortSignal): Promise<ProxyResult> {
     const query = force ? '?force=true' : '';
-    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/stop${query}`);
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/stop${query}`,
+      undefined,
+      signal,
+    );
   }
 
-  async startModel(name: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/start`);
+  async startModel(name: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/start`,
+      undefined,
+      signal,
+    );
   }
 
-  async createInstance(name: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/models/${encodeURIComponent(name)}/instances`);
+  async createInstance(name: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/models/${encodeURIComponent(name)}/instances`,
+      undefined,
+      signal,
+    );
   }
 
-  async deleteInstance(name: string, instanceId: string): Promise<ProxyResult> {
+  async deleteInstance(
+    name: string,
+    instanceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProxyResult> {
     return this.request(
       'DELETE',
       `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}`,
+      undefined,
+      signal,
     );
   }
 
-  async sleepInstance(name: string, instanceId: string): Promise<ProxyResult> {
+  async sleepInstance(
+    name: string,
+    instanceId: string,
+    signal?: AbortSignal,
+  ): Promise<ProxyResult> {
     return this.request(
       'POST',
-      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/sleep`,
+      `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(
+        instanceId,
+      )}/sleep`,
+      undefined,
+      signal,
     );
   }
 
-  async wakeInstance(name: string, instanceId: string): Promise<ProxyResult> {
+  async wakeInstance(name: string, instanceId: string, signal?: AbortSignal): Promise<ProxyResult> {
     return this.request(
       'POST',
       `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/wake`,
+      undefined,
+      signal,
     );
   }
 
@@ -129,81 +196,106 @@ export class ControlPlaneClient {
     name: string,
     instanceId: string,
     body: ControlPlaneComponents['schemas']['MoveModelInstanceRequest'],
+    signal?: AbortSignal,
   ): Promise<ProxyResult> {
     return this.request(
       'POST',
       `/api/v1/models/${encodeURIComponent(name)}/instances/${encodeURIComponent(instanceId)}/move`,
       body,
+      signal,
     );
   }
 
-  async browseWeights(path?: string): Promise<ProxyResult> {
+  async browseWeights(path?: string, signal?: AbortSignal): Promise<ProxyResult> {
     const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-    return this.request('GET', `/api/v1/weights${qs}`);
+    return this.request('GET', `/api/v1/weights${qs}`, undefined, signal);
   }
 
-  async listWorkers(): Promise<ProxyResult> {
-    return this.request('GET', '/api/v1/workers');
+  async listWorkers(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/workers', undefined, signal);
   }
 
-  async getWorker(id: string): Promise<ProxyResult> {
-    return this.request('GET', `/api/v1/workers/${encodeURIComponent(id)}`);
+  async getWorker(id: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('GET', `/api/v1/workers/${encodeURIComponent(id)}`, undefined, signal);
   }
 
-  async getClusterStatus(): Promise<ProxyResult> {
-    return this.request('GET', '/api/v1/cluster/status');
+  async getClusterStatus(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/cluster/status', undefined, signal);
   }
 
-  async getClusterMemory(): Promise<ProxyResult> {
-    return this.request('GET', '/api/v1/cluster/memory');
+  async getClusterMemory(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/cluster/memory', undefined, signal);
   }
 
+  // Health probes are server-initiated (no browser client to disconnect), so they only need
+  // the timeout — a hung control plane must not stall /readyz for undici's ~300 s default.
   async isHealthy(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/healthz`);
+      const res = await fetch(`${this.baseUrl}/healthz`, {
+        signal: AbortSignal.timeout(this.upstreamTimeoutMs),
+      });
       return res.ok;
     } catch {
       return false;
     }
   }
 
-  async listCatalog(): Promise<ProxyResult> {
-    return this.request('GET', '/api/v1/catalog');
+  async listCatalog(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('GET', '/api/v1/catalog', undefined, signal);
   }
 
-  async refreshCatalog(): Promise<ProxyResult> {
-    return this.request('POST', '/api/v1/catalog/refresh');
+  async refreshCatalog(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/catalog/refresh', undefined, signal);
   }
 
-  async importRunner(id: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/catalog/${encodeURIComponent(id)}/import`);
+  async importRunner(id: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/catalog/${encodeURIComponent(id)}/import`,
+      undefined,
+      signal,
+    );
   }
 
-  async uninstallRunner(id: string): Promise<ProxyResult> {
-    return this.request('DELETE', `/api/v1/catalog/${encodeURIComponent(id)}`);
+  async uninstallRunner(id: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('DELETE', `/api/v1/catalog/${encodeURIComponent(id)}`, undefined, signal);
   }
 
-  async listNotifications(limit?: number, offset?: number): Promise<ProxyResult> {
+  async listNotifications(
+    limit?: number,
+    offset?: number,
+    signal?: AbortSignal,
+  ): Promise<ProxyResult> {
     const params = new URLSearchParams();
     if (limit !== undefined) params.set('limit', String(limit));
     if (offset !== undefined) params.set('offset', String(offset));
     const qs = params.toString();
-    return this.request('GET', `/api/v1/notifications${qs ? `?${qs}` : ''}`);
+    return this.request('GET', `/api/v1/notifications${qs ? `?${qs}` : ''}`, undefined, signal);
   }
 
-  async markNotificationRead(id: string): Promise<ProxyResult> {
-    return this.request('POST', `/api/v1/notifications/${encodeURIComponent(id)}/read`);
+  async markNotificationRead(id: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'POST',
+      `/api/v1/notifications/${encodeURIComponent(id)}/read`,
+      undefined,
+      signal,
+    );
   }
 
-  async markAllNotificationsRead(): Promise<ProxyResult> {
-    return this.request('POST', '/api/v1/notifications/read-all');
+  async markAllNotificationsRead(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('POST', '/api/v1/notifications/read-all', undefined, signal);
   }
 
-  async removeNotification(id: string): Promise<ProxyResult> {
-    return this.request('DELETE', `/api/v1/notifications/${encodeURIComponent(id)}`);
+  async removeNotification(id: string, signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request(
+      'DELETE',
+      `/api/v1/notifications/${encodeURIComponent(id)}`,
+      undefined,
+      signal,
+    );
   }
 
-  async clearAllNotifications(): Promise<ProxyResult> {
-    return this.request('DELETE', '/api/v1/notifications');
+  async clearAllNotifications(signal?: AbortSignal): Promise<ProxyResult> {
+    return this.request('DELETE', '/api/v1/notifications', undefined, signal);
   }
 }

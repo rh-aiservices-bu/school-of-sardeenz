@@ -8,7 +8,7 @@ import fastifyStatic from '@fastify/static';
 
 import type { Config } from './config.js';
 import type { RouteDeps } from './routes/deps.js';
-import { BffError } from './errors.js';
+import { BffError, isClientDisconnect } from './errors.js';
 import { authPlugin } from './plugins/auth.js';
 import { registerProbes } from './health/probes.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -48,9 +48,18 @@ export async function buildServer(deps: ServerDeps) {
     trustProxy: true,
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     if (error instanceof BffError) {
       return reply.code(error.statusCode).send(error.toResponse());
+    }
+
+    if (isClientDisconnect(error)) {
+      // A browser navigating away is routine, not a fault: nothing can reach that socket and
+      // a 500 write on it is pointless. Log at info and return without touching the reply —
+      // Fastify's error handler sends nothing when it gets undefined, so no write is attempted
+      // on the dead socket and no "reply already sent" warn path is entered.
+      request.log.info({ err: error }, 'Client disconnected before the upstream call completed');
+      return;
     }
 
     app.log.error({ err: error }, 'Unhandled error');

@@ -206,6 +206,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **BFF buffered upstream calls now time out and abort on client disconnect, and the
+  ErrorBoundary covers the auth pages and providers (#256).** Every buffered-JSON BFF upstream
+  call — control plane, Prometheus, the inference health probe — is bounded by the new
+  `SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS` (default `20000`, deliberately above the control plane's
+  own 15 s catalog-source fetch bound so a slow-but-valid catalog refresh is not aborted at the
+  BFF after the control plane already succeeded) and by the browser request's own
+  disconnection: `dashboard/server/clients/upstream-signal.ts` composes both with
+  `AbortSignal.any` (the disconnect half hangs off `reply.raw` 'close'/'error', because
+  `request.raw` 'close' fires when a POST body finishes being consumed), and every buffered
+  handler in `routes/models|cluster|workers|catalog|notifications|weights|metrics` threads the
+  signal through its client call. A timeout maps to the existing 504 `UPSTREAM_TIMEOUT` (and so
+  now triggers the read routes' Redis fallback instead of hanging for undici's ~300 s default),
+  a client disconnect rethrows without a 5xx, and genuine network faults keep their 502. The
+  inference/SSE streaming routes — including `model-logs`' `proxyRequest` passthrough — stay
+  untimed on purpose. The dashboard's `ErrorBoundary` also moves to
+  `src/components/ErrorBoundary.tsx` and gains a second, hoisted instance around the whole
+  `<Routes>` tree: a render exception in `/login`, `/oauth/callback`, `ProtectedRoute`, the
+  Degraded/EventStream/Notification/InferenceWorkspace providers or `AppLayout` now shows the
+  fallback instead of a blank screen, while the page-level boundary inside `AppLayout` is kept
+  for page-crash containment.
 - **Runner-contract conformance covers the conflict and crash paths, and both shims'
   `_health_poller` lifecycle is unit-tested (#252).** The shared suite grows from 8 to 13 named
   cases (25 tests): `/sleep` and `/memory-report` `409` while `STARTING`, vLLM's in-flight-request

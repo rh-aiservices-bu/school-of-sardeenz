@@ -25,6 +25,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     inferenceUrl: 'http://inference.test:8080',
     repoStatsUrl: 'https://api.github.com/repos/rh-aiservices-bu/school-of-sardeenz',
     maxConcurrentInferenceRequestsPerUser: 4,
+    upstreamTimeoutMs: 15_000,
     authMode: 'none',
     adminUsername: 'admin',
     adminPassword: 'admin-secret-should-never-leak',

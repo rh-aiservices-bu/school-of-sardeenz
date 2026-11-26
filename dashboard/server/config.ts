@@ -18,6 +18,15 @@ export interface Config {
   /** GitHub repo API URL for sidebar star/fork counts. Empty string disables the lookup. */
   readonly repoStatsUrl: string;
   readonly maxConcurrentInferenceRequestsPerUser: number;
+  /** Timeout (ms) for the BFF's buffered JSON upstream calls (control plane, Prometheus,
+   *  inference health probe). Streaming routes are exempt.
+   *
+   *  Invariant: this value must exceed the longest bounded upstream operation it drives — the
+   *  control plane's own catalog-source fetch bound (15 s, `FETCH_TIMEOUT_MS` in
+   *  `control-plane/src/services/catalog-service.ts`), which `POST /api/v1/catalog/refresh`
+   *  awaits before replying. A caller timeout equal to the operation it drives aborts every
+   *  slow-but-valid run at the boundary: the control plane finishes, the BFF has already 504'd. */
+  readonly upstreamTimeoutMs: number;
   readonly authMode: AuthMode;
   readonly adminUsername: string;
   readonly adminPassword: string;
@@ -86,6 +95,7 @@ export function loadConfig(): Config {
       'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
       4,
     ),
+    upstreamTimeoutMs: positiveSafeIntegerEnv('SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS', 20_000),
     authMode,
     adminUsername: optionalEnv('ADMIN_USERNAME', 'admin'),
     adminPassword: optionalEnv('ADMIN_PASSWORD', ''),
