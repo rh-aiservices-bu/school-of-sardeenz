@@ -46,12 +46,10 @@ runner SIFs. To serve predictive or Hugging Face models, follow
 
 ## Project Status
 
-Phases 0–5 and milestones M2–M17 are complete and merged to `dev`. M19 (Deployment, Release & Docs
-Hygiene) is nearly done — its Phase 5 track, the image/supply-chain hardening (#266), the ADR-016
-wording reconciliation (#267) and the docs/contracts items (#248, #249, #268) are merged, with #315
-(cluster-only) and one deploy-only image rollout proof outstanding. M18 (CI & test infrastructure) is
-implemented on `milestone/m18-ci-test-infrastructure` and awaiting merge (its CI integration job is
-staged advisory until #322 is fixed); M20 (dashboard performance) is open. Releases: `v0.2.0`
+Phases 0–5 and milestones M2–M18 and M20 are complete and merged to `dev`. M19 (Deployment, Release
+& Docs Hygiene) is nearly done — its Phase 5 track, the image/supply-chain hardening (#266), the
+ADR-016 wording reconciliation (#267) and the docs/contracts items (#248, #249, #268) are merged,
+with #315 (cluster-only) and one deploy-only image rollout proof outstanding. Releases: `v0.2.0`
 (2026-09-15) and 0.2.1 (2026-10-29, not yet tagged, recorded in [`CHANGELOG.md`](CHANGELOG.md)). See
 [`docs/project/status.md`](docs/project/status.md) for details and the [overall plan](docs/project/overall-plan.md) for the delivery phases.
 
