@@ -1,17 +1,89 @@
 {
-  "dur": 60,
-  "subs": [
-    {"id": "l01", "t0": 1.0, "t1": 5.4, "n": 0, "en": "One GPU. Room for three models. You need to serve six."},
-    {"id": "l02", "t0": 7.0, "t1": 9.6, "n": 1, "en": "Every request lands at the proxy."},
-    {"id": "l03", "t0": 10.5, "t1": 16.4, "n": 2, "en": "It reads the routing map. If the model is awake, the request goes straight through."},
-    {"id": "l04", "t0": 18.0, "t1": 20.2, "n": 2, "en": "But this model is asleep."},
-    {"id": "l05", "t0": 20.5, "t1": 26.0, "n": 3, "en": "The proxy doesn't refuse. It parks the connection and rings the control plane. Once."},
-    {"id": "l06", "t0": 27.5, "t1": 31.6, "n": 4, "en": "The control plane keeps the memory ledger. The tin is full."},
-    {"id": "l07", "t0": 32.0, "t1": 35.6, "n": 4, "en": "So it picks the model nobody has asked for the longest."},
-    {"id": "l08", "t0": 36.5, "t1": 44.0, "n": 5, "en": "It moves that one out to host RAM, and wakes the one that's wanted."},
-    {"id": "l09", "t0": 45.5, "t1": 47.8, "n": 2, "en": "The map updates. The gate lifts."},
-    {"id": "l10", "t0": 48.0, "t1": 51.4, "n": 0, "en": "All the client saw was a slow first token."},
-    {"id": "l11", "t0": 54.6, "t1": 57.2, "n": 0, "en": "To Kubernetes, nothing moved."},
-    {"id": "l12", "t0": 57.4, "t1": 59.9, "n": 0, "en": "Sardeenz: more models than memory."}
-  ]
+ "dur": 68,
+ "subs": [
+  {
+   "id": "l01",
+   "t0": 0.8,
+   "t1": 6.6,
+   "n": 0,
+   "en": "One GPU. 24 GB. Your model needs 22. The last 2 sit empty."
+  },
+  {
+   "id": "l02",
+   "t0": 7.4,
+   "t1": 13.4,
+   "n": 0,
+   "en": "Slicing can't help: slices come in fixed sizes, and none leaves a 2 GB corner."
+  },
+  {
+   "id": "l03",
+   "t0": 14.0,
+   "t1": 17.6,
+   "n": 0,
+   "en": "So the small model gets a GPU of its own."
+  },
+  {
+   "id": "l04",
+   "t0": 19.6,
+   "t1": 23.6,
+   "n": 0,
+   "en": "Sardeenz doesn't slice."
+  },
+  {
+   "id": "l05",
+   "t0": 24.2,
+   "t1": 30.6,
+   "n": 1,
+   "en": "It keeps a memory ledger and packs each GPU by size."
+  },
+  {
+   "id": "l06",
+   "t0": 31.2,
+   "t1": 38.2,
+   "n": 2,
+   "en": "Generative, predictive, embeddings: different engines, different sizes, same GPU."
+  },
+  {
+   "id": "l07",
+   "t0": 39.6,
+   "t1": 46.6,
+   "n": 3,
+   "en": "One proxy routes every request to the right model."
+  },
+  {
+   "id": "l08",
+   "t0": 47.4,
+   "t1": 51.2,
+   "n": 5,
+   "en": "More models than memory? The idle ones sleep in host RAM."
+  },
+  {
+   "id": "l09",
+   "t0": 51.6,
+   "t1": 57.6,
+   "n": 6,
+   "en": "A request for a sleeping model is parked while the least recently used one is swapped out."
+  },
+  {
+   "id": "l10",
+   "t0": 58.0,
+   "t1": 61.6,
+   "n": 4,
+   "en": "The client just sees a slow first token."
+  },
+  {
+   "id": "l11",
+   "t0": 63.0,
+   "t1": 65.4,
+   "n": 0,
+   "en": "To Kubernetes, nothing moved."
+  },
+  {
+   "id": "l12",
+   "t0": 65.8,
+   "t1": 67.9,
+   "n": 0,
+   "en": "Sardeenz: every gigabyte, working."
+  }
+ ]
 }
