@@ -393,3 +393,58 @@ describe.skipIf(!AVAILABLE)('Routing protocol tag protection (#309)', () => {
     expect(parsed.protocol).toBe('openai');
   });
 });
+
+describe.skipIf(!AVAILABLE)('additive-only tolerance (#331)', () => {
+  let harness: TestHarness;
+
+  beforeEach(async () => {
+    harness = createHarness();
+    await harness.setup();
+  });
+
+  afterEach(async () => {
+    await harness?.teardown();
+  });
+
+  it('getEntry returns a routing entry containing unknown extra fields', async () => {
+    const MODEL = 'future-field-entry-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+
+    // Raw value as a NEWER control plane would have written it.
+    const raw = JSON.stringify({
+      modelName: MODEL,
+      state: ModelState.ACTIVE,
+      protocol: Protocol.openai,
+      endpoints: [{ host: '10.0.0.40', port: 8040, weight: 1, healthy: true }],
+      updatedAt: new Date().toISOString(),
+      futureField: 'unknown-to-this-control-plane',
+    });
+    await harness.redis.hset(HASH, MODEL, raw);
+
+    const entry = await harness.routingMap.getEntry(MODEL);
+    expect(entry).not.toBeNull();
+    expect(entry?.modelName).toBe(MODEL);
+    expect(entry?.state).toBe(ModelState.ACTIVE);
+    expect(entry?.protocol).toBe(Protocol.openai);
+    expect(entry?.endpoints[0]?.host).toBe('10.0.0.40');
+    expect(entry?.endpoints[0]?.port).toBe(8040);
+  });
+
+  it('getInstance returns an instance-state blob containing unknown extra fields', async () => {
+    const MODEL = 'future-field-instance-model';
+    const INSTANCE_ID = 'inst-future-field';
+
+    await harness.lifecycle.createInstance(MODEL, INSTANCE_ID);
+    const key = redisKey(harness.keyPrefix, 'models', MODEL, INSTANCE_ID);
+    const written = await harness.redis.get(key);
+    expect(written).not.toBeNull();
+    const blob = JSON.parse(written as string) as Record<string, unknown>;
+    blob.futureField = 'unknown-to-this-control-plane';
+    await harness.redis.set(key, JSON.stringify(blob));
+
+    const instance = await harness.lifecycle.getInstance(MODEL, INSTANCE_ID);
+    expect(instance).not.toBeNull();
+    expect(instance?.instanceId).toBe(INSTANCE_ID);
+    expect(instance?.modelName).toBe(MODEL);
+  });
+});

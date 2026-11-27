@@ -21,6 +21,7 @@ mod test_parking_leak;
 mod test_parking_limits;
 mod test_parking_timeout;
 mod test_protocol_family_admission;
+mod test_schema_tolerance;
 mod test_sleeping_model;
 mod test_streaming;
 mod test_thundering_herd;

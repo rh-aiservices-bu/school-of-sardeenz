@@ -133,6 +133,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missing `docs/development/agent-profile.md` (required by the milestone skills) was created
   from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
   (`reports/`, `plans/`, `worktrees/`, `profiles`).
+- **Redis-transported schemas are now governed by a written additive-only rule (#331).** The
+  JSON blobs that cross the proxy↔control-plane seam through Redis (routing map, routing
+  pub/sub payloads, instance state, worker registration/detail, cluster memory, proxy
+  protocols) may only gain optional fields — no renames, removals or type changes — and new
+  enum values additionally require every reader to tolerate them (`Protocol`/`ModelState` stay
+  closed on the proxy). The rule lives in `docs/development/contracts.md` — naming which
+  payloads are mirrored from a spec and which two are code-defined only (instance state, worker
+  detail) — with a condensed form in `packages/contracts/AGENTS.md` (whose stale pointer to a
+  nonexistent `contract-reviewer` agent now names the real reviewer/boundary-reviewer seats), is
+  enforced by the reviewer and boundary-reviewer checklists, and is pinned by tests in both
+  directions: proxy unit + ungated integration tests prove an entry with unknown extra fields
+  deserialises and routes while an unknown enum value stays a counted whole-entry parse failure
+  with carry-forward, and a control-plane integration test proves the reverse direction (it reads
+  blobs carrying unknown extra fields). `deployment/README.md` documents the supported upgrade
+  order — control plane first, with the enum-value exception as a coordinated proxy-first
+  release that has to finish before a model using the new value is imported. No schema version
+  field is added; that is deferred to the first change the rule cannot express.
 
 ### Added
 

@@ -288,6 +288,32 @@ with one replica: the replacement pod starts alongside the old one (the default 
 up to one pod), must pass its readiness probe, and only then is the old pod removed — a
 readiness-gated handover with no planned outage, subject to the image pull succeeding.
 
+### Upgrade order: control plane before proxy
+
+The Redis-transported schemas the control plane writes and the proxy reads are additive-only
+(`docs/development/contracts.md`, § Redis-Transported Schemas), which fixes the supported order
+for a mixed-version window:
+
+1. Roll `sardeenz-control-plane` first (`strategy: Recreate`, single replica — the old pod must
+   exit before the new one starts), and wait for readiness.
+2. Then roll `sardeenz-proxy`.
+
+Rationale: the still-running old proxies ignore any new optional field the new control plane
+writes, and the proxy's parse-failure carry-forward bounds the blast radius of an unparseable
+entry to that model's last-known-good route (`proxy/src/state/redis_sync.rs` — counted in
+`sardeenz_proxy_routing_parse_errors_total`, never a crash).
+
+**Exception — enum values are not additive.** `Protocol` and `ModelState` are closed on the
+proxy; an old proxy fails the whole entry parse on an unknown value. The proxy release that can
+parse a new enum value must roll **before** the control plane starts writing it — a coordinated
+release, not a rolling-upgrade-safe addition. Wait for that proxy rollout to complete before
+importing or deploying a model that uses the new value: a proxy rollout is the readiness-gated
+RollingUpdate described above, so old and new replicas overlap until the last old pod is gone,
+and the new proxy advertises its protocol set at `{prefix}:proxy:protocols` as soon as it
+connects (`proxy/src/state/redis_sync.rs:72-79`). The catalog-import guard reads that key
+(`control-plane/src/routes/catalog.ts:53-56`), so one new proxy is enough to clear the guard
+while an old replica is still serving — and that replica drops the new model's routing entry.
+
 ### Prerequisites and failure modes
 
 **`worker-base:latest` must exist and be signed.** The per-merge worker job builds
