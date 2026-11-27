@@ -43,7 +43,9 @@ formats, model directory layout, and `model-settings.json` examples.
   plane, loads it once at startup (restart the worker after changing it), and logs a warning for
   every advertised runner type it cannot resolve.
   The worker's fetch follows no redirects and refuses a response over 1 MiB, so point it at the
-  catalog's final URL (the official raw URL does not redirect).
+  catalog's final URL (the official raw URL does not redirect). The control plane's fetch enforces
+  the same 1 MiB cap (it still follows redirects), surfacing an over-cap response as the
+  `CATALOG_FETCH_FAILED` 502.
 - The **control plane** loads the catalog, cross-references the module store, and serves a merged
   view (which entries are imported, whether an update is available, and any module-store SIFs not
   in the catalog). Manual **Refresh** bypasses HTTP and intermediary caches so a mutable catalog URL

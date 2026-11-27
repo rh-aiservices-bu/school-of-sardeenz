@@ -167,6 +167,18 @@ export class ControlPlaneError extends Error {
     );
   }
 
+  /**
+   * The remote catalog body is capped at 1 MiB (matching the worker loader from #289): a response
+   * past the cap is a failed fetch, so the API keeps the existing `CATALOG_FETCH_FAILED` code.
+   */
+  static catalogTooLarge(): ControlPlaneError {
+    return new ControlPlaneError(
+      502,
+      'CATALOG_FETCH_FAILED',
+      'Failed to fetch catalog: catalog response exceeds the 1048576-byte limit',
+    );
+  }
+
   static moduleInUse(id: string): ControlPlaneError {
     return new ControlPlaneError(
       409,

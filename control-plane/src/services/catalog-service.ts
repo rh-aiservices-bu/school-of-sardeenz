@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import { Protocol, type ControlPlaneComponents } from '@sardeenz/types';
 
+import { ControlPlaneError } from '../errors.js';
+
 export type CatalogEntry = ControlPlaneComponents['schemas']['CatalogEntry'];
 
 export interface CatalogInvalidEntry {
@@ -34,6 +36,10 @@ const FETCH_TIMEOUT_MS = 15_000;
 // `GET /api/v1/catalog` response and dashboard alert. The catalog is remote input, so cap the
 // echo: a hostile/huge scalar must not be amplified into the log and the API.
 const ECHO_LIMIT = 64;
+// Mirror of the worker's cap (runners/dev-worker/src/runner-catalog.ts): the catalog is remote
+// input, so the origin must not decide how much memory the leader allocates. The fetch timeout
+// bounds the socket, not the body.
+const MAX_CATALOG_BYTES = 1024 * 1024;
 
 function echoCatalogValue(value: unknown): string {
   let text: string;
@@ -138,14 +144,42 @@ export class CatalogService {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (!res.ok) {
+        // The error path must not hand the origin an unbounded read either: drain the body through
+        // the same cap (its text is not used) before reporting the status failure.
+        await this.readBodyWithLimit(res).catch(() => '');
         throw new Error(`Catalog fetch failed: ${res.status} ${res.statusText}`);
       }
-      return res.text();
+      return this.readBodyWithLimit(res);
     }
     // Local file path (dev) or file:// URL.
     const path = this.source.startsWith('file://') ? new URL(this.source).pathname : this.source;
     const readFileImpl = this.deps.readFile ?? ((p: string) => readFile(p, 'utf8'));
     return readFileImpl(path);
+  }
+
+  // Streams the body, refusing anything past MAX_CATALOG_BYTES (see the constant).
+  private async readBodyWithLimit(res: Response): Promise<string> {
+    // A declared length over the cap is refused before reading a byte; a chunked response declares
+    // none, so the streamed counter below is the real bound.
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_CATALOG_BYTES) {
+      throw ControlPlaneError.catalogTooLarge();
+    }
+    if (!res.body) return '';
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_CATALOG_BYTES) {
+        await reader.cancel();
+        throw ControlPlaneError.catalogTooLarge();
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks).toString('utf8');
   }
 
   // Parse + validate. Invalid entries are excluded from `entries` (logged, and surfaced in

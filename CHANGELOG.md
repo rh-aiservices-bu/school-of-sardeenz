@@ -652,6 +652,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reasons unrelated to the change under review. TypeScript and Vitest cannot see `logs/` by
   construction (reference-scoped `tsc --build`, workspace-project Vitest), so only the two globbing
   tools needed the ignore; `docs/development/setup.md` records why.
+- **control-plane:** the remote-catalog fetch streams the response body and refuses anything
+  over 1 MiB (matching the worker loader from #289), on the success and error paths, so a
+  hostile or broken catalog origin can no longer decide how much memory the leader allocates;
+  the over-cap failure surfaces as the existing `CATALOG_FETCH_FAILED` 502.
 
 ### Security
 

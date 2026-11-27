@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ModelLifecycleState, CatalogItemState } from '@sardeenz/types';
 import { registerCatalogRoutes } from '../catalog.js';
 import type { RouteDeps } from '../deps.js';
+import { ControlPlaneError } from '../../errors.js';
 import type { CatalogEntry, CatalogSnapshot } from '../../services/catalog-service.js';
 import type { ImportedModuleProvenance } from '../../services/module-store.js';
 
@@ -57,6 +58,8 @@ interface Overrides {
   proxyProtocols?: string[] | null;
   /** Override the catalog entries the snapshot resolves to (default: [ENTRY]). */
   entries?: CatalogEntry[];
+  /** Make catalogService.load/refresh reject with this error (fetch-failure mapping). */
+  loadError?: Error;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -84,8 +87,12 @@ function buildApp(over: Overrides = {}): {
   const deps = {
     config: {} as RouteDeps['config'],
     catalogService: {
-      load: vi.fn(() => Promise.resolve(snapshot)),
-      refresh: vi.fn(() => Promise.resolve(snapshot)),
+      load: vi.fn(() =>
+        over.loadError ? Promise.reject(over.loadError) : Promise.resolve(snapshot),
+      ),
+      refresh: vi.fn(() =>
+        over.loadError ? Promise.reject(over.loadError) : Promise.resolve(snapshot),
+      ),
     },
     moduleStore,
     lifecycle: { getAllInstances: vi.fn(() => Promise.resolve(over.activeStates ?? [])) },
@@ -146,6 +153,17 @@ describe('catalog routes', () => {
     expect(item.updateAvailable).toBe(false);
     expect('updateReason' in item).toBe(false);
     expect(item.importedShimSource).toBe(SHIM);
+  });
+
+  it('GET /catalog passes an over-cap catalog error through as 502 CATALOG_FETCH_FAILED', async () => {
+    const { app: a } = buildApp({ loadError: ControlPlaneError.catalogTooLarge() });
+    const res = await a.inject({ method: 'GET', url: '/api/v1/catalog' });
+    expect(res.statusCode).toBe(502);
+    const body = res.json<{ error: string; code: string }>();
+    expect(body.code).toBe('CATALOG_FETCH_FAILED');
+    expect(body.error).toMatch(/1048576-byte limit/);
+    // Passed through unchanged: the prefix appears once, not doubled by the route's wrapper.
+    expect(body.error.match(/Failed to fetch catalog:/g)).toHaveLength(1);
   });
 
   it('POST /catalog/:id/import returns 202 with IMPORTING status', async () => {
