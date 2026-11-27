@@ -1,6 +1,7 @@
 import type { Config } from '../config.js';
 import type { ControlPlaneComponents } from '@sardeenz/types';
 import { BffError, rethrowUpstreamAbort } from '../errors.js';
+import { getActor, getActorRoles, getRequestId } from '../request-context.js';
 
 export interface ProxyResult {
   status: number;
@@ -37,6 +38,26 @@ export class ControlPlaneClient {
       const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
       headers['Authorization'] = `Bearer ${this.token}`;
       init.headers = headers;
+    }
+    // Forward the identity the BFF verified so the control plane can attribute the action
+    // (#335), and the request id for BFF↔control-plane correlation. Only non-GET requests: read
+    // paths (including the SSE log stream) are untouched. The two headers are independent — with
+    // `AUTH_MODE=none`, or on any unauthenticated path, there is no actor but correlation must
+    // still work — so `x-request-id` is sent whenever the context has one; the control plane then
+    // records `actor: "service"`.
+    if (method !== 'GET') {
+      const actor = getActor();
+      const requestId = getRequestId();
+      if (actor !== undefined || requestId !== undefined) {
+        const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+        if (actor !== undefined) {
+          headers['X-Sardeenz-Actor'] = actor;
+          const roles = getActorRoles();
+          if (roles) headers['X-Sardeenz-Actor-Roles'] = roles.join(',');
+        }
+        if (requestId) headers['x-request-id'] = requestId;
+        init.headers = headers;
+      }
     }
     // No timeout here on purpose: the model-logs route streams through this method and must
     // stay untimed. Buffered callers pass a composed signal from `request()`'s call sites.

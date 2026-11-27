@@ -85,6 +85,82 @@ in-cluster).
 Store them in Kubernetes Secrets, not in manifests
 ([ADR-013](../architecture/adrs/adr-013-secrets-management.md)).
 
+## Audit Log
+
+Every mutating control-plane request emits **exactly one** structured JSON log line — including
+requests that fail — so an operator can answer _who_ deployed, deleted, moved, stopped, slept or
+woke a model, imported or removed a runner, or changed notification state. Read paths (`GET`) and
+non-`/api/v1` routes are never logged. There is no audit table, endpoint or dashboard view: the log
+line _is_ the audit trail.
+
+The line carries a stable field set; `audit: true` is the routing field and the `msg` is `audit`:
+
+```jsonc
+{
+  "level": 30,
+  "time": "2026-11-27T09:41:02.113Z",
+  "audit": true,
+  "requestId": "0f3c…", // request.id: the forwarded x-request-id, else generated
+  "actor": "alice", // asserted identity; "service" when none was asserted
+  "actorRoles": ["admin"], // asserted; omitted when absent or empty
+  "action": "deleteModel", // stable action name, not a raw path
+  "target": { "modelName": "llama-3" },
+  "params": { "force": true }, // per-action allowlist; {} when nothing applies
+  "outcome": { "status": 202 },
+  "msg": "audit",
+}
+```
+
+A failure adds `outcome.reason` (omitted on success) — the conflict `details.reason` when the error
+carries one, else the error code:
+
+```jsonc
+{
+  "audit": true,
+  "requestId": "9b71…",
+  "actor": "service",
+  "action": "sleepModel",
+  "target": { "modelName": "llama-3" },
+  "params": {},
+  "outcome": { "status": 409, "reason": "delete-in-progress" },
+  "msg": "audit",
+}
+```
+
+`actor` is the dashboard's logged-in user, forwarded by the BFF in the optional
+`X-Sardeenz-Actor` (and `X-Sardeenz-Actor-Roles`) header after JWT verification. The control plane
+honours that header **only** on a request that authenticated with `SARDEENZ_API_TOKEN`. Because the
+BFF, proxy and workers share that one token
+([ADR-022](../architecture/adrs/adr-022-fail-closed-service-tokens.md)), **any token holder can
+assert any actor**: the line records the _asserted_ actor, so treat it as attribution for
+investigation, never as an authorization input. With no `SARDEENZ_API_TOKEN` configured the header
+is never read, so a spoofed value on an unauthenticated request cannot appear in the log.
+
+`actor: "service"` means "no trusted user was asserted": direct API clients using the token, and
+the proxy's model-wake trigger (which has no user behind it). A token holder may assert that
+literal, and an authenticated user may be named `service`, so the value alone does not prove
+automation — use `actorRoles`, `action` and `target` to tell those cases apart.
+
+### Collecting and retaining the lines
+
+- Select on `audit=true` in the cluster logging stack (Loki `| json | audit = true`, Elasticsearch
+  `audit: true`, …) and route those lines to their own index/stream.
+- Ship the control plane's stdout through the platform's logging pipeline; the line is emitted on
+  the root logger, so it is unaffected by per-request debug settings and cannot be disabled by a
+  `SARDEENZ_*` flag.
+- Set the retention period independently of ordinary debug logs — audit lines are small and
+  rarely voluminous, so they can be kept far longer.
+- The line contains a **username**, i.e. personal data: retention and access to the audit stream
+  must match the cluster's data policy.
+
+### Never logged
+
+Request bodies, `engineArgs`/`engineConfig`, model paths, `Authorization` headers and tokens are
+never included. `params` is built from a per-action allowlist (`force`; `targetWorkerId` +
+`targetDeviceIndices`; `runnerType` + `requiredMemory`), and `target` from the path parameters
+(plus `modelName` for the two body-only actions, deploy and the proxy wake trigger), so credentials
+that end up in a deploy body cannot leak into the audit trail.
+
 ## Control Plane Network Isolation
 
 The control plane supports shared bearer-token authentication through `SARDEENZ_API_TOKEN`, but

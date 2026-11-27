@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Every mutating control-plane action now records who asked for it (#335).** The dashboard BFF
+  forwards the JWT-verified username and roles to the control plane in optional
+  `X-Sardeenz-Actor` / `X-Sardeenz-Actor-Roles` headers (specified on all 19 mutating operations in
+  `control-plane.yaml`, honoured only on a `SARDEENZ_API_TOKEN`-authenticated request — a spoofed
+  header on an unauthenticated request is never read, and absent means `actor: "service"`). The
+  control plane emits exactly one structured JSON audit line per mutating request — `audit: true`,
+  `requestId`, `actor`, `action`, `target`, allowlisted `params` and `outcome` (status, plus
+  `details.reason` on failure) — from hooks, so no route file changes and a new mutating `/api/v1`
+  route without an action name fails the server build. Request bodies, engine args and tokens are
+  never logged. Since all services share one token, the actor is an assertion for investigation,
+  not authorization; a new _Audit Log_ section in the security guide documents the format, that
+  trust assumption (ADR-022) and how to collect and retain the lines. Every caller-supplied value
+  in the line (actor, body strings, device-index list, `x-request-id`) is length-capped, and the
+  BFF forwards `x-request-id` for correlation even when it asserts no actor (`AUTH_MODE=none`).
 - **Pickle-based model weights are refused by default, with an explicit opt-in (#336).** Both
   runner shims scan the model directory at startup and refuse `.bin`, `.pt`, `.pth`, `.ckpt`,
   `.pkl`, `.pickle` and `.joblib` weights — formats that deserialize with pickle and can

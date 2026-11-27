@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fastifyJwt from '@fastify/jwt';
 import fp from 'fastify-plugin';
 import type { Config } from '../config.js';
+import { runWithRequestContext, setActor, setRequestId } from '../request-context.js';
 
 export interface JwtPayload {
   username: string;
@@ -72,6 +73,17 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): P
   const { config } = opts;
   const authEnabled = config.authMode !== 'none';
 
+  // Open the per-request context before any route runs, so `authenticate` can record the
+  // verified identity and the control-plane client can forward it (#335). Registered outside
+  // the `authEnabled` branch on purpose: with AUTH_MODE=none a context still exists, it simply
+  // never gets an actor, and the control plane records `actor: "service"`.
+  app.addHook('onRequest', (request, _reply, done) => {
+    runWithRequestContext(() => {
+      setRequestId(request.id);
+      done();
+    });
+  });
+
   if (authEnabled) {
     if (!config.jwtSecret) {
       throw new Error('JWT_SECRET is required when AUTH_MODE is not "none"');
@@ -121,6 +133,10 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: Config }): P
     } catch {
       return reply.code(401).send({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
     }
+    // The only writer of the request actor: whatever the BFF just verified is what the
+    // control plane records (#335) — an assertion, never an authorization input.
+    const user = request.user as JwtPayload;
+    setActor(user.username, user.roles);
   };
 
   // ----- requireRole factory -----

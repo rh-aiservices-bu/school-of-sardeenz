@@ -12,7 +12,7 @@ The dashboard owns the **operator experience** for day-to-day cluster management
 
 - **Make orchestration decisions.** The control plane handles placement, eviction, and lifecycle transitions. The dashboard triggers actions (deploy, sleep, wake, delete, and explicit instance move) and displays their results. A move is admin-only from GPU placement: the dashboard selects a compatible worker and exact GPUs, then polls model detail for replacement deployment, cutover, source drain, success, or teardown failure.
 - **Replace Prometheus/Grafana.** The metrics dashboard provides a convenience view of key metrics. Production alerting and deep observability remain in external tooling.
-- **Enforce RBAC beyond simple role-based auth.** A lightweight auth system (JWT, three modes: `none` / `simple` / `oauth`) is implemented. Per-model permissions and audit logging remain future work.
+- **Enforce RBAC beyond simple role-based auth.** A lightweight auth system (JWT, three modes: `none` / `simple` / `oauth`) is implemented. Per-model permissions remain future work. Audit logging is not a dashboard feature: the BFF forwards the verified username and roles to the control plane, which emits a structured audit line per mutating request (see [deployment security](../../usage/deployment-security.md#audit-log)).
 - **Manage multiple clusters.** Single cluster only.
 
 ## Architecture

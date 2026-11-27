@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ControlPlaneClient } from '../../clients/control-plane.js';
 import { ClientDisconnectedError } from '../../clients/upstream-signal.js';
 import { BffError } from '../../errors.js';
+import { runWithRequestContext, setActor, setRequestId } from '../../request-context.js';
 import type { Config } from '../../config.js';
 
 const mockConfig: Config = {
@@ -345,6 +346,105 @@ describe('ControlPlaneClient', () => {
       fetchSpy.mockRejectedValue(reason);
 
       await expect(client.request('GET', '/api/v1/models')).rejects.toBe(reason);
+    });
+  });
+
+  describe('actor forwarding', () => {
+    it('adds the actor headers to a mutating request inside a request context', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      await runWithRequestContext(async () => {
+        setActor('alice', ['admin', 'viewer']);
+        setRequestId('req-1');
+        return client.deployModel({ modelName: 'llama-3' });
+      });
+
+      const headers = firstCallInit().headers as Record<string, string>;
+      expect(headers['X-Sardeenz-Actor']).toBe('alice');
+      expect(headers['X-Sardeenz-Actor-Roles']).toBe('admin,viewer');
+      expect(headers['x-request-id']).toBe('req-1');
+      // the existing token/content-type assembly survives the merge
+      expect(headers['Content-Type']).toBe('application/json');
+    });
+
+    it('omits the roles header when the verified user has no roles', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      await runWithRequestContext(async () => {
+        setActor('bob', []);
+        return client.deployModel({ modelName: 'llama-3' });
+      });
+
+      const headers = firstCallInit().headers as Record<string, string>;
+      expect(headers['X-Sardeenz-Actor']).toBe('bob');
+      expect(headers['X-Sardeenz-Actor-Roles']).toBeUndefined();
+    });
+
+    it('does not add the headers to a GET', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(200, { models: [] }));
+
+      await runWithRequestContext(async () => {
+        setActor('alice', ['admin']);
+        setRequestId('req-1');
+        return client.listModels();
+      });
+
+      expect(firstCallInit().headers).toBeUndefined();
+    });
+
+    it('sends x-request-id without an actor header when no actor was asserted', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      // AUTH_MODE=none, and any unauthenticated path: a request id exists, no verified actor.
+      await runWithRequestContext(async () => {
+        setRequestId('req-none');
+        return client.deployModel({ modelName: 'llama-3' });
+      });
+
+      const headers = firstCallInit().headers as Record<string, string>;
+      expect(headers['x-request-id']).toBe('req-none');
+      expect(headers['X-Sardeenz-Actor']).toBeUndefined();
+      expect(headers['X-Sardeenz-Actor-Roles']).toBeUndefined();
+    });
+
+    it('adds no actor header outside a request context', async () => {
+      fetchSpy.mockResolvedValue(makeFetchResponse(202, {}));
+
+      await client.deployModel({ modelName: 'llama-3' });
+
+      const headers = firstCallInit().headers as Record<string, string>;
+      expect(headers['X-Sardeenz-Actor']).toBeUndefined();
+      expect(headers['Content-Type']).toBe('application/json');
+    });
+
+    it('keeps concurrent request contexts isolated', async () => {
+      let releaseFirst: () => void = () => {};
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      fetchSpy
+        .mockImplementationOnce(async () => {
+          await firstGate;
+          return makeFetchResponse(202, {});
+        })
+        .mockImplementationOnce(() => Promise.resolve(makeFetchResponse(202, {})));
+
+      const first = runWithRequestContext(async () => {
+        setActor('alice', ['admin']);
+        return client.deployModel({ modelName: 'a' });
+      });
+      const second = runWithRequestContext(async () => {
+        setActor('bob', ['admin-readonly']);
+        return client.deployModel({ modelName: 'b' });
+      });
+      await second;
+      releaseFirst();
+      await first;
+
+      const firstInit = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+      const secondInit = fetchSpy.mock.calls[1]?.[1] as RequestInit;
+      expect((firstInit.headers as Record<string, string>)['X-Sardeenz-Actor']).toBe('alice');
+      expect((secondInit.headers as Record<string, string>)['X-Sardeenz-Actor']).toBe('bob');
     });
   });
 });
