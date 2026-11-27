@@ -1,0 +1,17 @@
+{
+  "dur": 60,
+  "subs": [
+    {"id": "l01", "t0": 1.0, "t1": 5.4, "n": 0, "en": "One GPU. Room for three models. You need to serve six."},
+    {"id": "l02", "t0": 7.0, "t1": 9.6, "n": 1, "en": "Every request lands at the proxy."},
+    {"id": "l03", "t0": 10.5, "t1": 16.4, "n": 2, "en": "It reads the routing map. If the model is awake, the request goes straight through."},
+    {"id": "l04", "t0": 18.0, "t1": 20.2, "n": 2, "en": "But this model is asleep."},
+    {"id": "l05", "t0": 20.5, "t1": 26.0, "n": 3, "en": "The proxy doesn't refuse. It parks the connection and rings the control plane. Once."},
+    {"id": "l06", "t0": 27.5, "t1": 31.6, "n": 4, "en": "The control plane keeps the memory ledger. The tin is full."},
+    {"id": "l07", "t0": 32.0, "t1": 35.6, "n": 4, "en": "So it picks the model nobody has asked for the longest."},
+    {"id": "l08", "t0": 36.5, "t1": 44.0, "n": 5, "en": "It moves that one out to host RAM, and wakes the one that's wanted."},
+    {"id": "l09", "t0": 45.5, "t1": 47.8, "n": 2, "en": "The map updates. The gate lifts."},
+    {"id": "l10", "t0": 48.0, "t1": 51.4, "n": 0, "en": "All the client saw was a slow first token."},
+    {"id": "l11", "t0": 54.6, "t1": 57.2, "n": 0, "en": "To Kubernetes, nothing moved."},
+    {"id": "l12", "t0": 57.4, "t1": 59.9, "n": 0, "en": "Sardeenz: more models than memory."}
+  ]
+}
