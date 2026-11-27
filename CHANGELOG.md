@@ -645,6 +645,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   only the genuinely per-runner figures plus the residual in "Other". Legacy workers that do not
   label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
   conservative direction); unlabeled sole-resident rows keep displaying.
+- **`make lint` no longer fails on scratch files in the gitignored `logs/` directory (#306).**
+  ESLint's ignores list (`eslint.config.js`) and `.prettierignore` now exclude `logs/`, matching the
+  `.gitignore` entry — `eslint .` walks the whole tree (ESLint 9 does not read `.gitignore`) and
+  previously linted throwaway verification scripts parked there, so a pre-commit gate could fail for
+  reasons unrelated to the change under review. TypeScript and Vitest cannot see `logs/` by
+  construction (reference-scoped `tsc --build`, workspace-project Vitest), so only the two globbing
+  tools needed the ignore; `docs/development/setup.md` records why.
 
 ### Security
 

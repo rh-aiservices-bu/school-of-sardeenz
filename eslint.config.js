@@ -25,6 +25,7 @@ export default tseslint.config(
       '**/node_modules/',
       '**/target/',
       '**/coverage/',
+      'logs/',
       'site/',
       '**/.claude/',
       '**/.qwen/worktrees/',

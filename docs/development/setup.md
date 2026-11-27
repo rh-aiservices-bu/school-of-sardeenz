@@ -209,6 +209,13 @@ fix (#325), and that one line was deleted.
 
 Dev servers running on the host write their output to the `logs/` directory in the project root (gitignored). Since the project folder is bind-mounted into the ccbox container, Claude Code can read these logs directly to debug runtime issues without needing output pasted into the conversation.
 
+`logs/` is excluded from ESLint (`.eslintrc`-style global `ignores` in `eslint.config.js` — ESLint 9 does
+not read `.gitignore`, so `eslint .` would otherwise lint throwaway verification scripts parked
+there) and from Prettier (`.prettierignore`). TypeScript and Vitest cannot see it at all: `tsc
+--build` is reference-scoped to each project's `include`, and the root `vitest.config.ts` lists only
+workspace projects. Scratch files in `logs/` therefore never affect `make lint`, `make format` or
+`make format-check`.
+
 Parallel sessions coordinate through the same directory — CPU lock, shared test database and a
 message bus. See [`parallel-sessions.md`](parallel-sessions.md) before running a heavy gate while
 another session is active.
