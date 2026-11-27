@@ -21,6 +21,7 @@ export function registerRunnerRoutes(
       engineConfig?: Record<string, unknown>;
       engineArgs?: string[];
       servedModelName?: string;
+      allowUnsafeWeights?: boolean;
       entrypoint?: string[];
       devices: { deviceIndex: number; deviceType: string }[];
     };
@@ -56,6 +57,16 @@ export function registerRunnerRoutes(
       });
     }
 
+    // Reject rather than coerce a non-boolean (#336): `=== true` coercion would turn garbage into
+    // a decision, and the wrong direction (an unrefused pickle) is the unsafe one.
+    if (body.allowUnsafeWeights !== undefined && typeof body.allowUnsafeWeights !== 'boolean') {
+      console.warn('[worker] POST /runners rejected: allowUnsafeWeights is not a boolean');
+      return reply.status(400).send({
+        error: 'allowUnsafeWeights must be a boolean',
+        code: 'BAD_REQUEST',
+      });
+    }
+
     // instanceId is optional/back-compat in the contract — the control plane always sends one,
     // but a fallback keeps older callers (and manual testing) working.
     const instanceId = body.instanceId ?? `inst-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -73,6 +84,7 @@ export function registerRunnerRoutes(
         engineConfig: body.engineConfig,
         engineArgs: body.engineArgs,
         servedModelName: body.servedModelName,
+        allowUnsafeWeights: body.allowUnsafeWeights,
         entrypoint: body.entrypoint,
         devices: body.devices,
       });

@@ -181,8 +181,12 @@ Force Full regardless of diff size, mapped to the generic list:
 - Secrets/env config: `**/config.ts`, `SARDEENZ_*` env wiring,
   `deployment/prereq/**`.
 - Infra/CI: `deployment/**`, `.github/**`, `Makefile`, `containers/**`.
-- Security label (`area/security`) or external input parsing
-  (proxy request handling: `proxy/src/**` routes/body limits).
+- Security label (`area/security`) **when the diff touches a
+  security-sensitive code path** (auth, tokens, secrets, external input
+  parsing) **or changes executable behaviour** — a security-themed issue
+  whose diff is docs only does not, by itself, force Full (approved
+  2026-11-27, M22 planning). External input parsing (proxy request
+  handling: `proxy/src/**` routes/body limits) always forces Full.
 - Cross-service changes: proxy ↔ control-plane, control-plane ↔ BFF, or
   contract + consumer in the same diff.
 - Any issue with an open question.

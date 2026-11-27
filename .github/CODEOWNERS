@@ -1,0 +1,30 @@
+# Code owners for the security-sensitive control surface (#338).
+#
+# Everything below configures or weakens a gate that protects the rest of the repository: the
+# secret-scan allowlist (.gitleaks.toml), the CI workflows that run the gates, Dependabot's update
+# config, the pinned CI test constraints and the runner images built from them, and the prereq
+# image manifests. Any of these can be edited legitimately — but a single PR can also introduce
+# the secret or the unpinned image the gate exists to catch in the same diff, and no workflow can
+# police the revision of its own configuration. The control is a mandatory owner review, so these
+# paths are routed to the maintainer.
+#
+# Enforced only once a repository admin enables "Require review from Code Owners" for `dev`
+# (Settings → Branches); until then this file requests the review but does not block a merge.
+#
+# This file owns itself. GitHub evaluates the CODEOWNERS of the pull request's *head* branch, so a
+# PR could otherwise rewrite or delete the `/.gitleaks.toml` rule below and allowlist a secret in
+# the same diff — the reviewers it removes cannot restore a rule they no longer see. Listing the
+# file's own path routes that edit to the maintainer as well.
+#
+# The ceiling of that control: a PR that deletes both this self-ownership rule and the rule it
+# protects in the same diff presents a CODEOWNERS matching nothing, so the owner request is
+# satisfied vacuously (any non-CODEOWNERS branch protection still applies). What remains is that the
+# deletion is a loud, reviewable diff — the rules vanishing is visible evidence in a way a secret
+# hidden in added code is not.
+/.github/CODEOWNERS         @guimou
+/.gitleaks.toml             @guimou
+/.github/workflows/         @guimou
+/.github/dependabot.yml     @guimou
+/runners/ci-constraints.txt @guimou
+/containers/runners/        @guimou
+/deployment/prereq/         @guimou

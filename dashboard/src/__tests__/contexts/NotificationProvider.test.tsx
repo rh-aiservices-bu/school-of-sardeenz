@@ -58,6 +58,7 @@ function renderGate(auth: Partial<AuthState>, children: ReactNode) {
     authMode: 'simple',
     isLoading: false,
     login: async () => {},
+    exchangeCode: async () => {},
     logout: () => {},
     loginError: null,
     ...auth,

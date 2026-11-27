@@ -69,6 +69,9 @@ paths:
         `POST /api/v1/models/{modelName}/instances` instead.
       tags:
         - Models
+      parameters:
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       requestBody:
         required: true
         content:
@@ -226,6 +229,8 @@ paths:
           description: Immutable model configuration name
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       requestBody:
         required: true
         content:
@@ -315,6 +320,8 @@ paths:
           schema:
             type: boolean
             default: false
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Model removal accepted
@@ -509,6 +516,8 @@ paths:
           description: The model name (routing key)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Sleep request accepted
@@ -561,6 +570,8 @@ paths:
           description: The model name (routing key)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Wake request accepted
@@ -632,6 +643,8 @@ paths:
           schema:
             type: boolean
             default: false
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Stop request accepted
@@ -700,6 +713,8 @@ paths:
           description: The model name (routing key)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Start request accepted
@@ -778,6 +793,8 @@ paths:
           description: The model name (routing key)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Instance creation accepted
@@ -858,6 +875,8 @@ paths:
           description: The instance identifier (`inst-<hex>`)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Instance removal accepted
@@ -921,6 +940,8 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       requestBody:
         required: true
         content:
@@ -997,6 +1018,8 @@ paths:
           description: The instance identifier (`inst-<hex>`)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Sleep request accepted
@@ -1055,6 +1078,8 @@ paths:
           description: The instance identifier (`inst-<hex>`)
           schema:
             type: string
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Wake request accepted
@@ -1304,6 +1329,9 @@ paths:
         view.
       tags:
         - Catalog
+      parameters:
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "200":
           description: Catalog refreshed successfully
@@ -1354,6 +1382,8 @@ paths:
           schema:
             type: string
           description: Catalog entry id.
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "202":
           description: Import accepted and started
@@ -1397,6 +1427,8 @@ paths:
           schema:
             type: string
           description: Catalog entry id.
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "204":
           description: SIF removed successfully
@@ -1543,6 +1575,9 @@ paths:
         Removes all stored notifications and resets read state.
       tags:
         - Notifications
+      parameters:
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "204":
           description: All notifications cleared
@@ -1579,6 +1614,8 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "204":
           description: Notification marked as read
@@ -1607,6 +1644,9 @@ paths:
       summary: Mark all notifications as read
       tags:
         - Notifications
+      parameters:
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "204":
           description: All notifications marked as read
@@ -1643,6 +1683,8 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/ActorHeader"
+        - $ref: "#/components/parameters/ActorRolesHeader"
       responses:
         "204":
           description: Notification removed
@@ -1666,6 +1708,29 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
 components:
+  parameters:
+    ActorHeader:
+      name: X-Sardeenz-Actor
+      in: header
+      required: false
+      description: >-
+        Asserted acting user, forwarded by the dashboard BFF after JWT
+        verification. Honoured only when the request authenticates with the
+        service bearer token; otherwise ignored. Absent means "service".
+      schema:
+        type: string
+        maxLength: 256
+    ActorRolesHeader:
+      name: X-Sardeenz-Actor-Roles
+      in: header
+      required: false
+      description: >-
+        Comma-separated asserted roles of the acting user. Recorded as an
+        assertion only, never used for authorization. Honoured only when the
+        request authenticates with the service bearer token.
+      schema:
+        type: string
+        maxLength: 512
   schemas:
     StartupLogSession:
       type: object
@@ -1944,6 +2009,17 @@ components:
             target worker, and the device reports a kvcached pool. Headroom is
             bounded by the control plane's oversubscription cap. Default
             false: bytes must fit (unchanged placement).
+        allowUnsafeWeights:
+          type: boolean
+          default: false
+          description: |
+            Opt-in to loading pickle-based weight formats (.bin, .pt, .pth,
+            .ckpt, .pkl, .pickle, .joblib). These formats deserialize with
+            pickle and can execute arbitrary code on the worker, so the runner
+            shim refuses them at startup unless this is true. Safetensors,
+            ONNX, GGUF and XGBoost .bst are unaffected. Persisted on the model
+            record so every later start keeps the opt-in, and delivered to the
+            runner as SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1.
 
     ModelConfigurationUpdateRequest:
       type: object
@@ -1955,6 +2031,7 @@ components:
         - tensorParallel
         - pinned
         - allowCoLocation
+        - allowUnsafeWeights
       properties:
         displayName:
           $ref: "#/components/schemas/ModelDeploymentRequest/properties/displayName"
@@ -1980,6 +2057,8 @@ components:
           $ref: "#/components/schemas/ModelDeploymentRequest/properties/pinned"
         allowCoLocation:
           $ref: "#/components/schemas/ModelDeploymentRequest/properties/allowCoLocation"
+        allowUnsafeWeights:
+          $ref: "#/components/schemas/ModelDeploymentRequest/properties/allowUnsafeWeights"
 
     ModelDeploymentResponse:
       type: object
@@ -2282,6 +2361,12 @@ components:
           description: |
             Whether the model opted in to kvcached elastic co-location
             (see ModelDeploymentRequest.allowCoLocation). Present in the
+            detail payload so the edit form can hydrate the switch.
+        allowUnsafeWeights:
+          type: boolean
+          description: |
+            Whether the model opted in to pickle-based (unsafe) weight formats
+            (see ModelDeploymentRequest.allowUnsafeWeights). Present in the
             detail payload so the edit form can hydrate the switch.
         engineArgs:
           type: array

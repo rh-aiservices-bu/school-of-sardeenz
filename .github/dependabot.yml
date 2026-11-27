@@ -16,6 +16,12 @@
 #   version) so coverage keeps tracking the catalog.
 # - Minor+patch updates are grouped into one PR per entry to keep noise down;
 #   major bumps and security updates stay individual.
+# - This registry is checked: tests/container-images/verify-dependabot-coverage.mjs (make
+#   verify-dependabot-coverage, a step in the CI quality job) fails when a
+#   containers/runners/<engine>/<version>/ directory has no docker entry, when an entry's directory
+#   is gone, or when a shipped runners.yaml entry is neither registered nor one of the two
+#   documented skips named in that script. No kubernetes ecosystem exists in Dependabot, so
+#   deployment/prereq/ images are bumped by hand (deployment/prereq/README.md).
 version: 2
 updates:
   # npm: root lockfile covers control-plane, dashboard, packages/* and

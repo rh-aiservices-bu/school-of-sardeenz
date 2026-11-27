@@ -37,6 +37,14 @@ export interface LaunchSpec {
    */
   servedModelName?: string;
   /**
+   * Opt-in to pickle-based weight formats (#336). The ApptainerLauncher emits
+   * SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1 into envFlags only when true — `--cleanenv` means the
+   * runner inherits nothing from the worker's own environment, so this is the only channel.
+   * The StubLauncher ignores it. Absent and false are the same launch identity (see
+   * normalizeLaunchSpec).
+   */
+  allowUnsafeWeights?: boolean;
+  /**
    * Verbatim argv to exec inside the SIF (from catalog metadata). ApptainerLauncher uses it in
    * place of config.runnerEntrypoint; StubLauncher ignores it.
    */

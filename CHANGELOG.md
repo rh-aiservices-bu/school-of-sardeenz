@@ -133,6 +133,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missing `docs/development/agent-profile.md` (required by the milestone skills) was created
   from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
   (`reports/`, `plans/`, `worktrees/`, `profiles`).
+- **The CI Python job installs test deps under a generated constraints file (#182).** The
+  `python` job's `make test-python-deps` now passes `-c runners/ci-constraints.txt` — a generated,
+  sorted `name==version` pin of exactly the two shims' `[test]`-extra dependency closure
+  (`make python-constraints` regenerates it, on Python 3.12 per `.python-version`) — so the job
+  stops floating on PyPI. Version-exact, not hash-pinned: `-c` constraints cannot carry hashes, so
+  this buys version reproducibility, not integrity; the advisory half (#338's `pip-audit` over the
+  same constrained set) is the forcing function that keeps the file fresh — a pinned version with
+  a known CVE fails that sweep and forces a regeneration. The file covers **only the CI/dev
+  install**: the shims' runtime `dependencies` stay deliberately unpinned because they are
+  installed atop the vLLM/MLServer base images inside the SIFs, which already ship
+  fastapi/uvicorn/httpx.
+- **The two `deployment/prereq/` backing services are pinned instead of `:latest` (#339).** Valkey
+  moves to `quay.io/sclorg/valkey-8-c10s:20261125@sha256:5ab722e9…` and PostgreSQL to
+  `quay.io/sclorg/postgresql-16-c9s:20261125@sha256:e8f74f91…` — the ADR-030 decision 1 manual-bump
+  form (`name:dated-tag@sha256:<64 hex>`, the multi-arch index digest resolved from the Quay API at
+  bump time). With `imagePullPolicy: IfNotPresent` a moving `:latest` let two nodes that had cached
+  different pulls run different PostgreSQL/Valkey builds from identical manifests; with an immutable
+  digest the running bytes are the pinned ones. The four platform bases keep `:latest` by policy —
+  overlays pin them (#247). Bumping the prereq images stays a documented manual step
+  (`deployment/prereq/README.md`): Dependabot has no ecosystem for raw Kubernetes manifests.
+- **Docs synchronized for M22.** The M22 features carried their core documentation in each issue,
+  and the sync commit closes the remaining gaps: both shim READMEs and the runner-contract doc
+  document the mandatory weights-policy module (`weights.py`) and its cross-copy drift tests; the
+  MLServer guide's sklearn layout names the opt-in `pytorch_model.bin`/`.joblib` need; the
+  republish runbook intro covers `runners/mlserver`; the architecture overview names the startup
+  weights refusal and the audit line; ADR-023's URL-fragment residual is marked closed by #136 and
+  ADR-016's consequences point at the weights trust boundary; `setup.md`'s command table regains
+  its `make verify-image-pins` row.
 
 ### Added
 
@@ -211,6 +239,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   worker now forces Model Runner V1 for every kvcached module in the 0.24+ range (`vllm-0.24`,
   `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The catalog entry is
   pinned to the published `vllm:0.26-rc1` SIF (`sha256:075b3057…`).
+- **CI gate for Dependabot coverage and prereq image pins (#339).**
+  `tests/container-images/verify-dependabot-coverage.mjs` (node builtins only;
+  `make verify-dependabot-coverage`; a step of the CI `quality` job) keys the check on the
+  `runners.yaml` catalog rather than on a blanket directory rule: each catalog entry resolves to its
+  build directories via `runnerType.toLowerCase()` plus a version prefix (`0.26` → `0.26.0`), and
+  each of those directories must have a `docker` entry in `.github/dependabot.yml` or be one of the
+  two documented #233 skips (`vllm` 0.21.0/0.24.0, decision named in the script comment — a stale
+  skip fails too). It also fails when a `docker` entry points at a directory that no longer exists
+  or at a runner directory with no build file, on duplicate docker directories, on a shipped catalog
+  entry with no build directory, and on any `deployment/prereq/` image that is not
+  `name:dated-tag@sha256:<64 hex>` (a `:latest` or digest-less reference). The four platform bases
+  that keep `:latest` by policy are out of scope. `.github/dependabot.yml`, the runner-publishing and
+  republish runbooks, `containers/README.md`, `deployment/AGENTS.md` and
+  `deployment/prereq/README.md` document the entry as a required step and the manual prereq bump.
+- **Secret scanning blocks PRs and advisories are tracked in an issue (#338).** A `secrets` job
+  in CI runs gitleaks 8.30.1 (downloaded by checksum-pinned release, `--redact`) over the pushed
+  commit range on every PR and direct push, with a reviewed `.gitleaks.toml` allowlist scoped to
+  the two credential _templates_ (`targetRules`, so a real AWS key in the same file still fails).
+  A new nightly `advisories.yml` sweeps `npm audit`, `cargo audit` and `pip-audit` (the latter
+  over `#182`'s constrained CI install, never the SIF runtime trees) and files or updates a
+  single `area/security` tracking issue — findings leave the run green, a check that could not
+  execute turns it red. `tests/security/report-advisories.mjs` renders the issue body with
+  committed rehearsal fixtures, neutralising markdown in upstream advisory fields. A new
+  `.github/CODEOWNERS` routes the gates' own configuration (`.gitleaks.toml`, the workflows,
+  Dependabot, the CI constraints and the runner/prereq image inputs) to the maintainer, since a PR
+  can otherwise edit the gate in the same diff as what it catches; it blocks only once
+  **Require review from Code Owners** is enabled on `dev` (repo-owner action).
 
 ### Fixed
 
@@ -1074,6 +1129,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to an empty argv now fails worker startup loudly instead of producing per-request 400s. The
   worker-agent contract's `entrypoint` description gained the constraint sentence (generated
   types regenerated — description-only, no shape change).
+- **The OAuth callback no longer puts the JWT in the URL (#136).** `GET /api/auth/callback` used
+  to redirect to `/oauth/callback#token=<jwt>`, where the bearer token — full admin authority for
+  up to `JWT_EXPIRATION_HOURS` (8 h default) — was visible in the address bar and readable by any
+  script or extension with DOM access until the SPA cleared it. It now mints a single-use, opaque
+  60-second exchange code (256-bit hex) and redirects to `/oauth/callback?code=…`; the SPA posts
+  that code to the new public `POST /api/auth/exchange`, which is registered only in `oauth` mode,
+  rate-limited per IP (same window as login), and returns `{ token, expiresIn }` in the response
+  body. The code is deleted on first use, so a replay answers `400 INVALID_REQUEST` and issues no
+  token; an expired code does too. The SSE cookie stays on the callback and the exchange sets no
+  cookie. The BFF `req` serializer now also redacts `code` (`code=[REDACTED]`) alongside `token`,
+  because both the upstream authorization code and the exchange code reach the access log through
+  URLs. The exchange store is process-local (`replicas: 1`, documented in code).
+- **Every mutating control-plane action now records who asked for it (#335).** The dashboard BFF
+  forwards the JWT-verified username and roles to the control plane in optional
+  `X-Sardeenz-Actor` / `X-Sardeenz-Actor-Roles` headers (specified on all 19 mutating operations in
+  `control-plane.yaml`, honoured only on a `SARDEENZ_API_TOKEN`-authenticated request — a spoofed
+  header on an unauthenticated request is never read, and absent means `actor: "service"`). The
+  control plane emits exactly one structured JSON audit line per mutating request — `audit: true`,
+  `requestId`, `actor`, `action`, `target`, allowlisted `params` and `outcome` (status, plus
+  `details.reason` on failure) — from hooks, so no route file changes and a new mutating `/api/v1`
+  route without an action name fails the server build. Request bodies, engine args and tokens are
+  never logged. Since all services share one token, the actor is an assertion for investigation,
+  not authorization; a new _Audit Log_ section in the security guide documents the format, that
+  trust assumption (ADR-022) and how to collect and retain the lines. Every caller-supplied value
+  in the line (actor, body strings, device-index list, `x-request-id`) is length-capped, and the
+  BFF forwards `x-request-id` for correlation even when it asserts no actor (`AUTH_MODE=none`).
+- **Pickle-based model weights are refused by default, with an explicit opt-in (#336).** Both
+  runner shims scan the model directory at startup and refuse `.bin`, `.pt`, `.pth`, `.ckpt`,
+  `.pkl`, `.pickle` and `.joblib` weights — formats that deserialize with pickle and can
+  execute arbitrary code on a GPU worker — naming the offending files and the opt-in in the
+  error. Safetensors, ONNX, GGUF and `.bst` are unaffected. The opt-in (`allowUnsafeWeights`,
+  off by default) travels dashboard → control plane → model record (new `allow_unsafe_weights`
+  column) → worker launch identity → `SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1` in the runner
+  environment, and surfaces as a warning-labelled switch in the deploy form. The control plane
+  additionally refuses pickle deploys early at `POST`/`PUT /api/v1/models` (advisory — the shim
+  is the enforcement point), and a new "Model weights trust boundary" section in the security
+  guide documents that write access to the weights volume is code execution on workers. Takes
+  effect on the cluster once the MLServer `1.7.1-rc5` SIF is republished.
 
 ## [0.2.1] - 2026-10-29
 

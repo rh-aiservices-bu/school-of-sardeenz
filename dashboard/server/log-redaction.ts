@@ -3,15 +3,18 @@ import type { FastifyRequest } from 'fastify';
 /** Placeholder written in place of a query token. */
 export const REDACTED = '[REDACTED]';
 
-const TOKEN_PARAM = 'token';
+const SECRET_PARAMS = new Set(['token', 'code']);
 
 /**
- * Strip the value of any `token` query parameter from a request URL before it is logged.
+ * Strip the value of any secret-bearing query parameter from a request URL before it is logged.
  *
- * Fastify's default request serializer logs `req.url` at info level, which would put the
- * deprecated `?token=<jwt>` SSE fallback (and any `Referer`/upstream access log derived from
- * it) into the BFF access log verbatim. Only the `token` value is replaced; the rest of the
- * query string is preserved so other parameters stay debuggable, and a URL with no `token`
+ * Fastify's default request serializer logs `req.url` at info level, which would put a live
+ * credential into the BFF access log verbatim. `token` is the deprecated `?token=<jwt>` SSE
+ * fallback (and any `Referer`/upstream access log derived from it); `code` is a credential
+ * too — both the upstream OAuth authorization code on `/api/auth/callback?code=…` and the
+ * single-use exchange code on the SPA document request `/oauth/callback?code=…`, which the
+ * BFF serves through its SPA fallback. Only the matched values are replaced; the rest of the
+ * query string is preserved so other parameters stay debuggable, and a URL with no matching
  * parameter is returned untouched.
  */
 export function redactUrlForLog(url: string): string {
@@ -29,7 +32,7 @@ export function redactUrlForLog(url: string): string {
   const params = new URLSearchParams(query);
   let redacted = false;
   for (const key of [...params.keys()]) {
-    if (key.toLowerCase() === TOKEN_PARAM) {
+    if (SECRET_PARAMS.has(key.toLowerCase())) {
       params.set(key, REDACTED);
       redacted = true;
     }

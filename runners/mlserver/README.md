@@ -103,6 +103,7 @@ sardeenz_mlserver_runner/
 ├── onnx_runtime.py  # MLServer MLModel for *.onnx graphs (imports mlserver + onnxruntime; SIF-only)
 ├── onnx_support.py  # pure helpers behind it: artifact/provider selection, dtype/shape fitting
 ├── state.py      # RunnerState machine + contract-shape response builders + V2 path builders (pure)
+├── weights.py    # pickle-weights refusal at startup (#336; see the security guide's trust boundary)
 └── testing.py    # test-only adapter: fakes the engine/memory seams for the conformance suite
 ```
 
@@ -110,6 +111,13 @@ sardeenz_mlserver_runner/
 
 - **Sleep level:** the contract defines only `L1_HOST_RAM` (v0.1) — see the semantic-difference
   note above.
+- **Weights-format refusal (#336):** `weights.py` scans the model directory at startup (invoked
+  from `build_model_settings`) and refuses pickle-based weight files (`.bin`, `.pt`, `.pth`,
+  `.ckpt`, `.pkl`, `.pickle`, `.joblib`) unless `SARDEENZ_ALLOW_UNSAFE_WEIGHTS` is `1`/`true` —
+  the worker emits that only for models deployed with `allowUnsafeWeights`. The suffix tuple must
+  stay set-equal to the vLLM shim's and the control plane's copy (drift tests pin both
+  directions). Policy and rationale:
+  [Model weights trust boundary](../../docs/usage/deployment-security.md#model-weights-trust-boundary).
 - **Memory attribution** is best-effort, identical to the vLLM shim's `memory.py`: the shim owns no
   CUDA pool (the engine is a child; onnxruntime allocates outside torch's pool), so the figure is
   the whole-device used memory, `attribution: "device"`. CPU-only sklearn models introspect no CUDA

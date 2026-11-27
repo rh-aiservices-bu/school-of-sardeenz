@@ -500,6 +500,15 @@ components:
           description: |
             Ordered CLI tokens the worker appends verbatim to the engine argv
             after the shim's `--` separator. Never shell-interpreted.
+        allowUnsafeWeights:
+          type: boolean
+          description: |
+            Opt-in to pickle-based weight formats for this model. When true, the
+            worker emits SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1 into the runner process
+            environment; when absent or false no variable is emitted and the
+            runner shim refuses pickle-based weights (.bin, .pt, .pth, .ckpt,
+            .pkl, .pickle, .joblib) at startup. Absent and false are the same
+            launch identity.
         entrypoint:
           type: array
           items:

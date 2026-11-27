@@ -94,6 +94,12 @@ def active_requests_client(request):
         yield request.param, client
 
 
+@pytest.fixture(params=_SHIM_IDS, ids=_SHIM_IDS)
+def weights_policy(request):
+    """The shim's weights-policy module (#336) — direct attribute access, fail loud."""
+    return _BUILDERS[request.param].WEIGHTS_POLICY
+
+
 def _wait_state(client, want: str, attempts: int = 100):
     for _ in range(attempts):
         r = client.get("/health")

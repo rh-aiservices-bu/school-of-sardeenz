@@ -45,8 +45,11 @@ on workers).
   before any Redis key or Postgres query — both params flow into keys by plain string join.
 - **Trust boundary:** every route is behind the auth hook (`SARDEENZ_API_TOKEN`), except when
   `SARDEENZ_ALLOW_UNAUTHENTICATED_API` opts out (startup fails without a token unless it is set —
-  a dev-only posture, never set in deployments); workers use `SARDEENZ_WORKER_TOKEN`. Plain
-  `http://` catalog sources are rejected unless
+  a dev-only posture, never set in deployments); workers use `SARDEENZ_WORKER_TOKEN`. The optional
+  `X-Sardeenz-Actor` / `X-Sardeenz-Actor-Roles` headers are honoured only on a
+  service-token-authenticated request and only feed the audit line (`utils/audit-log.ts`); absent
+  or untrusted means `actor: "service"` — the value is asserted, never an authorization input.
+  Plain `http://` catalog sources are rejected unless
   `SARDEENZ_ALLOW_INSECURE_CATALOG` is set (dev only); imported SIFs are verified unless
   `SARDEENZ_VERIFY_SIF` is disabled.
 

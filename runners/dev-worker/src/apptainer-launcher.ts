@@ -305,6 +305,12 @@ export class ApptainerLauncher implements RunnerLauncher {
       envFlags.CUDA_VISIBLE_DEVICES = spec.devices.map((d) => d.deviceIndex).join(',');
       envFlags.SARDEENZ_DEVICE_INDICES = spec.devices.map((d) => d.deviceIndex).join(',');
     }
+    // Weights-format opt-in (#336): only the explicit opt-in emits the variable — every
+    // non-opted-in model's argv stays byte-identical to today. --cleanenv above means this must
+    // be an --env flag, not a worker-process env var.
+    if (spec.allowUnsafeWeights === true) {
+      envFlags.SARDEENZ_ALLOW_UNSAFE_WEIGHTS = '1';
+    }
     // NOTE: HOME is deliberately NOT an `--env` flag — Apptainer rejects it. It is passed as a
     // process env var below so the container inherits a writable HOME on node-local scratch.
     for (const [key, value] of Object.entries(envFlags)) {

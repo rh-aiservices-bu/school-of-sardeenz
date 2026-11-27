@@ -40,13 +40,15 @@ mechanism but did not make the query fallback narrower.
   full URL (including `?token=`) for every request. The BFF now installs its own `req` serializer
   (`dashboard/server/log-redaction.ts`) that writes `token=[REDACTED]` and leaves other query
   parameters intact — [#269](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/269).
-  The URL-fragment transit half of the problem remains #136 (Parking Lot).
+  The URL-fragment transit half of the problem was closed by #136 (M22): the OAuth callback now
+  hands the JWT to the SPA through a single-use exchange code redeemed at `POST /api/auth/exchange`
+  and returned in the response body, so no token enters `window.location` in `oauth` mode.
 - **Rejected alternatives.** Removing the fallback entirely breaks `EventSource` for authed
   browsers where third-party-cookie restrictions block the cookie; allowing it globally is the
   pre-M15 leak.
 
 ## Non-goals
 
-- URL-fragment token transit (#136).
+- URL-fragment token transit (#136) — resolved separately in M22; see Consequences above.
 - Method- or content-type-based gating; an authenticated non-GET on an SSE path is harmless (the
   routes are GET-only and 404 otherwise).

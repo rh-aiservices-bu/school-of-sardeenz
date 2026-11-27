@@ -47,6 +47,12 @@ relative paths that resolve outside that directory are rejected, including symli
 Sardeenz always replaces the settings file's `name` with the deployment's served model name. This
 keeps routing identity independent from the name bundled with the artifact.
 
+`.joblib` and `.pkl` are pickle-based: the deployment must set **Allow Unsafe (Pickle-Based)
+Weights** or the runner refuses to start (see
+[Model weights trust boundary](deployment-security.md#model-weights-trust-boundary)). Prefer
+[skl2onnx](https://onnx.ai/sklearn-onnx/) and deploy the exported graph as `.onnx` when the model
+allows it.
+
 For a Hugging Face repository, point `parameters.uri` at the directory:
 
 ```text
@@ -187,6 +193,13 @@ directory:
 | `*.onnx` (and none of the combinations above)                                | `sardeenz_mlserver_runner.onnx_runtime.ONNXRuntimeModel` |
 | No recognized combination                                                    | Deployment fails during runner startup                   |
 
+Detection is separate from the weights-format policy. A Hugging Face directory is served from
+`config.json` plus `*.safetensors`; a `pytorch_model.bin` checkpoint is only _recognised_ if the
+model opted in. The sklearn family is opt-in-only too: `*.joblib` and `*.pkl` require
+`allowUnsafeWeights`, while `.bst` and `model.json` do not. See
+[Model weights trust boundary](deployment-security.md#model-weights-trust-boundary) for the full
+policy — only deploy weights from a source you trust.
+
 Automatic detection selects an implementation, not a particular artifact. It generates settings
 whose `parameters.uri` is the whole model directory. For file-based models—especially directories
 containing multiple files—provide `model-settings.json` with the exact artifact URI.
@@ -229,6 +242,11 @@ is placed.
 
 ## Troubleshooting
 
+- **`Refusing to load pickle-based weights ...`:** the model directory holds `.bin`, `.pt`,
+  `.pth`, `.ckpt`, `.pkl`, `.pickle` or `.joblib` weights and the model was not deployed with
+  `allowUnsafeWeights`. Convert the weights to safetensors, or redeploy with the opt-in if you
+  trust their source (see
+  [Model weights trust boundary](deployment-security.md#model-weights-trust-boundary)).
 - **Could not infer an MLServer runtime:** add an explicit `model-settings.json`, and confirm that
   the selected SIF contains the requested implementation.
 - **Model path does not exist or escapes the weights root:** select a real directory strictly below

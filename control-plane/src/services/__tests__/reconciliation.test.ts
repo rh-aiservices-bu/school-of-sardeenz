@@ -210,6 +210,7 @@ function makeModelRecord(overrides: Partial<ModelRecord> & { name: string }): Mo
     displayName: null,
     pinned: false,
     allowCoLocation: false,
+    allowUnsafeWeights: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

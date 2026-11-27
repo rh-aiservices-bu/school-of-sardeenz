@@ -1,0 +1,67 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "cross-spawn": {
+      "name": "cross-spawn",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1103970,
+          "name": "cross-spawn",
+          "dependency": "cross-spawn",
+          "title": "Regular Expression Denial of Service in cross-spawn",
+          "url": "https://github.com/advisories/GHSA-3xgq-45jj-v275",
+          "severity": "high",
+          "range": "<7.0.5"
+        }
+      ],
+      "effects": ["execa"],
+      "range": "<7.0.5",
+      "nodes": ["node_modules/cross-spawn"],
+      "fixAvailable": {
+        "name": "cross-spawn",
+        "version": "7.0.5",
+        "isSemVerMajor": false
+      }
+    },
+    "tmp": {
+      "name": "tmp",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1097498,
+          "name": "tmp",
+          "dependency": "tmp",
+          "title": "tmp allows a symbolic-link write outside its temporary directory",
+          "url": "https://github.com/advisories/GHSA-52f5-9888-hmc6",
+          "severity": "moderate",
+          "range": "<0.2.4"
+        }
+      ],
+      "effects": ["example-fixture-consumer"],
+      "range": "<0.2.4",
+      "nodes": ["node_modules/tmp"],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 1,
+      "high": 1,
+      "critical": 0,
+      "total": 2
+    },
+    "dependencies": {
+      "prod": 212,
+      "dev": 517,
+      "optional": 48,
+      "peer": 9,
+      "peerOptional": 0,
+      "total": 786
+    }
+  }
+}

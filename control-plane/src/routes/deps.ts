@@ -14,6 +14,7 @@ import type { NotificationService } from '../services/notification.js';
 import type { CatalogService } from '../services/catalog-service.js';
 import type { ModuleStoreService } from '../services/module-store.js';
 import type { WeightsBrowserService } from '../services/weights-browser.js';
+import type { WeightsPolicyService } from '../services/weights-policy.js';
 import type { ProxyProtocolsService } from '../services/proxy-protocols.js';
 import type { MoveOrchestrationService } from '../services/move-orchestration.js';
 import type { RunnerClient } from '../clients/runner.js';
@@ -38,6 +39,7 @@ export interface RouteDeps {
   catalogService: CatalogService;
   moduleStore: ModuleStoreService;
   weightsBrowser: WeightsBrowserService;
+  weightsPolicy: WeightsPolicyService;
   proxyProtocols: ProxyProtocolsService;
   createRunnerClient: (host: string, port: number) => RunnerClient;
   createWorkerClient: (baseUrl: string) => WorkerClient;

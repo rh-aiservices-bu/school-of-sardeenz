@@ -1,4 +1,8 @@
 // @vitest-environment node
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Mock } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -7,6 +11,7 @@ import { registerModelRoutes } from '../models.js';
 import type { RouteDeps } from '../deps.js';
 import type { InstanceState, MoveOperation } from '../../services/model-lifecycle.js';
 import { WorkerHttpError } from '../../clients/worker.js';
+import { WeightsPolicyService } from '../../services/weights-policy.js';
 
 const INSTANCE_ID = 'inst-000000000001';
 
@@ -57,6 +62,7 @@ interface Overrides {
   removeMoveOperation?: Mock;
   removeModel?: Mock;
   releaseInstanceReservations?: Mock;
+  weightsPolicy?: Pick<RouteDeps['weightsPolicy'], 'findRefusedWeightFiles'>;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -123,6 +129,10 @@ function buildApp(over: Overrides = {}): {
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
+    },
+    // Advisory weights scan (#336): default finds nothing so pre-existing cases are unaffected.
+    weightsPolicy: over.weightsPolicy ?? {
+      findRefusedWeightFiles: vi.fn(() => Promise.resolve([])),
     },
     workerPool: {
       getWorker:
@@ -191,6 +201,8 @@ interface DeployOverrides {
   updateMoveOperation?: Mock;
   resumeMove?: Mock;
   getEntry?: Mock;
+  weightsPolicy?: Pick<RouteDeps['weightsPolicy'], 'findRefusedWeightFiles'>;
+  weightsDir?: string;
 }
 
 function buildDeployApp(over: DeployOverrides = {}): {
@@ -220,7 +232,7 @@ function buildDeployApp(over: DeployOverrides = {}): {
   });
 
   const deps = {
-    config: { weightsDir: '/weights' },
+    config: { weightsDir: over.weightsDir ?? '/weights' },
     leaderElection: { isLeader: true },
     modelRepository: {
       // Default mirrors ModelRepository.create: echoes params back as a ModelRecord, filling in
@@ -241,6 +253,8 @@ function buildDeployApp(over: DeployOverrides = {}): {
             engineArgs: (params.engineArgs as string[] | undefined) ?? null,
             runtimeModule: (params.runtimeModule as string | undefined) ?? null,
             pinned: (params.pinned as boolean | undefined) ?? false,
+            allowCoLocation: (params.allowCoLocation as boolean | undefined) ?? false,
+            allowUnsafeWeights: (params.allowUnsafeWeights as boolean | undefined) ?? false,
             createdAt: new Date(),
             updatedAt: new Date(),
           }),
@@ -309,6 +323,10 @@ function buildDeployApp(over: DeployOverrides = {}): {
     },
     notifications: {
       createNotification: vi.fn(() => Promise.resolve()),
+    },
+    // Advisory weights scan (#336): default finds nothing so pre-existing cases are unaffected.
+    weightsPolicy: over.weightsPolicy ?? {
+      findRefusedWeightFiles: vi.fn(() => Promise.resolve([])),
     },
     catalogService: {
       resolveRunnerMetadata:
@@ -1034,6 +1052,7 @@ describe('PUT /api/v1/models/:modelName configuration update', () => {
     displayName: '  Updated model  ',
     pinned: true,
     allowCoLocation: false,
+    allowUnsafeWeights: false,
   };
 
   it('replaces a stopped configuration and trims the display name', async () => {
@@ -2976,6 +2995,300 @@ describe('allowCoLocation (Phase 5 #276)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
     expect(res.statusCode).toBe(200);
     expect(res.json<{ allowCoLocation?: boolean }>().allowCoLocation).toBe(true);
+  });
+});
+
+describe('allowUnsafeWeights (#336)', () => {
+  const PLACEMENT = {
+    workerId: 'w1',
+    runnerType: 'vllm',
+    devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+  };
+
+  function storeRecord(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'rec-1',
+      name: 'm1',
+      runnerType: 'vllm',
+      modelPath: '/weights/m1',
+      requiredMemory: 8e9,
+      deviceType: null,
+      tensorParallel: 1,
+      engineConfig: null,
+      engineArgs: null,
+      runtimeModule: null,
+      servedModelName: null,
+      displayName: null,
+      pinned: false,
+      allowCoLocation: false,
+      allowUnsafeWeights: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  it('deploy persists allowUnsafeWeights and forwards it in StartRunnerRequest', async () => {
+    const place: Mock = vi.fn(() => PLACEMENT);
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve(storeRecord({ ...params, id: 'rec-1' })),
+    );
+    const deployModel = vi.fn<(params: Record<string, unknown>) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    const { app } = buildDeployApp({ place, createModelRecord, deployModel });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, allowUnsafeWeights: true },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(createModelRecord.mock.calls[0]?.[0]).toMatchObject({ allowUnsafeWeights: true });
+    expect(deployModel.mock.calls[0]?.[0]).toMatchObject({ allowUnsafeWeights: true });
+  });
+
+  it('deploy omits allowUnsafeWeights by default', async () => {
+    const place: Mock = vi.fn(() => PLACEMENT);
+    const deployModel = vi.fn<(params: Record<string, unknown>) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    const { app } = buildDeployApp({ place, deployModel });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(202);
+    const requestArg = deployModel.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    // The persisted default is a real `false`; absent and false are the same launch identity.
+    expect(requestArg?.allowUnsafeWeights).toBe(false);
+  });
+
+  it('rejects a non-boolean allowUnsafeWeights at deploy', async () => {
+    const { app } = buildDeployApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, allowUnsafeWeights: 'yes' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+
+  it('requires allowUnsafeWeights to be a boolean at update', async () => {
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/models/m1',
+      payload: {
+        runnerType: 'vllm',
+        modelPath: '/weights/m1',
+        requiredMemory: 8e9,
+        tensorParallel: 1,
+        pinned: false,
+        allowCoLocation: false,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+  });
+
+  it('rebuilt start keeps allowUnsafeWeights from the stored record', async () => {
+    const place: Mock = vi.fn(() => PLACEMENT);
+    const deployModel = vi.fn<(params: Record<string, unknown>) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    const { app } = buildDeployApp({
+      place,
+      deployModel,
+      findByName: vi.fn(() => Promise.resolve(storeRecord({ allowUnsafeWeights: true }))),
+    });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/start' });
+
+    expect(res.statusCode).toBe(202);
+    // Without the persisted flag a start-after-stop would silently downgrade to deny.
+    expect(deployModel.mock.calls[0]?.[0]).toMatchObject({ allowUnsafeWeights: true });
+  });
+
+  it('capacity-reclamation path keeps allowUnsafeWeights', async () => {
+    const victim = {
+      instanceId: 'inst-old',
+      modelName: 'old-model',
+      state: ModelLifecycleState.ACTIVE,
+      workerId: 'w1',
+      memoryBytes: 8e9,
+      lastInferenceAt: null,
+      pinned: false,
+    };
+    const place: Mock = vi
+      .fn()
+      .mockReturnValueOnce(null) // initial attempt: no capacity
+      .mockReturnValue(PLACEMENT); // post-teardown placement succeeds
+    const deployModel = vi.fn<(params: Record<string, unknown>) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    const createModelRecord = vi.fn((params: Record<string, unknown>) =>
+      Promise.resolve(storeRecord({ ...params, id: 'rec-1' })),
+    );
+    const { app } = buildDeployApp({
+      place,
+      deployModel,
+      createModelRecord,
+      selectVictims: vi.fn(() => [victim]),
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, allowUnsafeWeights: true },
+    });
+    expect(res.statusCode).toBe(202);
+
+    await vi.waitFor(() => expect(deployModel).toHaveBeenCalledOnce());
+    expect(deployModel.mock.calls[0]?.[0]).toMatchObject({ allowUnsafeWeights: true });
+  });
+
+  it('serializes allowUnsafeWeights on ModelDetail', async () => {
+    const { app } = buildDeployApp({
+      findByName: vi.fn(() => Promise.resolve(storeRecord({ allowUnsafeWeights: true }))),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/v1/models/m1' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ allowUnsafeWeights?: boolean }>().allowUnsafeWeights).toBe(true);
+  });
+
+  it('refuses a deploy whose weights are pickle-based', async () => {
+    const createModelRecord = vi.fn();
+    const weightsPolicy = {
+      findRefusedWeightFiles: vi.fn(() => Promise.resolve(['pytorch_model.bin'])),
+    };
+    const { app } = buildDeployApp({ weightsPolicy, createModelRecord });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe('INVALID_REQUEST');
+    const message = res.json<{ error: string }>().error;
+    expect(message).toContain('pytorch_model.bin');
+    expect(message).toContain('allowUnsafeWeights');
+    expect(message).toContain('SARDEENZ_ALLOW_UNSAFE_WEIGHTS');
+    expect(createModelRecord).not.toHaveBeenCalled();
+  });
+
+  it('allows the deploy when the opt-in is set', async () => {
+    const place: Mock = vi.fn(() => PLACEMENT);
+    const weightsPolicy = {
+      findRefusedWeightFiles: vi.fn(() => Promise.resolve(['pytorch_model.bin'])),
+    };
+    const { app } = buildDeployApp({ place, weightsPolicy });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/models',
+      payload: { ...DEPLOY_BODY, allowUnsafeWeights: true },
+    });
+
+    expect(res.statusCode).toBe(202);
+    // The opt-in skips the advisory scan entirely — the shim is the enforcement point.
+    expect(weightsPolicy.findRefusedWeightFiles).not.toHaveBeenCalled();
+  });
+
+  it('allows the deploy when the scan finds nothing', async () => {
+    const place: Mock = vi.fn(() => PLACEMENT);
+    const { app } = buildDeployApp({ place });
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models', payload: DEPLOY_BODY });
+
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('fails open when the weights directory is unreadable', async () => {
+    // A real, contained weights tree whose model directory does not exist: the scan's readdir
+    // throws ENOENT on the model path itself, so findRefusedWeightFiles logs at warn and returns
+    // [], and the deploy proceeds — the shim (the enforcement point) reports the real error. A
+    // fail-closed regression would surface as a 500 here.
+    const weightsDir = await mkdtemp(join(tmpdir(), 'weights-policy-route-'));
+    const warn = vi.fn();
+    try {
+      const place: Mock = vi.fn(() => PLACEMENT);
+      const { app } = buildDeployApp({
+        place,
+        weightsDir,
+        weightsPolicy: new WeightsPolicyService({ warn }),
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/models',
+        payload: { ...DEPLOY_BODY, modelPath: join(weightsDir, 'missing-model') },
+      });
+
+      expect(res.statusCode).toBe(202);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      await rm(weightsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an update whose weights are pickle-based', async () => {
+    const weightsPolicy = { findRefusedWeightFiles: vi.fn(() => Promise.resolve(['model.pt'])) };
+    const { app } = buildApp({
+      weightsPolicy,
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/models/m1',
+      payload: {
+        runnerType: 'vllm',
+        modelPath: '/weights/m1',
+        requiredMemory: 8e9,
+        tensorParallel: 1,
+        pinned: false,
+        allowCoLocation: false,
+        allowUnsafeWeights: false,
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ error: string }>().error).toContain('model.pt');
+  });
+
+  it('allows the update when the opt-in is set and persists it', async () => {
+    const weightsPolicy = { findRefusedWeightFiles: vi.fn(() => Promise.resolve(['model.pt'])) };
+    const updateModel = vi.fn<(name: string, params: Record<string, unknown>) => Promise<unknown>>(
+      () => Promise.resolve(storeRecord({ allowUnsafeWeights: true })),
+    );
+    const { app } = buildApp({
+      weightsPolicy,
+      updateModel,
+      getInstance: vi.fn(() => Promise.resolve(null)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([])),
+    });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/models/m1',
+      payload: {
+        runnerType: 'vllm',
+        modelPath: '/weights/m1',
+        requiredMemory: 8e9,
+        tensorParallel: 1,
+        pinned: false,
+        allowCoLocation: false,
+        allowUnsafeWeights: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(updateModel.mock.calls[0]?.[1]).toMatchObject({ allowUnsafeWeights: true });
   });
 });
 

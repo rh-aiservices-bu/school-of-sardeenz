@@ -82,6 +82,26 @@ describe('ApptainerLauncher.buildExecPlan', () => {
     },
   );
 
+  it('emits --env SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1 when the model opted in (#336)', async () => {
+    const { launcher } = makeLauncher();
+    const plan = await launcher.buildExecPlan(makeSpec({ allowUnsafeWeights: true }));
+
+    // --cleanenv means the runner inherits nothing: the flag must travel as an --env pair.
+    const idx = plan.args.indexOf('SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1');
+    expect(idx).toBeGreaterThan(0);
+    expect(plan.args[idx - 1]).toBe('--env');
+  });
+
+  it('emits no weights opt-in by default (#336)', async () => {
+    // Absent and false are the same launch identity: argv stays byte-identical to pre-#336.
+    for (const spec of [makeSpec(), makeSpec({ allowUnsafeWeights: false })]) {
+      const { launcher } = makeLauncher();
+      const plan = await launcher.buildExecPlan(spec);
+
+      expect(plan.args.some((arg) => arg.startsWith('SARDEENZ_ALLOW_UNSAFE_WEIGHTS'))).toBe(false);
+    }
+  });
+
   it('constructs the apptainer exec command with --nv, binds, cache redirects and entrypoint', async () => {
     const { launcher } = makeLauncher();
     const plan = await launcher.buildExecPlan(makeSpec());

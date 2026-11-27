@@ -13,6 +13,8 @@ import os
 import tempfile
 from typing import Any
 
+from .weights import check_weights
+
 SKLEARN_IMPL = "mlserver_sklearn.SKLearnModel"
 HUGGINGFACE_IMPL = "mlserver_huggingface.HuggingFaceRuntime"
 # Shipped by this package (Seldon publishes no mlserver-onnx); resolved by `mlserver start` inside
@@ -82,8 +84,14 @@ def _require_contained(uri: str, source_dir: str) -> None:
         )
 
 
-def build_model_settings(source_dir: str, model_name: str) -> dict[str, Any]:
+def build_model_settings(
+    source_dir: str, model_name: str, *, allow_unsafe: bool | None = None
+) -> dict[str, Any]:
     """Build the ``model-settings.json`` body enforcing ``model_name`` as the served identity.
+
+    Refuses pickle-based weights first (``check_weights``, #336): ``allow_unsafe=None`` reads
+    ``SARDEENZ_ALLOW_UNSAFE_WEIGHTS`` from the environment; the opt-in is required for
+    ``.bin``/``.pt``/``.pth``/``.ckpt``/``.pkl``/``.pickle``/``.joblib`` weights.
 
     If the source dir already ships a ``model-settings.json``, it is deep-copied with only
     ``name`` overridden and (when relative) ``parameters.uri`` rebased to an absolute path under
@@ -93,6 +101,7 @@ def build_model_settings(source_dir: str, model_name: str) -> dict[str, Any]:
     crafted absolute or ``../``-relative uri in a source-supplied model-settings.json must not be
     able to make MLServer load from an arbitrary path reachable inside the SIF mounts.
     """
+    check_weights(source_dir, allow_unsafe=allow_unsafe)
     source_settings = load_source_model_settings(source_dir)
     if source_settings is not None:
         settings = json.loads(json.dumps(source_settings))  # deep copy
