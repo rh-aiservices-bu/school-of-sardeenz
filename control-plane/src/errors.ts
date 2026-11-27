@@ -203,3 +203,21 @@ export class ControlPlaneError extends Error {
     return new ControlPlaneError(401, 'UNAUTHORIZED', 'Missing or invalid API token');
   }
 }
+
+/**
+ * The Redis compare-and-set lost the race: the instance's state no longer admits the requested
+ * transition because another actor moved it first. Wire-identical to `ControlPlaneError.invalidState`
+ * (409, `INVALID_STATE`, same message template and details); the subtype exists only so claim loops
+ * can skip "someone else won" while still treating every other transition failure as real (#303).
+ */
+export class StateConflictError extends ControlPlaneError {
+  constructor(modelName: string, currentState: string, action: string) {
+    super(
+      409,
+      'INVALID_STATE',
+      `Cannot ${action} model ${modelName}: current state is ${currentState}`,
+      { modelName, currentState, action },
+    );
+    this.name = 'StateConflictError';
+  }
+}

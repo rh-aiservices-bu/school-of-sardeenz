@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ModelLifecycleState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
-import { ControlPlaneError } from '../errors.js';
+import { ControlPlaneError, StateConflictError } from '../errors.js';
 import { deriveAggregateState } from '../services/model-lifecycle.js';
 import { refreshModelRoutingState } from '../services/sleep-wake.js';
 import { assertValidModelName } from '../utils/model-name.js';
@@ -68,8 +68,21 @@ export function registerInternalRoutes(app: FastifyInstance, deps: RouteDeps): v
 
     // Atomically claim SLEEPING → STARTING before launching background work.
     // The CAS transition (Lua script) ensures only one concurrent request wins this instance;
-    // a losing concurrent request will find it in STARTING and return 202 above.
-    await deps.lifecycle.transition(modelName, target.instanceId, ModelLifecycleState.STARTING);
+    // a losing concurrent request finds a lost CAS below and answers idempotently.
+    try {
+      await deps.lifecycle.transition(modelName, target.instanceId, ModelLifecycleState.STARTING);
+    } catch (err) {
+      if (!(err instanceof StateConflictError)) throw err;
+      // Lost the CAS race — another trigger is already waking this instance. Answer the benign
+      // already-waking 202: the endpoint is documented as idempotent (proxy-control-plane.yaml),
+      // and a 409 here would make the losing proxy replica abort its whole parked herd.
+      return reply.code(202).send({
+        accepted: true,
+        modelName,
+        currentState: ModelLifecycleState.STARTING,
+        message: 'Model is already waking up',
+      });
+    }
     await refreshModelRoutingState(deps.lifecycle, deps.routingMap, modelName);
 
     const runnerClient = deps.createRunnerClient(target.runnerHost, target.runnerPort);

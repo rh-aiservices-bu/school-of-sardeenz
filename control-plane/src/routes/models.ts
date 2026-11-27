@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { ModelLifecycleState } from '@sardeenz/types';
+import { ClusterEventType, ModelLifecycleState } from '@sardeenz/types';
 
 import type { RouteDeps } from './deps.js';
-import { ControlPlaneError } from '../errors.js';
+import { ControlPlaneError, StateConflictError } from '../errors.js';
+import { wakeClaimFailuresTotal } from '../health/metrics.js';
 import { isContainedIn } from '../utils/path-containment.js';
 import {
   assertModelNameRoutableForProtocol,
@@ -1942,8 +1943,25 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
               ModelLifecycleState.STARTING,
             );
             claimed.push(instance);
-          } catch {
-            // Lost the race on this instance — another concurrent wake claimed it first.
+          } catch (err) {
+            if (err instanceof StateConflictError) {
+              // Lost the race on this instance — another concurrent wake claimed it first.
+              continue;
+            }
+            // A real failure (Redis down, store error, corrupt record): the instance is neither
+            // claimed nor woken, so surface it instead of dropping it silently (#303). The 202
+            // body still reports `claimed.length`, honest about the partial wake (D5).
+            app.log.error({ err, modelName, instanceId: instance.instanceId }, 'Wake claim failed');
+            wakeClaimFailuresTotal.inc();
+            void deps.clusterEvents?.publish({
+              type: ClusterEventType.MODEL_STATE_CHANGED,
+              modelName,
+              timestamp: new Date().toISOString(),
+              message: `Wake claim failed for ${instance.instanceId} of ${modelName}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+              data: { instanceId: instance.instanceId, reason: 'wake-claim-failed' },
+            });
           }
         }
         await refreshModelRoutingState(deps.lifecycle, deps.routingMap, modelName);

@@ -665,6 +665,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   still get the `openai` creation default. `refreshModelRoutingState` now derives the model tag
   from all tagged instances agreeing instead of the first instance with a value, passing no value
   (keeping the entry's tag) and counting `instance-vs-instance` when they disagree.
+- **Wake claim loops no longer conflate a lost CAS with real transition failures (#303).**
+  `ModelLifecycleService.transition` now throws a typed `StateConflictError` on an
+  `INVALID_TRANSITION` (wire-identical: 409 `INVALID_STATE`, same message and `details`), and the
+  two claim loops skip only that subtype. The model-level wake loop logs `Wake claim failed` with
+  `{ modelName, instanceId }`, increments
+  `sardeenz_control_plane_wake_claim_failures_total` and publishes a `MODEL_STATE_CHANGED` cluster
+  event with `data.reason: 'wake-claim-failed'` for anything else — a Redis outage or corrupt
+  record now surfaces instead of being silently swallowed as a race, while the 202 body still
+  reports the claimed-instance count unchanged. The internal wake route the proxies call answers a
+  lost CAS with the benign already-waking 202 (the endpoint is documented as idempotent) instead of
+  a 409 that made the losing proxy replica abort its whole parked herd; non-conflict errors still
+  propagate.
 
 ### Security
 

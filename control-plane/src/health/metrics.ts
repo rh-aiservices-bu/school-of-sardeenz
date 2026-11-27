@@ -80,6 +80,12 @@ export const wakeTriggersTotal = new Counter({
   registers: [registry],
 });
 
+export const wakeClaimFailuresTotal = new Counter({
+  name: 'sardeenz_control_plane_wake_claim_failures_total',
+  help: 'Instances dropped from a model-level wake claim loop by a non-conflict transition error (#303)',
+  registers: [registry],
+});
+
 export const stateTransitionsTotal = new Counter({
   name: 'sardeenz_control_plane_state_transitions_total',
   help: 'Model state transitions',

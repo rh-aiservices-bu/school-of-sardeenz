@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ModelLifecycleState } from '@sardeenz/types';
 
 import { registerInternalRoutes } from '../internal.js';
-import { ControlPlaneError } from '../../errors.js';
+import { ControlPlaneError, StateConflictError } from '../../errors.js';
 import type { RouteDeps } from '../deps.js';
 import type { InstanceState } from '../../services/model-lifecycle.js';
 
@@ -198,15 +198,11 @@ describe('POST /api/v1/wake — internal wake route', () => {
     );
   });
 
-  it('does not launch background wake when CAS transition fails (concurrent request lost the race)', async () => {
+  it('returns the benign already-waking 202 when the CAS transition loses the race', async () => {
     mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
     // Simulate CAS failure: another request already moved the state to STARTING
     mocks.lifecycle.transition.mockRejectedValue(
-      ControlPlaneError.invalidState(
-        'test-model',
-        ModelLifecycleState.STARTING,
-        'transition to STARTING',
-      ),
+      new StateConflictError('test-model', ModelLifecycleState.STARTING, 'transition to STARTING'),
     );
     app = await buildTestApp(toDeps(mocks));
 
@@ -216,11 +212,36 @@ describe('POST /api/v1/wake — internal wake route', () => {
       payload: { modelName: 'test-model' },
     });
 
-    // The route should propagate the error (409 INVALID_STATE)
-    expect(res.statusCode).toBe(409);
-    expect(res.json<ErrorResponse>().code).toBe('INVALID_STATE');
+    // Idempotent 202 (proxy-control-plane.yaml): a 409 would make the losing proxy abort its herd
+    expect(res.statusCode).toBe(202);
+    expect(res.json<WakeResponse>()).toEqual({
+      accepted: true,
+      modelName: 'test-model',
+      currentState: ModelLifecycleState.STARTING,
+      message: 'Model is already waking up',
+    });
 
-    // Background wake must NOT have been started
+    // Background wake must NOT have been started, and the loser does not refresh the routing map
+    expect(mocks.sleepWake.wakeModel).not.toHaveBeenCalled();
+    expect(mocks.routingMap.setModelState).not.toHaveBeenCalled();
+  });
+
+  it('propagates a non-conflict transition error', async () => {
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([makeSleepingState()]);
+    mocks.lifecycle.transition.mockRejectedValue(new Error('redis unavailable'));
+    app = await buildTestApp(toDeps(mocks));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/wake',
+      payload: { modelName: 'test-model' },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json<ErrorResponse>()).toEqual({
+      error: 'redis unavailable',
+      code: 'INTERNAL_ERROR',
+    });
     expect(mocks.sleepWake.wakeModel).not.toHaveBeenCalled();
   });
 

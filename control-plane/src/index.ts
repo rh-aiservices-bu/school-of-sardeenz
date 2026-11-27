@@ -201,6 +201,7 @@ async function main(): Promise<void> {
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
       createWorkerClient,
       startupLogRepository,
+      clusterEvents,
     },
   });
 

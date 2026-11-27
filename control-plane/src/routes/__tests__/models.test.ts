@@ -2,11 +2,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Mock } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { ModelLifecycleState, Protocol } from '@sardeenz/types';
+import { ClusterEventType, ModelLifecycleState, Protocol } from '@sardeenz/types';
 import { registerModelRoutes } from '../models.js';
 import type { RouteDeps } from '../deps.js';
 import type { InstanceState, MoveOperation } from '../../services/model-lifecycle.js';
 import { WorkerHttpError } from '../../clients/worker.js';
+import { StateConflictError } from '../../errors.js';
+import { registry } from '../../health/metrics.js';
 
 const INSTANCE_ID = 'inst-000000000001';
 
@@ -57,6 +59,7 @@ interface Overrides {
   removeMoveOperation?: Mock;
   removeModel?: Mock;
   releaseInstanceReservations?: Mock;
+  clusterEvents?: Mock;
 }
 
 function buildApp(over: Overrides = {}): {
@@ -67,10 +70,13 @@ function buildApp(over: Overrides = {}): {
   logWarn: Mock;
   stopRunner: Mock;
   createWorkerClient: Mock;
+  publishClusterEvent: Mock;
 } {
   const logInfo = vi.fn();
   const logError = vi.fn();
   const logWarn = vi.fn();
+  // #303: the optional cluster-event sink, always wired so a test can assert a publish (or its absence).
+  const publishClusterEvent = over.clusterEvents ?? vi.fn();
 
   const getInstance = over.getInstance ?? vi.fn(() => Promise.resolve(ACTIVE_STATE));
   const getInstancesForModel =
@@ -141,6 +147,7 @@ function buildApp(over: Overrides = {}): {
       startTimer: vi.fn(() => vi.fn()),
       recordEviction: vi.fn(),
     },
+    clusterEvents: { publish: publishClusterEvent },
   } as unknown as RouteDeps;
 
   const app = Fastify({ logger: false });
@@ -159,7 +166,16 @@ function buildApp(over: Overrides = {}): {
     },
   );
   registerModelRoutes(app, deps);
-  return { app, deps, logInfo, logError, logWarn, stopRunner, createWorkerClient };
+  return {
+    app,
+    deps,
+    logInfo,
+    logError,
+    logWarn,
+    stopRunner,
+    createWorkerClient,
+    publishClusterEvent,
+  };
 }
 
 interface DeployOverrides {
@@ -3360,5 +3376,112 @@ describe('model wake returns promptly and backgrounds eviction (#242)', () => {
 
     const second = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
     expect(second.statusCode).toBe(202);
+  });
+});
+
+describe('#303 wake claim loop', () => {
+  /** Current value of the model-wake claim-failure counter (prom-client global registry). */
+  async function claimFailures(): Promise<number> {
+    const metrics = await registry.getMetricsAsJSON();
+    const metric = metrics.find(
+      (m) => m.name === 'sardeenz_control_plane_wake_claim_failures_total',
+    );
+    return metric?.values[0]?.value ?? 0;
+  }
+
+  function buildWakeApp(over: Overrides = {}) {
+    return buildApp({
+      getInstance: vi.fn(() => Promise.resolve(sleepingState)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([sleepingState])),
+      findByName: vi.fn(() => Promise.resolve({ name: 'm1' })),
+      ...over,
+    });
+  }
+
+  it('logs, counts and emits an event when a claim fails with a non-conflict error', async () => {
+    const transition = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
+    const { app, deps, logError, publishClusterEvent } = buildWakeApp({ transition });
+    const { wakeModel } = deps.sleepWake as unknown as { wakeModel: Mock };
+    const before = await claimFailures();
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+
+    // D5: the response body is unchanged — a partial (here empty) wake is honest via its count.
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({
+      modelName: 'm1',
+      state: ModelLifecycleState.STARTING,
+      previousState: ModelLifecycleState.SLEEPING,
+      message: 'Wake initiated for 0 instance(s)',
+    });
+
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({ modelName: 'm1', instanceId: INSTANCE_ID }),
+      'Wake claim failed',
+    );
+    expect(await claimFailures()).toBe(before + 1);
+    expect(publishClusterEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: ClusterEventType.MODEL_STATE_CHANGED,
+        modelName: 'm1',
+        data: { instanceId: INSTANCE_ID, reason: 'wake-claim-failed' },
+      }),
+    );
+
+    // The instance was never claimed, so no background wake is dispatched for it.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(wakeModel).not.toHaveBeenCalled();
+  });
+
+  it('skips a lost CAS quietly', async () => {
+    const transition = vi.fn(() =>
+      Promise.reject(
+        new StateConflictError('m1', ModelLifecycleState.STARTING, 'transition to STARTING'),
+      ),
+    );
+    const { app, logError, publishClusterEvent } = buildWakeApp({ transition });
+    const before = await claimFailures();
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({
+      modelName: 'm1',
+      state: ModelLifecycleState.STARTING,
+      previousState: ModelLifecycleState.SLEEPING,
+      message: 'Wake initiated for 0 instance(s)',
+    });
+    expect(logError).not.toHaveBeenCalledWith(expect.anything(), 'Wake claim failed');
+    expect(await claimFailures()).toBe(before);
+    expect(publishClusterEvent).not.toHaveBeenCalled();
+  });
+
+  it('claims the remaining instances when only some lose the race', async () => {
+    const second = { ...sleepingState, instanceId: 'inst-000000000002' };
+    const transition = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new StateConflictError('m1', ModelLifecycleState.STARTING, 'transition to STARTING'),
+      )
+      .mockResolvedValue(undefined);
+    const { app, deps } = buildWakeApp({
+      getInstancesForModel: vi.fn(() => Promise.resolve([sleepingState, second])),
+      transition,
+    });
+    const { wakeModel } = deps.sleepWake as unknown as { wakeModel: Mock };
+    const before = await claimFailures();
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({
+      modelName: 'm1',
+      state: ModelLifecycleState.STARTING,
+      previousState: ModelLifecycleState.SLEEPING,
+      message: 'Wake initiated for 1 instance(s)',
+    });
+    // The wake runs in the detached task.
+    await vi.waitFor(() => expect(wakeModel).toHaveBeenCalledOnce());
+    expect(await claimFailures()).toBe(before);
   });
 });
