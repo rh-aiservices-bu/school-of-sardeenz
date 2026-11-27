@@ -13,7 +13,7 @@ The proxy owns the **inference request path** — from client connection to runn
 - **Make orchestration decisions.** The control plane decides where models run, when to sleep them, and how to allocate device memory. The proxy reads the output of those decisions (the routing map) and acts on them.
 - **Health-check runners directly.** The control plane owns runner health. The proxy applies its own per-endpoint circuit breaker as a last-resort backstop, but does not poll runners.
 - **Persist state.** The proxy is fully stateless across replicas. Routing state lives in Redis. Circuit breaker and parking state are per-replica and ephemeral.
-- **Serve admin traffic.** Admin routes (`/healthz`, `/readyz`, `/metrics`) are on a separate port and not part of the inference path.
+- **Serve admin traffic.** Admin routes (`/healthz`, `/readyz`, `/metrics`, `/drain`) are on a separate port and not part of the inference path.
 
 ## Overview
 
@@ -424,28 +424,29 @@ replicas.
 
 All configuration is read from environment variables at startup via `Config::from_env()`.
 
-| Variable                                  | Type         | Default                  | Description                                                                                                                            |
-| ----------------------------------------- | ------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `SARDEENZ_PROXY_LISTEN_ADDR`              | `SocketAddr` | `0.0.0.0:8080`           | Inference server bind address (the legacy `SARDEENZ_LISTEN_ADDR` name is still read as a fallback)                                     |
-| `SARDEENZ_ADMIN_ADDR`                     | `SocketAddr` | `0.0.0.0:9099`           | Admin server bind address (health + metrics)                                                                                           |
-| `SARDEENZ_REDIS_URL`                      | `String`     | `redis://127.0.0.1:6379` | Redis/Valkey connection URL                                                                                                            |
-| `SARDEENZ_CONTROL_PLANE_URL`              | `String`     | `http://127.0.0.1:3000`  | Control plane base URL for wake triggers                                                                                               |
-| `SARDEENZ_LOG_LEVEL`                      | `String`     | `info`                   | Log level (`trace`, `debug`, `info`, `warn`, `error`)                                                                                  |
-| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`          | `u64`        | `300`                    | Timeout for forwarded requests to runners (includes streaming)                                                                         |
-| `SARDEENZ_REDIS_KEY_PREFIX`               | `String`     | `sardeenz`               | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`)                                                               |
-| `SARDEENZ_PARKING_TIMEOUT_SECS`           | `u64`        | `120`                    | Max time a request can be parked before returning 503                                                                                  |
-| `SARDEENZ_PARKING_MAX_PER_MODEL`          | `usize`      | `1000`                   | Max concurrently parked requests per model                                                                                             |
-| `SARDEENZ_PARKING_MAX_GLOBAL`             | `usize`      | `10000`                  | Max concurrently parked requests across all models                                                                                     |
-| `SARDEENZ_PARKING_MAX_BYTES`              | `usize`      | `1073741824`             | Max total bytes of parked request bodies (1 GiB)                                                                                       |
-| `SARDEENZ_PROXY_MAX_BODY_BYTES`           | `usize`      | `33554432`               | Max buffered request body size (32 MiB); larger bodies are rejected with 413 request_too_large                                         |
-| `SARDEENZ_PROXY_MAX_BUFFERED_BYTES`       | `usize`      | `268435456`              | Per-process budget over buffered bodies (256 MiB per replica); excess gets 503 overloaded. 0 = unlimited (WARN at startup)             |
-| `SARDEENZ_API_TOKEN`                      | `String`     | unset                    | Bearer token sent on wake-trigger calls to the control plane (required when its auth is enabled)                                       |
-| `SARDEENZ_CB_FAILURE_THRESHOLD`           | `u32`        | `5`                      | Failures within window to trip a circuit breaker                                                                                       |
-| `SARDEENZ_CB_FAILURE_WINDOW_SECS`         | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                                                                                    |
-| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS`       | `u64`        | `15`                     | Time before an open circuit transitions to half-open                                                                                   |
-| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`  | `usize`      | `0` (unlimited)          | Max concurrently forwarded (in-flight upstream) requests, across all models                                                            |
-| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `usize`      | `0` (unlimited)          | Max concurrently forwarded requests for a single model                                                                                 |
-| `SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS`      | `u64`        | `45`                     | Drain margin; the in-process shutdown deadline is `SARDEENZ_PARKING_TIMEOUT_SECS` + this (see [Graceful shutdown](#graceful-shutdown)) |
+| Variable                                  | Type         | Default                  | Description                                                                                                                                                                              |
+| ----------------------------------------- | ------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SARDEENZ_PROXY_LISTEN_ADDR`              | `SocketAddr` | `0.0.0.0:8080`           | Inference server bind address (the legacy `SARDEENZ_LISTEN_ADDR` name is still read as a fallback)                                                                                       |
+| `SARDEENZ_ADMIN_ADDR`                     | `SocketAddr` | `0.0.0.0:9099`           | Admin server bind address (health + metrics)                                                                                                                                             |
+| `SARDEENZ_REDIS_URL`                      | `String`     | `redis://127.0.0.1:6379` | Redis/Valkey connection URL                                                                                                                                                              |
+| `SARDEENZ_CONTROL_PLANE_URL`              | `String`     | `http://127.0.0.1:3000`  | Control plane base URL for wake triggers                                                                                                                                                 |
+| `SARDEENZ_LOG_LEVEL`                      | `String`     | `info`                   | Log level (`trace`, `debug`, `info`, `warn`, `error`)                                                                                                                                    |
+| `SARDEENZ_UPSTREAM_TIMEOUT_SECS`          | `u64`        | `300`                    | Timeout for forwarded requests to runners (includes streaming)                                                                                                                           |
+| `SARDEENZ_REDIS_KEY_PREFIX`               | `String`     | `sardeenz`               | Prefix for Redis keys and pub/sub channels (e.g. `sardeenz:routing-map`)                                                                                                                 |
+| `SARDEENZ_PARKING_TIMEOUT_SECS`           | `u64`        | `120`                    | Max time a request can be parked before returning 503                                                                                                                                    |
+| `SARDEENZ_PARKING_MAX_PER_MODEL`          | `usize`      | `1000`                   | Max concurrently parked requests per model                                                                                                                                               |
+| `SARDEENZ_PARKING_MAX_GLOBAL`             | `usize`      | `10000`                  | Max concurrently parked requests across all models                                                                                                                                       |
+| `SARDEENZ_PARKING_MAX_BYTES`              | `usize`      | `1073741824`             | Max total bytes of parked request bodies (1 GiB)                                                                                                                                         |
+| `SARDEENZ_PROXY_MAX_BODY_BYTES`           | `usize`      | `33554432`               | Max buffered request body size (32 MiB); larger bodies are rejected with 413 request_too_large                                                                                           |
+| `SARDEENZ_PROXY_MAX_BUFFERED_BYTES`       | `usize`      | `268435456`              | Per-process budget over buffered bodies (256 MiB per replica); excess gets 503 overloaded. 0 = unlimited (WARN at startup)                                                               |
+| `SARDEENZ_API_TOKEN`                      | `String`     | unset                    | Bearer token sent on wake-trigger calls to the control plane (required when its auth is enabled)                                                                                         |
+| `SARDEENZ_PROXY_INFERENCE_API_KEY`        | `String`     | unset                    | Optional static bearer key(s) for `/openai/*` and `/oip/*` (comma-separated rotation list; a blank segment fails startup; see [Optional inference API key](#optional-inference-api-key)) |
+| `SARDEENZ_CB_FAILURE_THRESHOLD`           | `u32`        | `5`                      | Failures within window to trip a circuit breaker                                                                                                                                         |
+| `SARDEENZ_CB_FAILURE_WINDOW_SECS`         | `u64`        | `30`                     | Sliding window for circuit breaker failure counting                                                                                                                                      |
+| `SARDEENZ_CB_RECOVERY_TIMEOUT_SECS`       | `u64`        | `15`                     | Time before an open circuit transitions to half-open                                                                                                                                     |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`  | `usize`      | `0` (unlimited)          | Max concurrently forwarded (in-flight upstream) requests, across all models                                                                                                              |
+| `SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL` | `usize`      | `0` (unlimited)          | Max concurrently forwarded requests for a single model                                                                                                                                   |
+| `SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS`      | `u64`        | `45`                     | Drain margin; the in-process shutdown deadline is `SARDEENZ_PARKING_TIMEOUT_SECS` + this (see [Graceful shutdown](#graceful-shutdown))                                                   |
 
 All socket address and numeric values are validated at startup; a parse failure causes the process to exit immediately.
 
@@ -453,18 +454,19 @@ All socket address and numeric values are validated at startup; a parse failure 
 
 Metrics are exposed in Prometheus text format on `GET /metrics` (admin port). All metric names use the `sardeenz_proxy_` prefix.
 
-| Metric                                      | Type      | Labels                             | Description                                                                    |
-| ------------------------------------------- | --------- | ---------------------------------- | ------------------------------------------------------------------------------ |
-| `sardeenz_proxy_requests_total`             | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                                           |
-| `sardeenz_proxy_request_duration_seconds`   | Histogram | —                                  | End-to-end request latency, excluding parking wait time                        |
-| `sardeenz_proxy_active_connections`         | Gauge     | —                                  | Currently active forwarded connections                                         |
-| `sardeenz_proxy_buffered_body_bytes`        | Gauge     | —                                  | Bytes currently held in buffered inference request bodies (per replica)        |
-| `sardeenz_proxy_parked_connections`         | Gauge     | `model`                            | Currently parked connections, per model                                        |
-| `sardeenz_proxy_wake_triggers_total`        | Counter   | `result`                           | Wake triggers fired to the control plane                                       |
-| `sardeenz_proxy_wake_herd_fastfail_total`   | Counter   | `model`                            | Piggybacked parked requests failed fast because the shared wake trigger failed |
-| `sardeenz_proxy_parking_duration_seconds`   | Histogram | —                                  | Time a request spent parked before forwarding                                  |
-| `sardeenz_proxy_circuit_breaker_state`      | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                           |
-| `sardeenz_proxy_routing_parse_errors_total` | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model        |
+| Metric                                           | Type      | Labels                             | Description                                                                                            |
+| ------------------------------------------------ | --------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `sardeenz_proxy_requests_total`                  | Counter   | `model`, `endpoint`, `status_code` | Total inference requests, by outcome                                                                   |
+| `sardeenz_proxy_request_duration_seconds`        | Histogram | —                                  | End-to-end request latency, excluding parking wait time                                                |
+| `sardeenz_proxy_active_connections`              | Gauge     | —                                  | Currently active forwarded connections                                                                 |
+| `sardeenz_proxy_buffered_body_bytes`             | Gauge     | —                                  | Bytes currently held in buffered inference request bodies (per replica)                                |
+| `sardeenz_proxy_parked_connections`              | Gauge     | `model`                            | Currently parked connections, per model                                                                |
+| `sardeenz_proxy_wake_triggers_total`             | Counter   | `result`                           | Wake triggers fired to the control plane                                                               |
+| `sardeenz_proxy_wake_herd_fastfail_total`        | Counter   | `model`                            | Piggybacked parked requests failed fast because the shared wake trigger failed                         |
+| `sardeenz_proxy_parking_duration_seconds`        | Histogram | —                                  | Time a request spent parked before forwarding                                                          |
+| `sardeenz_proxy_circuit_breaker_state`           | Gauge     | `endpoint`                         | Circuit breaker state: 0=closed, 1=open, 2=half-open                                                   |
+| `sardeenz_proxy_routing_parse_errors_total`      | Counter   | `model`                            | Routing entries that failed to deserialize during Redis sync, per model                                |
+| `sardeenz_proxy_inference_auth_rejections_total` | Counter   | —                                  | Inference requests rejected by the optional static API key (no labels; the key is never a label value) |
 
 Both histograms are registered with explicit bucket boundaries (seconds) so they render as
 Prometheus histograms (`_bucket` series) rather than summaries — required for the dashboard's

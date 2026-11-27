@@ -183,7 +183,10 @@ vitest config allows an empty run), a final `if: always()` step runs
 test executed or any test was skipped** — a green integration job therefore means the tests ran,
 not that they were skipped. Rollout: the job landed staged with `continue-on-error: true` and is
 now **blocking** — its first green run (32/32 tests, 2026-11-25) followed the #322 cutover-barrier
-fix (#325), and that one line was deleted.
+fix (#325), and that one line was deleted. Since M21 the suite also carries scripted
+**failure scenarios** (`failure-scenarios.integration.test.ts`: Redis loss vs the mass-divergence
+guard, control-plane loss mid-wake, worker/runner loss mid-launch, concurrent wake triggers),
+taking it to 44 tests.
 
 ## Common Commands
 
@@ -199,7 +202,7 @@ fix (#325), and that one line was deleted.
 | `make test`             | Run all test suites (Vitest + cargo test)                                                                                                                                |
 | `make test-python`      | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
 | `make test-coverage`    | Run tests with V8 coverage                                                                                                                                               |
-| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 32/32 since 2026-11-25) |
+| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 44/44 since M21)        |
 | `make codegen`          | Regenerate types from OpenAPI specs                                                                                                                                      |
 | `make services`         | Start dev services (Redis + Postgres)                                                                                                                                    |
 | `make services-stop`    | Stop dev services                                                                                                                                                        |

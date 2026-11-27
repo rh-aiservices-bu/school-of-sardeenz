@@ -246,6 +246,12 @@ The same "Namespace and CNI considerations" caveats as above apply unchanged: Ne
 labels are not workload identity, and the rules are only as strong as the CNI's enforcement of
 them.
 
+One flow is intentionally absent from the table: the proxy pod's `preStop` hook calls
+`GET /drain` on `sardeenz-proxy-admin:9099` (`deployment/proxy/deployment.yaml`, #330), and that
+call is kubelet-originated — node-originated traffic is unaffected by pod-scoped NetworkPolicy,
+like the liveness/readiness probes, so it needs no allow rule. The endpoint is stateless (it
+holds the response for 5 s and answers `200 drained`) and is never exposed to any other source.
+
 ## Module store write protection
 
 The `sardeenz-modules` PVC (the module store) is write-protected by a cluster-scoped
