@@ -10,6 +10,53 @@ The proxy reads the routing map from `sardeenz-redis` and sends wake requests to
 `sardeenz-control-plane`. It consumes `SARDEENZ_API_TOKEN` from the shared
 `sardeenz-service-tokens` Secret described in [`../README.md`](../README.md).
 
+## High availability and graceful shutdown
+
+The Deployment runs **two replicas** behind the inference Service, with a PodDisruptionBudget
+(`minAvailable: 1`) registered by this kustomization. A node drain may evict one proxy pod at a
+time and the survivor keeps serving: the proxy holds no cross-replica state (ADR-007), so replicas
+share only what Redis already shares — the routing map, presence leases and propagation barriers.
+
+Replicas spread across nodes **softly** (`topologySpreadConstraints`, `maxSkew: 1`,
+`kubernetes.io/hostname`, `whenUnsatisfiable: ScheduleAnyway`): a multi-node cluster ends up with
+one pod per node, while a single-node cluster still schedules both instead of leaving the second
+one `Pending`. There is no `strategy:` override — the default RollingUpdate math with two replicas
+is `maxSurge: 1` / `maxUnavailable: 0`, i.e. a readiness-gated, zero-downtime rollout: the new pod
+must pass `/readyz` before the old one is removed.
+
+**Per-process (per-replica) limits.** Every capacity limit the proxy enforces is per process,
+never cluster-wide: parking (`SARDEENZ_PARKING_MAX_PER_MODEL`, `SARDEENZ_PARKING_MAX_GLOBAL`,
+`SARDEENZ_PARKING_MAX_BYTES`), forwarding caps (`SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS`,
+`SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL`) and the buffered-body budget
+(`SARDEENZ_PROXY_MAX_BUFFERED_BYTES`, see [Buffered-body budget](#buffered-body-budget)). With two
+replicas each configured value buys that capacity **per replica**, so the effective aggregate
+ceiling is the configured value × the replica count — e.g. 2 × 256 MiB of buffered bodies across
+the Deployment — while a single request is still capped by the replica that receives it: the
+Service load-balances, it does not aggregate.
+
+**Shutdown sequence.** On pod deletion the kubelet first runs the `preStop` httpGet against
+`sardeenz-proxy-admin:9099/drain`, which holds the response for 5 s so router and endpoint
+propagation finish before the pod stops accepting (the image is distroless, so there is no shell and
+no `sleep` for a classic `exec` hook). SIGTERM then flips `/readyz` to `503` — the pod drops out of
+the Service's ready endpoints and `inference` handlers decline new work — and the servers stop
+accepting while live connections finish, bounded by an in-process deadline:
+`SARDEENZ_PARKING_TIMEOUT_SECS + SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS` (165 s at the defaults of
+120 s + 45 s). Size the grace period against that:
+
+`terminationGracePeriodSeconds` (180 s) ≥ preStop (5 s) + parking timeout (120 s) + drain margin
+(45 s), with ~10 s of process-exit slack. Raise the three together when raising
+`SARDEENZ_PARKING_TIMEOUT_SECS` — the in-process deadline is _derived_ from it
+(`Config::shutdown_deadline`), so the manifest cannot silently fall behind the code, but the grace
+period is a literal and can.
+
+Because the deadline is parking timeout plus a margin, a request parked on a wake always resolves
+first: it is either served or returns its ordinary parking `503`. Requests still streaming when the
+deadline expires are **cut** — the process exits, the client sees a connection reset (not a JSON
+error) — and a `WARN` naming the deadline and the parked count is logged first. Long SSE streams
+that live past ~165 s therefore need a longer
+`SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS` (and a matching grace period), or they will be cut on every
+rollout and node drain.
+
 ## Request body limit
 
 Both inference surfaces (`/openai/*` and `/oip/*`) buffer the whole request body before routing it.
@@ -18,7 +65,7 @@ rejected before routing with the proxy's JSON error envelope — `413`, `type: "
 a message naming the configured limit and the variable.
 
 The limit bounds one request, not total proxy memory — the aggregate of concurrently buffered
-bodies is bounded separately by `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (see
+bodies within one replica is bounded separately by `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (see
 [Buffered-body budget](#buffered-body-budget)), and the container memory limit in `deployment.yaml`
 (`1Gi`) remains the hard ceiling. Keep the inference Service cluster-internal or behind an
 authenticated gateway that enforces its own body cap, and lower `SARDEENZ_PROXY_MAX_BODY_BYTES`
@@ -28,12 +75,14 @@ router rejects the request first with its own error shape.
 
 ## Buffered-body budget
 
-`SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`, 256 MiB) is a global admission budget
-over **all bytes of request bodies currently buffered in memory** by the `/openai/*` and `/oip/*`
-surfaces. The counter is frame-based, so it is computed from the bytes actually received: a lying,
-too-small or absent `Content-Length` cannot bypass it, and chunked framing is counted exactly like
-declared framing. A request that would cross the budget is rejected with the proxy's JSON error
-envelope — `503`, `type: "overloaded"`, message
+`SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`, 256 MiB) is a **per-process
+(per-replica)** admission budget over **all request-body bytes this process currently holds in
+memory** across the `/openai/*` and `/oip/*` surfaces. It is not a cluster-wide budget: each replica
+enforces its own, independently, so the aggregate ceiling across the Deployment is the configured
+value × the replica count. The counter is frame-based, so it is computed from the bytes actually
+received: a lying, too-small or absent `Content-Length` cannot bypass it, and chunked framing is
+counted exactly like declared framing. A request that would cross the budget is rejected with the
+proxy's JSON error envelope — `503`, `type: "overloaded"`, message
 `buffered body budget exceeded (SARDEENZ_PROXY_MAX_BUFFERED_BYTES); retry later` — either on its
 declared `Content-Length` before the read starts (advisory) or as soon as a data frame would cross
 the budget (authoritative). Admission never waits, so the budget cannot deadlock against parking or
@@ -56,14 +105,16 @@ but a long wake storm holding parked bytes can saturate this budget and `503` ne
 the parked bodies time out or the model wakes. Size the budget above the parked working set you
 expect during a wake.
 
-Sizing: the deployed value is 256 MiB, 25 % of the proxy's `1Gi` container memory limit, leaving
-headroom for per-connection stacks, routing state and response streaming. Peak buffered memory is
-bounded by this value rather than by concurrency, so raise it and the memory limit together. `0`
-disables enforcement — an explicit opt-out that logs
+Sizing: the deployed value is 256 MiB **per replica**, 25 % of each proxy container's `1Gi` memory
+limit, leaving headroom for per-connection stacks, routing state and response streaming. Peak
+buffered memory in one replica is bounded by this value rather than by concurrency, so raise it and
+the memory limit together; with two replicas the Deployment can hold up to 512 MiB of buffered
+bodies. `0` disables enforcement — an explicit opt-out that logs
 `buffered-body budget enforcement disabled (SARDEENZ_PROXY_MAX_BUFFERED_BYTES=0)` at startup; the
 counter and the gauge keep running either way so the exposure stays visible. Watch
-`sardeenz_proxy_buffered_body_bytes` (admin `/metrics`, no labels) for the current value, and alarm
-when it approaches the configured budget.
+`sardeenz_proxy_buffered_body_bytes` (admin `/metrics`, no labels) for the current value — one
+series per replica, so sum across replicas for the Deployment total — and alarm when it approaches
+the configured budget.
 
 ## Inference API key
 

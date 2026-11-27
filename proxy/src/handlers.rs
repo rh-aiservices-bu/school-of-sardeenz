@@ -305,6 +305,19 @@ async fn handle_oip_infer_inner(
     run_inference(state, model_name, parts, body_bytes, Protocol::Oip).await
 }
 
+/// 503 for a request declined by an admission check. Status and error `type`
+/// stay `model_unavailable` in both cases; only the message names the real
+/// cause, so a drain-time 503 is not read as a Redis outage (#330).
+fn not_ready_error(state: &AppState) -> ProxyError {
+    if state.is_shutting_down() {
+        ProxyError::ModelUnavailable(
+            "proxy is shutting down; retry later or use another replica".to_string(),
+        )
+    } else {
+        ProxyError::ModelUnavailable("routing state is not connected".to_string())
+    }
+}
+
 /// Resolve→park→forward core shared by the openai and oip infer handlers.
 /// `protocol` is the family of the surface the request arrived on; both admission checks use it.
 async fn run_inference(
@@ -318,7 +331,7 @@ async fn run_inference(
     // would let a move's cutover barrier miss this process while it continues selecting the old
     // runner.
     if !state.is_ready().await {
-        return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
+        return Err(not_ready_error(&state));
     }
 
     let resolution = state.resolver.resolve(&model_name, protocol).await?;
@@ -355,7 +368,9 @@ async fn run_inference(
     // Close the race where Redis disconnects after the admission check but before this request
     // acquires its routing generation. Disconnect cleanup waits on existing leases; a request
     // that acquired only after that wait began must observe not-ready and decline the old route.
-    if !state.is_ready().await {
+    // Drain-blind by design (#330): a request parked before SIGTERM was already admitted, and D6
+    // promises it resolves normally — served, or its ordinary parking 503.
+    if !state.routing_state_ready() {
         return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
     }
     let entry = &routing_lease.entry;
@@ -483,7 +498,7 @@ async fn handle_oip_ready_inner(
     request: Request<Body>,
 ) -> Result<Response, ProxyError> {
     if !state.is_ready().await {
-        return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
+        return Err(not_ready_error(&state));
     }
     let model_name = crate::protocol::extract_model_name_from_path(&model).ok_or_else(|| {
         ProxyError::BadRequest("missing or invalid model path segment".to_string())
@@ -494,7 +509,11 @@ async fn handle_oip_ready_inner(
         .get_with_lease(&model_name)
         .await
         .ok_or_else(|| ProxyError::ModelNotFound(model_name.clone()))?;
-    if !state.is_ready().await {
+    // Same drain-blind recheck as `run_inference` (#330): this exists to close the Redis
+    // disconnect race between admission and lease acquisition, so a probe admitted before
+    // SIGTERM is not turned into a 503 by the drain flag alone. A genuine disconnect still
+    // clears `redis_connected`, which `routing_state_ready` always sees.
+    if !state.routing_state_ready() {
         return Err(ProxyError::ModelUnavailable("routing state is not connected".to_string()));
     }
     let entry = &routing_lease.entry;

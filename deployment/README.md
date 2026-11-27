@@ -132,6 +132,7 @@ oc rollout status deployment/sardeenz-proxy -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-dashboard -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-worker -n "$SARDEENZ_NAMESPACE"
 ```
+
 If applying over a namespace that already exists fails with a field-ownership conflict on the
 Namespace's `metadata.labels`, apply the label directly
 (`oc label namespace "$SARDEENZ_NAMESPACE" sardeenz.io/module-guard=enforce --overwrite`) rather
@@ -194,7 +195,7 @@ are distinct, so give one entry each):
 # deployment/overlays/<env>/kustomization.yaml
 images:
   - name: quay.io/rh-aiservices-bu/sardeenz-proxy
-    newTag: "5bb4090"          # a sha tag publish-images.yml already pushed
+    newTag: '5bb4090' # a sha tag publish-images.yml already pushed
   - name: quay.io/rh-aiservices-bu/sardeenz-control-plane
     digest: sha256:<manifest-list-digest>
 ```
@@ -283,10 +284,20 @@ Plan for disruption: `sardeenz-control-plane` and `sardeenz-worker` are `strateg
 never become Ready; worker: it holds an exclusive GPU). A worker rollout terminates **every runner
 on that worker**; the 60 s `terminationGracePeriodSeconds` drains in-flight runners (the agent
 SIGTERMs each runner, which drains vLLM). Restart the worker when model disruption is acceptable, or
-stop models first through the control plane. The proxy and dashboard use the default RollingUpdate
-with one replica: the replacement pod starts alongside the old one (the default `maxSurge` rounds
-up to one pod), must pass its readiness probe, and only then is the old pod removed — a
-readiness-gated handover with no planned outage, subject to the image pull succeeding.
+stop models first through the control plane. The proxy runs **two replicas** with a
+PodDisruptionBudget (`minAvailable: 1`) and soft topology spread across nodes, so a node drain
+evicts one pod while the survivor keeps serving, and a rollout surges one pod (the default
+RollingUpdate math is `maxSurge: 1`, `maxUnavailable: 0`), gates it on `/readyz`, then drains the
+old one through a 5 s `preStop /drain` on the admin port (the image is distroless — no shell to
+`sleep` in) and a 180 s grace period: in-flight SSE streams and parked requests shorter than the
+derived ~165 s in-process shutdown deadline (`SARDEENZ_PARKING_TIMEOUT_SECS` +
+`SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS`) complete, longer streams are cut with a `WARN` — a
+readiness-gated handover with no planned outage, subject to the image pull succeeding. See
+[`proxy/README.md`](proxy/README.md#high-availability-and-graceful-shutdown). The dashboard keeps
+the default RollingUpdate with one replica: the replacement pod starts alongside the old one (the
+default `maxSurge` rounds up to one pod), must pass its readiness probe, and only then is the old
+pod removed — a readiness-gated handover with no planned outage, subject to the image pull
+succeeding.
 
 ### Upgrade order: control plane before proxy
 

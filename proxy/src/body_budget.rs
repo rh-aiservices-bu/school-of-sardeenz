@@ -1,5 +1,8 @@
-//! Global admission budget over the total bytes of request bodies buffered in
-//! memory by the proxy's two inference surfaces (`/openai/*`, `/oip/*`) — #300.
+//! Per-process admission budget over the total bytes of request bodies buffered
+//! in memory by the proxy's two inference surfaces (`/openai/*`, `/oip/*`) —
+//! #300. Each replica enforces its own budget independently (ADR-007: no
+//! cross-replica shared state), so the Deployment-wide ceiling is this value
+//! times the replica count.
 //!
 //! `SARDEENZ_PROXY_MAX_BODY_BYTES` bounds one request; nothing bounded the
 //! aggregate, so ~32 concurrent maximum-size bodies could reach the container
@@ -43,7 +46,7 @@ struct Inner {
     in_use: AtomicUsize,
 }
 
-/// Global budget over total buffered body bytes. Cloning is cheap (shared `Arc`).
+/// Per-process budget over total buffered body bytes. Cloning is cheap (shared `Arc`).
 #[derive(Clone)]
 pub struct BufferedBodyBudget {
     inner: Arc<Inner>,

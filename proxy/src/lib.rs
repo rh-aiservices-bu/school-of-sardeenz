@@ -11,4 +11,5 @@ pub mod parking;
 pub mod protocol;
 pub mod routes;
 pub mod routing;
+pub mod shutdown;
 pub mod state;

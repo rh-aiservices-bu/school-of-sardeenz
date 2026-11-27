@@ -11,6 +11,7 @@ mod parking;
 mod protocol;
 mod routes;
 mod routing;
+mod shutdown;
 mod state;
 
 use axum::routing::get;
@@ -150,6 +151,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(handlers::handle_metrics))
+        // preStop hook target (#330): distroless has no shell/sleep, so the
+        // endpoint-propagation delay is served by holding this response. It
+        // stays on the internal admin listener — no new exposure.
+        .route("/drain", get(|| async { shutdown::prestop_drain(shutdown::PRESTOP_DELAY).await }))
         .with_state(state.clone());
 
     // Bind listeners
@@ -184,20 +189,24 @@ async fn main() -> anyhow::Result<()> {
     // Wait for shutdown signal
     shutdown_signal().await;
 
-    // Signal all tasks to stop
+    // Readiness flips first: the pod leaves the Service's endpoint pool and
+    // inference handlers decline new work while in-flight requests drain.
+    state.set_shutting_down(true);
+
+    // Signal all tasks to stop accepting new connections (keep-alive disabled
+    // on live connections; in-flight requests continue).
     drop(shutdown_tx);
 
-    // Wait for both servers to drain gracefully
-    let (proxy_result, admin_result) = tokio::join!(proxy_handle, admin_handle);
-    if let Err(e) = proxy_result {
-        tracing::error!(error = %e, "proxy server task failed");
-    }
-    if let Err(e) = admin_result {
-        tracing::error!(error = %e, "admin server task failed");
-    }
-
-    // Wait for Redis sync to stop
-    let _ = redis_handle.await;
+    // Drain within the derived deadline (parking timeout + drain margin):
+    // parked requests always resolve first; only longer streams are cut.
+    shutdown::drain_with_deadline(
+        proxy_handle,
+        admin_handle,
+        redis_handle,
+        &state,
+        config.shutdown_deadline(),
+    )
+    .await;
 
     tracing::info!("proxy shut down");
     Ok(())

@@ -259,13 +259,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The proxy bounds the aggregate of concurrently buffered inference bodies (#300).**
   `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`, 256 MiB; `0` = unlimited, a WARN-logged
   opt-out) counts every byte the `/openai/*` and `/oip/*` surfaces hold buffered — through parking
-  and forwarding — against one global budget, released on completion or cancellation, and rejects a
-  request that would cross it with the existing `503` envelope (`type: "overloaded"`, message naming
-  the variable) before or during the read. Per-request over-limit behaviour (413
-  `request_too_large`) is unchanged and takes precedence; the count is frame-based, so a lying or
-  absent `Content-Length` cannot bypass it. The manifest sets 256 MiB against the proxy's 1 GiB
-  memory limit (a parked body counts against both this budget and `SARDEENZ_PARKING_MAX_BYTES`), and
-  a new `sardeenz_proxy_buffered_body_bytes` gauge exposes the in-use bytes.
+  and forwarding — against one per-process budget (each replica enforces its own), released on
+  completion or cancellation, and rejects a request that would cross it with the existing `503`
+  envelope (`type: "overloaded"`, message naming the variable) before or during the read.
+  Per-request over-limit behaviour (413 `request_too_large`) is unchanged and takes precedence; the
+  count is frame-based, so a lying or absent `Content-Length` cannot bypass it. The manifest sets
+  256 MiB against the proxy's 1 GiB memory limit (a parked body counts against both this budget and
+  `SARDEENZ_PARKING_MAX_BYTES`), and a new `sardeenz_proxy_buffered_body_bytes` gauge exposes the
+  in-use bytes.
 
 - **ADR-031 records that in-namespace traffic is plaintext by design (#333).** The new ADR
   (`docs/architecture/adrs/adr-031-in-namespace-plaintext-traffic.md`) tabulates every hop that
@@ -281,6 +282,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `pg` honours `sslmode=` in the connection string, both with no code change, while the Rust
   proxy's `redis` dependency enables no TLS feature and rejects `rediss://`, so a cluster-wide
   Redis TLS migration waits on the proxy.
+- **The routing proxy is actually highly available, and drains instead of being killed (#330).** The
+  Deployment defaults to two replicas with a PodDisruptionBudget (`minAvailable: 1`) and soft
+  hostname topology spread (`ScheduleAnyway`, so a single-node cluster still schedules both), which
+  makes a node drain evict one replica while the survivor serves. Shutdown is bounded instead of
+  unbounded: a 5 s `preStop` httpGet on the admin port serves the endpoint-propagation delay (the
+  image is distroless — no shell, no `sleep`) and a 180 s `terminationGracePeriodSeconds` covers a
+  **derived** in-process deadline, `SARDEENZ_PARKING_TIMEOUT_SECS + SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS`
+  (165 s at the defaults; the manifest comment records the
+  `terminationGracePeriodSeconds ≥ preStop + parking timeout + drain secs` invariant). SIGTERM
+  flips `/readyz` to `503` so the pod leaves the Service's endpoints and new work is declined, then
+  in-flight requests finish; past the deadline the proxy warns with the parked count and exits, so
+  only streams longer than the deadline are cut (client sees a reset). Parked requests always
+  resolve first — served, or their ordinary parking 503. Two-replica behaviour is now proven rather
+  than assumed: the control plane deduplicates concurrent wake triggers from both replicas into one
+  wake (both get 2xx, `wakeModel` runs once), each replica still fires exactly one trigger for its
+  own parked herd, parking limits stay per replica, and both replicas hold distinct presence leases
+  and acknowledge a routing propagation barrier.
 
 ### Fixed
 

@@ -18,10 +18,12 @@ pub struct Config {
     /// zero-downtime rotation (D2); comparison is constant-time per key.
     pub inference_api_keys: Vec<String>,
     pub max_body_bytes: usize,
-    /// Aggregate admission budget over all concurrently buffered inference
-    /// bodies (#300). Default `268435456` (256 MiB) — enforcement is ON out of
-    /// the box, the same fail-closed precedent as `max_body_bytes`. `0` is an
-    /// explicit, WARN-logged unlimited opt-out (see `main.rs`); counting and the
+    /// Per-process admission budget over all concurrently buffered inference
+    /// bodies (#300): each replica enforces its own, so the Deployment-wide
+    /// ceiling is twice this value at two replicas. Default `268435456`
+    /// (256 MiB) — enforcement is ON out of the box, the same fail-closed
+    /// precedent as `max_body_bytes`. `0` is an explicit, WARN-logged unlimited
+    /// opt-out (see `main.rs`); counting and the
     /// `sardeenz_proxy_buffered_body_bytes` gauge still run.
     pub max_buffered_bytes: usize,
     /// Max concurrently *forwarded* (in-flight upstream) requests across all
@@ -31,6 +33,12 @@ pub struct Config {
     pub max_concurrent_forwards: usize,
     /// Max concurrently forwarded requests for a single model. `0` = unlimited.
     pub max_concurrent_forwards_per_model: usize,
+    /// Drain margin added to the parking timeout to bound in-process shutdown
+    /// (#330): the deadline is `parking.timeout + shutdown_drain_secs`, derived
+    /// by [`Config::shutdown_deadline`] and never a constant, so raising
+    /// `SARDEENZ_PARKING_TIMEOUT_SECS` cannot silently invalidate the
+    /// Deployment's `terminationGracePeriodSeconds`.
+    pub shutdown_drain_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -111,7 +119,17 @@ impl Config {
                 "SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL",
                 "0",
             )?,
+            shutdown_drain_secs: parse_env("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "45")?,
         })
+    }
+
+    /// In-process shutdown deadline: parking timeout + drain margin (D6, #330).
+    /// Derived, never a constant, so raising `SARDEENZ_PARKING_TIMEOUT_SECS`
+    /// cannot silently invalidate the Deployment's
+    /// `terminationGracePeriodSeconds` (invariant: `terminationGracePeriodSeconds`
+    /// ≥ preStop (5 s) + this deadline).
+    pub fn shutdown_deadline(&self) -> Duration {
+        self.parking.timeout + Duration::from_secs(self.shutdown_drain_secs)
     }
 }
 
@@ -198,6 +216,7 @@ mod tests {
             "SARDEENZ_PROXY_INFERENCE_API_KEY",
             "SARDEENZ_PROXY_MAX_BODY_BYTES",
             "SARDEENZ_PROXY_MAX_BUFFERED_BYTES",
+            "SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS",
         ] {
             std::env::remove_var(key);
         }
@@ -218,6 +237,45 @@ mod tests {
         );
         assert_eq!(config.max_concurrent_forwards, 0);
         assert_eq!(config.max_concurrent_forwards_per_model, 0);
+        assert_eq!(
+            config.shutdown_drain_secs, 45,
+            "default shutdown drain margin mirrors the Deployment's 45 s env value (#330)"
+        );
+    }
+
+    #[test]
+    fn explicit_shutdown_drain_secs_parses() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "123");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS");
+        assert_eq!(config.unwrap().shutdown_drain_secs, 123);
+    }
+
+    #[test]
+    fn invalid_shutdown_drain_secs_fails() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "banana");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS");
+        let error = config.expect_err("a non-numeric drain margin must fail startup");
+        assert!(
+            error.to_string().contains("invalid value for SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS"),
+            "message should name the variable: {error}"
+        );
+    }
+
+    #[test]
+    fn shutdown_deadline_is_parking_plus_drain() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PARKING_TIMEOUT_SECS", "120");
+        std::env::set_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "45");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PARKING_TIMEOUT_SECS");
+        std::env::remove_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS");
+        // 165 s at the documented defaults; the manifest's 180 s grace period
+        // leaves 15 s for the 5 s preStop plus process-exit slack (D6).
+        assert_eq!(config.unwrap().shutdown_deadline(), Duration::from_secs(165));
     }
 
     #[test]

@@ -7,7 +7,7 @@ pub mod routing;
 
 pub use mock_control_plane::MockControlPlaneBuilder;
 pub use mock_runner::{MockRunner, RunnerState};
-pub use proxy_builder::TestProxy;
+pub use proxy_builder::{spawn_drainable, ShutdownHandle, TestProxy};
 pub use routing::{
     insert_active_model, insert_active_model_multi, insert_active_model_with_metadata,
     insert_active_oip_model, insert_model, insert_sleeping_model, insert_sleeping_oip_model,
