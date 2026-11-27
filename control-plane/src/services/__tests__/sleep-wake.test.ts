@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ModelLifecycleState, Protocol, RunnerState, SleepLevel } from '@sardeenz/types';
+import {
+  ModelLifecycleState,
+  ModelState,
+  Protocol,
+  RunnerState,
+  SleepLevel,
+} from '@sardeenz/types';
 
-import { SleepWakeService } from '../sleep-wake.js';
+import { refreshModelRoutingState, SleepWakeService } from '../sleep-wake.js';
 import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
 import type { RoutingMapService } from '../routing-map.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RunnerClient } from '../../clients/runner.js';
+import { registry } from '../../health/metrics.js';
 
 // These tests pin the add/remove-endpoint symmetry that the engine-port split (issue #77) hinges on:
 // the routing endpoint is registered under the *engine* port, so sleep/wake/stop must remove and
@@ -140,7 +147,7 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
         healthy: true,
         runnerId: 'runner-abc',
       },
-      Protocol.openai,
+      undefined,
     );
   });
 
@@ -187,7 +194,7 @@ describe('SleepWakeService — engine-port routing symmetry', () => {
     expect(mocks.routingMap.addEndpoint).toHaveBeenCalledWith(
       'test-model',
       expect.objectContaining({ host: '10.0.0.1', port: 5001 }),
-      Protocol.openai,
+      undefined,
     );
   });
 });
@@ -454,5 +461,94 @@ describe('SleepWakeService — RUNNER_TIMEOUT reachability (#96)', () => {
       ModelLifecycleState.ERROR,
       expect.anything(),
     );
+  });
+});
+
+describe('refreshModelRoutingState protocol derivation (#309)', () => {
+  async function conflicts(kind: 'entry-vs-caller' | 'instance-vs-instance'): Promise<number> {
+    const metrics = await registry.getMetricsAsJSON();
+    const metric = metrics.find(
+      (m) => m.name === 'sardeenz_control_plane_routing_protocol_conflicts_total',
+    );
+    const sample = metric?.values.find((v) => v.labels.kind === kind);
+    return sample?.value ?? 0;
+  }
+
+  function makeLogger() {
+    return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  }
+
+  it('derives the tag when every tagged instance agrees, ignoring an untagged legacy sibling', async () => {
+    const mocks = createMocks();
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([
+      makeState({ instanceId: 'inst-a', protocol: Protocol.oip }),
+      makeState({ instanceId: 'inst-b', protocol: Protocol.oip }),
+      makeState({ instanceId: 'inst-legacy', protocol: undefined }),
+    ]);
+
+    await refreshModelRoutingState(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      'test-model',
+    );
+
+    expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+      'test-model',
+      ModelState.ACTIVE,
+      Protocol.oip,
+    );
+  });
+
+  it('passes no protocol, counts instance-vs-instance and warns once when tagged instances disagree', async () => {
+    const before = await conflicts('instance-vs-instance');
+    const logger = makeLogger();
+    const mocks = createMocks();
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([
+      makeState({ instanceId: 'inst-a', protocol: Protocol.openai }),
+      makeState({ instanceId: 'inst-b', protocol: Protocol.oip }),
+    ]);
+
+    await refreshModelRoutingState(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      'test-model',
+      logger,
+    );
+
+    expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+      'test-model',
+      ModelState.ACTIVE,
+      undefined,
+    );
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      { modelName: 'test-model', protocols: [Protocol.openai, Protocol.oip] },
+      'Instance protocols disagree — keeping the routing entry protocol',
+    );
+    expect((await conflicts('instance-vs-instance')) - before).toBe(1);
+  });
+
+  it('passes no protocol when no instance carries a tag (all legacy records)', async () => {
+    const before = await conflicts('instance-vs-instance');
+    const logger = makeLogger();
+    const mocks = createMocks();
+    mocks.lifecycle.getInstancesForModel.mockResolvedValue([
+      makeState({ instanceId: 'inst-a', protocol: undefined }),
+    ]);
+
+    await refreshModelRoutingState(
+      mocks.lifecycle as unknown as ModelLifecycleService,
+      mocks.routingMap as unknown as RoutingMapService,
+      'test-model',
+      logger,
+    );
+
+    expect(mocks.routingMap.setModelState).toHaveBeenCalledWith(
+      'test-model',
+      ModelState.ACTIVE,
+      undefined,
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect((await conflicts('instance-vs-instance')) - before).toBe(0);
   });
 });

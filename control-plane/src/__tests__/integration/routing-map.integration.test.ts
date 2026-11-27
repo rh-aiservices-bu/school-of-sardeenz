@@ -12,6 +12,7 @@ import { createMockRunner, type MockRunnerServer } from './helpers/mock-runner.j
 import { createMockWorker, type MockWorkerServer } from './helpers/mock-worker.js';
 import { RunnerClient } from '../../clients/runner.js';
 import { redisKey } from '../../clients/redis.js';
+import { registry } from '../../health/metrics.js';
 import type { RunnerEndpoint } from '../../services/routing-map.js';
 
 const AVAILABLE = await canConnect();
@@ -319,5 +320,76 @@ describe.skipIf(!AVAILABLE)('Routing map serialization integration (#79)', () =>
       harness.routingMap.cutoverEndpointAndWait(MODEL, endpoint.host, endpoint.port),
     ).resolves.toBe(true);
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(50);
+  });
+});
+
+describe.skipIf(!AVAILABLE)('Routing protocol tag protection (#309)', () => {
+  let harness: TestHarness;
+
+  beforeEach(async () => {
+    harness = createHarness();
+    await harness.setup();
+  });
+
+  afterEach(async () => {
+    await harness?.teardown();
+  });
+
+  async function conflicts(kind: 'entry-vs-caller' | 'instance-vs-instance'): Promise<number> {
+    const metrics = await registry.getMetricsAsJSON();
+    const metric = metrics.find(
+      (m) => m.name === 'sardeenz_control_plane_routing_protocol_conflicts_total',
+    );
+    const sample = metric?.values.find((v) => v.labels.kind === kind);
+    return sample?.value ?? 0;
+  }
+
+  it('keeps the entry tag across a setModelState that carries no protocol', async () => {
+    const MODEL = 'protocol-tag-kept-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+    const ep: RunnerEndpoint = { host: '10.0.0.30', port: 8030, weight: 1, healthy: true };
+
+    await harness.routingMap.addEndpoint(MODEL, ep, Protocol.oip);
+    await harness.routingMap.setModelState(MODEL, ModelState.SLEEPING);
+
+    const raw = await harness.redis.hget(HASH, MODEL);
+    const parsed = JSON.parse(raw as string) as { protocol: string; state: string };
+    expect(parsed.protocol).toBe('oip');
+    expect(parsed.state).toBe(ModelState.SLEEPING);
+  });
+
+  it('keeps the entry tag on a disagreeing addEndpoint, still adds the endpoint and counts', async () => {
+    const MODEL = 'protocol-tag-conflict-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+    const ep: RunnerEndpoint = { host: '10.0.0.31', port: 8031, weight: 1, healthy: true };
+    const ep2: RunnerEndpoint = { host: '10.0.0.32', port: 8032, weight: 1, healthy: true };
+
+    await harness.routingMap.addEndpoint(MODEL, ep, Protocol.oip);
+    const before = await conflicts('entry-vs-caller');
+    await harness.routingMap.addEndpoint(MODEL, ep2, Protocol.openai);
+
+    const raw = await harness.redis.hget(HASH, MODEL);
+    const parsed = JSON.parse(raw as string) as {
+      protocol: string;
+      endpoints: Array<{ host: string; port: number }>;
+    };
+    expect(parsed.protocol).toBe('oip');
+    expect(parsed.endpoints).toEqual(
+      expect.arrayContaining([expect.objectContaining({ host: ep2.host, port: ep2.port })]),
+    );
+    expect(parsed.endpoints).toHaveLength(2);
+    expect((await conflicts('entry-vs-caller')) - before).toBe(1);
+  });
+
+  it('creates a new entry with the openai default when no protocol is passed', async () => {
+    const MODEL = 'protocol-tag-creation-model';
+    const HASH = redisKey(harness.keyPrefix, 'routing-map');
+    const ep: RunnerEndpoint = { host: '10.0.0.33', port: 8033, weight: 1, healthy: true };
+
+    await harness.routingMap.addEndpoint(MODEL, ep);
+
+    const raw = await harness.redis.hget(HASH, MODEL);
+    const parsed = JSON.parse(raw as string) as { protocol: string };
+    expect(parsed.protocol).toBe('openai');
   });
 });

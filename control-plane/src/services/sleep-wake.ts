@@ -8,6 +8,7 @@ import {
 import type { RunnerClient } from '../clients/runner.js';
 import {
   runnerHealthCheckErrorsTotal,
+  routingProtocolConflictsTotal,
   sleepDuration,
   wakeDuration,
   wakeTriggersTotal,
@@ -16,7 +17,7 @@ import { ControlPlaneError } from '../errors.js';
 import { delaySafe } from '../utils.js';
 import { deriveAggregateState, type ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
-import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
+import type { RoutingMapLogger, RoutingMapService, RunnerEndpoint } from './routing-map.js';
 
 /** Maps a ModelLifecycleState to the ModelState exposed in the routing map. */
 export function toRoutingState(state: ModelLifecycleState): ModelState | null {
@@ -51,12 +52,29 @@ export async function refreshModelRoutingState(
   lifecycle: ModelLifecycleService,
   routingMap: RoutingMapService,
   modelName: string,
+  logger?: RoutingMapLogger,
 ): Promise<void> {
   const instances = await lifecycle.getInstancesForModel(modelName);
   const aggregate = deriveAggregateState(instances);
   const routingState = toRoutingState(aggregate);
   if (routingState) {
-    const protocol = instances.find((i) => i.protocol)?.protocol ?? Protocol.openai;
+    // Derive the model tag from ALL tagged instances, deterministically (#309): "first instance
+    // with a value" let one legacy record decide a live model's protocol family. All tagged
+    // instances agreeing is authoritative; disagreeing instances pass no value, so the routing
+    // entry keeps its persisted tag (decision D9) and the divergence is counted + logged once;
+    // no tagged instance at all likewise passes no value (a new entry still gets the Lua
+    // creation default).
+    const tagged = new Set(instances.flatMap((i) => (i.protocol ? [i.protocol] : [])));
+    let protocol: Protocol | undefined;
+    if (tagged.size === 1) {
+      protocol = [...tagged][0];
+    } else if (tagged.size > 1) {
+      routingProtocolConflictsTotal.inc({ kind: 'instance-vs-instance' });
+      logger?.warn(
+        { modelName, protocols: [...tagged] },
+        'Instance protocols disagree — keeping the routing entry protocol',
+      );
+    }
     await routingMap.setModelState(modelName, routingState, protocol);
   } else {
     await routingMap.removeModel(modelName);
@@ -78,6 +96,7 @@ export class SleepWakeService {
     private readonly sleepTimeoutMs: number,
     private readonly wakeTimeoutMs: number,
     private readonly healthCheckIntervalMs: number,
+    private readonly logger?: RoutingMapLogger,
   ) {}
 
   /**
@@ -106,7 +125,7 @@ export class SleepWakeService {
       if (instanceState.state === ModelLifecycleState.ACTIVE) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
       }
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       // Wait for in-flight requests to drain.
       await this.waitForDrain(modelName, instanceId, runnerClient);
@@ -127,7 +146,7 @@ export class SleepWakeService {
 
       // DRAINING → SLEEPING
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.SLEEPING);
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       sleepDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
@@ -167,7 +186,7 @@ export class SleepWakeService {
       if (instanceState.state === ModelLifecycleState.SLEEPING) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STARTING);
       }
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       // Send wake command. Unlike sleep, /wake on the runner completes quickly —
       // the runner begins reloading weights but does not wait for READY itself.
@@ -186,16 +205,12 @@ export class SleepWakeService {
           healthy: true,
           ...(instanceState.runnerId ? { runnerId: instanceState.runnerId } : {}),
         };
-        await this.routingMap.addEndpoint(
-          modelName,
-          endpoint,
-          instanceState.protocol ?? Protocol.openai,
-        );
+        await this.routingMap.addEndpoint(modelName, endpoint, instanceState.protocol);
       }
 
       // STARTING → ACTIVE
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ACTIVE);
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       wakeDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
@@ -236,7 +251,7 @@ export class SleepWakeService {
       // "not accepting new traffic" rather than "already empty"; always poll it before stop.
       if (currentState === ModelLifecycleState.ACTIVE) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
-        await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+        await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
       }
       if (
         runnerClient &&
@@ -281,7 +296,7 @@ export class SleepWakeService {
       }
       // STOPPED is already terminal — no transition needed.
 
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
       this.memoryBudget.releaseInstanceReservations(instanceId);
     } catch (err) {
       await this.transitionToError(
@@ -441,7 +456,7 @@ export class SleepWakeService {
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ERROR, {
         errorMessage,
       });
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
     } catch {
       // Intentionally swallowed — do not mask the original error.
     }

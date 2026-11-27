@@ -1,4 +1,4 @@
-import { ModelLifecycleState, Protocol } from '@sardeenz/types';
+import { ModelLifecycleState } from '@sardeenz/types';
 
 import { WorkerHttpError, type WorkerClient } from '../clients/worker.js';
 import type { RunnerClient } from '../clients/runner.js';
@@ -287,7 +287,7 @@ export class MoveOrchestrationService {
         healthy: true,
         runnerId: lookup.runnerId,
       },
-      replacement.protocol ?? Protocol.openai,
+      replacement.protocol,
     );
 
     try {

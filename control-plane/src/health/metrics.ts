@@ -146,6 +146,13 @@ export const reconciliationErrors = new Counter({
   registers: [registry],
 });
 
+export const routingProtocolConflictsTotal = new Counter({
+  name: 'sardeenz_control_plane_routing_protocol_conflicts_total',
+  help: 'Routing-map writes where the entry kept its protocol over a disagreeing value',
+  labelNames: ['kind'] as const, // 'entry-vs-caller' | 'instance-vs-instance'
+  registers: [registry],
+});
+
 export const reconciliationTickDuration = new Histogram({
   name: 'sardeenz_control_plane_reconciliation_tick_duration_seconds',
   help: 'Time for a single reconciliation tick',

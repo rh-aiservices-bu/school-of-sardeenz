@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     config.redisKeyPrefix,
     config.workerHeartbeatTimeoutSecs,
   );
-  const routingMap = new RoutingMapService(redis, config.redisKeyPrefix);
+  const routingMap = new RoutingMapService(redis, config.redisKeyPrefix, notificationLogger);
   const proxyProtocols = new ProxyProtocolsService(redis, config.redisKeyPrefix);
   const placement = new PlacementPipeline(undefined, {
     maxPoolHeadroomPercent: config.colocationMaxPoolHeadroomPercent,
@@ -100,6 +100,7 @@ async function main(): Promise<void> {
     config.sleepTimeoutSecs * 1000,
     config.wakeTimeoutSecs * 1000,
     config.healthCheckIntervalSecs * 1000,
+    notificationLogger,
   );
   const notifications = new NotificationService(redis, config.redisKeyPrefix, notificationLogger);
 

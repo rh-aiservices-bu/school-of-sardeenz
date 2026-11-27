@@ -656,6 +656,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   over 1 MiB (matching the worker loader from #289), on the success and error paths, so a
   hostile or broken catalog origin can no longer decide how much memory the leader allocates;
   the over-cap failure surfaces as the existing `CATALOG_FETCH_FAILED` 502.
+- **Defaulted protocol writes can no longer flip a live model's routing tag (#309).**
+  `RoutingMapService.setModelState`/`addEndpoint` keep an existing routing entry's `protocol`
+  when the caller has no authoritative value (the empty-string ARGV sentinel), and keep it —
+  logging once and counting `sardeenz_control_plane_routing_protocol_conflicts_total` — when an
+  authoritative caller value disagrees with the entry, so a single instance record with a
+  missing/legacy protocol cannot make a live model 404 under its real proxy surface. New entries
+  still get the `openai` creation default. `refreshModelRoutingState` now derives the model tag
+  from all tagged instances agreeing instead of the first instance with a value, passing no value
+  (keeping the entry's tag) and counting `instance-vs-instance` when they disagree.
 
 ### Security
 
