@@ -267,6 +267,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   memory limit (a parked body counts against both this budget and `SARDEENZ_PARKING_MAX_BYTES`), and
   a new `sardeenz_proxy_buffered_body_bytes` gauge exposes the in-use bytes.
 
+- **ADR-031 records that in-namespace traffic is plaintext by design (#333).** The new ADR
+  (`docs/architecture/adrs/adr-031-in-namespace-plaintext-traffic.md`) tabulates every hop that
+  carries a credential or user payload — the service tokens on the proxy→control-plane,
+  BFF→control-plane and control-plane→worker calls, the opt-in inference key (#332), the Valkey
+  `requirepass` password and the PostgreSQL password embedded in their connection URLs, and the
+  unauthenticated runner engine and management ports — together with the trust assumptions the
+  posture rests on (dedicated namespace, a CNI that enforces NetworkPolicy, no untrusted workloads
+  in it) and what an in-namespace attacker gets from it. Its mitigation inventory is the post-M21
+  one — default-deny plus per-flow allows (ADR-025), fail-closed service tokens (ADR-022), the
+  inference-port key (#332) and the buffered-body bound (#300), none of which encrypts — and it
+  pins the TLS-client facts for Backlog #334: ioredis turns a `rediss://` URL into `tls: true` and
+  `pg` honours `sslmode=` in the connection string, both with no code change, while the Rust
+  proxy's `redis` dependency enables no TLS feature and rejects `rediss://`, so a cluster-wide
+  Redis TLS migration waits on the proxy.
+
 ### Fixed
 
 - **The BFF ends every hijacked stream on shutdown, so `app.close()` no longer waits for a client

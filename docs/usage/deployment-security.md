@@ -133,7 +133,7 @@ Any caller with network access to the control plane can:
 
 2. **No public-facing Ingress**: Do not create an Ingress or Route for the control plane. It should only be reachable via cluster-internal DNS (`control-plane.namespace.svc`).
 
-3. **Service mesh mTLS** (optional): If running in a service mesh (Istio, Linkerd), enable strict mTLS between the control plane and its clients.
+3. **Service mesh mTLS** (optional): If running in a service mesh (Istio, Linkerd), enable strict mTLS between the control plane and its clients. All in-namespace traffic is plaintext by design at this stage — see [ADR-031](../architecture/adrs/adr-031-in-namespace-plaintext-traffic.md).
 
 `deployment/control-plane/networkpolicy.yaml` also allows ingress to port 3000 from the
 `openshift-user-workload-monitoring` namespace, so OpenShift's Prometheus can scrape the
@@ -209,6 +209,14 @@ The `sardeenz` namespace ships default-deny ingress from
 policy with an empty `podSelector`, `policyTypes: [Ingress]` and no ingress rules drops every
 inbound connection to every Pod in the namespace. NetworkPolicy allows are additive, so the
 per-flow policies below supply exactly the allowed set. Egress is unrestricted.
+
+Every flow in the table below is plaintext inside the namespace: the service tokens, the Valkey
+password and the inference payloads cross it unencrypted. What bounds an in-namespace attacker is
+reachability (these policies), authentication ([ADR-022](../architecture/adrs/adr-022-fail-closed-service-tokens.md)
+service tokens, Valkey AUTH) and admission control over who may create pods in the namespace — not
+encryption. [ADR-031](../architecture/adrs/adr-031-in-namespace-plaintext-traffic.md) records the
+hop-by-hop position, the trust assumptions, the TLS client options and the direction for native TLS
+(#334).
 
 | Destination              | Port          | Allowed sources                                                                                          | Policy                                      |
 | ------------------------ | ------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------- |

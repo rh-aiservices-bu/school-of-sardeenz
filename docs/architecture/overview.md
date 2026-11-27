@@ -600,6 +600,7 @@ The workflow: edit the OpenAPI spec → run code generation → TypeScript types
 | [ADR-019](adrs/adr-019-logical-model-vs-instance-split.md)   | Logical model vs. instance split _(refines ADR-014)_                                     |
 | [ADR-020](adrs/adr-020-config-name-vs-served-model-name.md)  | Configuration name vs. served model name _(refines ADR-019; amended by ADR-021)_         |
 | [ADR-021](adrs/adr-021-protocol-family-path-prefixes.md)     | Protocol-family path prefixes for multi-protocol runners _(amends ADR-020)_              |
+| [ADR-031](adrs/adr-031-in-namespace-plaintext-traffic.md)    | In-namespace traffic is plaintext by design at this stage _(extends ADR-022/ADR-025)_    |
 
 ---
 

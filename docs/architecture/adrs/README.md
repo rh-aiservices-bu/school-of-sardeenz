@@ -30,3 +30,4 @@
 - [ADR-028](adr-028-drain-signal-semantics.md) — The Drain Signal Is Two-Valued: Unknown Never Means Drained _(extends ADR-010)_
 - [ADR-029](adr-029-colocation-hold-and-pressure-stop.md) — Co-location Keeps Sleep's Hold, and Pressure Evicts by Stopping _(extends ADR-011/ADR-014; amends ADR-011)_
 - [ADR-030](adr-030-platform-image-signing-and-scanning.md) — Platform Images Are Digest-Pinned, Trivy-Gated and Cosign-Signed in CI _(clarifies ADR-017)_
+- [ADR-031](adr-031-in-namespace-plaintext-traffic.md) — In-Namespace Traffic Is Plaintext by Design at This Stage _(extends ADR-022/ADR-025)_
