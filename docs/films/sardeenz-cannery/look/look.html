@@ -1,0 +1,141 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Cannery look samples</title>
+<style>
+@font-face{font-family:'BSD';font-weight:900;src:url(../fonts/bsd900.woff2) format('woff2')}
+@font-face{font-family:'BSD';font-weight:800;src:url(../fonts/bsd800.woff2) format('woff2')}
+@font-face{font-family:'ARC';font-weight:700;src:url(../fonts/arc700.woff2) format('woff2')}
+@font-face{font-family:'ARC';font-weight:600;src:url(../fonts/arc600.woff2) format('woff2')}
+html,body{margin:0}
+</style></head><body><div id="stage"></div>
+<script>
+// Look samples for a more cartoonish cannery film, based on the Sardeenz logo
+// (flat blue sardines with big eyes in a navy tin on cream). Open with ?look=a|b|c|d.
+const LOGO = { blue: '#4394e5', blueD: '#357abd', navy: '#113f6f', cream: '#fffeda', pupil: '#333333' };
+const LOOKS = {
+  a: { name: 'A · LOGO FLAT', note: 'No outlines, the logo\'s own shapes and colours. Kind = colour.',
+    bg: '#eaf3fb', panel: LOGO.cream, tin: LOGO.navy, ink: LOGO.navy, line: 0, shadow: 0, shine: 0,
+    gen: LOGO.blue, genD: LOGO.blueD, emb: '#2fb59a', embD: '#1f8f79', pred: '#f47a52', predD: '#cc5a37', sleep: '#b9cfe6', sleepD: '#93b0cf',
+    ctrl: '#ffc533', ctrlD: '#e0a200', traffic: '#f47a52', metal: '#c9d6e3', metalD: '#9fb3c8', text: LOGO.navy, hat: '#ffc533', skin: '#ffd9b8', suit: LOGO.navy, face: true },
+  b: { name: 'B · BOLD OUTLINE CARTOON', note: 'Logo colours with thick navy outlines, shine and chunky drop shadows.',
+    bg: LOGO.cream, panel: '#ffffff', tin: LOGO.navy, ink: LOGO.navy, line: 7, shadow: 1, shine: 1,
+    gen: LOGO.blue, genD: LOGO.blueD, emb: '#3cc7a6', embD: '#23967c', pred: '#ff8a5c', predD: '#d9623a', sleep: '#c4d6ea', sleepD: '#9db6d1',
+    ctrl: '#ffcf40', ctrlD: '#e3a800', traffic: '#ff6b5a', metal: '#dfe7ef', metalD: '#b4c3d3', text: LOGO.navy, hat: '#ffcf40', skin: '#ffd9b8', suit: '#4394e5', face: true },
+  c: { name: 'C · PRINTED CANNERY + LOGO FISH', note: 'The current film\'s paper, ink line and rooms, with the logo\'s sardines moved in.',
+    bg: '#F2ECE0', panel: '#FBF7EE', tin: '#24345A', ink: '#1D2030', line: 3, shadow: 2, shine: 0,
+    gen: LOGO.blue, genD: LOGO.blueD, emb: '#2E8D87', embD: '#1D625E', pred: '#E9825F', predD: '#C8735C', sleep: '#E6DCC8', sleepD: '#cdbfa5',
+    ctrl: '#F3B23A', ctrlD: '#C98A1E', traffic: '#E04A2F', metal: '#EFE7D7', metalD: '#E6DCC8', text: '#1D2030', hat: '#F3B23A', skin: '#F2D3BE', suit: '#FFFBF3', face: false },
+  d: { name: 'D · NIGHT AQUARIUM', note: 'Dark navy stage, flat glowing shapes, cream type. Same logo fish.',
+    bg: '#0b2a4a', panel: '#0f3a63', tin: '#06203a', ink: '#06203a', line: 0, shadow: 0, shine: 1, glow: 1,
+    gen: '#5aa9f5', genD: '#2f7fd0', emb: '#49d6b6', embD: '#27a488', pred: '#ff9468', predD: '#e06a3f', sleep: '#3c5f85', sleepD: '#2b4a6c',
+    ctrl: '#ffd257', ctrlD: '#e0ab1c', traffic: '#ff7a66', metal: '#2a557f', metalD: '#1d4166', text: LOGO.cream, hat: '#ffd257', skin: '#ffd9b8', suit: '#5aa9f5', face: true },
+};
+const key = (new URLSearchParams(location.search).get('look') || 'a'), T = LOOKS[key];
+const S = []; const o = s => S.push(s);
+const st = (w = T.line) => w ? ` stroke="${T.ink}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"` : '';
+function sh(d, dx = 10, dy = 10) { if (T.shadow === 1) o(`<path d="${d}" fill="${T.ink}" opacity=".22" transform="translate(${dx} ${dy})"/>`); if (T.shadow === 2) o(`<path d="${d}" fill="#DCCFB8" transform="translate(${dx * .8} ${dy * .7})"/>`); }
+const P = (d, f, w) => o(`<path d="${d}" fill="${f}"${st(w)}/>`);
+const R = (x, y, w, h, r = 0) => `M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+const E = (cx, cy, rx, ry = rx) => `M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0Z`;
+const txt = (x, y, s, size, a = {}) => o(`<text x="${x}" y="${y}" font-family="${a.fam || 'BSD'}" font-weight="${a.w || 900}" font-size="${size}" fill="${a.fill || T.text}" text-anchor="${a.anchor || 'start'}" letter-spacing="${a.ls || 1}">${s}</text>`);
+
+// the logo's sardine, facing left: an ellipse, two leaf-shaped tail lobes, a big eye, a small smile
+function fish(x0, cy, len, h, kind, awake, letter) {
+  const c = awake ? T[kind] : T.sleep, cd = awake ? T[kind + 'D'] : T.sleepD, rx = len * .46, cx = x0 + rx + 4, ry = h / 2;
+  const tx = cx + rx - ry * .25, tl = Math.min(len * .13, ry * 1.5);
+  const lobe = s => `M${tx} ${cy}Q${tx + tl * .5} ${cy + s * ry * 1.15} ${tx + tl * 1.2} ${cy + s * ry * .95}Q${tx + tl * 1.45} ${cy + s * ry * .7} ${tx + tl * .9} ${cy + s * ry * .25}Q${tx + tl * .4} ${cy} ${tx} ${cy}Z`;
+  const body = E(cx, cy, rx, ry);
+  o(`<g${T.glow && awake ? ' filter="url(#glow)"' : ''}>`);
+  sh(body); P(lobe(-1), c); P(lobe(1), c); P(body, c);
+  if (kind === 'emb') for (const u of [.15, .38, .6]) o(`<path d="M${cx + rx * u} ${cy - ry * .78}Q${cx + rx * u - 14} ${cy} ${cx + rx * u} ${cy + ry * .78}" fill="none" stroke="${cd}" stroke-width="${Math.max(8, ry * .22)}" stroke-linecap="round"/>`);
+  if (T.shine) o(`<path d="M${cx - rx * .55} ${cy - ry * .55}Q${cx} ${cy - ry * .95} ${cx + rx * .5} ${cy - ry * .6}" fill="none" stroke="#fff" stroke-width="${ry * .14}" stroke-linecap="round" opacity=".45"/>`);
+  const er = Math.min(ry * .46, rx * .3), ex = x0 + Math.min(len * .16, ry * 1.5) + er * .2, ey = cy - ry * .2;
+  if (awake) { o(`<path d="${E(ex, ey, er * 1.12, er)}" fill="#fff"${st(T.line ? Math.max(2, T.line * .6) : 0)}/>`); o(`<path d="${E(ex - er * .25, ey - er * .12, er * .44, er * .36)}" fill="${LOGO.pupil}"/>`); }
+  else o(`<path d="M${ex - er} ${ey}Q${ex} ${ey + er * .9} ${ex + er} ${ey}" fill="none" stroke="${T.text === LOGO.cream ? LOGO.cream : T.ink}" stroke-width="${Math.max(4, er * .22)}" stroke-linecap="round"/>`);
+  o(`<path d="M${ex - er * 1.1} ${cy + ry * .42}Q${ex - er * .2} ${cy + ry * .66} ${ex + er * .7} ${cy + ry * .5}" fill="none" stroke="${cd}" stroke-width="${Math.max(4, ry * .09)}" stroke-linecap="round"/>`);
+  o('</g>');
+  if (letter) { const lx = kind === 'emb' ? cx + rx * .05 : cx + rx * .12, r = Math.min(ry * .62, 34); P(E(lx, cy, r), '#fff', T.line ? Math.max(2, T.line * .5) : 0); txt(lx, cy + r * .5, letter, r * 1.45, { anchor: 'middle', fill: LOGO.navy, ls: 0 }); }
+}
+// a predictive model: a prawn drawn the way the logo would draw one
+function prawn(x0, cy, len, h, awake, letter) {
+  const c = awake ? T.pred : T.sleep, cd = awake ? T.predD : T.sleepD, s = len / 100, y0 = cy - 50 * s * (h / len) ;
+  o(`<g transform="translate(${x0} ${cy - h / 2}) scale(${len / 100} ${h / 110})"${T.glow && awake ? ' filter="url(#glow)"' : ''}>`);
+  const body = 'M6 44Q2 4 46 4Q96 4 96 52Q96 92 62 104Q50 108 46 96Q44 86 56 82Q72 76 72 54Q70 30 48 30Q30 30 30 50Q30 62 20 62Q8 62 6 44Z';
+  sh(body, 8, 8);
+  P('M54 100Q38 124 20 110Q34 104 44 92Z', cd); P(body, c);
+  for (const d of ['M50 6Q46 18 48 30', 'M74 14Q64 22 62 36', 'M92 36Q78 38 70 46', 'M94 66Q80 62 72 60']) o(`<path d="${d}" fill="none" stroke="${cd}" stroke-width="5" stroke-linecap="round"/>`);
+  o(`<path d="M12 28Q-8 6 -2 -14M18 22Q10 0 22 -14" fill="none" stroke="${cd}" stroke-width="5" stroke-linecap="round"/>`);
+  if (awake) { o(`<path d="${E(22, 36, 13, 12)}" fill="#fff"${st(T.line ? 3 : 0)}/>`); o(`<path d="${E(19, 35, 6, 5)}" fill="${LOGO.pupil}"/>`); }
+  else o(`<path d="M10 36q12 10 24 0" fill="none" stroke="${T.ink}" stroke-width="4" stroke-linecap="round"/>`);
+  o('</g>');
+  if (letter) { P(E(x0 + len * .5, cy - h / 2 - 34, 26), '#fff', T.line ? Math.max(2, T.line * .5) : 0); txt(x0 + len * .5, cy - h / 2 - 21, letter, 38, { anchor: 'middle', fill: LOGO.navy, ls: 0 }); }
+}
+function zzz(x, y) { [0, 1, 2].forEach(i => txt(x + i * 22, y - i * 30, 'Z', 30 + i * 12, { fill: T.text, })); }
+function card(xc, y, kind, gb) {
+  const w = Math.max(kind.length * 15.5, 96) + 30, d = R(xc - w / 2, y, w, 74, 10);
+  sh(d, 6, 6); P(d, key === 'd' ? '#fffeda' : '#fff', T.line ? Math.max(2, T.line * .5) : (key === 'a' ? 0 : 2));
+  txt(xc, y + 28, kind, 22, { fam: 'ARC', w: 700, anchor: 'middle', fill: LOGO.navy, ls: .5 }); txt(xc, y + 62, gb + ' GB', 32, { anchor: 'middle', fill: LOGO.navy });
+}
+function worker(x, y, k = 1, arm = 150) {
+  o(`<g transform="translate(${x} ${y}) scale(${k})">`);
+  if (T.face) {
+    sh('M-34 -78Q-34 -104 0 -104Q34 -104 34 -78V-14Q34 0 20 0H-20Q-34 0 -34 -14Z', 8, 8);
+    const a = arm * Math.PI / 180, hx = 30 + Math.sin(a) * 52, hy = -78 + Math.cos(a) * 52;
+    o(`<path d="M30 -78L${hx} ${hy}" stroke="${T.line ? T.ink : T.suit}" stroke-width="${T.line ? 30 : 22}" stroke-linecap="round"/>`); if (T.line) o(`<path d="M30 -78L${hx} ${hy}" stroke="${T.suit}" stroke-width="18" stroke-linecap="round"/>`);
+    P(E(hx, hy, 13), T.skin, T.line ? 4 : 0);
+    P('M-34 -78Q-34 -104 0 -104Q34 -104 34 -78V-14Q34 0 20 0H-20Q-34 0 -34 -14Z', T.suit);
+    P(R(-22, -8, 18, 22, 6), T.line ? T.ink : LOGO.navy, 0); P(R(4, -8, 18, 22, 6), T.line ? T.ink : LOGO.navy, 0);
+    P(E(0, -140, 44, 42), T.skin);
+    P(E(-16, -142, 13, 14), '#fff', T.line ? 3 : 0); P(E(16, -142, 13, 14), '#fff', T.line ? 3 : 0);
+    P(E(-13, -140, 5.5), LOGO.pupil, 0); P(E(19, -140, 5.5), LOGO.pupil, 0);
+    o(`<path d="M-12 -118Q2 -108 16 -119" fill="none" stroke="${LOGO.pupil}" stroke-width="4" stroke-linecap="round"/>`);
+    P('M-48 -152Q-46 -196 0 -196Q46 -196 48 -152Z', T.hat); P(R(-56, -158, 112, 14, 7), T.hat);
+  } else {
+    const a = arm * Math.PI / 180;
+    o(`<path d="M-12 -72L-18 0M12 -72L18 0" stroke="${T.ink}" stroke-width="16" stroke-linecap="round"/>`);
+    o(`<path d="M24 -140L${24 + Math.sin(a) * 60} ${-140 + Math.cos(a) * 60}" stroke="${T.ink}" stroke-width="24" stroke-linecap="round"/><path d="M24 -140L${24 + Math.sin(a) * 60} ${-140 + Math.cos(a) * 60}" stroke="${T.suit}" stroke-width="14" stroke-linecap="round"/>`);
+    P('M-24 -152Q0 -160 24 -152L34 -64Q0 -56 -34 -64Z', T.suit, 5); P(E(0, -180, 23), T.skin, 5); P('M-26 -184Q-25 -214 0 -214Q25 -214 26 -184Z', T.hat, 5);
+  }
+  o('</g>');
+}
+function capsule(x, y, letter) { const d = R(x - 62, y - 66, 124, 66, 33); sh(d, 7, 7); P(d, T.traffic); if (T.shine) o(`<path d="M${x - 40} ${y - 52}h58" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".5"/>`); P(E(x + 24, y - 33, 22), '#fff', T.line ? 3 : 0); txt(x + 24, y - 20, letter, 36, { anchor: 'middle', fill: LOGO.navy, ls: 0 }); }
+
+// ---------------- the sample sheet ----------------
+o(`<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><filter id="glow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`);
+o(`<rect width="1920" height="1080" fill="${T.bg}"/>`);
+txt(60, 78, T.name, 54, { ls: 3 }); txt(60, 116, T.note, 26, { fam: 'ARC', w: 600, ls: 0 });
+// scene: one GPU of the packing floor inside the tin
+const tx = 60, ty = 150, tw = 1800, th = 590;
+sh(R(tx, ty, tw, th, 120), 16, 16);
+P(R(tx, ty, tw, th, 120), T.tin, T.line && key !== 'c' ? T.line : (key === 'c' ? 4 : 0));
+P(R(tx + 46, ty + 46, tw - 92, th - 92, 84), T.panel, key === 'c' ? 3 : 0);
+// crane rail and trolley bringing the embedding model
+const ry = ty + 96; P(R(tx + 110, ry, tw - 220, 18, 9), T.metalD, T.line ? Math.max(2, T.line * .5) : 0);
+const cx = 1500; o(`<path d="M${cx} ${ry + 30}V${ry + 96}" stroke="${T.ink === T.tin && key === 'd' ? T.ctrlD : T.ink}" stroke-width="6"/>`);
+sh(R(cx - 62, ry - 22, 124, 56, 14)); P(R(cx - 62, ry - 22, 124, 56, 14), T.ctrl); P(R(cx - 120, ry + 92, 240, 22, 11), T.ctrl);
+for (const dx of [-100, 100]) P(R(cx + dx - 11, ry + 104, 22, 70, 9), T.ctrlD);
+fish(cx - 95, ry + 176, 190, 92, 'emb', true, 'E');
+// GPU tray: 24 GB ruler, the 22 GB model and the 2 GB model that fits the corner
+const U = 46, x0 = 250, fy = ty + 356, base = R(x0 - 26, fy + 66, 24 * U + 52, 28, 14);
+sh(base); P(base, T.metal); P(R(x0 - 26, fy - 70, 22, 150, 10), T.metal); P(R(x0 + 24 * U + 4, fy - 70, 22, 150, 10), T.metal);
+for (let g = 0; g <= 24; g += 2) { o(`<path d="M${x0 + g * U} ${fy + 96}v${g % 6 ? 12 : 22}" stroke="${T.text}" stroke-width="${g % 6 ? 3 : 5}" stroke-linecap="round"/>`); if (g % 6 === 0) txt(x0 + g * U, fy + 150, g, 28, { fam: 'ARC', w: 700, anchor: 'middle', ls: 0 }); }
+fish(x0, fy, 22 * U, 118, 'gen', true, 'A');
+prawn(x0 + 22 * U + 2, fy + 2, 2 * U - 4, 112, true, 'P');
+{ const d = R(x0 + 6 * U, ty + 196, 420, 70, 14); sh(d, 7, 7); P(d, key === 'd' ? LOGO.cream : '#fff', T.line ? Math.max(2, T.line * .5) : (key === 'a' ? 0 : 2)); txt(x0 + 6 * U + 24, ty + 247, 'GPU 0', 44, { fill: LOGO.navy }); txt(x0 + 6 * U + 396, ty + 247, '24 / 24 GB', 44, { anchor: 'end', fill: key === 'c' ? '#2E8D87' : '#1f9d7f' }); }
+card(x0 + 4 * U, fy - 160, 'LLM', 22); card(x0 + 19 * U, fy - 160, 'PREDICTIVE', 2);
+worker(1640, ty + th - 66, 1.05, 140);
+// lever
+P(R(1700, ty + th - 150, 70, 84, 12), T.metalD); o(`<path d="M1735 ${ty + th - 120}l34 -84" stroke="${T.ink === T.tin && key === 'd' ? T.metal : T.ink}" stroke-width="10" stroke-linecap="round"/>`); P(E(1769, ty + th - 208, 18), T.ctrl);
+// cast line-up
+const ly = 915;
+txt(60, 800, 'THE CAST', 34, { ls: 3 });
+fish(60, ly, 420, 120, 'gen', true, 'B'); txt(270, ly + 110, 'generative · awake', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+fish(520, ly, 330, 110, 'gen', false, 'D'); zzz(560, ly - 70); txt(685, ly + 110, 'asleep in host RAM', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+fish(900, ly, 200, 100, 'emb', true, 'E'); txt(1000, ly + 110, 'embedding', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+prawn(1160, ly, 110, 120, true, 'P'); txt(1215, ly + 110, 'predictive', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+capsule(1400, ly + 40, 'A'); txt(1400, ly + 110, 'a request', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+worker(1600, ly + 70, .95, 30); txt(1600, ly + 110, 'crew', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+// the logo itself, for comparison
+o(`<image href="sardeenz-logo.svg" x="1700" y="800" width="170" height="114"/>`); txt(1785, ly + 110, 'the logo', 24, { fam: 'ARC', w: 600, anchor: 'middle', ls: 0 });
+o('</svg>');
+document.getElementById('stage').innerHTML = S.join('\n');
+document.fonts.ready.then(() => { window.READY = true; });
+</script></body></html>
