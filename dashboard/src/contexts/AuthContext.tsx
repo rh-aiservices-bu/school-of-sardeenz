@@ -25,6 +25,7 @@ export interface AuthState {
   authMode: AuthMode;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
+  exchangeCode: (code: string) => Promise<void>;
   logout: () => void;
   loginError: string | null;
 }
@@ -77,6 +78,7 @@ const AuthContext = createContext<AuthState>({
   authMode: 'none',
   isLoading: true,
   login: async () => {},
+  exchangeCode: async () => {},
   logout: () => {},
   loginError: null,
 });
@@ -191,20 +193,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!cancelled.value) setAuthMode(data.authMode);
         }
 
-        // Check for OAuth callback token in URL fragment
-        if (window.location.hash.startsWith('#token=')) {
-          const fragmentToken = window.location.hash.slice(7);
-          storeToken(fragmentToken);
-          if (!cancelled.value) {
-            await validateTokenServerSide(fragmentToken, baseUrl, cancelled);
-          }
-          window.history.replaceState(null, '', window.location.pathname);
-        } else {
-          // Validate existing cached token server-side
-          const token = getStoredToken();
-          if (token && !cancelled.value) {
-            await validateTokenServerSide(token, baseUrl, cancelled);
-          }
+        // Validate existing cached token server-side
+        const token = getStoredToken();
+        if (token && !cancelled.value) {
+          await validateTokenServerSide(token, baseUrl, cancelled);
         }
       } catch {
         // If we can't reach the server, default to 'none'
@@ -244,13 +236,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setUserFromToken],
   );
 
+  const exchangeCode = useCallback(
+    async (code: string) => {
+      const baseUrl = import.meta.env.VITE_API_URL ?? '/api';
+      const res = await fetch(`${baseUrl}/auth/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const message = body.error ?? `Login failed (${res.status})`;
+        setLoginError(message);
+        throw new Error(message);
+      }
+      const data = (await res.json()) as { token: string };
+      storeToken(data.token);
+      const ok = await validateTokenServerSide(data.token, baseUrl, { value: false });
+      if (!ok) throw new Error('Token validation failed');
+    },
+    [validateTokenServerSide],
+  );
+
   const isAuthenticated = authMode === 'none' || user !== null;
   // In 'none' mode the synthetic user has 'admin' role; otherwise require explicit membership.
   const isAdmin = authMode === 'none' || (user?.roles.includes('admin') ?? false);
 
   return (
     <AuthContext.Provider
-      value={{ isAuthenticated, isAdmin, user, authMode, isLoading, login, logout, loginError }}
+      value={{
+        isAuthenticated,
+        isAdmin,
+        user,
+        authMode,
+        isLoading,
+        login,
+        exchangeCode,
+        logout,
+        loginError,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -1108,6 +1108,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to an empty argv now fails worker startup loudly instead of producing per-request 400s. The
   worker-agent contract's `entrypoint` description gained the constraint sentence (generated
   types regenerated — description-only, no shape change).
+- **The OAuth callback no longer puts the JWT in the URL (#136).** `GET /api/auth/callback` used
+  to redirect to `/oauth/callback#token=<jwt>`, where the bearer token — full admin authority for
+  up to `JWT_EXPIRATION_HOURS` (8 h default) — was visible in the address bar and readable by any
+  script or extension with DOM access until the SPA cleared it. It now mints a single-use, opaque
+  60-second exchange code (256-bit hex) and redirects to `/oauth/callback?code=…`; the SPA posts
+  that code to the new public `POST /api/auth/exchange`, which is registered only in `oauth` mode,
+  rate-limited per IP (same window as login), and returns `{ token, expiresIn }` in the response
+  body. The code is deleted on first use, so a replay answers `400 INVALID_REQUEST` and issues no
+  token; an expired code does too. The SSE cookie stays on the callback and the exchange sets no
+  cookie. The BFF `req` serializer now also redacts `code` (`code=[REDACTED]`) alongside `token`,
+  because both the upstream authorization code and the exchange code reach the access log through
+  URLs. The exchange store is process-local (`replicas: 1`, documented in code).
 
 ## [0.2.1] - 2026-10-29
 

@@ -15,6 +15,7 @@ const PUBLIC_PATHS = [
   '/api/auth/config',
   '/api/auth/login',
   '/api/auth/callback',
+  '/api/auth/exchange',
   '/api/auth/logout',
   '/healthz',
   '/readyz',

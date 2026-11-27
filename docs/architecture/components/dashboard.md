@@ -393,20 +393,21 @@ The BFF implements a lightweight auth system controlled by the `AUTH_MODE` envir
 
 ### Three modes
 
-| Mode             | Behavior                                                                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none` (default) | No authentication. `authenticate` and `requireRole` decorators are no-ops. All routes are open. Use for local development and air-gapped deployments.                                       |
-| `simple`         | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT.                                                 |
-| `oauth`          | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens, resolves Sardeenz marker Roles through namespace-scoped Kubernetes RBAC, then issues an internal JWT. |
+| Mode             | Behavior                                                                                                                                                                                                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none` (default) | No authentication. `authenticate` and `requireRole` decorators are no-ops. All routes are open. Use for local development and air-gapped deployments.                                                                                                                         |
+| `simple`         | Username/password login. `POST /api/auth/login` validates credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD` and returns a signed JWT.                                                                                                                                   |
+| `oauth`          | OIDC authorization code flow. `GET /api/auth/callback` exchanges the code for tokens, resolves Sardeenz marker Roles through namespace-scoped Kubernetes RBAC, then issues an internal JWT and hands it to the SPA through a single-use exchange code, never through the URL. |
 
 ### JWT flow
 
-1. Client authenticates and receives a JWT signed with `JWT_SECRET`.
+1. Client authenticates and receives a JWT signed with `JWT_SECRET`. In `oauth` mode the JWT never enters `window.location`: `GET /api/auth/callback` mints a single-use, 60-second opaque code and redirects to `/oauth/callback?code=<64 hex>`, and the SPA redeems it at the public, per-IP rate-limited `POST /api/auth/exchange`, which returns `{ token, expiresIn }` in the response body. The store deletes a code before checking its TTL, so it is invalidated on first use and a replay answers `400`. (The store is a process-local `Map`, which is why the BFF is deployed with `replicas: 1`.)
 2. Subsequent requests include the token as `Authorization: Bearer <token>`.
 3. The `sardeenz_sse` cookie (Path=/api, HttpOnly, SameSite=Strict; set at login) is also accepted on any `/api` route; the `?token=<jwt>` query fallback is additionally restricted to the three SSE routes (`/api/events`, `/api/models/:name/logs`, `/api/models/:name/instances/:instanceId/startup-logs`). In `AUTH_MODE=none` none of this applies — the extractor is never installed.
    Because the fallback still puts a live JWT in a URL, the BFF installs its own Fastify `req`
    serializer (`dashboard/server/log-redaction.ts`): the automatic request log line records
-   `token=[REDACTED]` and leaves every other query parameter intact.
+   `token=[REDACTED]` and `code=[REDACTED]` (the OAuth authorization and exchange codes are
+   credentials too) and leaves every other query parameter intact.
 4. The `authenticate` preHandler verifies the token; `requireRole('admin-readonly')` checks the `roles` claim.
 
 ### Route protection

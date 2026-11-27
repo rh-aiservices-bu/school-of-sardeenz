@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance } from 'fastify';
 import { authPlugin } from '../../plugins/auth.js';
-import { registerAuthRoutes, _resetRateLimiter } from '../../routes/auth.js';
+import { registerAuthRoutes, _resetRateLimiter, _resetExchangeCodes } from '../../routes/auth.js';
 import { registerModelRoutes } from '../../routes/models.js';
 import { registerModelLogRoutes } from '../../routes/model-logs.js';
 import { BffError } from '../../errors.js';
@@ -207,6 +207,343 @@ describe('OpenShift OAuth login', () => {
       'https://kubernetes.default.svc/apis/user.openshift.io/v1/users/~',
     );
     expect(fetchMock.mock.calls[2]?.[0]).toContain('/localsubjectaccessreviews');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* POST /api/auth/exchange — single-use code handoff (issue #136)      */
+/* ------------------------------------------------------------------ */
+describe('POST /api/auth/exchange (oauth mode)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetRateLimiter();
+    _resetExchangeCodes();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  const oauthConfig = () =>
+    makeConfig({
+      authMode: 'oauth',
+      oauthClientSecret: 'oauth-secret',
+      oauthIssuerUrl: 'https://oauth.example.com/oauth',
+      k8sApiUrl: 'https://kubernetes.default.svc',
+      serviceAccountToken: 'reviewer-token',
+      publicUrl: 'https://dashboard.example.com',
+    });
+
+  /** Answer the callback's upstream calls: token, OpenShift user, two marker-role reviews. */
+  function stubOauthFetch(): void {
+    const fetchMock = vi.fn((input: string, init?: RequestInit): Promise<Response> => {
+      if (input.endsWith('/token')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ access_token: 'oauth-access-token' })),
+        );
+      }
+      if (input.includes('/apis/user.openshift.io/v1/users/~')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ metadata: { name: 'alice' }, groups: ['platform-admins'] }),
+          ),
+        );
+      }
+      // LocalSubjectAccessReview — only the `admin` marker role is granted.
+      const rawBody = init?.body;
+      const request = JSON.parse(typeof rawBody === 'string' ? rawBody : '{}') as {
+        spec?: { resourceAttributes?: { resource?: string } };
+      };
+      const allowed = request.spec?.resourceAttributes?.resource === 'admin';
+      return Promise.resolve(new Response(JSON.stringify({ status: { allowed } })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  }
+
+  /** Runs the login redirect + callback and returns the callback response. */
+  async function runCallback(app: FastifyInstance) {
+    const login = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    const state = new URL(login.headers.location ?? '').searchParams.get('state');
+    return app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?code=authorization-code&state=${state}`,
+    });
+  }
+
+  /** Mints a fresh exchange code through the callback and returns it. */
+  async function mintCode(app: FastifyInstance): Promise<string> {
+    const callback = await runCallback(app);
+    expect(callback.statusCode).toBe(302);
+    const location = callback.headers.location ?? '';
+    return new URL(location, 'https://dashboard.example.com').searchParams.get('code') ?? '';
+  }
+
+  it('redirects to a single opaque exchange code, never the token', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const callback = await runCallback(app);
+    await app.close();
+
+    expect(callback.statusCode).toBe(302);
+    const location = callback.headers.location ?? '';
+    expect(location).toMatch(/^\/oauth\/callback\?code=[0-9a-f]{64}$/);
+    const params = new URL(location, 'https://dashboard.example.com').searchParams;
+    expect([...params.keys()]).toEqual(['code']);
+    expect(location).not.toContain('token=');
+    expect(location).not.toContain('eyJ');
+  });
+
+  it('exchanges the code for the callback-issued JWT', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const code = await mintCode(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseJson<{ token: string; expiresIn: number }>(res);
+    expect(body.expiresIn).toBe(8 * 3600);
+    const verified = app.jwt.verify<{ username: string; roles: string[] }>(body.token);
+    await app.close();
+
+    expect(verified.username).toBe('alice');
+    expect(verified.roles).toEqual(['admin']);
+  });
+
+  it('invalidates the code on first use', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const code = await mintCode(app);
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+    await app.close();
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(400);
+    expect(parseJson(second)).toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+
+  it('issues no token when a consumed code is replayed', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const code = await mintCode(app);
+    await app.inject({ method: 'POST', url: '/api/auth/exchange', payload: { code } });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+    const third = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+    await app.close();
+
+    expect(second.statusCode).toBe(400);
+    expect('token' in parseJson<Record<string, unknown>>(second)).toBe(false);
+    expect(third.statusCode).toBe(400);
+    expect('token' in parseJson<Record<string, unknown>>(third)).toBe(false);
+  });
+
+  it('rejects a code past its TTL', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const code = await mintCode(app);
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now + 61_000);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(400);
+    expect(parseJson(res)).toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+
+  it('rejects an unknown code', async () => {
+    const app = await buildApp(oauthConfig());
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code: 'a'.repeat(64) },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(400);
+    expect(parseJson(res)).toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+
+  it('rejects a missing or non-string code with 400, never 500', async () => {
+    const app = await buildApp(oauthConfig());
+
+    const noBody = await app.inject({ method: 'POST', url: '/api/auth/exchange' });
+    const emptyBody = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: {},
+    });
+    const nonString = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code: 42 },
+    });
+    await app.close();
+
+    for (const res of [noBody, emptyBody, nonString]) {
+      expect(res.statusCode).toBe(400);
+      expect(parseJson(res)).toMatchObject({ code: 'INVALID_REQUEST' });
+    }
+  });
+
+  it('rate-limits a broken IP but not other clients', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const badCode = { code: 'a'.repeat(64) };
+    for (let i = 0; i < 10; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/exchange',
+        payload: badCode,
+        headers: { 'x-forwarded-for': '10.0.0.1' },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: badCode,
+      headers: { 'x-forwarded-for': '10.0.0.1' },
+    });
+    const otherIp = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: badCode,
+      headers: { 'x-forwarded-for': '10.0.0.2' },
+    });
+    await app.close();
+
+    expect(blocked.statusCode).toBe(429);
+    expect(parseJson(blocked)).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(otherIp.statusCode).toBe(400);
+  });
+
+  it('clears the rate-limit bucket on a successful exchange', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    for (let i = 0; i < 9; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/exchange',
+        payload: { code: 'a'.repeat(64) },
+        headers: { 'x-forwarded-for': '10.0.0.3' },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+
+    const code = await mintCode(app);
+    const valid = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+      headers: { 'x-forwarded-for': '10.0.0.3' },
+    });
+    // A rate-limited request must never burn the code, so a second minted code is needed.
+    const nextCode = await mintCode(app);
+    const next = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code: nextCode },
+      headers: { 'x-forwarded-for': '10.0.0.3' },
+    });
+    await app.close();
+
+    expect(valid.statusCode).toBe(200);
+    expect(next.statusCode).toBe(200);
+  });
+
+  it('is reachable without an Authorization header (public allowlist entry)', async () => {
+    const app = await buildApp(oauthConfig());
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code: 'a'.repeat(64) },
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(400);
+    expect(parseJson(res)).toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+
+  it('does not exist outside oauth mode', async () => {
+    const noneApp = await buildApp(makeConfig({ authMode: 'none' }));
+    const simpleApp = await buildApp(makeConfig({ authMode: 'simple' }));
+
+    const noneRes = await noneApp.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code: 'a'.repeat(64) },
+    });
+    const simpleRes = await simpleApp.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code: 'a'.repeat(64) },
+    });
+    await noneApp.close();
+    await simpleApp.close();
+
+    expect(noneRes.statusCode).toBe(404);
+    expect(simpleRes.statusCode).toBe(404);
+  });
+
+  it('sets the SSE cookie on the callback but no cookie on the exchange', async () => {
+    stubOauthFetch();
+    const app = await buildApp(oauthConfig());
+
+    const callback = await runCallback(app);
+    const callbackCookies = callback.headers['set-cookie'];
+    const callbackCookieStr = Array.isArray(callbackCookies)
+      ? callbackCookies.join('; ')
+      : (callbackCookies ?? '');
+    const code = new URL(
+      callback.headers.location ?? '',
+      'https://dashboard.example.com',
+    ).searchParams.get('code');
+
+    const exchange = await app.inject({
+      method: 'POST',
+      url: '/api/auth/exchange',
+      payload: { code },
+    });
+    await app.close();
+
+    expect(callbackCookieStr).toContain('sardeenz_sse=');
+    expect(exchange.statusCode).toBe(200);
+    expect(exchange.headers['set-cookie']).toBeUndefined();
   });
 });
 

@@ -87,6 +87,9 @@ const cleanupTimer = setInterval(() => {
   for (const [key, entry] of loginAttempts) {
     if (now >= entry.resetAt) loginAttempts.delete(key);
   }
+  for (const [code, entry] of pendingExchanges) {
+    if (now >= entry.expiresAt) pendingExchanges.delete(code);
+  }
 }, CLEANUP_INTERVAL_MS);
 cleanupTimer.unref();
 
@@ -107,6 +110,35 @@ function consumeState(state: string): boolean {
   if (expiresAt === undefined) return false;
   pendingStates.delete(state);
   return Date.now() < expiresAt;
+}
+
+/* ------------------------------------------------------------------ */
+/* OAuth exchange-code store (in-memory with TTL)                      */
+/* ------------------------------------------------------------------ */
+// Single-replica assumption: the BFF runs as one pod
+// (deployment/dashboard/deployment.yaml:6), so the callback that mints a code and the
+// exchange that redeems it always reach this process. If the BFF is ever scaled past one
+// replica this Map — and pendingStates and the rate limiter above — must move to Redis with a
+// per-key TTL, or a code minted on pod A reads as invalid when exchanged against pod B.
+const EXCHANGE_CODE_TTL_MS = 60_000; // 1 minute
+const pendingExchanges = new Map<string, { token: string; expiresAt: number }>(); // code → entry
+
+function createExchangeCode(token: string): string {
+  const code = randomBytes(32).toString('hex');
+  pendingExchanges.set(code, { token, expiresAt: Date.now() + EXCHANGE_CODE_TTL_MS });
+  return code;
+}
+
+function consumeExchangeCode(code: string): string | null {
+  const entry = pendingExchanges.get(code);
+  if (entry === undefined) return null;
+  pendingExchanges.delete(code); // delete before the TTL check: a replay can never win
+  return Date.now() < entry.expiresAt ? entry.token : null;
+}
+
+/** @internal — exposed for test cleanup only */
+export function _resetExchangeCodes(): void {
+  pendingExchanges.clear();
 }
 
 /* ------------------------------------------------------------------ */
@@ -271,7 +303,32 @@ export function registerAuthRoutes(app: FastifyInstance, config: Config): void {
       const token = app.jwt.sign(payload, { expiresIn: expiresInSec });
 
       void reply.setCookie(SSE_COOKIE_NAME, token, sseCookieOptions(expiresInSec, config, request));
-      return reply.redirect(`/oauth/callback#token=${token}`);
+      const exchangeCode = createExchangeCode(token);
+      return reply.redirect(`/oauth/callback?code=${exchangeCode}`);
+    });
+
+    // POST /api/auth/exchange — redeem the single-use code from the callback redirect
+    app.post('/api/auth/exchange', async (request: FastifyRequest, reply: FastifyReply) => {
+      const rateLimitKey = `exchange:${request.ip}`;
+      if (isRateLimited(rateLimitKey)) {
+        return reply.code(429).send({ error: 'Too many exchange attempts', code: 'RATE_LIMITED' });
+      }
+
+      const body = request.body as { code?: unknown } | undefined;
+      const code = typeof body?.code === 'string' ? body.code : '';
+      if (!code) {
+        return reply.code(400).send({ error: 'Missing exchange code', code: 'INVALID_REQUEST' });
+      }
+
+      const token = consumeExchangeCode(code);
+      if (!token) {
+        return reply
+          .code(400)
+          .send({ error: 'Invalid or expired exchange code', code: 'INVALID_REQUEST' });
+      }
+
+      clearRateLimit(rateLimitKey);
+      return reply.send({ token, expiresIn: expiresInSec });
     });
   }
 
