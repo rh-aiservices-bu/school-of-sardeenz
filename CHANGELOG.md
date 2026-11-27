@@ -6,35 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Security
-
-- **Every mutating control-plane action now records who asked for it (#335).** The dashboard BFF
-  forwards the JWT-verified username and roles to the control plane in optional
-  `X-Sardeenz-Actor` / `X-Sardeenz-Actor-Roles` headers (specified on all 19 mutating operations in
-  `control-plane.yaml`, honoured only on a `SARDEENZ_API_TOKEN`-authenticated request — a spoofed
-  header on an unauthenticated request is never read, and absent means `actor: "service"`). The
-  control plane emits exactly one structured JSON audit line per mutating request — `audit: true`,
-  `requestId`, `actor`, `action`, `target`, allowlisted `params` and `outcome` (status, plus
-  `details.reason` on failure) — from hooks, so no route file changes and a new mutating `/api/v1`
-  route without an action name fails the server build. Request bodies, engine args and tokens are
-  never logged. Since all services share one token, the actor is an assertion for investigation,
-  not authorization; a new _Audit Log_ section in the security guide documents the format, that
-  trust assumption (ADR-022) and how to collect and retain the lines. Every caller-supplied value
-  in the line (actor, body strings, device-index list, `x-request-id`) is length-capped, and the
-  BFF forwards `x-request-id` for correlation even when it asserts no actor (`AUTH_MODE=none`).
-- **Pickle-based model weights are refused by default, with an explicit opt-in (#336).** Both
-  runner shims scan the model directory at startup and refuse `.bin`, `.pt`, `.pth`, `.ckpt`,
-  `.pkl`, `.pickle` and `.joblib` weights — formats that deserialize with pickle and can
-  execute arbitrary code on a GPU worker — naming the offending files and the opt-in in the
-  error. Safetensors, ONNX, GGUF and `.bst` are unaffected. The opt-in (`allowUnsafeWeights`,
-  off by default) travels dashboard → control plane → model record (new `allow_unsafe_weights`
-  column) → worker launch identity → `SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1` in the runner
-  environment, and surfaces as a warning-labelled switch in the deploy form. The control plane
-  additionally refuses pickle deploys early at `POST`/`PUT /api/v1/models` (advisory — the shim
-  is the enforcement point), and a new "Model weights trust boundary" section in the security
-  guide documents that write access to the weights volume is code execution on workers. Takes
-  effect on the cluster once the MLServer `1.7.1-rc5` SIF is republished.
-
 ### Changed
 
 - **Dashboard render and bundle cost cut on three axes (#255).** The EventStream context is split
@@ -1162,6 +1133,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cookie. The BFF `req` serializer now also redacts `code` (`code=[REDACTED]`) alongside `token`,
   because both the upstream authorization code and the exchange code reach the access log through
   URLs. The exchange store is process-local (`replicas: 1`, documented in code).
+- **Every mutating control-plane action now records who asked for it (#335).** The dashboard BFF
+  forwards the JWT-verified username and roles to the control plane in optional
+  `X-Sardeenz-Actor` / `X-Sardeenz-Actor-Roles` headers (specified on all 19 mutating operations in
+  `control-plane.yaml`, honoured only on a `SARDEENZ_API_TOKEN`-authenticated request — a spoofed
+  header on an unauthenticated request is never read, and absent means `actor: "service"`). The
+  control plane emits exactly one structured JSON audit line per mutating request — `audit: true`,
+  `requestId`, `actor`, `action`, `target`, allowlisted `params` and `outcome` (status, plus
+  `details.reason` on failure) — from hooks, so no route file changes and a new mutating `/api/v1`
+  route without an action name fails the server build. Request bodies, engine args and tokens are
+  never logged. Since all services share one token, the actor is an assertion for investigation,
+  not authorization; a new _Audit Log_ section in the security guide documents the format, that
+  trust assumption (ADR-022) and how to collect and retain the lines. Every caller-supplied value
+  in the line (actor, body strings, device-index list, `x-request-id`) is length-capped, and the
+  BFF forwards `x-request-id` for correlation even when it asserts no actor (`AUTH_MODE=none`).
+- **Pickle-based model weights are refused by default, with an explicit opt-in (#336).** Both
+  runner shims scan the model directory at startup and refuse `.bin`, `.pt`, `.pth`, `.ckpt`,
+  `.pkl`, `.pickle` and `.joblib` weights — formats that deserialize with pickle and can
+  execute arbitrary code on a GPU worker — naming the offending files and the opt-in in the
+  error. Safetensors, ONNX, GGUF and `.bst` are unaffected. The opt-in (`allowUnsafeWeights`,
+  off by default) travels dashboard → control plane → model record (new `allow_unsafe_weights`
+  column) → worker launch identity → `SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1` in the runner
+  environment, and surfaces as a warning-labelled switch in the deploy form. The control plane
+  additionally refuses pickle deploys early at `POST`/`PUT /api/v1/models` (advisory — the shim
+  is the enforcement point), and a new "Model weights trust boundary" section in the security
+  guide documents that write access to the weights volume is code execution on workers. Takes
+  effect on the cluster once the MLServer `1.7.1-rc5` SIF is republished.
 
 ## [0.2.1] - 2026-10-29
 
