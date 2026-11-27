@@ -136,6 +136,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Parallel agent sessions have a committed coordination contract.** Two sessions share one
+  checkout, one test database and one CPU, so the rules now live in the repository instead of in a
+  prompt: `docs/development/parallel-sessions.md` (CPU lock around every heavy command with an
+  absolute lock path, the shared `_test` database taken before the CPU lock, the message bus, and
+  the dev-merge claim), `scripts/session-bus/bus.sh` with a 20-case self-test
+  (`scripts/session-bus/bus.test.sh`) implementing the bus, the claim and a join banner, and a
+  pointer from `AGENTS.md`. A worktree has its own untracked `logs/`, so every path is absolute —
+  a relative lock would serialise nothing.
 - **Runner-shim provenance and staleness gate (#287).** The catalog accepts an optional
   `shimSource` — the full 40-char git commit of the runner-shim tree an image was built from
   (the librarian job's logged `Source commit`) — validated at catalog ingest; the imported module's
