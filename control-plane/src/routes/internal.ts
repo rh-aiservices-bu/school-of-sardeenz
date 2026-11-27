@@ -87,9 +87,11 @@ export function registerInternalRoutes(app: FastifyInstance, deps: RouteDeps): v
 
     const runnerClient = deps.createRunnerClient(target.runnerHost, target.runnerPort);
 
-    deps.sleepWake.wakeModel(modelName, target.instanceId, runnerClient).catch((err: unknown) => {
-      app.log.error({ err, modelName, instanceId: target.instanceId }, 'Background wake failed');
-    });
+    deps.sleepWake
+      .wakeModel(modelName, target.instanceId, runnerClient, { claimed: true })
+      .catch((err: unknown) => {
+        app.log.error({ err, modelName, instanceId: target.instanceId }, 'Background wake failed');
+      });
 
     return reply.code(202).send({
       accepted: true,

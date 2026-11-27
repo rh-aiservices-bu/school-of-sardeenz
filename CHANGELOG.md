@@ -133,6 +133,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missing `docs/development/agent-profile.md` (required by the milestone skills) was created
   from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
   (`reports/`, `plans/`, `worktrees/`, `profiles`).
+- **The engine-runner contract now documents `POST /wake` as idempotent (#323).** The
+  never-implemented `409 "Runner is not sleeping"` is removed from
+  `packages/contracts/specs/engine-runner.yaml` (types regenerated via `make codegen`; no consumer
+  referenced the removed response type) — a runner that is not sleeping answers `200` and reports
+  its post-wake state. Both Python shims already behaved this way, so **no SIF republish is
+  needed** and no shim runtime code changed. The control plane keeps a spurious wake visible on its
+  own side: `wakeModel` now takes the caller's claim outcome, and a wake against an instance the
+  caller did not win `SLEEPING → STARTING` for is a logged, counted no-op
+  (`sardeenz_control_plane_wake_unclaimed_total{state}`) instead of a failed `STARTING → ACTIVE`
+  that marked a healthy instance ERROR; it also no longer counts as a wake trigger. The
+  dev-worker runner stub and the conformance suite are aligned, the `/wake` divergence entry in
+  `runners/conformance/README.md` is replaced by a "Recorded assumptions" note (calling the
+  engine's own wake while loading/serving is assumed, not proven — decision D12), and the
+  runner-contract doc states the idempotent semantics.
 - **Redis-transported schemas are now governed by a written additive-only rule (#331).** The
   JSON blobs that cross the proxy↔control-plane seam through Redis (routing map, routing
   pub/sub payloads, instance state, worker registration/detail, cluster memory, proxy

@@ -45,16 +45,16 @@ existing two adapters, then add it to `_BUILDERS` in `conftest.py`.
 
 ## What it checks
 
-The 13 named cases in `test_engine_runner_contract.py` cover `/health`, `/capabilities`,
+The 14 named cases in `test_engine_runner_contract.py` cover `/health`, `/capabilities`,
 `/memory-report`, `/progress`, `/sleep-status`, `/sleep` (bad level, bad/missing body, `409` while
-`STARTING`, the in-flight-request guard), `/wake` from a non-sleeping runner, `ERROR` surfaced in
-`/health` after the engine dies, and the `/sleep` → `/sleep-status` → `/wake` → `/sleep-status`
-state-machine transition — the same transition both shims' `state.py` response builders must
-produce identically. 12 of them run against every shim (25 tests today: the 8 original cases + 4
-conflict/error cases × 2 shims, plus 1 capability-gated). The `/memory-report` shape case also
-asserts that every **current emitter declares** a memory `attribution` scope (`runner` or `device`,
-#244) — the field stays optional in the contract for legacy images, but the shims under this suite
-must declare one.
+`STARTING`, the in-flight-request guard), `/wake` from a non-sleeping runner (`READY` and
+`STARTING`), `ERROR` surfaced in `/health` after the engine dies, and the `/sleep` →
+`/sleep-status` → `/wake` → `/sleep-status` state-machine transition — the same transition both
+shims' `state.py` response builders must produce identically. 13 of them run against every shim
+(27 tests today: the 8 original cases + 5 conflict/idempotency cases × 2 shims, plus 1
+capability-gated). The `/memory-report` shape case also asserts that every **current emitter
+declares** a memory `attribution` scope (`runner` or `device`, #244) — the field stays optional in
+the contract for legacy images, but the shims under this suite must declare one.
 
 ## Capability-gated cases
 
@@ -76,23 +76,24 @@ would encode runner identity and turn a real behavioural difference into a green
 adding a runtime flag to `/capabilities.features` would change shim behaviour (this issue is
 tests + test adapters only) and export a field the control plane has no use for.
 
+## Recorded assumptions
+
+Some contract statements are backed by the shims' handlers only, not by a real engine. They are
+recorded here so the suite's evidence is never overstated.
+
+**`POST /wake` is harmless from any engine state (#323, decision D12).** The contract documents
+`200`-from-any-state (`packages/contracts/specs/engine-runner.yaml`); what this suite proves, with
+fake engines, is only that the shims' `/wake` handlers answer `200` without a state check
+(`test_wake_from_non_sleeping_returns_200`, `test_wake_from_starting_returns_200`). That calling
+the *engine's* wake (`POST /wake_up` for vLLM, repository `load` for MLServer) while the engine is
+loading or already serving is harmless is an **assumed, unverified engine property** — proving it
+requires a GPU/cluster run, deferred beyond M21 by decision D12. No real-engine proof is claimed
+here.
+
 ## Known divergences from the contract
 
 The suite is the executable forcing function for `engine-runner.yaml`, so a case that pins
 behaviour the spec does not describe is called out here instead of being asserted silently.
-
-### `/wake` from a non-sleeping runner returns `200` (#252, decided 2026-11-25)
-
-`engine-runner.yaml` documents `409 — Runner is not sleeping` for `/wake`. Neither shim checks its
-state: both call the engine's wake (`POST /wake_up` for vLLM, repository `load` for MLServer) and
-answer `200 {"state": "READY"}`. `test_wake_from_non_sleeping_returns_200` pins that `200`; no
-shim runtime behaviour changes in #252. The control plane wakes whatever instance it is handed
-(its sleep/wake path only conditionally claims `SLEEPING → STARTING`), so adopting the contract's
-`409` would turn a spuriously-woken READY runner into an error transition there. Aligning contract
-and behaviour — including that consumer consequence — is tracked as follow-up
-[#323](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/323): #252 pins the `200`,
-#323 owns the alignment. The same missing guard also lets `/wake` succeed from `STARTING` and
-`ERROR` (flipping the runner to `READY`), which #323 must decide alongside the `409`.
 
 Observed but not asserted here (out of scope for #252): `/health` answers `200` in `STARTING`
 (with a `progress` block) where the spec's summary lists `503` for "alive but not yet

@@ -86,6 +86,13 @@ export const wakeClaimFailuresTotal = new Counter({
   registers: [registry],
 });
 
+export const wakeUnclaimedTotal = new Counter({
+  name: 'sardeenz_control_plane_wake_unclaimed_total',
+  help: 'Wakes skipped: instance not claimed SLEEPING -> STARTING by the caller (idempotent no-op)',
+  labelNames: ['state'] as const,
+  registers: [registry],
+});
+
 export const stateTransitionsTotal = new Counter({
   name: 'sardeenz_control_plane_state_transitions_total',
   help: 'Model state transitions',

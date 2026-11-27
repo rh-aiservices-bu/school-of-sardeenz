@@ -12,6 +12,7 @@ import {
   sleepDuration,
   wakeDuration,
   wakeTriggersTotal,
+  wakeUnclaimedTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
 import { delaySafe } from '../utils.js';
@@ -86,6 +87,15 @@ export interface RunnerHealthResult {
   state: RunnerState;
   activeRequests: number | null;
   message?: string;
+}
+
+/**
+ * Options for {@link SleepWakeService.wakeModel}. `claimed: true` means the caller already won
+ * the `SLEEPING → STARTING` CAS (route handlers do); omitted/false keeps the direct-call
+ * behaviour of claiming a SLEEPING instance internally (#323).
+ */
+export interface WakeModelOptions {
+  claimed?: boolean;
 }
 
 export class SleepWakeService {
@@ -165,20 +175,47 @@ export class SleepWakeService {
    *
    * Updates the routing map (per-instance endpoint re-add, then a model-level aggregate
    * refresh) at each stage. Records duration in wakeDuration histogram.
+   *
+   * `opts.claimed` says whether the caller already won the `SLEEPING → STARTING` CAS:
+   *  - `claimed: true` → the instance is only wake-eligible if its re-read state is STARTING;
+   *  - `claimed` falsy → the instance is only wake-eligible if its re-read state is SLEEPING,
+   *    which is then claimed here (so a direct three-argument call keeps working).
+   * Any other observed state is a counted + logged no-op (`sardeenz_control_plane_wake_unclaimed_total`):
+   * the instance is untouched and no `/wake` is sent. #323 — the runner's `POST /wake` is
+   * idempotent (`200` from any state), so a spurious wake must stay visible on this side instead
+   * of landing a healthy instance in ERROR via a failed `STARTING → ACTIVE`.
    */
   async wakeModel(
     modelName: string,
     instanceId: string,
     runnerClient: RunnerClient,
+    opts?: WakeModelOptions,
   ): Promise<void> {
     const startedAt = Date.now();
-
-    wakeTriggersTotal.inc();
 
     const instanceState = await this.lifecycle.getInstance(modelName, instanceId);
     if (!instanceState) {
       throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
     }
+
+    // Eligibility gate (#323): only a caller's successful CAS (`claimed`, state STARTING) or a
+    // direct call against a SLEEPING instance may proceed. Everything else — already ACTIVE,
+    // DRAINING, STOPPING, STOPPED, ERROR, PENDING, or STARTING via an unclaimed call — is a
+    // no-op: no trigger count, no transition, no /wake, no waitForReady, no ERROR fallback.
+    const eligible =
+      opts?.claimed === true
+        ? instanceState.state === ModelLifecycleState.STARTING
+        : instanceState.state === ModelLifecycleState.SLEEPING;
+    if (!eligible) {
+      wakeUnclaimedTotal.inc({ state: instanceState.state });
+      this.logger?.warn(
+        { modelName, instanceId, state: instanceState.state, claimed: opts?.claimed ?? false },
+        'Skipped unclaimed wake: instance not in a wake-eligible state',
+      );
+      return;
+    }
+
+    wakeTriggersTotal.inc();
 
     try {
       // SLEEPING → STARTING is claimed atomically by the route handler.

@@ -2083,7 +2083,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
             );
             wakeTasks.push(
               deps.sleepWake
-                .wakeModel(modelName, instance.instanceId, runnerClient)
+                .wakeModel(modelName, instance.instanceId, runnerClient, { claimed: true })
                 .catch((err: unknown) => {
                   app.log.error(
                     { err, modelName, instanceId: instance.instanceId },
@@ -2505,7 +2505,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       const runnerClient = deps.createRunnerClient(instance.runnerHost, instance.runnerPort);
 
       deps.sleepWake
-        .wakeModel(modelName, instanceId, runnerClient)
+        .wakeModel(modelName, instanceId, runnerClient, { claimed: true })
         .catch((err: unknown) => {
           app.log.error({ err, modelName, instanceId }, 'Background wake failed');
         })

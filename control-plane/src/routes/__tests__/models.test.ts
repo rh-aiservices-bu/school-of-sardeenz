@@ -2824,6 +2824,27 @@ describe('instance-scoped op dedup (quality L4 / security L2)', () => {
     expect(statusCodes).toEqual([202, 409]);
   });
 
+  it('passes the satisfied claim to wakeModel on an instance-level wake (#323)', async () => {
+    const sleepingState = { ...ACTIVE_STATE, state: ModelLifecycleState.SLEEPING };
+    const wakeModel = vi.fn(() => Promise.resolve());
+    const { app } = buildApp({
+      getInstance: vi.fn(() => Promise.resolve(sleepingState)),
+      getInstancesForModel: vi.fn(() => Promise.resolve([sleepingState])),
+      wakeModel,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/models/m1/instances/${INSTANCE_ID}/wake`,
+    });
+
+    expect(res.statusCode).toBe(202);
+    // The route claimed SLEEPING → STARTING; an unclaimed wake would be a counted no-op.
+    expect(wakeModel).toHaveBeenCalledWith('m1', INSTANCE_ID, expect.anything(), {
+      claimed: true,
+    });
+  });
+
   it('releases the sleep claim when transition throws after the claim so a retry succeeds', async () => {
     const transition = vi.fn<() => Promise<void>>(() =>
       Promise.reject(new Error('INVALID_TRANSITION')),
@@ -3483,5 +3504,19 @@ describe('#303 wake claim loop', () => {
     // The wake runs in the detached task.
     await vi.waitFor(() => expect(wakeModel).toHaveBeenCalledOnce());
     expect(await claimFailures()).toBe(before);
+  });
+
+  it('passes the satisfied claim to wakeModel (#323)', async () => {
+    const { app, deps } = buildWakeApp();
+    const { wakeModel } = deps.sleepWake as unknown as { wakeModel: Mock };
+
+    const res = await app.inject({ method: 'POST', url: '/api/v1/models/m1/wake' });
+    expect(res.statusCode).toBe(202);
+
+    await vi.waitFor(() => expect(wakeModel).toHaveBeenCalledOnce());
+    // The loop above claimed SLEEPING → STARTING; an unclaimed wake would be a counted no-op.
+    expect(wakeModel).toHaveBeenCalledWith('m1', INSTANCE_ID, expect.anything(), {
+      claimed: true,
+    });
   });
 });

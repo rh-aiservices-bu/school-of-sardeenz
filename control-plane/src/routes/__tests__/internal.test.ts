@@ -196,6 +196,13 @@ describe('POST /api/v1/wake — internal wake route', () => {
       INSTANCE_ID,
       ModelLifecycleState.STARTING,
     );
+    // #323: the route hands its successful claim to wakeModel so an unclaimed wake is a no-op.
+    expect(mocks.sleepWake.wakeModel).toHaveBeenCalledWith(
+      'test-model',
+      INSTANCE_ID,
+      expect.anything(),
+      { claimed: true },
+    );
   });
 
   it('returns the benign already-waking 202 when the CAS transition loses the race', async () => {
@@ -324,6 +331,7 @@ describe('POST /api/v1/wake — internal wake route', () => {
       'test-model',
       INSTANCE_ID,
       mockRunnerClient,
+      { claimed: true },
     );
   });
 

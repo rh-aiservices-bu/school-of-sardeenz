@@ -206,7 +206,7 @@ Only `L1_HOST_RAM` is defined in v0.1 of the contract. Future levels (e.g., L2 f
 #### Protocol
 
 1. **Sleep:** Control plane sends `POST /sleep` with `{ "level": "L1_HOST_RAM" }`. The call blocks until the offload completes. The response includes `deviceMemoryFreedBytes` so the control plane can update its capacity accounting.
-2. **Wake:** Control plane sends `POST /wake`. The call blocks until the runner is back in `READY` state and can accept inference traffic.
+2. **Wake:** Control plane sends `POST /wake`. The call blocks until the runner is back in `READY` state and can accept inference traffic. `POST /wake` is idempotent — a runner that is not sleeping also answers `200` and reports its post-wake state; a non-sleeping runner does not refuse. (Whether waking an *engine* that is still loading or already serving is harmless is a recorded assumption, not proven here — see `runners/conformance/README.md` § "Recorded assumptions".)
 3. **Status:** `GET /sleep-status` returns whether the runner is sleeping and at which level. The control plane uses this for verification and eviction strategy decisions.
 
 Sleep and wake are **synchronous** by design. The control plane controls the timeout based on the expected offload/reload duration for the model size and sleep level.

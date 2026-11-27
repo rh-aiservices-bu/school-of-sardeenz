@@ -9,7 +9,7 @@ import {
 
 import { refreshModelRoutingState, SleepWakeService } from '../sleep-wake.js';
 import type { ModelLifecycleService, InstanceState } from '../model-lifecycle.js';
-import type { RoutingMapService } from '../routing-map.js';
+import type { RoutingMapLogger, RoutingMapService } from '../routing-map.js';
 import type { MemoryBudgetService } from '../memory-budget.js';
 import type { RunnerClient } from '../../clients/runner.js';
 import { registry } from '../../health/metrics.js';
@@ -92,7 +92,7 @@ function createMocks(): Mocks {
   };
 }
 
-function createService(mocks: Mocks): SleepWakeService {
+function createService(mocks: Mocks, logger?: RoutingMapLogger): SleepWakeService {
   return new SleepWakeService(
     mocks.lifecycle as unknown as ModelLifecycleService,
     mocks.routingMap as unknown as RoutingMapService,
@@ -100,6 +100,7 @@ function createService(mocks: Mocks): SleepWakeService {
     5_000,
     5_000,
     10,
+    logger,
   );
 }
 
@@ -300,6 +301,11 @@ describe('SleepWakeService — timeout threading (#89)', () => {
   });
 
   it('wakeModel does not pass a custom timeout to runnerClient.wake()', async () => {
+    // SLEEPING keeps the direct three-argument call wake-eligible (#323 gate).
+    mocks.lifecycle.getInstance.mockResolvedValue(
+      makeState({ state: ModelLifecycleState.SLEEPING }),
+    );
+
     await service.wakeModel(
       'test-model',
       INSTANCE_ID,
@@ -307,6 +313,126 @@ describe('SleepWakeService — timeout threading (#89)', () => {
     );
 
     expect(mocks.runnerClient.wake).toHaveBeenCalledWith();
+  });
+});
+
+describe('SleepWakeService — unclaimed wake no-op (#323)', () => {
+  const UNCLAIMED = 'sardeenz_control_plane_wake_unclaimed_total';
+  const TRIGGERS = 'sardeenz_control_plane_wake_triggers_total';
+
+  /** Current value of a wake-family counter (prom-client global registry). */
+  async function metricValue(name: string, state?: string): Promise<number> {
+    const metrics = await registry.getMetricsAsJSON();
+    const metric = metrics.find((m) => m.name === name);
+    const sample =
+      state === undefined
+        ? metric?.values[0]
+        : metric?.values.find((v) => v.labels.state === state);
+    return sample?.value ?? 0;
+  }
+
+  function makeLogger() {
+    return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  }
+
+  it('wakeModel on an unclaimed ACTIVE instance is a logged, counted no-op', async () => {
+    const mocks = createMocks();
+    mocks.lifecycle.getInstance.mockResolvedValue(makeState({ state: ModelLifecycleState.ACTIVE }));
+    const logger = makeLogger();
+    const service = createService(mocks, logger);
+    const unclaimedBefore = await metricValue(UNCLAIMED, ModelLifecycleState.ACTIVE);
+    const triggersBefore = await metricValue(TRIGGERS);
+
+    await service.wakeModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+    );
+
+    // Nothing wakes, transitions or touches routing — the instance stays ACTIVE.
+    expect(mocks.runnerClient.wake).not.toHaveBeenCalled();
+    expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+    expect(mocks.routingMap.addEndpoint).not.toHaveBeenCalled();
+    expect(mocks.routingMap.setModelState).not.toHaveBeenCalled();
+
+    // Counted as an unclaimed skip, and explicitly NOT as a wake trigger.
+    expect(await metricValue(UNCLAIMED, ModelLifecycleState.ACTIVE)).toBe(unclaimedBefore + 1);
+    expect(await metricValue(TRIGGERS)).toBe(triggersBefore);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        modelName: 'test-model',
+        instanceId: INSTANCE_ID,
+        state: ModelLifecycleState.ACTIVE,
+        claimed: false,
+      },
+      'Skipped unclaimed wake: instance not in a wake-eligible state',
+    );
+  });
+
+  it('wakeModel with { claimed: true } proceeds on a STARTING instance', async () => {
+    // The route already won SLEEPING → STARTING; the caller's claim is honoured.
+    const mocks = createMocks();
+    mocks.lifecycle.getInstance.mockResolvedValue(
+      makeState({ state: ModelLifecycleState.STARTING }),
+    );
+    const logger = makeLogger();
+    const service = createService(mocks, logger);
+    const triggersBefore = await metricValue(TRIGGERS);
+
+    await service.wakeModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+      {
+        claimed: true,
+      },
+    );
+
+    expect(mocks.runnerClient.wake).toHaveBeenCalledWith();
+    // No second SLEEPING → STARTING claim; the wake settles the instance back to ACTIVE.
+    expect(mocks.lifecycle.transition).toHaveBeenCalledTimes(1);
+    expect(mocks.lifecycle.transition).toHaveBeenCalledWith(
+      'test-model',
+      INSTANCE_ID,
+      ModelLifecycleState.ACTIVE,
+    );
+    expect(mocks.routingMap.addEndpoint).toHaveBeenCalled();
+    expect(await metricValue(TRIGGERS)).toBe(triggersBefore + 1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('wakeModel with { claimed: true } on a non-STARTING instance is a logged, counted no-op', async () => {
+    // The instance moved past STARTING between the route's CAS and this re-read (fast wake or an
+    // external transition): a counted no-op, never the old failed STARTING → ACTIVE → ERROR path.
+    const mocks = createMocks();
+    mocks.lifecycle.getInstance.mockResolvedValue(makeState({ state: ModelLifecycleState.ACTIVE }));
+    const logger = makeLogger();
+    const service = createService(mocks, logger);
+    const unclaimedBefore = await metricValue(UNCLAIMED, ModelLifecycleState.ACTIVE);
+
+    await service.wakeModel(
+      'test-model',
+      INSTANCE_ID,
+      mocks.runnerClient as unknown as RunnerClient,
+      {
+        claimed: true,
+      },
+    );
+
+    expect(mocks.runnerClient.wake).not.toHaveBeenCalled();
+    expect(mocks.lifecycle.transition).not.toHaveBeenCalled();
+    expect(await metricValue(UNCLAIMED, ModelLifecycleState.ACTIVE)).toBe(unclaimedBefore + 1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        modelName: 'test-model',
+        instanceId: INSTANCE_ID,
+        state: ModelLifecycleState.ACTIVE,
+        claimed: true,
+      },
+      'Skipped unclaimed wake: instance not in a wake-eligible state',
+    );
   });
 });
 
