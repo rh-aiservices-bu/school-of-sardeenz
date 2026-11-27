@@ -153,6 +153,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   digest the running bytes are the pinned ones. The four platform bases keep `:latest` by policy —
   overlays pin them (#247). Bumping the prereq images stays a documented manual step
   (`deployment/prereq/README.md`): Dependabot has no ecosystem for raw Kubernetes manifests.
+- **Docs synchronized for M22.** The M22 features carried their core documentation in each issue,
+  and the sync commit closes the remaining gaps: both shim READMEs and the runner-contract doc
+  document the mandatory weights-policy module (`weights.py`) and its cross-copy drift tests; the
+  MLServer guide's sklearn layout names the opt-in `pytorch_model.bin`/`.joblib` need; the
+  republish runbook intro covers `runners/mlserver`; the architecture overview names the startup
+  weights refusal and the audit line; ADR-023's URL-fragment residual is marked closed by #136 and
+  ADR-016's consequences point at the weights trust boundary; `setup.md`'s command table regains
+  its `make verify-image-pins` row.
 
 ### Added
 

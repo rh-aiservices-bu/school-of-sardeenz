@@ -108,10 +108,10 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
 
 ## Republishing a runner and recording its shim source
 
-Use this when the runner **shim** (`runners/vllm`) changes and the published runner images predate
-that change. `shimSource` in the catalog records the commit an image was built from; the control
-plane writes it into the module sidecar at import and flags an imported module whose provenance is
-missing or behind (#287).
+Use this when a runner **shim** (`runners/vllm` or `runners/mlserver`) changes and the published
+runner images predate that change. `shimSource` in the catalog records the commit an image was
+built from; the control plane writes it into the module sidecar at import and flags an imported
+module whose provenance is missing or behind (#287).
 
 1. **Precondition: the shim change is merged**, and `GIT_REF` is the release commit (a sha, never a
    moving branch, for a release build). Then check the catalog against the tree:

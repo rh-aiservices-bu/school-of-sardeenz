@@ -47,6 +47,12 @@ relative paths that resolve outside that directory are rejected, including symli
 Sardeenz always replaces the settings file's `name` with the deployment's served model name. This
 keeps routing identity independent from the name bundled with the artifact.
 
+`.joblib` and `.pkl` are pickle-based: the deployment must set **Allow Unsafe (Pickle-Based)
+Weights** or the runner refuses to start (see
+[Model weights trust boundary](deployment-security.md#model-weights-trust-boundary)). Prefer
+[skl2onnx](https://onnx.ai/sklearn-onnx/) and deploy the exported graph as `.onnx` when the model
+allows it.
+
 For a Hugging Face repository, point `parameters.uri` at the directory:
 
 ```text
