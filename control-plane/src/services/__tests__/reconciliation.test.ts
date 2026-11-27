@@ -12,7 +12,7 @@ import type { RoutingMapService } from '../routing-map.js';
 import type { ModelRepository, ModelRecord } from '../model-repository.js';
 import type { EvictionEngine, EvictionCandidate } from '../eviction.js';
 import type { SleepWakeService } from '../sleep-wake.js';
-import type { InstanceRepository } from '../instance-repository.js';
+import type { InstanceRepository, InstanceRecord } from '../instance-repository.js';
 import type { NotificationService } from '../notification.js';
 import { ControlPlaneError } from '../../errors.js';
 import { deviceMemoryBytes, registry } from '../../health/metrics.js';
@@ -384,6 +384,23 @@ function createService(
 describe('ReconciliationService', () => {
   let mocks: MockDeps;
   let service: ReconciliationService;
+
+  /** Current value of one `action` label of the #286/#328 reconciliation counter. */
+  async function unclaimedCount(action: 'reaped' | 'refused'): Promise<number> {
+    const metrics = await registry.getMetricsAsJSON();
+    const metric = metrics.find(
+      (m) => m.name === 'sardeenz_control_plane_reconciliation_unclaimed_runners_total',
+    );
+    const sample = metric?.values.find((v) => v.labels.action === action);
+    return sample?.value ?? 0;
+  }
+
+  /** RUNNER_ORPHANED events published on the fake publisher, in publish order. */
+  function publishedOrphanEvents(): ClusterEvent[] {
+    return (mocks.redis.publish.mock.calls as unknown as [string, string][])
+      .map(([, payload]) => JSON.parse(payload) as ClusterEvent)
+      .filter((event) => event.type === ClusterEventType.RUNNER_ORPHANED);
+  }
 
   beforeEach(() => {
     mocks = createMocks();
@@ -2368,22 +2385,6 @@ describe('ReconciliationService', () => {
       };
     }
 
-    /** Current value of one `action` label of the #286 counter. */
-    async function unclaimedCount(action: 'reaped' | 'refused'): Promise<number> {
-      const metrics = await registry.getMetricsAsJSON();
-      const metric = metrics.find(
-        (m) => m.name === 'sardeenz_control_plane_reconciliation_unclaimed_runners_total',
-      );
-      const sample = metric?.values.find((v) => v.labels.action === action);
-      return sample?.value ?? 0;
-    }
-
-    function publishedOrphanEvents(): ClusterEvent[] {
-      return (mocks.redis.publish.mock.calls as unknown as [string, string][])
-        .map(([, payload]) => JSON.parse(payload) as ClusterEvent)
-        .filter((event) => event.type === ClusterEventType.RUNNER_ORPHANED);
-    }
-
     function buildSweepService() {
       return createService(mocks, { withWorkerClient: true, withNotifications: true });
     }
@@ -2690,6 +2691,138 @@ describe('ReconciliationService', () => {
       await sweep.tick();
 
       expect(mocks.workerClient.listRunners).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tick — instance-table reconciliation mass-divergence guard (#328)', () => {
+    function pgRow(instanceId: string, modelName = `model-${instanceId}`): InstanceRecord {
+      return {
+        instanceId,
+        modelName,
+        workerId: 'w1',
+        deviceIndices: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } satisfies InstanceRecord;
+    }
+
+    /** The row-side guard alone: `createWorkerClient` stays unwired, so the sweep never runs and
+     * the `refused` delta per tick comes only from `reconcileInstanceTable`. */
+    function buildGuardService() {
+      return createService(mocks, { withInstanceRepository: true });
+    }
+
+    it('refuses to prune instance rows when Redis holds no instance records at all (#328 mass divergence)', async () => {
+      const guard = buildGuardService();
+      mocks.instanceRepository.findAll.mockResolvedValue([
+        pgRow('inst-a', 'model-a'),
+        pgRow('inst-b', 'model-b'),
+      ]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      const refusedBefore = await unclaimedCount('refused');
+
+      await guard.tick();
+
+      // Nothing deleted: every row looking orphaned at once is divergence, not leakage.
+      expect(mocks.instanceRepository.delete).not.toHaveBeenCalled();
+      expect(await unclaimedCount('refused')).toBe(refusedBefore + 1);
+      const events = publishedOrphanEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: ClusterEventType.RUNNER_ORPHANED });
+      expect(events[0]?.data).toMatchObject({
+        reason: 'mass-divergence',
+        instanceIds: ['inst-a', 'inst-b'],
+        modelNames: ['model-a', 'model-b'],
+      });
+      // Cluster-wide refusal: no worker to attribute it to.
+      expect(events[0]?.workerId).toBeUndefined();
+      expect(mocks.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ instanceCount: 2 }),
+        expect.stringContaining('#241') as string,
+      );
+
+      // Episode semantics: the second refused tick recounts the refusal, not the red row.
+      await guard.tick();
+      expect(await unclaimedCount('refused')).toBe(refusedBefore + 2);
+      expect(publishedOrphanEvents()).toHaveLength(1);
+      expect(mocks.instanceRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not trip when both stores are empty (legitimately empty cluster)', async () => {
+      const guard = buildGuardService();
+      const refusedBefore = await unclaimedCount('refused');
+
+      await guard.tick();
+
+      expect(mocks.instanceRepository.delete).not.toHaveBeenCalled();
+      expect(await unclaimedCount('refused')).toBe(refusedBefore);
+      expect(publishedOrphanEvents()).toHaveLength(0);
+    });
+
+    it('still prunes a single orphaned row while other instance records exist', async () => {
+      const guard = buildGuardService();
+      mocks.instanceRepository.findAll.mockResolvedValue([
+        pgRow('inst-live', 'model-live'),
+        pgRow('inst-lost', 'model-lost'),
+      ]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'model-live', instanceId: 'inst-live' }),
+      ]);
+      const refusedBefore = await unclaimedCount('refused');
+
+      await guard.tick();
+
+      expect(mocks.instanceRepository.delete).toHaveBeenCalledOnce();
+      expect(mocks.instanceRepository.delete).toHaveBeenCalledWith('inst-lost');
+      expect(mocks.logger.info).toHaveBeenCalledWith(
+        { instanceId: 'inst-lost', modelName: 'model-lost' },
+        'Pruned orphaned instance row (no matching Redis state)',
+      );
+      expect(publishedOrphanEvents()).toHaveLength(0);
+      expect(await unclaimedCount('refused')).toBe(refusedBefore);
+    });
+
+    it('clears the guard when records reappear and re-reports a later divergence', async () => {
+      const guard = buildGuardService();
+      mocks.instanceRepository.findAll.mockResolvedValue([pgRow('inst-a', 'model-a')]);
+
+      // Diverged: one row.
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      await guard.tick();
+      expect(publishedOrphanEvents()).toHaveLength(1);
+
+      // Cleared: the record is back, so the row-side episode ends (and nothing is pruned).
+      mocks.lifecycle.getAllInstances.mockResolvedValue([
+        makeModelState({ modelName: 'model-a', instanceId: 'inst-a' }),
+      ]);
+      await guard.tick();
+      expect(mocks.instanceRepository.delete).not.toHaveBeenCalled();
+      expect(publishedOrphanEvents()).toHaveLength(1);
+
+      // A new episode is worth a new row.
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      await guard.tick();
+      expect(publishedOrphanEvents()).toHaveLength(2);
+    });
+
+    it("keeps the row-side episode armed across the sweep's workers-empty clear", async () => {
+      // Both halves wired, getAllWorkers left at its default `[]`: the post-flush shape, where the
+      // in-memory registry empties out during the tick and the sweep takes its workers-empty clear
+      // path every cycle. That clear must not un-arm the row-side episode (reserved key preserved).
+      const sweep = createService(mocks, {
+        withInstanceRepository: true,
+        withWorkerClient: true,
+      });
+      mocks.instanceRepository.findAll.mockResolvedValue([pgRow('inst-a', 'model-a')]);
+      mocks.lifecycle.getAllInstances.mockResolvedValue([]);
+      const refusedBefore = await unclaimedCount('refused');
+
+      await sweep.tick();
+      await sweep.tick();
+
+      expect(publishedOrphanEvents()).toHaveLength(1);
+      expect(await unclaimedCount('refused')).toBe(refusedBefore + 2);
+      expect(mocks.instanceRepository.delete).not.toHaveBeenCalled();
     });
   });
 });

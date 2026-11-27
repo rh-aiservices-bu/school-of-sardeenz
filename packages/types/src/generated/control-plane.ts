@@ -773,7 +773,9 @@ export type components = {
          *         `instanceId`, `modelName`.
          *       - `mass-divergence` — refusal, because the control plane held no
          *         instance records at all: plural `runnerIds` and `modelNames`
-         *         arrays covering every affected runner on the event's `workerId`.
+         *         arrays covering every affected runner on the event's `workerId`
+         *         (runner sweep), or plural `instanceIds` and `modelNames` arrays
+         *         with no `workerId` (instance-table guard — cluster-wide).
          * @enum {string}
          */
         ClusterEventType: ClusterEventType;

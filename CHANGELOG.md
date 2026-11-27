@@ -691,6 +691,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lost CAS with the benign already-waking 202 (the endpoint is documented as idempotent) instead of
   a 409 that made the losing proxy replica abort its whole parked herd; non-conflict errors still
   propagate.
+- **Reconciliation refuses to wholesale-delete instance rows when Redis holds no instance
+  records (#328).** A Redis flush, a restart without persistence or a failover to an empty
+  replica used to make `reconcileInstanceTable` see every Postgres `instances` row as orphaned
+  and delete them all in one tick — destroying the only durable record of which runners exist
+  while the runner processes kept holding VRAM. The step now refuses to prune anything while
+  Redis holds zero instance records but the ledger has rows, keeping the rows and surfacing the
+  refusal through the existing #286 mass-divergence telemetry — the same
+  `sardeenz_control_plane_reconciliation_unclaimed_runners_total{action="refused"}` counter,
+  the same `RUNNER_ORPHANED` event with `data.reason: "mass-divergence"` (now documented to
+  carry plural `instanceIds`/`modelNames` with no `workerId` for this half), and one
+  structured error log per tick, with the event published once per divergence episode. A
+  legitimately empty cluster (no rows either) is never blocked, single genuinely-orphaned rows
+  are still pruned, and the guard clears by itself once instance records reappear.
+  Rediscovering or reaping the live runners afterwards remains #241.
 
 ### Security
 
