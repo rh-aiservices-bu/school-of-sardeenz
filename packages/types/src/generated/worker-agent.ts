@@ -312,6 +312,15 @@ export type components = {
              */
             engineArgs?: string[];
             /**
+             * @description Opt-in to pickle-based weight formats for this model. When true, the
+             *     worker emits SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1 into the runner process
+             *     environment; when absent or false no variable is emitted and the
+             *     runner shim refuses pickle-based weights (.bin, .pt, .pth, .ckpt,
+             *     .pkl, .pickle, .joblib) at startup. Absent and false are the same
+             *     launch identity.
+             */
+            allowUnsafeWeights?: boolean;
+            /**
              * @description Optional verbatim argv the worker execs inside the SIF to launch
              *     this runner's management shim, from the runner's catalog metadata. When present,
              *     the Apptainer launcher uses it in place of its global

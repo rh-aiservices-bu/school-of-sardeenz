@@ -29,6 +29,7 @@ export interface DeployModelParams {
   engineArgs?: string[];
   runtimeModule?: string;
   servedModelName?: string;
+  allowUnsafeWeights?: boolean;
   protocol: Protocol;
   entrypoint?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
@@ -106,6 +107,7 @@ export class DeployOrchestrationService {
         engineConfig: params.engineConfig,
         engineArgs: params.engineArgs,
         runtimeModule: params.runtimeModule,
+        allowUnsafeWeights: params.allowUnsafeWeights,
         entrypoint: params.entrypoint,
         devices: params.devices as StartRunnerRequest['devices'],
       };

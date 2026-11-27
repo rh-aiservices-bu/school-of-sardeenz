@@ -23,6 +23,11 @@ PATCHED_SEAMS: tuple[str, ...]
 def build_conformance_app(*, ready: bool = True, alive: bool = True) -> fastapi.FastAPI: ...
 #   ready=False → the poller never reports readiness: the runner stays STARTING
 #   alive=False → the poller's first check sees a dead process: the runner flips ERROR
+
+# The shim's weights-policy module (#336) — exposes ALLOW_UNSAFE_ENV, REFUSED_SUFFIXES,
+# allow_unsafe_from_env, refused_weight_files, check_weights, WeightsRefusedError.
+# Mandatory on every adapter: direct attribute access, so a missing one fails loud.
+WEIGHTS_POLICY: types.ModuleType
 ```
 
 The adapter patches the shim's module-global engine/memory seams (e.g. `VllmEngine`/`MLServerEngine`,

@@ -61,6 +61,7 @@ interface FormState {
   runtimeModule: string;
   pinned: boolean;
   allowCoLocation: boolean;
+  allowUnsafeWeights: boolean;
   engineArgs: string;
   servedModelName: string;
 }
@@ -188,6 +189,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
     runtimeModule: '',
     pinned: false,
     allowCoLocation: false,
+    allowUnsafeWeights: false,
     engineArgs: '',
     servedModelName: '',
   });
@@ -264,6 +266,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
       runtimeModule: model.runtimeModule ?? '',
       pinned: model.pinned ?? false,
       allowCoLocation: model.allowCoLocation ?? false,
+      allowUnsafeWeights: model.allowUnsafeWeights ?? false,
       engineArgs: model.engineArgs?.join('\n') ?? '',
       servedModelName: model.servedModelName ?? '',
     });
@@ -302,6 +305,7 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
       requiredMemory: Math.round(parseFloat(form.requiredMemoryGib) * GIB),
       tensorParallel: parseInt(form.tensorParallel, 10),
       allowCoLocation: form.allowCoLocation,
+      allowUnsafeWeights: form.allowUnsafeWeights,
       pinned: form.pinned,
     };
 
@@ -543,6 +547,22 @@ export function ModelDeploy({ edit = false }: { edit?: boolean }) {
                 showError={false}
                 fieldId="allow-co-location"
               />
+            </FormGroup>
+
+            <FormGroup label={t('deploy.fields.allowUnsafeWeights')} fieldId="allow-unsafe-weights">
+              <Switch
+                id="allow-unsafe-weights"
+                label={t('deploy.fields.allowUnsafeWeights')}
+                isChecked={form.allowUnsafeWeights}
+                onChange={(_ev, checked) => set('allowUnsafeWeights', checked)}
+              />
+              <FormHelperText>
+                <HelperText>
+                  <HelperTextItem variant="warning">
+                    {t('deploy.hints.allowUnsafeWeights')}
+                  </HelperTextItem>
+                </HelperText>
+              </FormHelperText>
             </FormGroup>
 
             {/* Runner section: runner type, then runner-specific fields. */}

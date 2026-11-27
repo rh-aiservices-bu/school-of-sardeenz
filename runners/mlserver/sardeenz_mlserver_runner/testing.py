@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import app as _app
+from . import weights as WEIGHTS_POLICY
 from .cli import parse_args
 
 # No /sleep in-flight-request guard: MLServer reports the REST in-progress gauge but cannot

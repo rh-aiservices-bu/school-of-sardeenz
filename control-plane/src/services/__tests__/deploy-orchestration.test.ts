@@ -257,6 +257,24 @@ describe('DeployOrchestrationService', () => {
       );
     });
 
+    it('forwards allowUnsafeWeights into the worker StartRunnerRequest (#336)', async () => {
+      await service.deployModel(makeParams({ allowUnsafeWeights: true }));
+
+      expect(mocks.workerClient.startRunner).toHaveBeenCalledWith(
+        expect.objectContaining({ allowUnsafeWeights: true }),
+      );
+    });
+
+    it('omits allowUnsafeWeights from the start request by default (#336)', async () => {
+      await service.deployModel(makeParams());
+
+      const requestArg = mocks.workerClient.startRunner.mock.calls[0]?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      // Absent and false are the same launch identity: nothing truthy reaches the worker.
+      expect(requestArg?.allowUnsafeWeights).toBeUndefined();
+    });
+
     it('releases the model reservation after transitioning to ACTIVE (#87)', async () => {
       await service.deployModel(makeParams());
 

@@ -904,6 +904,17 @@ export type components = {
              * @default false
              */
             allowCoLocation: boolean;
+            /**
+             * @description Opt-in to loading pickle-based weight formats (.bin, .pt, .pth,
+             *     .ckpt, .pkl, .pickle, .joblib). These formats deserialize with
+             *     pickle and can execute arbitrary code on the worker, so the runner
+             *     shim refuses them at startup unless this is true. Safetensors,
+             *     ONNX, GGUF and XGBoost .bst are unaffected. Persisted on the model
+             *     record so every later start keeps the opt-in, and delivered to the
+             *     runner as SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1.
+             * @default false
+             */
+            allowUnsafeWeights: boolean;
         };
         /** @description Complete replacement for a stopped model's mutable configuration. */
         ModelConfigurationUpdateRequest: {
@@ -919,6 +930,7 @@ export type components = {
             runtimeModule?: components["schemas"]["ModelDeploymentRequest"]["runtimeModule"];
             pinned: components["schemas"]["ModelDeploymentRequest"]["pinned"];
             allowCoLocation: components["schemas"]["ModelDeploymentRequest"]["allowCoLocation"];
+            allowUnsafeWeights: components["schemas"]["ModelDeploymentRequest"]["allowUnsafeWeights"];
         };
         /**
          * @description Response after a deployment request is accepted. The model is now
@@ -1127,6 +1139,12 @@ export type components = {
              *     detail payload so the edit form can hydrate the switch.
              */
             allowCoLocation?: boolean;
+            /**
+             * @description Whether the model opted in to pickle-based (unsafe) weight formats
+             *     (see ModelDeploymentRequest.allowUnsafeWeights). Present in the
+             *     detail payload so the edit form can hydrate the switch.
+             */
+            allowUnsafeWeights?: boolean;
             /** @description Ordered CLI tokens passed verbatim to the engine. */
             engineArgs?: string[];
             /**

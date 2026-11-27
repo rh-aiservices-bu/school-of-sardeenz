@@ -111,6 +111,7 @@ function toDeps(mocks: Mocks): RouteDeps {
     catalogService: {} as RouteDeps['catalogService'],
     moduleStore: {} as RouteDeps['moduleStore'],
     weightsBrowser: {} as RouteDeps['weightsBrowser'],
+    weightsPolicy: {} as RouteDeps['weightsPolicy'],
     proxyProtocols: {} as RouteDeps['proxyProtocols'],
     createRunnerClient: mocks.createRunnerClient,
     createWorkerClient: vi.fn(),

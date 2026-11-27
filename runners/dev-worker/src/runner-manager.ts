@@ -95,6 +95,8 @@ export interface StartRunnerParams {
   engineArgs?: string[];
   /** Optional engine-reported model identity (ADR-020); passed through to the launcher. */
   servedModelName?: string;
+  /** Opt-in to pickle-based weight formats (#336); part of the launch identity. */
+  allowUnsafeWeights?: boolean;
   /** Optional verbatim argv from catalog metadata (#125); passed through to the launcher. */
   entrypoint?: string[];
   devices: { deviceIndex: number; deviceType: string }[];
@@ -136,6 +138,8 @@ export interface NormalizedLaunchSpec {
   /** Ordered argv tail — order is meaningful, never sorted. */
   engineArgs: string[];
   servedModelName: string | null;
+  /** Weights-format opt-in (#336): absent and false normalise to the same identity. */
+  allowUnsafeWeights: boolean;
   /** Ordered argv — order is meaningful, never sorted. */
   entrypoint: string[];
   /** Sorted by deviceIndex: placement order is not part of the launch identity. */
@@ -176,6 +180,7 @@ export function normalizeLaunchSpec(
     engineConfig: params.engineConfig === undefined ? null : canonicalJson(params.engineConfig),
     engineArgs: [...(params.engineArgs ?? [])],
     servedModelName: params.servedModelName ?? null,
+    allowUnsafeWeights: params.allowUnsafeWeights === true,
     entrypoint: [...(params.entrypoint ?? [])],
     devices: [...params.devices]
       .sort((a, b) => a.deviceIndex - b.deviceIndex)
@@ -437,6 +442,7 @@ export class RunnerManager {
           engineConfig: params.engineConfig,
           engineArgs: params.engineArgs,
           servedModelName: params.servedModelName,
+          allowUnsafeWeights: params.allowUnsafeWeights,
           entrypoint: params.entrypoint,
           devices: params.devices,
           port,

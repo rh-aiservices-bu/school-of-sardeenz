@@ -243,6 +243,72 @@ may patch the Namespace object: anyone who can remove the `sardeenz.io/module-gu
 edit the binding) can switch protection off. Restrict Namespace-object writes the same way you
 restrict Pod creation — labels alone are not a namespace boundary.
 
+## Model weights trust boundary
+
+The `sardeenz-weights` PVC holds the model directories every worker loads, and **write access to
+it is equivalent to code execution on every GPU worker**. Anyone who can write a weights
+directory can put a pickle-based checkpoint in it, and loading that checkpoint runs arbitrary code
+inside the runner process on the node. Two further inputs in the same trust class are documented
+risks, not refusals: a `runtimeModule` the operator explicitly names (the worker execs the SIF
+the control plane selects) and `--trust-remote-code` passed through `engineArgs` (the engine
+imports Python from the model repository — see #337).
+
+Only deploy weights from sources you trust. The platform verifies runner SIFs against their
+published digests ([ADR-017](../architecture/adrs/adr-017-runner-image-pipeline.md)) but it does
+**not** sign or checksum model weights — that gap is tracked separately (#284).
+
+### Format policy
+
+Both runner shims scan the model directory at startup and refuse **pickle-based** weight files
+unless the model opted in. The match is on the file suffix, case-insensitive, and the scan is
+recursive over **every** entry below the model directory — dot-directories (`.cache`, `.w`, …)
+and caches such as `__pycache__` included — because Hugging Face's `subfolder=` and a
+`model-settings.json` `parameters.uri` can point at any directory inside it, so pruning any of
+them would leave a reachable load path unscanned. The walk is metadata-only: it lists names and
+never opens a file. Symlinked directories are not followed, so nothing beneath them is scanned.
+On MLServer a link whose target lies outside the model directory is not a load path either: the
+model directory's own `model-settings.json` supplies `parameters.uri`, which the shim resolves
+with its real path and refuses when it lands outside. The vLLM shim has no such uri check, so
+there a symlinked directory pointing outside remains reachable through load paths the walk cannot
+see — a `pytorch_model.bin.index.json` `weight_map` entry naming `link/model.bin`, or
+`--subfolder=link` passed through `engineArgs`. That residual needs no code change, only the
+premise stated above: creating the link requires write access to the weights directory, which is
+already equivalent to code execution on every worker.
+
+| Refused without the opt-in | Allowed |
+| --- | --- |
+| `.bin` (including `pytorch_model.bin`), `.pt`, `.pth`, `.ckpt`, `.pkl`, `.pickle`, `.joblib` | `.safetensors`, `.onnx`, `.gguf`, `.msgpack`, `.h5` / `.keras` (HDF5), `.npy` / `.npz`, `.bst` (XGBoost binary — not a pickle), any `.json` |
+
+Two consequences worth stating explicitly:
+
+- A directory holding **both** a `.safetensors` artifact and a `pytorch_model.bin` copy is
+  refused — the presence of the pickle is enough. Delete the pickle copy, or opt in.
+- `pytorch_model.bin.index.json` is allowed while its `.bin` shards are not: the index is a
+  plain JSON manifest, the shards are pickles. The same applies to the sklearn family — `.joblib`
+  and `.pkl` require the opt-in; `.bst` and `model.json` do not.
+
+### The opt-in
+
+`allowUnsafeWeights` on the deploy request (a warning-labelled switch in the deploy form) is off
+by default. When set, it is persisted on the model record so every later start — restart,
+add-instance, capacity reclamation — keeps it, and the worker delivers it to the runner as
+`SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1` (`--cleanenv` means the SIF inherits nothing else). The runner
+shim is the enforcement point: without the variable it refuses the model, naming every offending
+relative path plus both spellings of the opt-in. Only `1` and `true` (case-insensitive) enable it;
+`yes`, `on` and any other value are denied.
+
+When the refusal fires, the deploy fails while starting and the reason is the runner's startup
+log — open it from the deploy-logs modal or `GET /api/v1/models/:name/startup-logs`.
+
+### The control plane's early refusal is advisory
+
+`POST /api/v1/models` and `PUT /api/v1/models/:name` also refuse a pickle-based `modelPath` with a
+`400` when the opt-in is absent, so the operator gets the answer at the form instead of a failed
+start. This is a courtesy, not the guarantee: the control plane's own view of
+`SARDEENZ_WEIGHTS_DIR` may be a different mount from the worker's (and it fails open on an
+unreadable directory so it cannot mask the engine's real error). The shim inside the SIF always
+re-checks and its answer is authoritative.
+
 ## Container securityContexts and SCC capabilities
 
 Every Sardeenz workload container hardens its own `securityContext`: no privilege escalation

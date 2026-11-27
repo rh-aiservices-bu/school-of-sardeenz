@@ -104,6 +104,7 @@ function toDeps(mocks: Mocks, deployTimeoutSecs = 5): RouteDeps {
     catalogService: {} as RouteDeps['catalogService'],
     moduleStore: {} as RouteDeps['moduleStore'],
     weightsBrowser: {} as RouteDeps['weightsBrowser'],
+    weightsPolicy: {} as RouteDeps['weightsPolicy'],
     proxyProtocols: {} as RouteDeps['proxyProtocols'],
     createRunnerClient: vi.fn(),
     createWorkerClient: mocks.createWorkerClient,
