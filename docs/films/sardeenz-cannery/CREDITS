@@ -1,0 +1,21 @@
+Every Gigabyte — credits and third-party material
+
+Picture
+- Drawn entirely in code (SVG rendered frame by frame in headless Chromium).
+- lib.js is adapted from the Assembly-Line Diagram demo of Lemo-Opuscar
+  (https://github.com/lemomo-ai/lemo-opuscar), MIT licence. The style itself (STYLE.md) is from the same library.
+- Render, mux and sound-effect tools: Lemo-Opuscar core/, MIT licence.
+
+Fonts (subsets in fonts/, SIL Open Font License 1.1)
+- Big Shoulders Display — Patric King / The Big Shoulders Project Authors. https://fonts.google.com/specimen/Big+Shoulders+Display
+- Archivo — Omnibus-Type / The Archivo Project Authors. https://fonts.google.com/specimen/Archivo
+
+Voice
+- Synthetic narration: Kokoro-82M text-to-speech (Apache-2.0), voice "bm_george", run offline through kokoro-onnx (MIT).
+
+Music and sound effects
+- Original score and all sound effects synthesized in mix.py (numpy / scipy). No samples or recordings.
+
+Names
+- MIG, Kubernetes and Redis are named as the technologies the film explains; they are trademarks of their owners
+  (NVIDIA Corporation, The Linux Foundation, Redis Ltd.). No logos are shown.

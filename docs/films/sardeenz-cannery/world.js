@@ -24,7 +24,7 @@ const RACK = { P: [2694, 1300], E: [2900, 1300], D: [2836, 1640], C: [3216, 1640
 // the crane's jobs: [model, grab time, release time, from, to]
 const JOBS = [['P', 24.8, 27.4, RACK.P, slotC('P')], ['E', 31.6, 34.2, RACK.E, slotC('E')], ['C', 52.0, 54.4, slotC('C'), RACK.C], ['D', 55.0, 57.4, RACK.D, slotC('D')]];
 const N_ON = { 1: 24.2, 2: 24.8, 3: 40.4, 4: 40.8, 5: 48.6, 6: 54.4 };
-const T_LID = [21.5, 23.5, 62.5, 64.6], T_TICK = 65.6;
+const T_LID = [21.6, 23.6, 62.6, 64.7], T_TICK = 65.4;
 
 const numOn = (n, t) => t >= N_ON[n];
 const numPop = (n, t) => 1 + .35 * pulse(t, N_ON[n], .35);
@@ -93,7 +93,8 @@ function tray(x0, cy, u, label, used, o = {}) {
     txt(sx + 22, sy + 48, label, 42, { w: 900, ls: 1.5 });
     txt(sx + sw - 22, sy + 48, `${used} / 24 GB`, 42, { w: 900, anchor: 'end', ls: 1.5, fill: used >= 24 ? C.teal : C.red });
   } else {
-    txt(x0 - 22 * k, cy - h - 44 * k, label, 38 * k, { w: 900, ls: 1.5 });
+    if (o.labelRight) txt(x0 + w + 22 * k, cy - h - 44 * k, label, 38 * k, { w: 900, ls: 1.5, anchor: 'end' });
+    else txt(x0 - 22 * k, cy - h - 44 * k, label, 38 * k, { w: 900, ls: 1.5 });
     if (used != null) txt(x0 + w + 22 * k, cy - h - 44 * k, `${used} / 24 GB`, 38 * k, { w: 900, anchor: 'end', ls: 1.5, fill: used >= 24 ? C.teal : C.red });
   }
 }
@@ -228,7 +229,7 @@ function before(t) {
   const blink = t < 7 ? .6 + .4 * Math.sin(t * 6) : 1;
   out(`<g opacity="${f1(blink)}">`); gap(T1 + 22 * B_U, B_Y, 2 * B_U, h); out('</g>');
   infoTag(T1 + 3 * B_U, 1400, 'A', 1.3, { sh: C.shade });
-  if (t > 1.6) { out(`<g opacity="${f1(seg(t, 1.6, 1.9))}">`); callout(T1 + 23 * B_U, B_Y - h, 1420, 50, '2 GB EMPTY', 60, { left: true }); out('</g>'); }
+  if (t > 1.6) { out(`<g opacity="${f1(seg(t, 1.6, 1.9))}">`); callout(T1 + 23 * B_U, B_Y - h, 1290, 150, '2 GB EMPTY', 60); out('</g>'); }
   // slicing press
   const BY = 1080;
   plaque(T1 - 20, BY - 150, 'SLICING PRESS', 'FIXED SLICES · MIG', { size: 50, zs: 38 });
@@ -255,7 +256,7 @@ function before(t) {
   }
   // tin 2: a whole GPU for the small model
   const hop = seg(t, 14.2, 15.4), px0 = lerp(T1 + 24 * B_U + 180, T2, eio(hop)), py = B_Y - Math.sin(hop * Math.PI) * 330 + (hop <= 0 ? 85 : hop >= 1 ? 0 : lerp(85, 0, hop));
-  tray(T2, B_Y, B_U, 'GPU 1', null);
+  tray(T2, B_Y, B_U, 'GPU 1', null, { labelRight: true });
   if (t > 15.6) { out(`<g opacity="${f1(seg(t, 15.6, 15.9))}">`); gap(T2 + 2 * B_U, B_Y, 22 * B_U, h); txt(T2 + 13 * B_U, B_Y + 34, '22 GB EMPTY', 100, { w: 900, anchor: 'middle', ls: 4, fill: C.red }); out('</g>'); }
   creature('P', px0, py, 2 * B_U, true, { h: 150, rot: Math.sin(hop * Math.PI) * -14 });
   infoTag(px0 + B_U + 150 * ss(hop), py - 330, 'P', 1.3, { sh: C.shade });
@@ -326,7 +327,8 @@ function interior(t) {
     worker(2400, FL, {
       s: 3, cap: C.sun, back: [lerp(-30, -160, bp), lerp(30, -10, bp)], front: [lerp(60, 172, su), lerp(40, 0, su)],
       prop: h => {
-        out(`<g transform="translate(${f1(h[0])} ${f1(h[1])}) rotate(${f1(lerp(70, 0, su))})">`);
+        if (su < .03) return;
+        out(`<g transform="translate(${f1(h[0])} ${f1(h[1])}) rotate(${f1(lerp(70, 0, su))}) scale(${f1(su * 100) / 100})">`);
         out(`<path d="M0 4V-30" stroke="${C.ink}" stroke-width="3" stroke-linecap="round"/>`);
         let d = ''; for (let i = 0; i < 8; i++) { const an = (i + .5) / 8 * Math.PI * 2; d += (i ? 'L' : 'M') + f1(Math.cos(an) * 17) + ' ' + f1(-46 + Math.sin(an) * 17); }
         out(`<path d="${d}Z" fill="${C.red}" stroke="${C.ink}" stroke-width="1.6" stroke-linejoin="round"/>`);
@@ -413,6 +415,8 @@ function interior(t) {
   for (const [L, , , , , tGo] of ORDERS) {
     const sx = slotX(L) + (L === 'P' ? 44 : 60), u = seg(t, tGo + 1.0, tGo + 1.35);
     if (u > 0 && u < 1) shape(R(sx - 12, 1530 + u * 30, 24, 16, 3), C.red, 2);
+    const q = seg(t, tGo + 1.3, tGo + 2.0), c = slotC(L);
+    if (q > 0 && q < 1) out(`<ellipse cx="${f1(c[0])}" cy="${c[1]}" rx="${f1(M[L].gb * U / 2 + 10 + q * 26)}" ry="${f1(70 + q * 26)}" fill="none" stroke="${C.red}" stroke-width="${f1(9 * (1 - q) + 2)}" opacity="${f1(1 - q)}"/>`);
   }
   for (const [L, t0] of [['P', 43.4], ['A', 44.6], ['B', 45.8], ['D', 59.8]]) beads(retFrom(L), t, t0, t0 + 4.5, 620, C.redL);
   const pulseOn = (pts, t0, v, col) => { const p = pathAt(pts, (t - t0) * v); if (t >= t0 && p) shape(E(p[0], p[1], 15), col, 3); };

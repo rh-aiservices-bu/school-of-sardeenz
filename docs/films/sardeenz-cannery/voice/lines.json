@@ -1,0 +1,78 @@
+[
+ {
+  "id": "l01",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "One GPU. Twenty-four gigabytes. Your model needs twenty-two. The last two sit empty.",
+  "asr": "1 GPU, 24 GB, your model needs 22, the last two sit empty."
+ },
+ {
+  "id": "l02",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "Slicing can't help. Slices come in fixed sizes, and none leaves a two-gigabyte corner.",
+  "asr": "Slicing can't help. Slices come in fixed sizes and none leaves a 2GB corner."
+ },
+ {
+  "id": "l03",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "So the small model gets a GPU of its own."
+ },
+ {
+  "id": "l04",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "Sardeenz doesn't slice.",
+  "asr": "Sardines doesn't slice."
+ },
+ {
+  "id": "l05",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "It keeps a memory ledger, and packs each GPU by size."
+ },
+ {
+  "id": "l06",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "Generative, predictive, embeddings. Different engines, different sizes, same GPU."
+ },
+ {
+  "id": "l07",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "One proxy routes every request to the right model."
+ },
+ {
+  "id": "l08",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "More models than memory? The idle models sleep in host ram."
+ },
+ {
+  "id": "l09",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "A request for a sleeping model is parked, while the least recently used one is swapped out."
+ },
+ {
+  "id": "l10",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "The client just sees a slow first token."
+ },
+ {
+  "id": "l11",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "To Kubernetes, nothing moved."
+ },
+ {
+  "id": "l12",
+  "voice": "bm_george",
+  "speed": 1.0,
+  "text": "Sardeenz. Every gigabyte, working.",
+  "asr": "Sardines. Every gigabyte, working."
+ }
+]

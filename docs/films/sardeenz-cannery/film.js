@@ -3,18 +3,18 @@
 
 let TL;
 let ZL = 1;
-window.DUR = 68;
+window.DUR = 69.2;
 
 // camera keys: [t, x, y, z]; eio between keys, so every key is a hold
 const CAM = [
   [0, -3780, 1450, .76], [7, -3780, 1450, .80], [13.6, -3780, 1450, .82], [15.2, -2560, 1450, .70], [17.6, -2560, 1450, .71],
   [19.6, 1750, 1010, .40], [23.4, 1750, 1010, .40],
   [24.6, 1640, 1370, .66], [38.4, 1640, 1370, .69],
-  [39.4, 1300, 480, .92], [47.0, 1560, 480, .92], [48.2, 1900, 480, 1.0], [50.2, 1900, 480, 1.0],
+  [39.6, 1800, 1170, .48], [46.8, 1800, 1170, .50], [48.0, 1900, 480, 1.0], [50.2, 1900, 480, 1.0],
   [51.4, 1800, 1170, .48], [60.4, 1800, 1170, .495],
-  [62.4, 1750, 1010, .395], [68, 1790, 1010, .405],
+  [62.4, 1750, 1010, .395], [69.2, 1790, 1010, .405],
 ];
-const WHIP = [[17.6, 19.6], [38.4, 39.4]];
+const WHIP = [[17.6, 19.6]];
 function camera(t) {
   const k = i => steps(CAM.map(c => [c[0], i === 3 ? Math.log(c[3]) : c[i]]), t);
   return { x: k(1), y: k(2), z: Math.exp(k(3)) };
@@ -80,12 +80,32 @@ function makeGrain() {
   cv.id = 'grain'; document.body.appendChild(cv);
 }
 
+// sound and cue events for the mixer (core/render/events.mjs exports them)
+function events() {
+  const ev = [], E = (t, type, o = {}) => ev.push({ t: +t.toFixed(3), type, ...o });
+  for (let t = .6; t < 6.8; t += 1.05) E(t, 'blink');
+  E(1.6, 'callout');
+  for (const [ts, , , fits] of SCHEMES) { E(ts + .4, 'press'); E(ts + .8, fits ? 'stamp' : 'clank'); if (!fits) { E(ts + .9, 'buzz'); E(ts + 1.5, 'press_up'); } }
+  E(14.2, 'hop'); E(15.4, 'hollow'); E(15.6, 'empty');
+  E(17.6, 'truck', { d: 2.0 });
+  E(T_LID[0], 'roll', { d: T_LID[1] - T_LID[0] }); E(T_LID[2], 'roll', { d: T_LID[3] - T_LID[2] }); E(T_LID[3], 'lid_shut');
+  for (const t of [24.2, 31.0, 51.2]) E(t, 'lever');
+  for (const [L, t0, t1] of JOBS) { E(t0 - 1.5, 'chain', { d: .9 }); E(t0, 'grab'); E(t0 + .5, 'chain', { d: t1 - .7 - t0 - .5 }); E(t1, 'settle', { L }); }
+  E(27.8, 'full', { n: 0 }); E(34.6, 'full', { n: 1 }); E(57.8, 'wake');
+  for (const [L, tDesk, , tGate, slot, tGo] of ORDERS) { E(tDesk + .1, 'desk_stamp'); E(tDesk + .35, 'flap'); if (slot >= 0) E(tGate, 'bump'); E(tGo + .45, 'drop'); E(tGo + 1.0, 'ticket'); }
+  E(48.5, 'stop'); E(49.6, 'bell'); E(50.8, 'ring_c'); E(54.6, 'flap'); E(58.0, 'flap'); E(58.1, 'gate');
+  for (const n of Object.keys(N_ON)) E(N_ON[n], 'num', { n: +n });
+  E(T_TICK, 'tick'); E(T_TICK + .6, 'final');
+  return ev.sort((a, b) => a.t - b.t);
+}
+
 async function boot() {
   TL = await (await fetch('timeline.json')).json();
   window.DUR = TL.dur;
   await Promise.all(['900 40px BSD', '800 40px BSD', '700 40px BSD', '800 40px ARC', '700 40px ARC', '600 40px ARC'].map(f => document.fonts.load(f, 'A')));
   await document.fonts.ready;
   makeGrain();
+  window.EV = events();
   window.render = t => { document.getElementById('stage').innerHTML = frame(Math.min(t, TL.dur - .001)); };
   window.TEXTS = t => {
     window.render(t);

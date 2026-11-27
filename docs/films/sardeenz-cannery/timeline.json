@@ -1,89 +1,101 @@
 {
- "dur": 68,
+ "dur": 69.2,
  "subs": [
   {
    "id": "l01",
    "t0": 0.8,
-   "t1": 6.6,
+   "t1": 7.449999999999999,
+   "v": 0.8,
    "n": 0,
    "en": "One GPU. 24 GB. Your model needs 22. The last 2 sit empty."
   },
   {
    "id": "l02",
-   "t0": 7.4,
-   "t1": 13.4,
+   "t0": 7.6,
+   "t1": 13.85,
+   "v": 7.6,
    "n": 0,
-   "en": "Slicing can't help: slices come in fixed sizes, and none leaves a 2 GB corner."
+   "en": "Slicing can't help. Slices come in fixed sizes, and none leaves a 2 GB corner."
   },
   {
    "id": "l03",
    "t0": 14.0,
-   "t1": 17.6,
+   "t1": 18.06,
+   "v": 14.0,
    "n": 0,
    "en": "So the small model gets a GPU of its own."
   },
   {
    "id": "l04",
-   "t0": 19.6,
-   "t1": 23.6,
+   "t0": 20.0,
+   "t1": 22.36,
+   "v": 20.0,
    "n": 0,
    "en": "Sardeenz doesn't slice."
   },
   {
    "id": "l05",
-   "t0": 24.2,
-   "t1": 30.6,
+   "t0": 24.6,
+   "t1": 29.2,
+   "v": 24.6,
    "n": 1,
-   "en": "It keeps a memory ledger and packs each GPU by size."
+   "en": "It keeps a memory ledger, and packs each GPU by size."
   },
   {
    "id": "l06",
-   "t0": 31.2,
-   "t1": 38.2,
+   "t0": 31.4,
+   "t1": 37.77,
+   "v": 31.4,
    "n": 2,
-   "en": "Generative, predictive, embeddings: different engines, different sizes, same GPU."
+   "en": "Generative, predictive, embeddings. Different engines, different sizes, same GPU."
   },
   {
    "id": "l07",
-   "t0": 39.6,
-   "t1": 46.6,
+   "t0": 40.0,
+   "t1": 44.04,
+   "v": 40.0,
    "n": 3,
    "en": "One proxy routes every request to the right model."
   },
   {
    "id": "l08",
-   "t0": 47.4,
-   "t1": 51.2,
+   "t0": 47.2,
+   "t1": 51.75,
+   "v": 47.2,
    "n": 5,
-   "en": "More models than memory? The idle ones sleep in host RAM."
+   "en": "More models than memory? The idle models sleep in host RAM."
   },
   {
    "id": "l09",
-   "t0": 51.6,
-   "t1": 57.6,
+   "t0": 51.9,
+   "t1": 58.15,
+   "v": 51.9,
    "n": 6,
-   "en": "A request for a sleeping model is parked while the least recently used one is swapped out."
+   "en": "A request for a sleeping model is parked, while the least recently used one is swapped out."
   },
   {
    "id": "l10",
-   "t0": 58.0,
-   "t1": 61.6,
+   "t0": 58.3,
+   "t1": 61.56,
+   "v": 58.3,
    "n": 4,
    "en": "The client just sees a slow first token."
   },
   {
    "id": "l11",
-   "t0": 63.0,
-   "t1": 65.4,
+   "t0": 63.2,
+   "t1": 65.85,
+   "v": 63.2,
    "n": 0,
    "en": "To Kubernetes, nothing moved."
   },
   {
    "id": "l12",
-   "t0": 65.8,
-   "t1": 67.9,
+   "t0": 66.0,
+   "t1": 69.05,
+   "v": 66.0,
    "n": 0,
-   "en": "Sardeenz: every gigabyte, working."
+   "en": "Sardeenz. Every gigabyte, working."
   }
  ]
 }
