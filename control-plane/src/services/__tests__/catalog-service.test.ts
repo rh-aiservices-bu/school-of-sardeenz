@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Protocol } from '@sardeenz/types';
 import { CatalogService } from '../catalog-service.js';
+import { ControlPlaneError } from '../../errors.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
@@ -274,6 +275,81 @@ describe('CatalogService http source', () => {
     });
     const snap = await svc.load();
     expect(snap.entries).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a response whose declared content-length is over the 1 MiB cap', async () => {
+    const bytes = 1024 * 1024 + 1;
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        new Response(Buffer.alloc(bytes, 'x'), {
+          status: 200,
+          headers: { 'content-length': String(bytes) },
+        }),
+      ),
+    ) as unknown as typeof fetch;
+    const svc = new CatalogService('https://example.com/runners.yaml', logger, {
+      fetch: fetchImpl,
+    });
+
+    await expect(svc.load()).rejects.toThrow(/1048576-byte limit/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a chunked response streamed past the 1 MiB cap', async () => {
+    // No content-length is declared, so the streamed byte counter is the bound.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(1024 * 1024));
+        controller.enqueue(new Uint8Array(4096));
+        controller.close();
+      },
+    });
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(stream, { status: 200 })),
+    ) as unknown as typeof fetch;
+    const svc = new CatalogService('https://example.com/runners.yaml', logger, {
+      fetch: fetchImpl,
+    });
+
+    await expect(svc.load()).rejects.toThrow(/1048576-byte limit/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an over-cap failure as the typed CATALOG_FETCH_FAILED 502', async () => {
+    const bytes = 1024 * 1024 + 1;
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        new Response('x', { status: 200, headers: { 'content-length': String(bytes) } }),
+      ),
+    ) as unknown as typeof fetch;
+    const svc = new CatalogService('https://example.com/runners.yaml', logger, {
+      fetch: fetchImpl,
+    });
+
+    const error: unknown = await svc.load().catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ControlPlaneError);
+    expect(error).toMatchObject({ statusCode: 502, code: 'CATALOG_FETCH_FAILED' });
+    expect((error as Error).message).toMatch(/1048576-byte limit/);
+  });
+
+  it('bounds the body of a non-ok response through the same cap', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(1024 * 1024));
+        controller.enqueue(new Uint8Array(4096));
+        controller.close();
+      },
+    });
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(stream, { status: 500, statusText: 'Internal Server Error' })),
+    ) as unknown as typeof fetch;
+    const svc = new CatalogService('https://example.com/runners.yaml', logger, {
+      fetch: fetchImpl,
+    });
+
+    // The status failure is what surfaces; the drain must not turn a 500 into the size error.
+    await expect(svc.load()).rejects.toThrow(/500 Internal Server Error/);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

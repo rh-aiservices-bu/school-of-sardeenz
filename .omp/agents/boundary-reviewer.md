@@ -52,6 +52,13 @@ touch a boundary:
 7. **Secrets and config** — new env/config keys follow the `SARDEENZ_*`
    prefix; no secret value in code, migrations, logs or committed files
    (ADR-013).
+8. **Redis-transported schemas** — routing map, routing pub/sub payloads
+   (`routing-updates`, `routing-barriers`), instance state, worker
+   registration/detail, cluster memory, proxy protocols: additive-only per
+   `docs/development/contracts.md` (§ Redis-Transported Schemas). A diff that
+   renames, removes, or re-types a field these payloads carry, or adds an enum
+   value a closed reader (proxy `Protocol`/`ModelState`) cannot parse, is a
+   **high** finding.
 
 Skip files that are purely internal to one component with no boundary
 impact.

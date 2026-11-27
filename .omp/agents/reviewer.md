@@ -16,7 +16,7 @@ You are one of several independent seats; the writer never reviews and the revie
 ## Dimensions (the prompt says which are yours)
 
 - **Conformance, two-way.** (a) Implementation matches the Blueprint: every change present, nothing outside it except flagged deviations, non-goals untouched. (b) The Blueprint faithfully covers the spec: nothing dropped. Acceptance criteria met; every completeness layer the profile's *Verification → completeness layers* names, updated. A conformance check against a concrete blueprint *is* the review — do not re-derive the design.
-- **Quality and rules.** Clean code, consistent with the exemplar's patterns, error handling that never fails silently, no premature abstraction or speculative code; the eight preloaded domain rules, checked one by one.
+- **Quality and rules.** Clean code, consistent with the exemplar's patterns, error handling that never fails silently, no premature abstraction or speculative code; the eight preloaded domain rules, checked one by one, and the additive-only rule for Redis-transported schemas (`docs/development/contracts.md` § Redis-Transported Schemas).
 - **Security** (when assigned). Injection, auth and user scoping, data exposure, secrets, dependency additions, OWASP top 10; the project's security posture doc for what is already in place.
 - **Silent failures** (when assigned). Catch blocks that swallow, fallbacks that mask, success reported without evidence.
 

@@ -133,6 +133,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missing `docs/development/agent-profile.md` (required by the milestone skills) was created
   from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
   (`reports/`, `plans/`, `worktrees/`, `profiles`).
+- **The engine-runner contract now documents `POST /wake` as idempotent (#323).** The
+  never-implemented `409 "Runner is not sleeping"` is removed from
+  `packages/contracts/specs/engine-runner.yaml` (types regenerated via `make codegen`; no consumer
+  referenced the removed response type) — a runner that is not sleeping answers `200` and reports
+  its post-wake state. Both Python shims already behaved this way, so **no SIF republish is
+  needed** and no shim runtime code changed. The control plane keeps a spurious wake visible on its
+  own side: `wakeModel` now takes the caller's claim outcome, and a wake against an instance the
+  caller did not win `SLEEPING → STARTING` for is a logged, counted no-op
+  (`sardeenz_control_plane_wake_unclaimed_total{state}`) instead of a failed `STARTING → ACTIVE`
+  that marked a healthy instance ERROR; it also no longer counts as a wake trigger. The
+  dev-worker runner stub and the conformance suite are aligned, the `/wake` divergence entry in
+  `runners/conformance/README.md` is replaced by a "Recorded assumptions" note (calling the
+  engine's own wake while loading/serving is assumed, not proven — decision D12), and the
+  runner-contract doc states the idempotent semantics.
+- **Redis-transported schemas are now governed by a written additive-only rule (#331).** The
+  JSON blobs that cross the proxy↔control-plane seam through Redis (routing map, routing
+  pub/sub payloads, instance state, worker registration/detail, cluster memory, proxy
+  protocols) may only gain optional fields — no renames, removals or type changes — and new
+  enum values additionally require every reader to tolerate them (`Protocol`/`ModelState` stay
+  closed on the proxy). The rule lives in `docs/development/contracts.md` — naming which
+  payloads are mirrored from a spec and which two are code-defined only (instance state, worker
+  detail) — with a condensed form in `packages/contracts/AGENTS.md` (whose stale pointer to a
+  nonexistent `contract-reviewer` agent now names the real reviewer/boundary-reviewer seats), is
+  enforced by the reviewer and boundary-reviewer checklists, and is pinned by tests in both
+  directions: proxy unit + ungated integration tests prove an entry with unknown extra fields
+  deserialises and routes while an unknown enum value stays a counted whole-entry parse failure
+  with carry-forward, and a control-plane integration test proves the reverse direction (it reads
+  blobs carrying unknown extra fields). `deployment/README.md` documents the supported upgrade
+  order — control plane first, with the enum-value exception as a coordinated proxy-first
+  release that has to finish before a model using the new value is imported. No schema version
+  field is added; that is deferred to the first change the rule cannot express.
 - **The CI Python job installs test deps under a generated constraints file (#182).** The
   `python` job's `make test-python-deps` now passes `-c runners/ci-constraints.txt` — a generated,
   sorted `name==version` pin of exactly the two shims' `[test]`-extra dependency closure
@@ -274,6 +305,84 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   branch-protection prerequisite and the self-deletion ceiling stated), and `ADR-035` (the audit line
   records an asserted actor, never an authenticated one; attribution for investigation, never an
   authorization input).
+
+- **The proxy's inference port can carry an optional static API key (#332).** Setting
+  `SARDEENZ_PROXY_INFERENCE_API_KEY` (sourced from `sardeenz-service-tokens` with `optional: true`,
+  so existing installs are unaffected) makes every `/openai/*` and `/oip/*` request carry
+  `Authorization: Bearer <key>` or receive `401` in the proxy's JSON envelope
+  (`type: "authentication_error"`), evaluated before the body is read and before any parking or
+  wake trigger. Keys are compared in constant time against every comma-separated value, so
+  rotation needs no downtime; a blank segment fails startup, and the client's `Authorization`
+  header is never forwarded to the runner while the key is enabled. The admin port stays
+  unauthenticated, and the dashboard BFF reads the same Secret key server-side
+  (`SARDEENZ_INFERENCE_API_KEY`), presenting the first key of the list, so the playground keeps
+  working through a rotation without the browser ever seeing it. This is a single shared secret
+  for quick protection of a test or demo Route — no per-client identity, quotas or rate limiting;
+  a gateway remains the production answer.
+- **The proxy bounds the aggregate of concurrently buffered inference bodies (#300).**
+  `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`, 256 MiB; `0` = unlimited, a WARN-logged
+  opt-out) counts every byte the `/openai/*` and `/oip/*` surfaces hold buffered — through parking
+  and forwarding — against one per-process budget (each replica enforces its own), released on
+  completion or cancellation, and rejects a request that would cross it with the existing `503`
+  envelope (`type: "overloaded"`, message naming the variable) before or during the read.
+  Per-request over-limit behaviour (413 `request_too_large`) is unchanged and takes precedence; the
+  count is frame-based, so a lying or absent `Content-Length` cannot bypass it. The manifest sets
+  256 MiB against the proxy's 1 GiB memory limit (a parked body counts against both this budget and
+  `SARDEENZ_PARKING_MAX_BYTES`), and a new `sardeenz_proxy_buffered_body_bytes` gauge exposes the
+  in-use bytes.
+
+- **ADR-031 records that in-namespace traffic is plaintext by design (#333).** The new ADR
+  (`docs/architecture/adrs/adr-031-in-namespace-plaintext-traffic.md`) tabulates every hop that
+  carries a credential or user payload — the service tokens on the proxy→control-plane,
+  BFF→control-plane and control-plane→worker calls, the opt-in inference key (#332), the Valkey
+  `requirepass` password and the PostgreSQL password embedded in their connection URLs, and the
+  unauthenticated runner engine and management ports — together with the trust assumptions the
+  posture rests on (dedicated namespace, a CNI that enforces NetworkPolicy, no untrusted workloads
+  in it) and what an in-namespace attacker gets from it. Its mitigation inventory is the post-M21
+  one — default-deny plus per-flow allows (ADR-025), fail-closed service tokens (ADR-022), the
+  inference-port key (#332) and the buffered-body bound (#300), none of which encrypts — and it
+  pins the TLS-client facts for Backlog #334: ioredis turns a `rediss://` URL into `tls: true` and
+  `pg` honours `sslmode=` in the connection string, both with no code change, while the Rust
+  proxy's `redis` dependency enables no TLS feature and rejects `rediss://`, so a cluster-wide
+  Redis TLS migration waits on the proxy.
+- **The routing proxy is actually highly available, and drains instead of being killed (#330).** The
+  Deployment defaults to two replicas with a PodDisruptionBudget (`minAvailable: 1`) and soft
+  hostname topology spread (`ScheduleAnyway`, so a single-node cluster still schedules both), which
+  makes a node drain evict one replica while the survivor serves. Shutdown is bounded instead of
+  unbounded: a 5 s `preStop` httpGet on the admin port serves the endpoint-propagation delay (the
+  image is distroless — no shell, no `sleep`) and a 180 s `terminationGracePeriodSeconds` covers a
+  **derived** in-process deadline, `SARDEENZ_PARKING_TIMEOUT_SECS + SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS`
+  (165 s at the defaults; the manifest comment records the
+  `terminationGracePeriodSeconds ≥ preStop + parking timeout + drain secs` invariant). SIGTERM
+  flips `/readyz` to `503` so the pod leaves the Service's endpoints and new work is declined, then
+  in-flight requests finish; past the deadline the proxy warns with the parked count and exits, so
+  only streams longer than the deadline are cut (client sees a reset). Parked requests always
+  resolve first — served, or their ordinary parking 503. Two-replica behaviour is now proven rather
+  than assumed: the control plane deduplicates concurrent wake triggers from both replicas into one
+  wake (both get 2xx, `wakeModel` runs once), each replica still fires exactly one trigger for its
+  own parked herd, parking limits stay per replica, and both replicas hold distinct presence leases
+  and acknowledge a routing propagation barrier.
+- **Scripted failure scenarios in both integration harnesses (#340).** Nothing in the suites killed
+  a dependency while the platform was working, so the M21 resilience fixes were proven by review
+  instead of by a test. The control-plane half
+  (`control-plane/src/__tests__/integration/failure-scenarios.integration.test.ts`, blocking
+  `integration` job) flushes the test keyspace and asserts the #328 guard on all three of its
+  surfaces (Postgres rows retained, one `mass-divergence` event, the `refused` counter) plus a
+  clean re-announce afterwards; strands a wake across a rebuilt service graph and asserts recovery
+  to terminal `ERROR` with the sibling still ACTIVE (the "reported, not swallowed" half of #303);
+  kills a worker mid-launch and asserts terminal `ERROR`, released capacity and a successful
+  retry; and races two wake triggers, asserting both 2xx (a lost CAS is the benign 202) while
+  exactly one wake executes (runner-side `/wake` count and the metric agree). The proxy half
+  (`proxy/tests/integration/test_failure_scenarios.rs`, `make test`) asserts a routing-state loss
+  fails inference with the clean `model_unavailable` 503 before the first load and after a
+  mid-flight disconnect, and recovers; a parked caller fast-fails with the error-state message; two
+  replicas on one cache each fire their own trigger and both herds resolve; and a killed replica
+  leaves the shared cache serving through the survivor. The harness gained the in-process
+  control-plane-loss seam (`rebuildHarnessGraph` over the same Redis/Postgres, never re-truncating),
+  the mock runner a wake counter and a hang knob (a wake parked on the socket models a restart
+  stranding it), the mock worker the `GET /runners/:runnerId` liveness probe (without it
+  reconciliation reaps a live sibling on a harness gap), and `TestProxy` readiness toggles plus a
+  replica-drop `shutdown()`.
 
 ### Fixed
 
@@ -708,6 +817,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   only the genuinely per-runner figures plus the residual in "Other". Legacy workers that do not
   label a scope lose per-model display for unlabeled co-located rows until they upgrade (the
   conservative direction); unlabeled sole-resident rows keep displaying.
+- **`make lint` no longer fails on scratch files in the gitignored `logs/` directory (#306).**
+  ESLint's ignores list (`eslint.config.js`) and `.prettierignore` now exclude `logs/`, matching the
+  `.gitignore` entry — `eslint .` walks the whole tree (ESLint 9 does not read `.gitignore`) and
+  previously linted throwaway verification scripts parked there, so a pre-commit gate could fail for
+  reasons unrelated to the change under review. TypeScript and Vitest cannot see `logs/` by
+  construction (reference-scoped `tsc --build`, workspace-project Vitest), so only the two globbing
+  tools needed the ignore; `docs/development/setup.md` records why.
+- **control-plane:** the remote-catalog fetch streams the response body and refuses anything
+  over 1 MiB (matching the worker loader from #289), on the success and error paths, so a
+  hostile or broken catalog origin can no longer decide how much memory the leader allocates;
+  the over-cap failure surfaces as the existing `CATALOG_FETCH_FAILED` 502.
+- **Defaulted protocol writes can no longer flip a live model's routing tag (#309).**
+  `RoutingMapService.setModelState`/`addEndpoint` keep an existing routing entry's `protocol`
+  when the caller has no authoritative value (the empty-string ARGV sentinel), and keep it —
+  logging once and counting `sardeenz_control_plane_routing_protocol_conflicts_total` — when an
+  authoritative caller value disagrees with the entry, so a single instance record with a
+  missing/legacy protocol cannot make a live model 404 under its real proxy surface. New entries
+  still get the `openai` creation default. `refreshModelRoutingState` now derives the model tag
+  from all tagged instances agreeing instead of the first instance with a value, passing no value
+  (keeping the entry's tag) and counting `instance-vs-instance` when they disagree.
+- **Wake claim loops no longer conflate a lost CAS with real transition failures (#303).**
+  `ModelLifecycleService.transition` now throws a typed `StateConflictError` on an
+  `INVALID_TRANSITION` (wire-identical: 409 `INVALID_STATE`, same message and `details`), and the
+  two claim loops skip only that subtype. The model-level wake loop logs `Wake claim failed` with
+  `{ modelName, instanceId }`, increments
+  `sardeenz_control_plane_wake_claim_failures_total` and publishes a `MODEL_STATE_CHANGED` cluster
+  event with `data.reason: 'wake-claim-failed'` for anything else — a Redis outage or corrupt
+  record now surfaces instead of being silently swallowed as a race, while the 202 body still
+  reports the claimed-instance count unchanged. The internal wake route the proxies call answers a
+  lost CAS with the benign already-waking 202 (the endpoint is documented as idempotent) instead of
+  a 409 that made the losing proxy replica abort its whole parked herd; non-conflict errors still
+  propagate.
+- **Reconciliation refuses to wholesale-delete instance rows when Redis holds no instance
+  records (#328).** A Redis flush, a restart without persistence or a failover to an empty
+  replica used to make `reconcileInstanceTable` see every Postgres `instances` row as orphaned
+  and delete them all in one tick — destroying the only durable record of which runners exist
+  while the runner processes kept holding VRAM. The step now refuses to prune anything while
+  Redis holds zero instance records but the ledger has rows, keeping the rows and surfacing the
+  refusal through the existing #286 mass-divergence telemetry — the same
+  `sardeenz_control_plane_reconciliation_unclaimed_runners_total{action="refused"}` counter,
+  the same `RUNNER_ORPHANED` event with `data.reason: "mass-divergence"` (now documented to
+  carry plural `instanceIds`/`modelNames` with no `workerId` for this half), and one
+  structured error log per tick, with the event published once per divergence episode. A
+  legitimately empty cluster (no rows either) is never blocked, single genuinely-orphaned rows
+  are still pruned, and the guard clears by itself once instance records reappear.
+  Rediscovering or reaping the live runners afterwards remains #241.
 
 ### Security
 

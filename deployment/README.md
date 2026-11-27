@@ -52,6 +52,7 @@ set +x
 POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 API_TOKEN="$(openssl rand -hex 32)"
 WORKER_TOKEN="$(openssl rand -hex 32)"
+INFERENCE_API_KEY="$(openssl rand -hex 32)"
 ADMIN_PASSWORD="$(openssl rand -hex 24)"
 JWT_SECRET="$(openssl rand -hex 32)"
 REDIS_PASSWORD="$(openssl rand -hex 24)"
@@ -71,6 +72,7 @@ oc create secret generic sardeenz-redis-credentials \
 oc create secret generic sardeenz-service-tokens \
   --from-literal=SARDEENZ_API_TOKEN="$API_TOKEN" \
   --from-literal=SARDEENZ_WORKER_TOKEN="$WORKER_TOKEN" \
+  --from-literal=SARDEENZ_PROXY_INFERENCE_API_KEY="$INFERENCE_API_KEY" \
   -n "$SARDEENZ_NAMESPACE"
 
 oc create secret generic sardeenz-dashboard-auth \
@@ -81,8 +83,15 @@ oc create secret generic sardeenz-dashboard-auth \
   -n "$SARDEENZ_NAMESPACE"
 
 # Store the generated admin password securely before clearing these shell variables.
-unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN ADMIN_PASSWORD JWT_SECRET REDIS_PASSWORD
+unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN INFERENCE_API_KEY ADMIN_PASSWORD JWT_SECRET REDIS_PASSWORD
 ```
+
+`SARDEENZ_PROXY_INFERENCE_API_KEY` is optional: omit that `--from-literal` (and the generator
+line) to leave the proxy's inference port keyless, as before. Both the proxy and the dashboard BFF
+read this one Secret key (the BFF's env var is `SARDEENZ_INFERENCE_API_KEY`), so the playground
+keeps working when the key is enabled. Rotate without downtime by listing two comma-separated keys,
+rolling the proxy and dashboard, then removing the old one — see
+[`proxy/README.md`](proxy/README.md#inference-api-key).
 
 Real registry credentials remain in `sardeenz-librarian-registry`, created as described in
 [`librarian/README.md`](librarian/README.md). The control plane also uses that Docker configuration
@@ -123,6 +132,7 @@ oc rollout status deployment/sardeenz-proxy -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-dashboard -n "$SARDEENZ_NAMESPACE"
 oc rollout status deployment/sardeenz-worker -n "$SARDEENZ_NAMESPACE"
 ```
+
 If applying over a namespace that already exists fails with a field-ownership conflict on the
 Namespace's `metadata.labels`, apply the label directly
 (`oc label namespace "$SARDEENZ_NAMESPACE" sardeenz.io/module-guard=enforce --overwrite`) rather
@@ -185,7 +195,7 @@ are distinct, so give one entry each):
 # deployment/overlays/<env>/kustomization.yaml
 images:
   - name: quay.io/rh-aiservices-bu/sardeenz-proxy
-    newTag: "5bb4090"          # a sha tag publish-images.yml already pushed
+    newTag: '5bb4090' # a sha tag publish-images.yml already pushed
   - name: quay.io/rh-aiservices-bu/sardeenz-control-plane
     digest: sha256:<manifest-list-digest>
 ```
@@ -274,10 +284,46 @@ Plan for disruption: `sardeenz-control-plane` and `sardeenz-worker` are `strateg
 never become Ready; worker: it holds an exclusive GPU). A worker rollout terminates **every runner
 on that worker**; the 60 s `terminationGracePeriodSeconds` drains in-flight runners (the agent
 SIGTERMs each runner, which drains vLLM). Restart the worker when model disruption is acceptable, or
-stop models first through the control plane. The proxy and dashboard use the default RollingUpdate
-with one replica: the replacement pod starts alongside the old one (the default `maxSurge` rounds
-up to one pod), must pass its readiness probe, and only then is the old pod removed — a
-readiness-gated handover with no planned outage, subject to the image pull succeeding.
+stop models first through the control plane. The proxy runs **two replicas** with a
+PodDisruptionBudget (`minAvailable: 1`) and soft topology spread across nodes, so a node drain
+evicts one pod while the survivor keeps serving, and a rollout surges one pod (the default
+RollingUpdate math is `maxSurge: 1`, `maxUnavailable: 0`), gates it on `/readyz`, then drains the
+old one through a 5 s `preStop /drain` on the admin port (the image is distroless — no shell to
+`sleep` in) and a 180 s grace period: in-flight SSE streams and parked requests shorter than the
+derived ~165 s in-process shutdown deadline (`SARDEENZ_PARKING_TIMEOUT_SECS` +
+`SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS`) complete, longer streams are cut with a `WARN` — a
+readiness-gated handover with no planned outage, subject to the image pull succeeding. See
+[`proxy/README.md`](proxy/README.md#high-availability-and-graceful-shutdown). The dashboard keeps
+the default RollingUpdate with one replica: the replacement pod starts alongside the old one (the
+default `maxSurge` rounds up to one pod), must pass its readiness probe, and only then is the old
+pod removed — a readiness-gated handover with no planned outage, subject to the image pull
+succeeding.
+
+### Upgrade order: control plane before proxy
+
+The Redis-transported schemas the control plane writes and the proxy reads are additive-only
+(`docs/development/contracts.md`, § Redis-Transported Schemas), which fixes the supported order
+for a mixed-version window:
+
+1. Roll `sardeenz-control-plane` first (`strategy: Recreate`, single replica — the old pod must
+   exit before the new one starts), and wait for readiness.
+2. Then roll `sardeenz-proxy`.
+
+Rationale: the still-running old proxies ignore any new optional field the new control plane
+writes, and the proxy's parse-failure carry-forward bounds the blast radius of an unparseable
+entry to that model's last-known-good route (`proxy/src/state/redis_sync.rs` — counted in
+`sardeenz_proxy_routing_parse_errors_total`, never a crash).
+
+**Exception — enum values are not additive.** `Protocol` and `ModelState` are closed on the
+proxy; an old proxy fails the whole entry parse on an unknown value. The proxy release that can
+parse a new enum value must roll **before** the control plane starts writing it — a coordinated
+release, not a rolling-upgrade-safe addition. Wait for that proxy rollout to complete before
+importing or deploying a model that uses the new value: a proxy rollout is the readiness-gated
+RollingUpdate described above, so old and new replicas overlap until the last old pod is gone,
+and the new proxy advertises its protocol set at `{prefix}:proxy:protocols` as soon as it
+connects (`proxy/src/state/redis_sync.rs:72-79`). The catalog-import guard reads that key
+(`control-plane/src/routes/catalog.ts:53-56`), so one new proxy is enough to clear the guard
+while an old replica is still serving — and that replica drops the new model's routing entry.
 
 ### Prerequisites and failure modes
 

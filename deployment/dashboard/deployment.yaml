@@ -34,6 +34,14 @@ spec:
                   key: SARDEENZ_REDIS_URL
             - name: SARDEENZ_INFERENCE_URL
               value: http://sardeenz-proxy:8080
+            # Same Secret key as the proxy's SARDEENZ_PROXY_INFERENCE_API_KEY (#332):
+            # the BFF sends it server-side so the playground works with the key enabled.
+            - name: SARDEENZ_INFERENCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-service-tokens
+                  key: SARDEENZ_PROXY_INFERENCE_API_KEY
+                  optional: true
             - name: SARDEENZ_PROMETHEUS_URL
               value: https://thanos-querier.openshift-monitoring.svc:9092
             - name: SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH

@@ -80,6 +80,19 @@ export const wakeTriggersTotal = new Counter({
   registers: [registry],
 });
 
+export const wakeClaimFailuresTotal = new Counter({
+  name: 'sardeenz_control_plane_wake_claim_failures_total',
+  help: 'Instances dropped from a model-level wake claim loop by a non-conflict transition error (#303)',
+  registers: [registry],
+});
+
+export const wakeUnclaimedTotal = new Counter({
+  name: 'sardeenz_control_plane_wake_unclaimed_total',
+  help: 'Wakes skipped: instance not claimed SLEEPING -> STARTING by the caller (idempotent no-op)',
+  labelNames: ['state'] as const,
+  registers: [registry],
+});
+
 export const stateTransitionsTotal = new Counter({
   name: 'sardeenz_control_plane_state_transitions_total',
   help: 'Model state transitions',
@@ -134,7 +147,9 @@ export const reconciliationUnclaimedRunnersTotal = new Counter({
   name: 'sardeenz_control_plane_reconciliation_unclaimed_runners_total',
   help:
     'Unclaimed runner sightings by action: "reaped" counts runners stopped by reconciliation; ' +
-    '"refused" counts worker-ticks refused by the mass-divergence guard (one per worker per tick)',
+    '"refused" counts mass-divergence guard refusals — worker-ticks refused by the runner sweep ' +
+    '(one per worker per tick) plus reconciliation ticks that refused wholesale instance-row ' +
+    'pruning (one per tick)',
   labelNames: ['action'] as const,
   registers: [registry],
 });
@@ -143,6 +158,13 @@ export const reconciliationErrors = new Counter({
   name: 'sardeenz_control_plane_reconciliation_errors_total',
   help: 'Reconciliation step errors',
   labelNames: ['step'] as const,
+  registers: [registry],
+});
+
+export const routingProtocolConflictsTotal = new Counter({
+  name: 'sardeenz_control_plane_routing_protocol_conflicts_total',
+  help: 'Routing-map writes where the entry kept its protocol over a disagreeing value',
+  labelNames: ['kind'] as const, // 'entry-vs-caller' | 'instance-vs-instance'
   registers: [registry],
 });
 

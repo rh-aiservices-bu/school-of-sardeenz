@@ -105,6 +105,10 @@ export type paths = {
          *
          *     The control plane should set an appropriate timeout (reload duration
          *     depends on model size and the level from which the runner is waking).
+         *
+         *     `POST /wake` is idempotent: a runner that is not sleeping also answers
+         *     `200` — the wake is a harmless no-op and the runner reports its
+         *     post-wake state. There is no not-sleeping refusal.
          */
         post: operations["wake"];
         delete?: never;
@@ -685,22 +689,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Runner is now awake and ready */
+            /** @description Runner is awake (idempotent: also returned when the runner was not sleeping) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["WakeResponse"];
-                };
-            };
-            /** @description Runner is not sleeping */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Internal runner error */

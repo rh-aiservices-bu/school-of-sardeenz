@@ -299,6 +299,98 @@ mod tests {
     }
 
     #[test]
+    fn parse_routing_map_accepts_unknown_extra_fields() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+
+        // A newer control plane's write: every known field intact plus fields
+        // this proxy build has never heard of, at the top level, inside an
+        // endpoint and inside metadata (which is #[serde(flatten)]ed).
+        let mut value = serde_json::to_value(sample_entry("future-model")).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        obj.insert("futureField".to_string(), serde_json::json!("unknown-to-this-proxy"));
+        obj["endpoints"][0]["futureEndpointField"] = serde_json::json!(1);
+        obj.insert(
+            "metadata".to_string(),
+            serde_json::json!({"ownedBy": "org", "futureMetaField": 42}),
+        );
+
+        let mut raw = HashMap::new();
+        raw.insert("future-model".to_string(), value.to_string());
+        let previous = RoutingMap::new();
+
+        let result = metrics::with_local_recorder(&recorder, || parse_routing_map(raw, &previous));
+
+        assert_eq!(result.len(), 1, "entry with unknown extra fields must survive");
+        let entry = result.get("future-model").expect("entry must be present");
+        assert_eq!(entry.model_name, "future-model");
+        assert_eq!(entry.state, ModelState::Active);
+        assert_eq!(entry.protocol, Protocol::Openai);
+        assert_eq!(entry.endpoints[0].host, "127.0.0.1");
+        assert_eq!(entry.endpoints[0].port, 8000);
+        assert_eq!(entry.metadata.as_ref().and_then(|m| m.owned_by.as_deref()), Some("org"));
+
+        let rendered = handle.render();
+        assert!(
+            !rendered.contains("sardeenz_proxy_routing_parse_errors_total"),
+            "unknown extra fields must not count as parse errors, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn parse_routing_map_unknown_enum_value_is_counted_and_carried_forward() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+
+        let prev = sample_entry("model-a");
+        let mut previous = RoutingMap::new();
+        previous.insert("model-a".to_string(), prev.clone());
+
+        // Valid JSON, but not a ModelState variant: the enums stay closed by
+        // design, so this is a whole-entry parse failure with carry-forward.
+        let mut value = serde_json::to_value(sample_entry("model-a")).unwrap();
+        value["state"] = serde_json::json!("HIBERNATING");
+
+        let mut raw = HashMap::new();
+        raw.insert("model-a".to_string(), value.to_string());
+
+        let result = metrics::with_local_recorder(&recorder, || parse_routing_map(raw, &previous));
+
+        assert_eq!(result.get("model-a").map(|e| &e.model_name), Some(&prev.model_name));
+
+        let rendered = handle.render();
+        assert!(
+            rendered.contains("sardeenz_proxy_routing_parse_errors_total")
+                && rendered.contains("model-a"),
+            "expected parse-error counter for model-a, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn parse_routing_map_unknown_enum_value_with_no_previous_is_dropped() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+
+        let mut value = serde_json::to_value(sample_entry("grpc-model")).unwrap();
+        value["protocol"] = serde_json::json!("grpc");
+
+        let mut raw = HashMap::new();
+        raw.insert("grpc-model".to_string(), value.to_string());
+        let previous = RoutingMap::new();
+
+        let result = metrics::with_local_recorder(&recorder, || parse_routing_map(raw, &previous));
+
+        assert!(result.is_empty(), "entry with no previous value should be dropped");
+
+        let rendered = handle.render();
+        assert!(
+            rendered.contains("sardeenz_proxy_routing_parse_errors_total")
+                && rendered.contains("grpc-model"),
+            "expected parse-error counter for grpc-model, got: {rendered}"
+        );
+    }
+
+    #[test]
     fn parse_routing_map_drops_unparseable_entry_with_no_previous() {
         let recorder = PrometheusBuilder::new().build_recorder();
         let handle = recorder.handle();

@@ -3,6 +3,7 @@ mod redis_sync;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::body_budget::BufferedBodyBudget;
 use crate::config::Config;
 use crate::forwarding::{CircuitBreaker, ForwardingClient, ForwardingLimiter, WeightedRoundRobin};
 use crate::inference_tracker::InferenceTracker;
@@ -23,11 +24,19 @@ pub struct AppState {
     pub circuit_breaker: CircuitBreaker,
     pub forwarding_client: ForwardingClient,
     pub forwarding_limiter: ForwardingLimiter,
+    /// Per-process admission budget over concurrently buffered inference bodies (#300).
+    /// Each replica enforces its own, so the Deployment-wide ceiling is this value
+    /// times the replica count.
+    pub buffered_body_budget: BufferedBodyBudget,
     pub inference_tracker: InferenceTracker,
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     proxy_id: Arc<str>,
     redis_connected: Arc<AtomicBool>,
     routing_map_loaded: Arc<AtomicBool>,
+    /// Set once SIGTERM starts the drain (#330). Consulted by `is_ready()`, so
+    /// the terminating pod drops out of the Service's ready endpoints and
+    /// inference handlers decline new work through their existing 503 path.
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -59,6 +68,7 @@ impl AppState {
             config.max_concurrent_forwards,
             config.max_concurrent_forwards_per_model,
         );
+        let buffered_body_budget = BufferedBodyBudget::new(config.max_buffered_bytes);
         let inference_tracker =
             InferenceTracker::new(config.redis_url.clone(), config.redis_key_prefix.clone());
 
@@ -71,17 +81,46 @@ impl AppState {
             circuit_breaker,
             forwarding_client,
             forwarding_limiter,
+            buffered_body_budget,
             inference_tracker,
             metrics_handle,
             proxy_id: Arc::from(uuid::Uuid::new_v4().to_string()),
             redis_connected: Arc::new(AtomicBool::new(redis_connected)),
             routing_map_loaded: Arc::new(AtomicBool::new(has_existing_cache)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub async fn is_ready(&self) -> bool {
+    /// Redis connectivity plus a completed routing-map load: this process can
+    /// select a route. Pre-drain semantics, still consulted by the post-park
+    /// recheck in `handlers::run_inference`, which exists to close the Redis
+    /// disconnect race — a request already parked when the drain began keeps
+    /// its admission (D6: parked requests resolve first, served or their
+    /// normal parking 503).
+    pub fn routing_state_ready(&self) -> bool {
         self.redis_connected.load(Ordering::Acquire)
             && self.routing_map_loaded.load(Ordering::Acquire)
+    }
+
+    /// Admission readiness: routing state plus "not shutting down". `/readyz`
+    /// and the inference handlers' entry check use this, so a draining pod
+    /// leaves the Service's endpoint pool and declines new work (#330).
+    pub async fn is_ready(&self) -> bool {
+        self.routing_state_ready() && !self.is_shutting_down()
+    }
+
+    /// Whether SIGTERM has started the drain (#330). Lets the admission refusal
+    /// name the real cause when the only reason a request was declined is the
+    /// shutdown, not a lost routing state.
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::Acquire)
+    }
+
+    /// Mark the process as draining (#330): `/readyz` flips to 503 and
+    /// inference handlers decline new work, so the pod leaves the Service's
+    /// endpoint pool while in-flight requests finish.
+    pub fn set_shutting_down(&self, down: bool) {
+        self.shutting_down.store(down, Ordering::Release);
     }
 
     pub fn set_redis_connected(&self, connected: bool) {

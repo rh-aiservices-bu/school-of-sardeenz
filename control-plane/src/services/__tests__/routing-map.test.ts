@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
+import { ModelState, Protocol } from '@sardeenz/types';
 
 import { RoutingMapService } from '../routing-map.js';
 import type { Redis } from '../../clients/redis.js';
 import { redisKey } from '../../clients/redis.js';
+import { registry } from '../../health/metrics.js';
 
 const KEY_PREFIX = 'test';
 const PROXY_ID = 'proxy-a';
@@ -100,5 +102,121 @@ describe('RoutingMapService.cutoverEndpointAndWait', () => {
     // short-circuits before the presence read — 1 snapshot + 2 poll reads.
     expect(smembers).toHaveBeenCalledTimes(3);
     expect(get).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('RoutingMapService protocol-tag protection (#309)', () => {
+  // Both writes return { existed, conflict, entryProtocol }; the Lua — not JavaScript — decides
+  // whether an existing entry keeps its tag, so the mocked eval result is the whole contract.
+  function makeRedis(evalResult: [number, number, Protocol]): {
+    redis: Redis;
+    evalMock: Mock;
+  } {
+    const evalMock = vi.fn().mockResolvedValue(evalResult);
+    return { redis: { eval: evalMock } as unknown as Redis, evalMock };
+  }
+
+  function makeLogger(): {
+    debug: Mock;
+    info: Mock;
+    warn: Mock;
+    error: Mock;
+  } {
+    return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  }
+
+  async function conflicts(kind: 'entry-vs-caller' | 'instance-vs-instance'): Promise<number> {
+    const metrics = await registry.getMetricsAsJSON();
+    const metric = metrics.find(
+      (m) => m.name === 'sardeenz_control_plane_routing_protocol_conflicts_total',
+    );
+    const sample = metric?.values.find((v) => v.labels.kind === kind);
+    return sample?.value ?? 0;
+  }
+
+  it('setModelState without a protocol passes the empty-string "no authoritative value" sentinel', async () => {
+    const { redis, evalMock } = makeRedis([1, 0, Protocol.oip]);
+    const service = new RoutingMapService(redis, KEY_PREFIX, makeLogger());
+
+    await service.setModelState('m1', ModelState.ACTIVE);
+
+    // redis.eval(script, numKeys, hashKey, channel, modelName, state, protocol, now)
+    const args = evalMock.mock.calls[0] as unknown[];
+    expect(args[6]).toBe('');
+  });
+
+  it('setModelState conflict marker warns once (current vs incoming) and counts entry-vs-caller', async () => {
+    const before = await conflicts('entry-vs-caller');
+    const logger = makeLogger();
+    const { redis } = makeRedis([1, 1, Protocol.oip]);
+    const service = new RoutingMapService(redis, KEY_PREFIX, logger);
+
+    await service.setModelState('m1', ModelState.ACTIVE, Protocol.openai);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      { modelName: 'm1', current: Protocol.oip, incoming: Protocol.openai },
+      'Routing entry protocol kept: caller value disagreed',
+    );
+    expect((await conflicts('entry-vs-caller')) - before).toBe(1);
+  });
+
+  it('addEndpoint without a protocol passes the empty-string sentinel in ARGV[5]', async () => {
+    const { redis, evalMock } = makeRedis([1, 0, Protocol.oip]);
+    const service = new RoutingMapService(redis, KEY_PREFIX, makeLogger());
+
+    await service.addEndpoint('m1', { host: '10.0.0.1', port: 8001, weight: 1, healthy: true });
+
+    // redis.eval(script, numKeys, hashKey, channel, modelName, endpointJson, now, updateJson, protocol)
+    const args = evalMock.mock.calls[0] as unknown[];
+    expect(args[8]).toBe('');
+  });
+
+  it('addEndpoint conflict marker keeps the tag, warns with the runnerId and counts entry-vs-caller', async () => {
+    const before = await conflicts('entry-vs-caller');
+    const logger = makeLogger();
+    const { redis } = makeRedis([1, 1, Protocol.oip]);
+    const service = new RoutingMapService(redis, KEY_PREFIX, logger);
+
+    await service.addEndpoint(
+      'm1',
+      { host: '10.0.0.1', port: 8001, weight: 1, healthy: true, runnerId: 'runner-abc' },
+      Protocol.openai,
+    );
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        modelName: 'm1',
+        current: Protocol.oip,
+        incoming: Protocol.openai,
+        runnerId: 'runner-abc',
+      },
+      'Routing entry protocol kept: caller value disagreed',
+    );
+    expect((await conflicts('entry-vs-caller')) - before).toBe(1);
+  });
+
+  it('counts a conflict even when no logger is configured (never fully silent)', async () => {
+    const before = await conflicts('entry-vs-caller');
+    const { redis } = makeRedis([1, 1, Protocol.oip]);
+    const service = new RoutingMapService(redis, KEY_PREFIX);
+
+    await expect(
+      service.setModelState('m1', ModelState.ACTIVE, Protocol.openai),
+    ).resolves.toBeUndefined();
+    expect((await conflicts('entry-vs-caller')) - before).toBe(1);
+  });
+
+  it('an agreeing authoritative protocol neither warns nor counts', async () => {
+    const before = await conflicts('entry-vs-caller');
+    const logger = makeLogger();
+    const { redis } = makeRedis([1, 0, Protocol.openai]);
+    const service = new RoutingMapService(redis, KEY_PREFIX, logger);
+
+    await service.setModelState('m1', ModelState.ACTIVE, Protocol.openai);
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect((await conflicts('entry-vs-caller')) - before).toBe(0);
   });
 });

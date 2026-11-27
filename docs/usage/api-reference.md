@@ -45,6 +45,18 @@ contract (see above), the limit is operator configuration rather than a versione
 value; an OpenShift Route or other router in front of the proxy may enforce its own, lower body
 limit.
 
+Two further admission guards share the same envelope. The aggregate of concurrently buffered
+bodies is capped per process by `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`,
+256 MiB per replica); a request that would cross it is rejected with `503` and
+`type: "overloaded"` (counted per received data frame, so a lying `Content-Length` cannot bypass
+it — see the proxy's [buffered-body budget](../../deployment/proxy/README.md#buffered-body-budget)).
+And when the operator sets the optional static inference key
+(`SARDEENZ_PROXY_INFERENCE_API_KEY`), a request without a valid
+`Authorization: Bearer <key>` is rejected with `401` and `type: "authentication_error"` before
+the body is read — see the proxy component's
+[optional inference API key](../architecture/components/proxy.md#optional-inference-api-key)
+section for the shape and the rotation procedure.
+
 ## Protocol-family admission
 
 A model is invocable only under the prefix that matches its `protocol` tag — `/openai/v1/...` for

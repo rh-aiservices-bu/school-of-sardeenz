@@ -30,6 +30,7 @@
 - [ADR-028](adr-028-drain-signal-semantics.md) — The Drain Signal Is Two-Valued: Unknown Never Means Drained _(extends ADR-010)_
 - [ADR-029](adr-029-colocation-hold-and-pressure-stop.md) — Co-location Keeps Sleep's Hold, and Pressure Evicts by Stopping _(extends ADR-011/ADR-014; amends ADR-011)_
 - [ADR-030](adr-030-platform-image-signing-and-scanning.md) — Platform Images Are Digest-Pinned, Trivy-Gated and Cosign-Signed in CI _(clarifies ADR-017)_
+- [ADR-031](adr-031-in-namespace-plaintext-traffic.md) — In-Namespace Traffic Is Plaintext by Design at This Stage _(extends ADR-022/ADR-025)_
 - [ADR-032](adr-032-pickle-weights-refusal.md) — Pickle-Based Weights Are Refused at Runner Startup, With a Per-Model Opt-In _(extends ADR-016)_
 - [ADR-033](adr-033-sanitise-not-escape.md) — Untrusted Text Rendered Into a Rendered Surface Is Sanitised by Whitelist, Never Escaped
 - [ADR-034](adr-034-codeowners-for-gate-config.md) — CI Configuration Is Code-Owned, and a Self-Referential Gate States Its Ceiling

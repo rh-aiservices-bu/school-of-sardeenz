@@ -180,14 +180,17 @@ def test_health_error_after_engine_death(dying_client):
 
 
 def test_wake_from_non_sleeping_returns_200(shim_client):
-    """Pins today's behaviour, a deliberate divergence from the contract (#252 OQ1=B).
-
-    engine-runner.yaml documents `409 — Runner is not sleeping`; both shims call the engine's
-    wake and answer 200 instead. No shim runtime change in #252 — the deviation, its
-    control-plane consequence and the follow-up are recorded in README "Known divergences".
-    """
+    """Contract (#323): /wake is idempotent — a READY runner answers 200 and stays READY."""
     _name, client = shim_client
     resp = client.post("/wake")
     assert resp.status_code == 200
     assert resp.json() == {"state": "READY"}
     assert client.get("/sleep-status").json() == {"isSleeping": False}
+
+
+def test_wake_from_starting_returns_200(starting_client):
+    """Contract (#323): /wake is idempotent — 200 from any state, including a still-loading runner."""
+    _name, client = starting_client
+    resp = client.post("/wake")
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "READY"

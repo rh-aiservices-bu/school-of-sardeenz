@@ -3,7 +3,15 @@ import { randomUUID } from 'node:crypto';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
 import { ControlPlaneError } from '../errors.js';
+import { routingProtocolConflictsTotal } from '../health/metrics.js';
 import { delaySafe } from '../utils.js';
+
+export interface RoutingMapLogger {
+  debug(obj: Record<string, unknown>, msg: string): void;
+  info(obj: Record<string, unknown>, msg: string): void;
+  warn(obj: Record<string, unknown>, msg: string): void;
+  error(obj: Record<string, unknown>, msg: string): void;
+}
 
 export interface RunnerEndpoint {
   host: string;
@@ -76,6 +84,7 @@ export class RoutingMapService {
   constructor(
     private readonly redis: Redis,
     private readonly keyPrefix: string,
+    private readonly logger?: RoutingMapLogger,
   ) {
     this.hashKey = redisKey(keyPrefix, ROUTING_MAP_FIELD);
     this.pubsubChannel = redisKey(keyPrefix, ROUTING_UPDATES_CHANNEL);
@@ -100,6 +109,12 @@ export class RoutingMapService {
     const now = new Date().toISOString();
     // Do not HGET/HSET in JavaScript here. A state refresh can race the move cutover Lua
     // mutation and otherwise write a stale endpoints array back over its weight=0 result.
+    //
+    // Protocol is passed as ARGV[3]; an empty string means "the caller has no authoritative
+    // value". An existing entry then keeps its persisted tag (decision D9) — a defaulted value
+    // must never flip a live model's protocol family (#309). Only a *new* entry gets the legacy
+    // OpenAI creation default. The tag policy lives inside the script so the write stays atomic;
+    // the script reports a conflict so JavaScript can count it and log once.
     const luaScript = `
       ${LUA_ENCODE_ROUTING_ENTRY}
       local raw = redis.call('HGET', KEYS[1], ARGV[1])
@@ -108,30 +123,36 @@ export class RoutingMapService {
       if existed then
         entry = cjson.decode(raw)
       else
-        entry = { modelName = ARGV[1], protocol = ARGV[3], endpoints = {} }
+        entry = { modelName = ARGV[1], protocol = ARGV[3] ~= '' and ARGV[3] or 'openai', endpoints = {} }
       end
       entry.state = ARGV[2]
-      if ARGV[3] ~= '' then entry.protocol = ARGV[3] end
+      local conflict = 0
+      if existed and ARGV[3] ~= '' and entry.protocol ~= ARGV[3] then conflict = 1 end
       entry.updatedAt = ARGV[4]
       redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
       local updateType = existed and 'MODEL_STATE_CHANGED' or 'MODEL_ADDED'
       redis.call('PUBLISH', KEYS[2], cjson.encode({
         type = updateType, modelName = ARGV[1], state = ARGV[2], timestamp = ARGV[4]
       }))
-      return existed and 1 or 0
+      return { existed and 1 or 0, conflict, entry.protocol }
     `;
-    await this.redis.eval(
+    const result = (await this.redis.eval(
       luaScript,
       2,
       this.hashKey,
       this.pubsubChannel,
       modelName,
       state,
-      // A newly-created routing entry must never carry an empty protocol. Existing entries keep
-      // their persisted protocol when callers omit it; new entries use the legacy OpenAI default.
-      protocol ?? Protocol.openai,
+      protocol ?? '',
       now,
-    );
+    )) as [number, number, Protocol];
+    if (result[1] === 1) {
+      routingProtocolConflictsTotal.inc({ kind: 'entry-vs-caller' });
+      this.logger?.warn(
+        { modelName, current: result[2], incoming: protocol },
+        'Routing entry protocol kept: caller value disagreed',
+      );
+    }
   }
 
   async removeModel(modelName: string): Promise<void> {
@@ -160,10 +181,12 @@ export class RoutingMapService {
       ${LUA_ENCODE_ROUTING_ENTRY}
       local raw = redis.call('HGET', KEYS[1], ARGV[1])
       local entry
+      local conflict = 0
       if raw then
         entry = cjson.decode(raw)
+        if ARGV[5] ~= '' and entry.protocol ~= ARGV[5] then conflict = 1 end
       else
-        entry = { modelName = ARGV[1], state = 'STARTING', protocol = ARGV[5], endpoints = {}, updatedAt = ARGV[3] }
+        entry = { modelName = ARGV[1], state = 'STARTING', protocol = ARGV[5] ~= '' and ARGV[5] or 'openai', endpoints = {}, updatedAt = ARGV[3] }
       end
       local ep = cjson.decode(ARGV[2])
       local filtered = {}
@@ -174,11 +197,10 @@ export class RoutingMapService {
       end
       filtered[#filtered + 1] = ep
       entry.endpoints = filtered
-      entry.protocol = ARGV[5]
       entry.updatedAt = ARGV[3]
       redis.call('HSET', KEYS[1], ARGV[1], encode_routing_entry(entry))
       redis.call('PUBLISH', KEYS[2], ARGV[4])
-      return 1
+      return { 1, conflict, entry.protocol }
     `;
 
     const update: RoutingMapUpdate = {
@@ -188,7 +210,9 @@ export class RoutingMapService {
       timestamp: now,
     };
 
-    await this.redis.eval(
+    // ARGV[5] empty = no authoritative caller value: an existing entry keeps its tag (D9), a
+    // newly-created one gets the creation default inside the script (#309).
+    const result = (await this.redis.eval(
       luaScript,
       2,
       this.hashKey,
@@ -197,8 +221,20 @@ export class RoutingMapService {
       JSON.stringify(endpoint),
       now,
       JSON.stringify(update),
-      protocol ?? 'openai',
-    );
+      protocol ?? '',
+    )) as [number, number, Protocol];
+    if (result[1] === 1) {
+      routingProtocolConflictsTotal.inc({ kind: 'entry-vs-caller' });
+      this.logger?.warn(
+        {
+          modelName,
+          current: result[2],
+          incoming: protocol,
+          ...(endpoint.runnerId ? { runnerId: endpoint.runnerId } : {}),
+        },
+        'Routing entry protocol kept: caller value disagreed',
+      );
+    }
   }
 
   async removeEndpoint(modelName: string, host: string, port: number): Promise<void> {

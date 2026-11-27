@@ -224,22 +224,26 @@ describe('Runner Stub Contract Endpoints', () => {
       expect(data.code).toBe('BAD_REQUEST');
     });
 
-    it('should return 409 for POST /wake when not sleeping', async () => {
+    it('returns 200 and reports the current state for POST /wake when not sleeping', async () => {
       // Ensure we're in READY state
       const healthResponse = await fetch(`${baseUrl}/health`);
       const healthData = (await healthResponse.json()) as HealthResponse;
       expect(healthData.state).toBe('READY');
 
-      // Try to wake when not sleeping
+      // Contract (#323): /wake is idempotent — waking a non-sleeping runner is a no-op.
       const response = await fetch(`${baseUrl}/wake`, {
         method: 'POST',
       });
 
-      expect(response.status).toBe(409);
+      expect(response.status).toBe(200);
 
-      const data = (await response.json()) as ErrorResponse;
-      expect(data.code).toBe('INVALID_STATE');
-      expect(data.details!.currentState).toBe('READY');
+      const data = (await response.json()) as WakeResponse;
+      expect(data.state).toBe('READY');
+
+      // The no-op neither mutates the state machine nor the reported health state.
+      const healthAfter = await fetch(`${baseUrl}/health`);
+      const healthAfterData = (await healthAfter.json()) as HealthResponse;
+      expect(healthAfterData.state).toBe('READY');
     });
   });
 });

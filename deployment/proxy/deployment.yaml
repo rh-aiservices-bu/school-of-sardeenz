@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: sardeenz-proxy
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: sardeenz-proxy
@@ -17,12 +17,35 @@ spec:
           type: RuntimeDefault
       # The proxy never calls the Kubernetes API, so the pod carries no ServiceAccount token.
       automountServiceAccountToken: false
+      # 180 = 5 (preStop /drain delay) + 120 (SARDEENZ_PARKING_TIMEOUT_SECS default)
+      #         + 45 (SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS) + 10 s process-exit slack.
+      # Invariant: terminationGracePeriodSeconds ≥ preStop + parking timeout + drain secs.
+      # Raise the three together when raising SARDEENZ_PARKING_TIMEOUT_SECS; the in-process
+      # deadline is derived from parking timeout + drain secs (Config::shutdown_deadline).
+      terminationGracePeriodSeconds: 180
+      # Soft spread: prefer one replica per node, but a single-node cluster must still
+      # schedule both — hard anti-affinity would leave the second pod Pending.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: sardeenz-proxy
       containers:
         - name: proxy
           image: quay.io/rh-aiservices-bu/sardeenz-proxy:latest
           # Always: :latest is mutable — re-resolve it at every pod start so a republished tag
           # actually rolls out; unchanged layers still come from the node cache.
           imagePullPolicy: Always
+          lifecycle:
+            preStop:
+              # Distroless static image has no shell/sleep (Dockerfile), so the
+              # endpoint-propagation delay is served by holding this HTTP response: the
+              # kubelet blocks on it before sending SIGTERM. See proxy/src/shutdown.rs.
+              httpGet:
+                path: /drain
+                port: admin
           env:
             - name: SARDEENZ_PROXY_LISTEN_ADDR
               value: 0.0.0.0:8080
@@ -41,11 +64,34 @@ spec:
             # Peak memory scales with concurrent maximum-size bodies; see deployment/proxy/README.md.
             - name: SARDEENZ_PROXY_MAX_BODY_BYTES
               value: '33554432'
+            # Per-process admission budget over all concurrently buffered inference
+            # bodies (#300): each replica enforces its own, so the two replicas can
+            # hold up to 512 MiB combined. 256 MiB = 25 % of each replica's 1Gi
+            # container memory limit below, leaving headroom for routing state,
+            # stacks and response streaming. A parked body counts against both this
+            # and SARDEENZ_PARKING_MAX_BYTES. 0 disables enforcement (a WARN-logged
+            # opt-out); the gauge always runs.
+            - name: SARDEENZ_PROXY_MAX_BUFFERED_BYTES
+              value: '268435456'
             - name: SARDEENZ_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: sardeenz-service-tokens
                   key: SARDEENZ_API_TOKEN
+            # Optional static API key for the inference port (#332). Absent from the
+            # Secret = key disabled (today's behaviour). Comma-separated values allow
+            # rotation; see the "Inference API key" section in this README.
+            - name: SARDEENZ_PROXY_INFERENCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sardeenz-service-tokens
+                  key: SARDEENZ_PROXY_INFERENCE_API_KEY
+                  optional: true
+            # In-process shutdown deadline = SARDEENZ_PARKING_TIMEOUT_SECS + this (#330).
+            # 165 s at defaults, inside the 180 s grace period above; keep all three in
+            # step when raising either knob.
+            - name: SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS
+              value: '45'
           ports:
             - name: inference
               containerPort: 8080

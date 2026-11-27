@@ -50,6 +50,7 @@ chrono = { version = "0.4", features = ["serde"] }
 bytes = "1"
 futures-util = "0.3"
 url = "2"
+subtle = "2"
 
 [features]
 redis-integration = []
