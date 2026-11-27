@@ -133,6 +133,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missing `docs/development/agent-profile.md` (required by the milestone skills) was created
   from the shipped template. `.gitignore` gains the `.omp/` scratchpad paths
   (`reports/`, `plans/`, `worktrees/`, `profiles`).
+- **The CI Python job installs test deps under a generated constraints file (#182).** The
+  `python` job's `make test-python-deps` now passes `-c runners/ci-constraints.txt` — a generated,
+  sorted `name==version` pin of exactly the two shims' `[test]`-extra dependency closure
+  (`make python-constraints` regenerates it, on Python 3.12 per `.python-version`) — so the job
+  stops floating on PyPI. Version-exact, not hash-pinned: `-c` constraints cannot carry hashes, so
+  this buys version reproducibility, not integrity; the advisory half (#338's `pip-audit` over the
+  same constrained set) is the forcing function that keeps the file fresh — a pinned version with
+  a known CVE fails that sweep and forces a regeneration. The file covers **only the CI/dev
+  install**: the shims' runtime `dependencies` stay deliberately unpinned because they are
+  installed atop the vLLM/MLServer base images inside the SIFs, which already ship
+  fastapi/uvicorn/httpx.
 
 ### Added
 

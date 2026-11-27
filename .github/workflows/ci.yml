@@ -189,6 +189,7 @@ jobs:
           python-version-file: .python-version
       # The shims + shared conformance suite exercise real FastAPI apps against FAKE engines, so the
       # only deps are fastapi/httpx/pytest (via each shim's [test] extra) — never vllm/torch/mlserver.
+      # `make test-python-deps` installs under runners/ci-constraints.txt (generated, CI-only).
       - name: Install shim test deps
         run: make test-python-deps
       - name: Run Python test suites

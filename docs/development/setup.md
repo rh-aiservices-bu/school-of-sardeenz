@@ -187,23 +187,30 @@ fix (#325), and that one line was deleted.
 
 ## Common Commands
 
-| Command                 | Description                                                                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `make` / `make help`    | List all targets with descriptions                                                                                                                                       |
-| `make all`              | Type-check and lint everything                                                                                                                                           |
-| `make lint`             | ESLint + clippy + OpenAPI spec validation                                                                                                                                |
-| `make lint-specs`       | Validate OpenAPI specs only (Redocly)                                                                                                                                    |
-| `make format`           | Auto-format all files                                                                                                                                                    |
-| `make format-check`     | Check formatting (CI-safe)                                                                                                                                               |
-| `make typecheck`        | TypeScript `tsc --build` + `cargo check`                                                                                                                                 |
-| `make test`             | Run all test suites (Vitest + cargo test)                                                                                                                                |
-| `make test-python`      | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps`; run inside a venv — system python3 lacks fastapi) |
-| `make test-coverage`    | Run tests with V8 coverage                                                                                                                                               |
-| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 32/32 since 2026-11-25) |
-| `make codegen`          | Regenerate types from OpenAPI specs                                                                                                                                      |
-| `make services`         | Start dev services (Redis + Postgres)                                                                                                                                    |
-| `make services-stop`    | Stop dev services                                                                                                                                                        |
-| `make clean`            | Remove all build artifacts                                                                                                                                               |
+| Command                 | Description                                                                                                                                                                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make` / `make help`    | List all targets with descriptions                                                                                                                                                                                                           |
+| `make all`              | Type-check and lint everything                                                                                                                                                                                                               |
+| `make lint`             | ESLint + clippy + OpenAPI spec validation                                                                                                                                                                                                    |
+| `make lint-specs`       | Validate OpenAPI specs only (Redocly)                                                                                                                                                                                                        |
+| `make format`           | Auto-format all files                                                                                                                                                                                                                        |
+| `make format-check`     | Check formatting (CI-safe)                                                                                                                                                                                                                   |
+| `make typecheck`        | TypeScript `tsc --build` + `cargo check`                                                                                                                                                                                                     |
+| `make test`             | Run all test suites (Vitest + cargo test)                                                                                                                                                                                                    |
+| `make test-python`      | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps` — which installs pinned test deps from `runners/ci-constraints.txt`; run inside a venv — system python3 lacks fastapi) |
+| `make test-coverage`    | Run tests with V8 coverage                                                                                                                                                                                                                   |
+| `make test-integration` | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 32/32 since 2026-11-25)                                                                     |
+| `make codegen`          | Regenerate types from OpenAPI specs                                                                                                                                                                                                          |
+| `make services`         | Start dev services (Redis + Postgres)                                                                                                                                                                                                        |
+| `make services-stop`    | Stop dev services                                                                                                                                                                                                                            |
+| `make clean`            | Remove all build artifacts                                                                                                                                                                                                                   |
+
+`make test-python-deps` installs the shim test deps under `runners/ci-constraints.txt` — a
+generated, CI-only pin file (`make python-constraints` regenerates it; it pins **only the CI/dev
+install, not the SIF runtime trees**, where the shims install unpinned atop the vLLM/MLServer base
+images). Any PR that changes a shim's `[test]` extras regenerates the file in the same PR. A green
+advisory sweep over this set must not be read as "shipped images are audited" — SIF runtime
+pinning/auditing is a separate boundary (#338).
 
 ## Logs
 

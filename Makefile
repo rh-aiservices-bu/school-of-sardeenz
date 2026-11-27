@@ -5,7 +5,7 @@ COMPOSE := $(shell if command -v podman-compose >/dev/null 2>&1; then echo "podm
 .DEFAULT_GOAL := help
 
 .PHONY: help all lint lint-specs format format-check typecheck test test-deployment test-integration \
-        test-coverage test-python test-python-deps codegen verify-image-pins clean services services-stop \
+        test-coverage test-python test-python-deps codegen verify-image-pins python-constraints clean services services-stop \
         dev dev-full dev-full-logged dev-cp dev-bff dev-dashboard dev-proxy \
         dev-worker dev-worker-2 dev-worker-stop docs-deps docs-build docs-serve
 
@@ -124,11 +124,35 @@ test-coverage: ## Run tests with V8 coverage
 # Rust/TS dev box needs no Python — CI runs both in a dedicated `python` job. The root pytest.ini
 # supplies --import-mode=importlib so the single invocation below does not collide on the shims'
 # duplicate tests/test_core.py basename (#161).
+# The install is constrained to runners/ci-constraints.txt (CI-only, generated) for
+# reproducibility — regenerate with `make python-constraints`; never freeze the SIF runtime.
 test-python-deps: ## Install the Python shims (editable, [test] extras) — run inside a venv
-	pip install -e "runners/vllm[test]" -e "runners/mlserver[test]"
+	pip install -c runners/ci-constraints.txt -e "runners/vllm[test]" -e "runners/mlserver[test]"
 
 test-python: ## Run the Python shim + conformance suites (needs test-python-deps first)
 	python3 -m pytest runners/vllm/tests runners/mlserver/tests runners/conformance
+
+python-constraints: ## Regenerate runners/ci-constraints.txt (CI-only test pins; needs python3.12 or uv)
+	rm -rf /tmp/sardeenz-ci-constraints
+	@if command -v python3.12 >/dev/null 2>&1; then \
+	   python3.12 -m venv /tmp/sardeenz-ci-constraints; \
+	 elif command -v uv >/dev/null 2>&1; then \
+	   uv venv --seed -p 3.12 /tmp/sardeenz-ci-constraints; \
+	 else \
+	   echo "error: python3.12 (or uv) required to match .python-version"; exit 1; \
+	 fi
+	/tmp/sardeenz-ci-constraints/bin/pip install --quiet --upgrade pip
+	/tmp/sardeenz-ci-constraints/bin/pip install --quiet -e "runners/vllm[test]" -e "runners/mlserver[test]"
+	{ printf '%s\n' \
+	    '# CI-only test constraints — NOT used to build the runner SIFs.' \
+	    '# Generated, do not edit. Regenerate with: make python-constraints' \
+	    "# Captured $$(date -u +%F) on Python 3.12 (.python-version / the CI \`python\` job)." \
+	    '# Consumed by `make test-python-deps` (-c); the shims'"'"' runtime deps stay unpinned' \
+	    '# on purpose — they are installed atop the vLLM/MLServer base images.'; \
+	  /tmp/sardeenz-ci-constraints/bin/pip freeze --exclude-editable | LC_ALL=C sort -f | grep -vE '^(pip|setuptools|wheel)=='; } \
+	  > runners/ci-constraints.txt.tmp
+	mv runners/ci-constraints.txt.tmp runners/ci-constraints.txt
+	rm -rf /tmp/sardeenz-ci-constraints
 
 ##@ Build / misc
 
