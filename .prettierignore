@@ -9,3 +9,5 @@ packages/contracts/specs/
 site/
 # Hand-formatted single-file canvas app; Prettier would explode its dense data tables
 docs/architecture-visualizer.html
+# Code-drawn explainer films: dense hand-formatted drawing code
+docs/films/

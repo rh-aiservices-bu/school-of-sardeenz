@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Explainer film (work in progress).** `films/sardeenz-cannery/` holds the treatment, storyboard
+- **Explainer film (work in progress).** `docs/films/sardeenz-cannery/` holds the treatment, storyboard
   and code-drawn source for a 60-second animated presentation of Sardeenz (request parking,
   wake, LRU eviction), built with the Lemo-Opuscar Assembly-Line Diagram style.
 - **MLServer runner: ONNX models.** The MLServer 1.7.1 image now installs
