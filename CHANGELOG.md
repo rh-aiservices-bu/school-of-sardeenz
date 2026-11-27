@@ -266,6 +266,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Dependabot, the CI constraints and the runner/prereq image inputs) to the maintainer, since a PR
   can otherwise edit the gate in the same diff as what it catches; it blocks only once
   **Require review from Code Owners** is enabled on `dev` (repo-owner action).
+- **Four decision records from M22 (#344).** `ADR-032` (pickle-based weights refused at runner
+  startup, shim-enforced, with a persisted per-model opt-in), `ADR-033` (untrusted text rendered
+  into a rendered surface is sanitised by per-field whitelist, never escaped — the rule the advisory
+  renderer converged on after three escaping rounds each found another survivable character),
+  `ADR-034` (CI configuration is code-owned via CODEOWNERS, including the file itself, with the
+  branch-protection prerequisite and the self-deletion ceiling stated), and `ADR-035` (the audit line
+  records an asserted actor, never an authenticated one; attribution for investigation, never an
+  authorization input).
 
 ### Fixed
 

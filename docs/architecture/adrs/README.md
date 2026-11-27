@@ -15,13 +15,13 @@
 - [ADR-013](adr-013-secrets-management.md) — Secrets Management Policy
 - [ADR-014](adr-014-inference-recency-tracking.md) — Inference Recency Tracking for LRU Eviction
 - [ADR-015](adr-015-sif-runtime-packaging.md) — Engine Runtime Delivery via Apptainer SIF on Shared RWX Storage _(supersedes ADR-004)_
-- [ADR-016](adr-016-sif-worker-security-posture.md) — Worker Security Posture for SIF Execution
+- [ADR-016](adr-016-sif-worker-security-posture.md) — Worker Security Posture for SIF Execution _(extended by ADR-032)_
 - [ADR-017](adr-017-runner-image-pipeline.md) — Runner Image Build and Supply Chain _(amended by ADR-018)_
 - [ADR-018](adr-018-runner-catalog-oras-distribution.md) — Runner Catalog and ORAS Distribution _(amends ADR-017)_
 - [ADR-019](adr-019-logical-model-vs-instance-split.md) — Logical Model vs. Instance Split _(refines ADR-014)_
 - [ADR-020](adr-020-config-name-vs-served-model-name.md) — Configuration Name vs. Served Model Name _(refines ADR-019; amended by ADR-021)_
 - [ADR-021](adr-021-protocol-family-path-prefixes.md) — Protocol-Family Path Prefixes for Multi-Protocol Runners _(amends ADR-020)_
-- [ADR-022](adr-022-fail-closed-service-tokens.md) — Service Tokens Fail Closed; the Dev Opt-Out Is a Dev-Only Escape Hatch _(extends ADR-013)_
+- [ADR-022](adr-022-fail-closed-service-tokens.md) — Service Tokens Fail Closed; the Dev Opt-Out Is a Dev-Only Escape Hatch _(extends ADR-013; extended by ADR-035)_
 - [ADR-023](adr-023-sse-only-query-token-fallback.md) — The `?token=` SSE Fallback Is Kept but Path-Gated
 - [ADR-024](adr-024-worker-entrypoint-allowlist.md) — Worker Entrypoint Allowlist Seeds from the Configured Argv
 - [ADR-025](adr-025-namespace-default-deny-ingress.md) — The Namespace Ships Default-Deny Ingress; Every Flow Needs an Explicit Allow
@@ -30,3 +30,7 @@
 - [ADR-028](adr-028-drain-signal-semantics.md) — The Drain Signal Is Two-Valued: Unknown Never Means Drained _(extends ADR-010)_
 - [ADR-029](adr-029-colocation-hold-and-pressure-stop.md) — Co-location Keeps Sleep's Hold, and Pressure Evicts by Stopping _(extends ADR-011/ADR-014; amends ADR-011)_
 - [ADR-030](adr-030-platform-image-signing-and-scanning.md) — Platform Images Are Digest-Pinned, Trivy-Gated and Cosign-Signed in CI _(clarifies ADR-017)_
+- [ADR-032](adr-032-pickle-weights-refusal.md) — Pickle-Based Weights Are Refused at Runner Startup, With a Per-Model Opt-In _(extends ADR-016)_
+- [ADR-033](adr-033-sanitise-not-escape.md) — Untrusted Text Rendered Into a Rendered Surface Is Sanitised by Whitelist, Never Escaped
+- [ADR-034](adr-034-codeowners-for-gate-config.md) — CI Configuration Is Code-Owned, and a Self-Referential Gate States Its Ceiling
+- [ADR-035](adr-035-audit-asserted-actor.md) — The Audit Line Records an Asserted Actor, Never an Authenticated One _(extends ADR-022)_

@@ -3,6 +3,8 @@
 ## Status
 
 Accepted. Implements the security half of [ADR-015](adr-015-sif-runtime-packaging.md).
+_(extended by [ADR-032](adr-032-pickle-weights-refusal.md): the SIF is verified, the weights it
+loads are format-checked.)_
 
 ## Context
 

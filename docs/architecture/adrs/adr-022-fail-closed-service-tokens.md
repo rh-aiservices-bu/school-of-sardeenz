@@ -5,6 +5,8 @@
 Accepted. Implemented in M15 ([#234](https://github.com/rh-aiservices-bu/school-of-sardeenz/issues/234),
 merged `46f204d`). Extends [ADR-013](adr-013-secrets-management.md), whose "inter-component
 authentication … is a separate design decision for Phase 2" deferral this record resolves.
+_(extended by [ADR-035](adr-035-audit-asserted-actor.md): one shared token means an audit actor is
+asserted, not authenticated.)_
 
 ## Context
 
