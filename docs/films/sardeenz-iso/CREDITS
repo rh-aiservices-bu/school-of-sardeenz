@@ -1,0 +1,20 @@
+Twenty-Four Cubes (sardeenz-iso) — third-party material
+
+Drawing engine
+  engine.js is copied from the Lemo-Opuscar library, styles/iso-infographic/demo/engine.js
+  https://github.com/lemomo-ai/lemo-opuscar — MIT License, Copyright (c) 2026 Lemomo (LemoLab).
+  The subtitle card in film.js is adapted from the same demo (MIT).
+  The film follows that library's "Isometric Infographic" style prompt; story, world, timeline and score are original.
+
+Font
+  Jost (weights 400, 500, 600, 700), Latin subset from Google Fonts — SIL Open Font License 1.1
+  https://fonts.google.com/specimen/Jost
+
+Voice
+  Kokoro v1.0 text-to-speech (kokoro-onnx), voice "bf_emma" — Apache License 2.0
+  https://github.com/thewh1teagle/kokoro-onnx
+
+Music and sound effects
+  Synthesised in mix.py with numpy/scipy and the Lemo-Opuscar core/audio/sfx.py helpers. No samples, no recordings.
+
+Tools (not part of the film): Lemo-Opuscar core render tools, Playwright/Chromium, ffmpeg.

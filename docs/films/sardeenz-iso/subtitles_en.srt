@@ -1,0 +1,63 @@
+1
+00:00:00,600 --> 00:00:02,600
+One GPU: 24 gigabytes.
+
+2
+00:00:02,600 --> 00:00:06,200
+Your model takes 22. Two are left over.
+
+3
+00:00:08,000 --> 00:00:10,000
+Slicing the GPU doesn't help.
+
+4
+00:00:10,000 --> 00:00:14,400
+Slices come in fixed sizes, and this model needs the whole card.
+
+5
+00:00:16,400 --> 00:00:19,200
+So a 2-gigabyte model gets a second GPU.
+
+6
+00:00:19,200 --> 00:00:21,800
+22 gigabytes sit idle.
+
+7
+00:00:23,400 --> 00:00:25,300
+Sardeenz doesn't slice.
+
+8
+00:00:25,300 --> 00:00:29,200
+It tracks memory in software, and packs each GPU by size.
+
+9
+00:00:31,400 --> 00:00:33,900
+Generative, embedding, predictive.
+
+10
+00:00:33,900 --> 00:00:37,400
+Different engines, different sizes, on the same GPUs.
+
+11
+00:00:40,400 --> 00:00:43,900
+One proxy routes every request to the right model.
+
+12
+00:00:48,400 --> 00:00:52,300
+More models than memory? Idle ones sleep in host RAM.
+
+13
+00:00:52,600 --> 00:00:54,700
+A request for a sleeping model waits,
+
+14
+00:00:54,700 --> 00:00:58,000
+while the least recently used one is swapped out.
+
+15
+00:01:00,400 --> 00:01:03,400
+Kubernetes still sees two busy GPUs.
+
+16
+00:01:03,600 --> 00:01:06,700
+Sardeenz: every gigabyte, working.

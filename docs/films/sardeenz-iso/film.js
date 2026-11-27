@@ -106,17 +106,17 @@ const CAM = [
   [0, .9, .5, .9, 120], [1.1, .9, .5, .9, 120], [3.5, 6, 1, .5, 88], [7.6, 6, 1, .8, 86], [8.8, 6.3, 1, 1.5, 82], [15.6, 6.3, 1, 1.5, 80],
   [17.6, 7, 2.2, .5, 62], [19.2, 6, 3.5, .5, 56], [22.6, 6, 3.6, .5, 57],
   [23.8, 6, 5, .3, 52], [39.8, 6, 5, .3, 54], [41.6, 5, 4, 0, 37], [47.8, 5, 4, 0, 38.5],
-  [49.6, 6.4, 7.3, -.6, 38], [59.8, 6.4, 7.3, -.6, 39.5], [62.0, 4.6, 5.2, 0, 29.5], [67, 4.6, 5.2, 0, 30.2],
+  [49.6, 5.6, 6.5, -.6, 37], [59.8, 5.6, 6.5, -.6, 38.5], [62.0, 4.6, 5.2, 0, 29.5], [67, 4.6, 5.2, 0, 30.2],
 ];
 function camera(t) { const k = i => key(CAM.map(c => [c[0], i === 4 ? Math.log(c[4]) : c[i]]), t); return { x: k(1), y: k(2), z: k(3), k: Math.exp(k(4)) }; }
 
 // ---------- drawing ----------
 let TEXTS = [];
 export const texts = () => TEXTS;
-function note(id, text, x, y, w, h) { TEXTS.push({ id, text, x0: x, y0: y, x1: x + w, y1: y + h }); }
+function note(id, text, x, y, w, h, pass) { const o = { id, text, x0: x, y0: y, x1: x + w, y1: y + h }; if (pass) o.pass = true; TEXTS.push(o); }
 function lab(iso, id, x, y, z, a, o) {
   if (a <= 0) return; pin(iso, x, y, z, { ...o, a });
-  if (a > .7 && (o.fade ?? 1) > .5) { const [sx, sy] = iso.P(x, y, z), dir = o.dir ?? 1, up = o.up ?? 130, len = o.len ?? 60, tx = sx + dir * (len + 12), w = 300; const s = [o.title, o.num, o.unit].filter(Boolean).join(' '); note(id, s, dir > 0 ? tx : tx - w, sy - up - 36, w, 90); }
+  if (a > .7 && (o.fade ?? 1) > .5) { const [sx, sy] = iso.P(x, y, z), dir = o.dir ?? 1, up = o.up ?? 130, len = o.len ?? 60, tx = sx + dir * (len + 12), w = Math.min(300, 15 * Math.max((o.title || '').length, ((o.num || '') + (o.unit || '')).length + 1)); const s = [o.title, o.num, o.unit].filter(Boolean).join(' '); note(id, s, dir > 0 ? tx : tx - w, sy - up - 36, w, 90, o.pass); }
 }
 const greyed = (hue, g) => g <= 0 ? T[hue] : tri(hex(mix(HUE[hue], HUE.grey, g)));
 
@@ -190,7 +190,7 @@ function world(iso, t) {
   // requests
   for (const r of requests(t)) iso.box(r.x - .22, r.y - .22, 0, .44, .44, .44, T[r.hue]);
   // the title, standing on the front edge of the board
-  if (t > TL.TITLE - .1) { const a = back(seg(t, TL.TITLE, TL.TITLE + .7), 1.5); iso.text3('SARDEENZ', .2, 10.3, 0, { plane: 'xz', size: 1.75 * a, extrude: .45, weight: 700, track: 6, tri: T.violet, bias: 40 }); }
+  if (t > TL.TITLE - .1) { const a = back(seg(t, TL.TITLE, TL.TITLE + .7), 1.5); iso.text3('SARDEENZ', .2, 10.3, 0, { plane: 'xz', size: 1.75 * a, extrude: .45, weight: 700, track: 6, tri: T.violet, bias: 8.8 }); }
   // sleeping marks
   for (const L of 'CD') { const p = pose(L, t); if (p && p.grey > .9 && p.z < -1.9 && p.z > -2.1 && t > TL.DOWN) iso.bill(p.x + 3.4, p.y + .4, p.z + BH + .5, (g) => { g.font = `700 0.6px ${FONT}`; g.fillStyle = INK; for (let i = 0; i < 3; i++) { const u = (t * .5 + i / 3) % 1; g.globalAlpha = 1 - u; g.font = `700 ${.35 + u * .35}px ${FONT}`; g.fillText('z', u * .7, -u * 1.1); } }, { bias: 5 }); }
 }
@@ -209,24 +209,28 @@ function backdrop(g, iso) {
 function labels(g, iso, t) {
   const A = (t0, t1 = 999, d = 1.1) => seg(t, t0, t0 + d) * (t < t1 ? 1 : 0), F = t1 => 1 - seg(t, t1 - .35, t1);
   // act 1
-  lab(iso, 'gb', 1, 0, CH, A(.7, 3.4, .7), { title: 'ONE CUBE', num: '1', unit: 'GB', dir: 1, up: 120, fade: F(3.4) });
+  lab(iso, 'gb', 1, 0, CH, A(.7, 3.9, .6), { title: 'ONE CUBE', num: '1', unit: 'GB', dir: 1, up: 120, fade: F(3.9) });
   lab(iso, 'gpu0', 0, 2, 0, A(3.0, 7.9), { title: 'GPU 0', num: '24', unit: 'GB', dir: -1, up: 150, len: 40, fade: F(7.9) });
   lab(iso, 'a22', 3, 0, CH + BH, A(4.3, 7.9), { title: 'MODEL A · LLM', num: '22', unit: 'GB', dir: -1, up: 120, len: 50, fade: F(7.9) });
   lab(iso, 'un2', 12, 1, CH, A(TL.CORAL0 + .2, 8.3), { title: 'LEFT OVER', num: '2', unit: 'GB', dir: 1, up: 150, len: 40, dot: HUE.coral, fade: F(8.3) });
   // slicing schemes and their verdicts
-  for (const [id, name, t0, t1, tm, ok] of [['s4', '4 × 6', TL.W4, TL.W4_OUT + .3, TL.BUMP1, 0], ['s2', '2 × 12', TL.W2, TL.W2_OUT + .3, TL.BUMP2, 0], ['s1', '1 × 24', TL.W2_OUT + .5, 15.9, TL.A_LAND2, 1]]) {
-    const a = A(t0, t1, .8); if (a <= 0) continue;
-    lab(iso, id, 12.3, -.2, 2.2, a, { title: 'FIXED SLICES · MIG', num: name, unit: 'GB', dir: 1, up: 170, len: 40, fade: F(t1) });
-    const [sx, sy] = iso.P(12.3, -.2, 2.2); g.save(); g.globalAlpha = F(t1); mark(g, sx + 52 + 250, sy - 170 + 30, ok, seg(t, tm, tm + .3)); g.restore();
+  {
+    const a = A(TL.W4 - .4, 15.9, .8), fd = F(15.9);
+    lab(iso, 'mig', 12.3, -.2, 2.2, a, { title: 'FIXED SLICES · MIG', dir: 1, up: 200, len: 40, fade: fd });
+    const [sx, sy] = iso.P(12.3, -.2, 2.2), tx = sx + 52, ty = sy - 200;
+    [['4 × 6 GB', TL.W4, TL.BUMP1, 0], ['2 × 12 GB', TL.W2, TL.BUMP2, 0], ['1 × 24 GB', TL.W2_OUT + .5, TL.A_LAND2, 1]].forEach(([name, t0, tm, ok], i) => {
+      const q = seg(t, t0, t0 + .3); if (q <= 0 || a <= 0) return;
+      g.save(); g.globalAlpha = q * fd; haloText(g, name, tx, ty + 38 + i * 46, { font: `400 38px ${FONT}`, track: .5 }); mark(g, tx + 210, ty + 26 + i * 46, ok, seg(t, tm, tm + .3)); g.restore();
+      if (q >= 1 && fd > .5) note('scheme' + i, name, tx, ty + 6 + i * 46, 180, 40);
+    });
   }
-  lab(iso, 'lock', 11.5, 2, CH + .2, A(TL.LOCK + .2, 16.3, .8), { title: 'LOCKED OUT', num: '2', unit: 'GB', dir: 1, up: 60, len: 70, dot: HUE.coral, fade: F(16.3) });
-  lab(iso, 'p2', pose('P', t)?.x ?? 0, (pose('P', t)?.y ?? 0), (pose('P', t)?.z ?? 0) + BH, A(TL.P_IN + .3, TL.P_GO - .1, .8), { title: 'MODEL P · PREDICTIVE', num: '2', unit: 'GB', dir: 1, up: 110, len: 40, fade: F(TL.P_GO - .1) });
-  lab(iso, 'gpu1', 12, 7, 0, A(TL.GPU1_IN + .9, TL.IDLE0, .7), { title: 'GPU 1', num: '24', unit: 'GB', dir: 1, up: 40, len: 60, fade: F(TL.IDLE0) });
-  if (t >= TL.IDLE0 && t < TL.P_HOP) { const n = Math.min(22, 1 + Math.floor((t - TL.IDLE0) / (TL.IDLE1 - TL.IDLE0) * 21)); lab(iso, 'idle', 12, 7, 0, 1, { title: 'GPU 1 · IDLE', num: String(n), unit: 'GB', dir: 1, up: 40, len: 60, dot: HUE.coral, fade: F(TL.P_HOP) }); }
+  lab(iso, 'lock', 11.5, 2, CH + .2, A(TL.LOCK + .2, 18.7, .8), { title: 'LOCKED OUT', num: '2', unit: 'GB', dir: -1, up: -100, len: 40, dot: HUE.coral, fade: F(18.7) });
+  lab(iso, 'p2', pose('P', t)?.x ?? 0, (pose('P', t)?.y ?? 0), (pose('P', t)?.z ?? 0) + BH, A(TL.P_IN, TL.P_LAND - .2, .5), { title: 'MODEL P · PREDICTIVE', num: '2', unit: 'GB', dir: 1, up: 110, len: 40, fade: F(TL.P_LAND - .2) });
+  if (t >= TL.IDLE0 && t < TL.P_HOP) { const n = Math.min(22, 1 + Math.floor((t - TL.IDLE0) / (TL.IDLE1 - TL.IDLE0) * 21)); lab(iso, 'idle', 12, 7, 0, 1, { title: 'GPU 1 · IDLE', num: String(n), unit: 'GB', dir: 1, up: -56, len: 60, dot: HUE.coral, fade: F(TL.P_HOP), pass: n < 22 }); }
   // act 2
   lab(iso, 'g0full', 12, 1, CH + BH, A(TL.P_HOME + .2, 39.6), { title: 'GPU 0', num: '24 / 24', unit: 'GB', dir: 1, up: 150, len: 50, dot: HUE.mint, fade: F(39.6) });
   lab(iso, 'kb', 2, 5, CH + BH, A(TL.B_LAND + .15, 39.2, .8), { title: 'GENERATIVE', num: '12', unit: 'GB', dir: -1, up: 190, len: 60, dot: HUE.blue, fade: F(39.2) });
-  lab(iso, 'ke', 12, 6, CH + BH, A(TL.E_LAND + .15, 39.2, .8), { title: 'EMBEDDING', num: '4', unit: 'GB', dir: 1, up: 12, len: 150, dot: HUE.mint, fade: F(39.2) });
+  lab(iso, 'ke', 12, 6, CH + BH, A(TL.E_LAND + .15, 39.2, .8), { title: 'EMBEDDING', num: '4', unit: 'GB', dir: 1, up: -56, len: 60, dot: HUE.mint, fade: F(39.2) });
   lab(iso, 'kp', 11.5, 0, CH + BH, A(TL.P_PIN, 39.2, .8), { title: 'PREDICTIVE', num: '2', unit: 'GB', dir: 1, up: 250, len: 50, dot: HUE.amber, fade: F(39.2) });
   lab(iso, 'g1full', 0, 7, 0, A(TL.FULL, 39.6, .8), { title: 'GPU 1', num: '24 / 24', unit: 'GB', dir: -1, up: 20, len: 80, dot: HUE.mint, fade: F(39.6) });
   // act 3
@@ -234,7 +238,7 @@ function labels(g, iso, t) {
   lab(iso, 'proxy', GATE_X, LANE_Y - 1, 2.05, A(TL.PROXY_PIN), { title: 'ROUTING PROXY', num: 'one way in', dir: 1, up: 150, len: 40, ns: 34, dot: HUE.violet });
   lab(iso, 'cp', 14.7, -3.3, 3.3, A(TL.CP_PIN), { title: 'CONTROL PLANE', num: t < TL.C_OUT || t > TL.D_HOME ? '48 / 48' : '40 / 48', unit: 'GB', dir: 1, up: 80, len: 40, dot: HUE.violet });
   lab(iso, 'ram', 0, 15, -2, A(TL.RAM_PIN), { title: 'HOST RAM', num: 'asleep', dir: -1, up: 40, len: 70, ns: 34, dot: HUE.grey });
-  lab(iso, 'lru', 8, 5, CH + BH, A(TL.LRU, TL.C_OUT + .5, .6), { title: 'LEAST RECENTLY USED', num: 'C', dir: 1, up: 230, len: 40, fade: F(TL.C_OUT + .5) });
+  lab(iso, 'lru', 8, 5, CH, A(TL.LRU - .4, 56.4, .6), { title: 'LEAST RECENTLY USED', num: 'model C', dir: 1, up: 250, len: 40, ns: 34, fade: F(56.4) });
   lab(iso, 'k8s', 12.35, 6, -.5, endA, { title: 'KUBERNETES SEES', num: '2 GPUs', unit: 'ALLOCATED', dir: 1, up: -60, len: 80, dot: HUE.graphite });
   // tracking ring on the request that waits
   const hero = requests(t).find(r => r.hero);
