@@ -400,8 +400,11 @@ export interface operations {
                 };
             };
             /**
-             * @description Model is not in a wakeable state. It may already be active,
-             *     starting, or in an error state.
+             * @description Model is not in a wakeable state: no instance is `SLEEPING` and none is
+             *     `ACTIVE` or `STARTING` (for example every instance is in an error,
+             *     stopping or draining state). A model with an `ACTIVE` instance answers
+             *     `200` and one with a `STARTING` instance answers `202` — this endpoint is
+             *     idempotent, so "already awake" and "already waking" are never refusals.
              */
             409: {
                 headers: {
