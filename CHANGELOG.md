@@ -299,6 +299,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   wake (both get 2xx, `wakeModel` runs once), each replica still fires exactly one trigger for its
   own parked herd, parking limits stay per replica, and both replicas hold distinct presence leases
   and acknowledge a routing propagation barrier.
+- **Scripted failure scenarios in both integration harnesses (#340).** Nothing in the suites killed
+  a dependency while the platform was working, so the M21 resilience fixes were proven by review
+  instead of by a test. The control-plane half
+  (`control-plane/src/__tests__/integration/failure-scenarios.integration.test.ts`, blocking
+  `integration` job) flushes the test keyspace and asserts the #328 guard on all three of its
+  surfaces (Postgres rows retained, one `mass-divergence` event, the `refused` counter) plus a
+  clean re-announce afterwards; strands a wake across a rebuilt service graph and asserts recovery
+  to terminal `ERROR` with the sibling still ACTIVE (the "reported, not swallowed" half of #303);
+  kills a worker mid-launch and asserts terminal `ERROR`, released capacity and a successful
+  retry; and races two wake triggers, asserting both 2xx (a lost CAS is the benign 202) while
+  exactly one wake executes (runner-side `/wake` count and the metric agree). The proxy half
+  (`proxy/tests/integration/test_failure_scenarios.rs`, `make test`) asserts a routing-state loss
+  fails inference with the clean `model_unavailable` 503 before the first load and after a
+  mid-flight disconnect, and recovers; a parked caller fast-fails with the error-state message; two
+  replicas on one cache each fire their own trigger and both herds resolve; and a killed replica
+  leaves the shared cache serving through the survivor. The harness gained the in-process
+  control-plane-loss seam (`rebuildHarnessGraph` over the same Redis/Postgres, never re-truncating),
+  the mock runner a wake counter and a hang knob (a wake parked on the socket models a restart
+  stranding it), the mock worker the `GET /runners/:runnerId` liveness probe (without it
+  reconciliation reaps a live sibling on a harness gap), and `TestProxy` readiness toggles plus a
+  replica-drop `shutdown()`.
 
 ### Fixed
 

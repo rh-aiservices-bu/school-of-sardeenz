@@ -29,12 +29,22 @@ use sardeenz_proxy::routing::RoutingMapCache;
 use sardeenz_proxy::shutdown;
 use sardeenz_proxy::state::AppState;
 
+/// The two axum serve tasks (`proxy`, `admin`), each of which resolves to the
+/// server's I/O result.
+type ServeHandles = (JoinHandle<std::io::Result<()>>, JoinHandle<std::io::Result<()>>);
+
 /// A running test proxy with its addresses and routing cache exposed.
 pub struct TestProxy {
     pub proxy_addr: std::net::SocketAddr,
     pub admin_addr: std::net::SocketAddr,
     pub routing_cache: RoutingMapCache,
     pub parking: ParkingManager,
+    /// The state both routers share, so a test can model a Redis loss / routing-map (re)load by
+    /// flipping the flags the production Redis-sync task flips (#340).
+    pub state: AppState,
+    /// The two serve tasks, owned so [`TestProxy::shutdown`] can model a dropped replica. `None`
+    /// when [`spawn_drainable`] built the proxy — `ShutdownHandle` owns them there (#330).
+    serve_handles: Option<ServeHandles>,
 }
 
 /// Configuration knobs for the test proxy.
@@ -176,16 +186,21 @@ impl TestProxy {
             .route("/healthz", get(handle_healthz))
             .route("/readyz", get(handle_readyz))
             .route("/metrics", get(handlers::handle_metrics))
-            .with_state(state);
+            .with_state(state.clone());
 
-        tokio::spawn(async move {
-            axum::serve(proxy_listener, proxy_app).await.unwrap();
-        });
-        tokio::spawn(async move {
-            axum::serve(admin_listener, admin_app).await.unwrap();
-        });
+        let proxy_handle =
+            tokio::spawn(async move { axum::serve(proxy_listener, proxy_app).await });
+        let admin_handle =
+            tokio::spawn(async move { axum::serve(admin_listener, admin_app).await });
 
-        TestProxy { proxy_addr, admin_addr, routing_cache, parking }
+        TestProxy {
+            proxy_addr,
+            admin_addr,
+            routing_cache,
+            parking,
+            state,
+            serve_handles: Some((proxy_handle, admin_handle)),
+        }
     }
 
     pub fn proxy_url(&self) -> String {
@@ -195,11 +210,35 @@ impl TestProxy {
     pub fn admin_url(&self) -> String {
         format!("http://{}", self.admin_addr)
     }
-}
 
-/// The two axum serve tasks (`proxy`, `admin`), each of which resolves to the
-/// server's I/O result.
-type ServeHandles = (JoinHandle<std::io::Result<()>>, JoinHandle<std::io::Result<()>>);
+    /// Model the production Redis-sync task losing / regaining its connection (#340). Inference
+    /// admission declines while it is false, and recovers when it is flipped back.
+    pub fn set_redis_connected(&self, connected: bool) {
+        self.state.set_redis_connected(connected);
+    }
+
+    /// Model the routing-map load lifecycle: false before the first complete load (and after a
+    /// loss), true once a map is available.
+    pub fn set_routing_map_loaded(&self, loaded: bool) {
+        self.state.set_routing_map_loaded(loaded);
+    }
+
+    /// Drop this replica: abort both serve tasks.
+    ///
+    /// This models a **killed** replica (SIGKILL-like: the accept loop stops immediately and no
+    /// drain runs), not the graceful path — that is `ShutdownHandle::begin` (#330, D6). It
+    /// deliberately does not flip `set_shutting_down`, which is both drain semantics and a
+    /// different readiness refusal. axum's per-connection tasks are not aborted (same caveat as
+    /// `test_graceful_shutdown.rs`), so an in-flight request is left to its own client timeout.
+    pub async fn shutdown(&mut self) {
+        if let Some((proxy_handle, admin_handle)) = self.serve_handles.take() {
+            proxy_handle.abort();
+            admin_handle.abort();
+            let _ = proxy_handle.await;
+            let _ = admin_handle.await;
+        }
+    }
+}
 
 /// Handle for graceful-shutdown tests: mirrors the binary's shutdown ordering
 /// (#330) and is reused by #340's replica-kill scenario.
@@ -291,7 +330,16 @@ pub async fn spawn_drainable(
         let _ = rx_redis.changed().await;
     });
 
-    let proxy = TestProxy { proxy_addr, admin_addr, routing_cache, parking };
+    let proxy = TestProxy {
+        proxy_addr,
+        admin_addr,
+        routing_cache,
+        parking,
+        state: state.clone(),
+        // `ShutdownHandle` owns the serve tasks on the drainable path (#330) — a graceful drain
+        // and a killed replica are different models, so `shutdown()` is a no-op here.
+        serve_handles: None,
+    };
     let handle = ShutdownHandle {
         shutdown_tx: Some(shutdown_tx),
         handles: Some((proxy_handle, admin_handle)),
