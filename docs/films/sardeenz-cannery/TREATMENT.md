@@ -7,6 +7,11 @@ Revision 2 moves the centre of the story. The selling point is **packing**: many
 different kinds and sizes on a finite number of GPUs, where fixed slicing (MIG) wastes memory or
 does not apply. Sleep and wake is the closing bonus, not the plot.
 
+Revision 3 keeps the story and sound and changes the look to a bold outline cartoon drawn from
+the Sardeenz logo (look B in `look/`): logo colours, thick navy outlines, the logo's sardines as
+the models, a crew with faces. Kind is now colour as well as shape: blue sardine = generative,
+green striped fish = embedding, orange prawn = predictive, pale with a closed eye = asleep.
+
 ## 1. Candidate structures
 
 1. **One request that hits a sleeping model** (revision 1). Shows the mechanism well, but makes

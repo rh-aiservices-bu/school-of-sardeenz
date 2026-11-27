@@ -56,14 +56,14 @@ function subtitles(t) {
     const stub = 72, pad = 26, w = stub + pad + we + pad + 4, h = 84;
     const x = s.right ? 1920 - 56 - w : 56, y = 1080 - 40 - h + (1 - pin) * 34 + pout * 40;
     out(`<g data-sub="1" opacity="${f1(Math.min(pin, 1 - pout) * 100) / 100}">`);
-    out(`<path d="${R(x, y, w, h, 4)}" fill="${C.ground}" opacity=".28" transform="translate(7 6)"/>`);
-    shape(R(x, y, w, h, 4), C.cream, 2.8);
-    fillOnly(R(x + 2, y + 2, stub - 2, h - 4, 3), s.n ? C.sun : C.red);
+    out(`<path d="${R(x, y, w, h, 18)}" fill="${C.ink}" opacity=".2" transform="translate(7 7)"/>`);
+    shape(R(x, y, w, h, 18), C.cream, 2.2);
+    out(`<path d="M${x + 18} ${y}H${x + stub}V${y + h}H${x + 18}A18 18 0 0 1 ${x} ${y + h - 18}V${y + 18}A18 18 0 0 1 ${x + 18} ${y}Z" fill="${s.n ? C.sun : C.red}"/>`);
     out(`<path d="M${x + stub} ${y + 8}V${y + h - 8}" stroke="${C.ink}" stroke-width="2.4" stroke-dasharray="5 6"/>`);
     shape(E(x + stub / 2, y + h / 2, 22), C.cream, 2.6);
     if (s.n) txt(x + stub / 2, y + h / 2 + 9.5, String(s.n), 28, { fam: FONT.en, w: 900, anchor: 'middle' });
     else { line([[x + stub / 2, y + h / 2], [x + stub / 2, y + h / 2 - 13]], 3); line([[x + stub / 2, y + h / 2], [x + stub / 2 + 10, y + h / 2 + 4]], 3); }
-    shape(R(x, y, w, h, 4), null, 2.8);
+    shape(R(x, y, w, h, 18), null, 2.2);
     txt(x + stub + pad, y + h / 2 + 12, s.en, es, { fam: FONT.sans, w: 600 });
     out('</g>');
   }
@@ -104,7 +104,6 @@ async function boot() {
   window.DUR = TL.dur;
   await Promise.all(['900 40px BSD', '800 40px BSD', '700 40px BSD', '800 40px ARC', '700 40px ARC', '600 40px ARC'].map(f => document.fonts.load(f, 'A')));
   await document.fonts.ready;
-  makeGrain();
   window.EV = events();
   window.render = t => { document.getElementById('stage').innerHTML = frame(Math.min(t, TL.dur - .001)); };
   window.TEXTS = t => {

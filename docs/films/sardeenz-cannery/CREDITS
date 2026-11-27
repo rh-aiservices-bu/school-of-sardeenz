@@ -4,6 +4,8 @@ Picture
 - Drawn entirely in code (SVG rendered frame by frame in headless Chromium).
 - lib.js is adapted from the Assembly-Line Diagram demo of Lemo-Opuscar
   (https://github.com/lemomo-ai/lemo-opuscar), MIT licence. The style itself (STYLE.md) is from the same library.
+- The look (blue sardines with big eyes, navy tin, cream) follows the Sardeenz logo,
+  assets/sardeenz-src.svg in https://github.com/rh-aiservices-bu/sardeenz; a copy is in look/sardeenz-logo.svg.
 - Render, mux and sound-effect tools: Lemo-Opuscar core/, MIT licence.
 
 Fonts (subsets in fonts/, SIL Open Font License 1.1)

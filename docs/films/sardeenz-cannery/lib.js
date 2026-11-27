@@ -3,53 +3,26 @@
 // All vector: SVG generated in code. The print feel = each colour plate with its own misregistration (ink lines stay put) + a very faint paper texture.
 // The palette uses semantic colour names; three colour schemes share the same drawing code (change PAL below to switch).
 
-const PALS = {
-  // A night-shift factory (used by the demo): deep indigo body cavity, teal instead of cobalt (reads apart from indigo), paper whitish, not yellowed
-  A: {
-    paper: '#F2ECE0', paperD: '#E3D9C7', shade: '#DCCFB8',
-    ink: '#1D2030', ground: '#24345A', groundL: '#2F4270', groundD: '#1C2A4A',
-    wall: '#FBF7EE', wallD: '#EFE7D7', wallS: '#E6DCC8',
-    blush: '#EE9F87', blushD: '#C8735C', blushL: '#F8CBBA', blushK: '#6B3A33',
-    red: '#E04A2F', redD: '#AC321F', redL: '#F59A80',
-    sun: '#F3B23A', sunD: '#C98A1E', sunL: '#FAD98E',
-    teal: '#2E8D87', tealD: '#1D625E', tealL: '#A3D5CE',
-    cream: '#FFFBF3', skin: '#F2D3BE', bread: '#E9C48C', breadD: '#C99A5A',
-  },
-  // B daytime chart (Holmes-style white ground, high saturation): light flesh body cavity, no large dark areas
-  B: {
-    paper: '#F7F5EF', paperD: '#E6E2D8', shade: '#E3DED2',
-    ink: '#17181F', ground: '#F4CDBE', groundL: '#EDBBA8', groundD: '#E7AF99',
-    wall: '#FFFFFF', wallD: '#F1EEE8', wallS: '#E8E3DA',
-    blush: '#E5826B', blushD: '#BF5E49', blushL: '#F6B8A6', blushK: '#5E2C26',
-    red: '#E33A2B', redD: '#A9271B', redL: '#F78E7F',
-    sun: '#FFC02E', sunD: '#D69410', sunL: '#FFE08A',
-    teal: '#2F6BD0', tealD: '#1F4C98', tealL: '#A9C6F2',
-    cream: '#FFFFFF', skin: '#F4D4C0', bread: '#EDC68A', breadD: '#C99A5A',
-  },
-  // C wine-red body cavity (closer to Kahn's warm tones): deep wine-red cavity
-  C: {
-    paper: '#F1E9DC', paperD: '#E1D5C2', shade: '#D9CAB2',
-    ink: '#221A1E', ground: '#4A2632', groundL: '#5C3241', groundD: '#3B1E28',
-    wall: '#FAF4EA', wallD: '#EEE3D2', wallS: '#E4D7C2',
-    blush: '#E9A38C', blushD: '#C07760', blushL: '#F6CDBE', blushK: '#5E2C2A',
-    red: '#D9472B', redD: '#A2321C', redL: '#F09A80',
-    sun: '#EDA936', sunD: '#C2841C', sunL: '#F8D68E',
-    teal: '#3A928B', tealD: '#26655F', tealL: '#A7D6CF',
-    cream: '#FFF9EF', skin: '#F0D0BA', bread: '#E6BF86', breadD: '#C29457',
-  },
+// Look B, "bold outline cartoon": the Sardeenz logo's colours (blue sardines, navy tin, cream), thick navy outlines,
+// flat offset shadows. Semantic names are kept from the first version so the drawing code reads the same:
+// blush = the tin's body, ground = inside the tin, wall = a room, red = inference traffic, sun = control, teal = state (awake).
+const C = {
+  paper: '#fffeda', paperD: '#f3efb4', shade: '#113f6f',
+  ink: '#113f6f', ground: '#1f5a94', groundL: '#2a69a8', groundD: '#113f6f',
+  wall: '#ffffff', wallD: '#dfe7ef', wallS: '#c4d3e2',
+  blush: '#113f6f', blushD: '#0b2f55', blushL: '#3f79b5', blushK: '#0b2f55',
+  red: '#ff5a6e', redD: '#d63a52', redL: '#ffb3bd',
+  sun: '#ffcf40', sunD: '#e3a800', sunL: '#ffe89a',
+  teal: '#4394e5', tealD: '#357abd', tealL: '#a9cdf3',
+  cream: '#ffffff', skin: '#ffd9b8', lid: '#fffeda', pupil: '#333333',
+  gen: '#4394e5', genD: '#357abd', emb: '#3cc7a6', embD: '#23967c', pred: '#ff9a4d', predD: '#d9722a', sleep: '#c4d6ea', sleepD: '#9db6d1',
 };
-const PAL = 'A';
-const C = PALS[PAL];
-
-// misregistration offset (px): each colour plate shifts as a whole in one direction; ink lines, paper and walls do not
-const REG = { red: [1.6, 0.8], sun: [-1.2, 1.3], teal: [1.0, -1.2], blush: [-0.8, -0.6] };
-const PLATE = {};
-for (const k of Object.keys(C)) { const p = ['red', 'sun', 'teal', 'blush'].find(s => k.startsWith(s)); if (p && !PLATE[C[k]]) PLATE[C[k]] = p; }
-const reg = f => REG[PLATE[f]] || [0, 0];
+const LW = 2.0;                       // every outline is this much heavier than in the printed look
+const reg = () => [0, 0];
 
 const S = []; let UID = 0; let KS = 1;   // KS: ink line-weight factor, set each frame from the camera distance
 const out = s => S.push(s);
-const tr = f => { const [x, y] = reg(f); return (x || y) ? ` transform="translate(${x} ${y})"` : ''; };
+const tr = () => '';
 const f1 = v => (Math.round(v * 10) / 10);
 
 // ---------- Basic shapes ----------
@@ -58,14 +31,14 @@ const E = (cx, cy, rx, ry = rx) => `M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx
 const PL = pts => 'M' + pts.map(p => f1(p[0]) + ' ' + f1(p[1])).join('L');
 function shape(d, fill, sw = 3, extra = '') {
   if (fill) out(`<path d="${d}" fill="${fill}"${tr(fill)} ${extra}/>`);
-  if (sw) out(`<path d="${d}" fill="none" stroke="${C.ink}" stroke-width="${f1(sw * KS * 100) / 100}" stroke-linejoin="round" stroke-linecap="round"/>`);
+  if (sw) out(`<path d="${d}" fill="none" stroke="${C.ink}" stroke-width="${f1(sw * LW * KS * 100) / 100}" stroke-linejoin="round" stroke-linecap="round"/>`);
 }
 const fillOnly = (d, fill, extra = '') => out(`<path d="${d}" fill="${fill}"${tr(fill)} ${extra}/>`);
-const line = (pts, w = 3, col = C.ink, extra = '') => out(`<path d="${PL(pts)}" fill="none" stroke="${col}" stroke-width="${f1(w * KS * 100) / 100}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`);
+const line = (pts, w = 3, col = C.ink, extra = '') => out(`<path d="${PL(pts)}" fill="none" stroke="${col}" stroke-width="${f1(w * (col === C.ink ? 1.5 : 1) * KS * 100) / 100}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`);
 // lines of geometric width (conveyor belts, piston rods etc.: scale with the camera, ignore KS)
 const gline = (pts, w, col = C.ink, extra = '') => out(`<path d="${PL(pts)}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`);
 // Holmes-style flat drop shadow: the same shape offset to the lower right, a single light colour
-const shadow = (d, dx = 18, dy = 14, col = C.shade) => out(`<path d="${d}" fill="${col}" transform="translate(${dx} ${dy})"/>`);
+const shadow = (d, dx = 18, dy = 14) => out(`<path d="${d}" fill="${C.shade}" opacity=".2" transform="translate(${dx} ${dy})"/>`);
 
 // ---------- Text ----------
 const FONT = { en: 'BSD', sans: 'ARC', zh: 'ARC' };
@@ -81,7 +54,7 @@ function txt(x, y, s, size, o = {}) {
 function pipe(pts, w, col, colL, o = {}) {
   const d = o.d || PL(pts), id = 'pm' + (UID++), cap = o.cap || 'butt';
   out(`<mask id="${id}" maskUnits="userSpaceOnUse" x="-300" y="-300" width="2600" height="1700"><path d="${d}" fill="none" stroke="#fff" stroke-width="${w - 3}" stroke-linejoin="round" stroke-linecap="${cap}"/></mask>`);
-  out(`<path d="${d}" fill="none" stroke="${C.ink}" stroke-width="${f1(w + 6 * KS)}" stroke-linejoin="round" stroke-linecap="${cap}"/>`);
+  out(`<path d="${d}" fill="none" stroke="${C.ink}" stroke-width="${f1(w + 11 * KS)}" stroke-linejoin="round" stroke-linecap="${cap}"/>`);
   out(`<g${tr(col)}><path d="${d}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="${cap}"/>`);
   const k = w * 0.22;
   out(`<g mask="url(#${id})"><path d="${d}" fill="none" stroke="${colL}" stroke-width="${f1(w * 0.18)}" stroke-linejoin="round" transform="translate(${f1(-k)} ${f1(-k)})"/></g></g>`);
@@ -151,30 +124,27 @@ function callout(px, py, ty, len, s, size = 40, o = {}) {
 
 // ---------- Little worker: feet at (x,y), about 64·s tall. Angles 0=hanging down, 90=right, 180=up, -90=left ----------
 function worker(x, y, o = {}) {
-  if (typeof ZL !== 'undefined' && ZL < .2) return;   // workers are skipped when pulled out
-  const s = o.s || 1, coat = o.coat || C.cream, lean = o.lean || 0, flip = o.flip ? -1 : 1;
+  if (typeof ZL !== 'undefined' && ZL < .2) return;
+  const s = o.s || 1, coat = o.coat && o.coat !== C.cream ? o.coat : C.gen, lean = o.lean || 0, flip = o.flip ? -1 : 1, hat = o.cap || C.sun;
   out(`<g transform="translate(${x} ${y}) rotate(${lean}) scale(${s * flip} ${s})">`);
   const arm = (side, a, b = 0, L1 = 13, L2 = 12) => {
-    const sx = side * 8, sy = -47, r = Math.PI / 180;
+    const sx = side * 9, sy = -45, r = Math.PI / 180;
     const ex = sx + Math.sin(a * r) * L1, ey = sy + Math.cos(a * r) * L1;
     const hx = ex + Math.sin((a + b) * r) * L2, hy = ey + Math.cos((a + b) * r) * L2;
-    out(`<path d="M${sx} ${sy}L${f1(ex)} ${f1(ey)}L${f1(hx)} ${f1(hy)}" fill="none" stroke="${C.ink}" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>`);
-    out(`<path d="M${sx} ${sy}L${f1(ex)} ${f1(ey)}L${f1(hx)} ${f1(hy)}" fill="none" stroke="${coat}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>`);
-    out(`<circle cx="${f1(hx)}" cy="${f1(hy)}" r="3.4" fill="${C.skin}" stroke="${C.ink}" stroke-width="1.8"/>`);
+    out(`<path d="M${sx} ${sy}L${f1(ex)} ${f1(ey)}L${f1(hx)} ${f1(hy)}" fill="none" stroke="${C.ink}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>`);
+    out(`<path d="M${sx} ${sy}L${f1(ex)} ${f1(ey)}L${f1(hx)} ${f1(hy)}" fill="none" stroke="${coat}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`);
+    out(`<circle cx="${f1(hx)}" cy="${f1(hy)}" r="4.2" fill="${C.skin}" stroke="${C.ink}" stroke-width="2.4"/>`);
     return [hx, hy];
   };
-  const w = o.walk || 0;
   if (o.back !== undefined) arm(-1, o.back[0], o.back[1] || 0);
-  if (o.sit) {
-    out(`<path d="M-4 -24L14 -22L14 -2M4 -24L20 -22L20 -2" fill="none" stroke="${C.ink}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`);
-  } else {
-    out(`<path d="M-4 -24L${-6 - w} 0M4 -24L${6 + w} 0" stroke="${C.ink}" stroke-width="6" stroke-linecap="round"/>`);
-    out(`<path d="M${-9 - w} 0h7M${3 + w} 0h7" stroke="${C.ink}" stroke-width="4" stroke-linecap="round"/>`);
-  }
-  shape('M-8 -51Q0 -54 8 -51L12 -21Q0 -18 -12 -21Z', coat, 2.2);
-  if (coat === C.cream) out(`<path d="M0 -50V-22" stroke="${C.ink}" stroke-width="1.4"/>`);
-  shape(E(0, -60, 7.6), C.skin, 2.2);
-  if (o.cap) shape('M-8.6 -61Q-8.4 -71 0 -71Q8.4 -71 8.6 -61Z', o.cap, 2);
+  out(`<path d="M-5 -22L-6 -3M5 -22L6 -3" stroke="${C.ink}" stroke-width="8" stroke-linecap="round"/>`);
+  out(`<path d="M-11 -1h9M2 -1h9" stroke="${C.ink}" stroke-width="5" stroke-linecap="round"/>`);
+  out(`<path d="M-11 -50Q0 -54 11 -50L13 -22Q0 -17 -13 -22Z" fill="${coat}" stroke="${C.ink}" stroke-width="2.8" stroke-linejoin="round"/>`);
+  out(`<circle cx="0" cy="-64" r="12" fill="${C.skin}" stroke="${C.ink}" stroke-width="2.8"/>`);
+  for (const ex of [-4.4, 4.8]) { out(`<ellipse cx="${ex}" cy="-64.5" rx="3.5" ry="3.8" fill="#fff" stroke="${C.ink}" stroke-width="1.2"/>`); out(`<circle cx="${ex + .9}" cy="-64" r="1.6" fill="${C.pupil}"/>`); }
+  out(`<path d="M-3 -58Q.6 -55.4 4.2 -58.2" fill="none" stroke="${C.pupil}" stroke-width="1.4" stroke-linecap="round"/>`);
+  out(`<path d="M-12.6 -67Q-12 -80.5 0 -80.5Q12 -80.5 12.6 -67Z" fill="${hat}" stroke="${C.ink}" stroke-width="2.6" stroke-linejoin="round"/>`);
+  out(`<rect x="-15" y="-69.4" width="30" height="4.6" rx="2.3" fill="${hat}" stroke="${C.ink}" stroke-width="2.2"/>`);
   let hand = null;
   if (o.front !== undefined) hand = arm(1, o.front[0], o.front[1] || 0);
   if (o.prop) o.prop(hand);

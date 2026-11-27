@@ -30,40 +30,40 @@ const numOn = (n, t) => t >= N_ON[n];
 const numPop = (n, t) => 1 + .35 * pulse(t, N_ON[n], .35);
 const P = (x, y, en, real, n, t, o = {}) => plaque(x, y, en, real, { n, on: numOn(n, t), pop: numPop(n, t), ...o });
 
-// ---------- creatures ----------
-// x0 = left end of the slot, cy = centreline, len = slot length in px, h = body height; all face left
+// ---------- creatures: the logo's sardine, and its neighbours ----------
+// x0 = left end of the slot, cy = centreline, len = slot length in px, h = body height; all face left.
+// Kind is colour and shape: blue sardine = generative, green striped fish = embedding, orange prawn = predictive; pale with a closed eye = asleep.
 function creature(L, x0, cy, len, awake, o = {}) {
-  const m = M[L], h = (o.h || 110) / 2, col = awake ? C.tealL : C.wallS, colD = awake ? C.teal : C.wallD, shc = o.shc || C.shade;
-  out(`<g transform="translate(${f1(x0 + len / 2)} ${f1(cy)}) rotate(${f1(o.rot || 0)}) translate(${f1(-len / 2 + 5)} 0)">`);
-  const W = len - 10, k = (o.h || 110) / 110;
+  const m = M[L], H = o.h || 110, c = awake ? C[m.type] : C.sleep, cd = awake ? C[m.type + 'D'] : C.sleepD, lw = f1(3 * LW * KS);
+  const S_ = ` stroke="${C.ink}" stroke-width="${lw}" stroke-linejoin="round" stroke-linecap="round"`;
+  out(`<g transform="translate(${f1(x0 + len / 2)} ${f1(cy)}) rotate(${f1(o.rot || 0)}) translate(${f1(-len / 2)} 0)">`);
   if (m.type === 'pred') {
-    // a prawn: curled back, tail fan, feelers
-    const s = W / 78;
-    out(`<g transform="scale(${f1(s * 100) / 100})">`);
-    const body = 'M4 14Q0 -40 40 -42Q78 -42 78 -2Q78 30 52 38L44 22Q58 16 58 -2Q56 -20 40 -20Q24 -20 24 14Z';
-    shadow(body, 7, 6, shc);
-    shape('M52 38L70 50L60 30ZM52 38L40 54L44 30Z', colD, 2.4);
-    shape(body, col, 2.8);
-    for (const d of ['M30 -40L34 -20', 'M48 -41L46 -20', 'M66 -30L54 -14', 'M77 -6L58 -2']) out(`<path d="${d}" stroke="${C.ink}" stroke-width="${f1(2 * KS)}" stroke-linecap="round"/>`);
-    out(`<path d="M8 -20Q-14 -44 -4 -62M10 -24Q2 -50 16 -64" fill="none" stroke="${C.ink}" stroke-width="${f1(2.2 * KS)}" stroke-linecap="round"/>`);
-    if (awake) out(`<circle cx="12" cy="-22" r="5" fill="${C.ink}"/>`); else out(`<path d="M6 -22q6 5 12 0" fill="none" stroke="${C.ink}" stroke-width="2.4" stroke-linecap="round"/>`);
+    const W = len - 6, k = H / 110;
+    out(`<g transform="translate(3 ${f1(-H / 2)}) scale(${f1(W / 100 * 100) / 100} ${f1(k * 100) / 100})">`);
+    const body = 'M6 44Q2 4 46 4Q96 4 96 52Q96 92 62 104Q50 108 46 96Q44 86 56 82Q72 76 72 54Q70 30 48 30Q30 30 30 50Q30 62 20 62Q8 62 6 44Z';
+    if (o.sh !== false) shadow(body, 9, 8);
+    out(`<path d="M54 100Q38 124 20 110Q34 104 44 92Z" fill="${cd}" stroke="${C.ink}" stroke-width="5" stroke-linejoin="round"/>`);
+    out(`<path d="${body}" fill="${c}" stroke="${C.ink}" stroke-width="5.5" stroke-linejoin="round"/>`);
+    for (const d of ['M50 6Q46 18 48 30', 'M74 14Q64 22 62 36', 'M92 36Q78 38 70 46', 'M94 66Q80 62 72 60']) out(`<path d="${d}" fill="none" stroke="${cd}" stroke-width="5" stroke-linecap="round"/>`);
+    out(`<path d="M12 28Q-8 6 -2 -14M18 22Q10 0 22 -14" fill="none" stroke="${C.ink}" stroke-width="4.5" stroke-linecap="round"/>`);
+    if (awake) { out(`<ellipse cx="22" cy="36" rx="13" ry="12" fill="#fff" stroke="${C.ink}" stroke-width="3.4"/>`); out(`<ellipse cx="19" cy="35" rx="6" ry="5" fill="${C.pupil}"/>`); }
+    else out(`<path d="M10 36q12 10 24 0" fill="none" stroke="${C.ink}" stroke-width="4.5" stroke-linecap="round"/>`);
     out('</g>');
-    shape(E(W / 2, -h - 34 * k, 23 * k), C.cream, 2.6); txt(W / 2, -h - 34 * k + 13 * k, L, 36 * k, { w: 900, anchor: 'middle' });
+    const r = 23 * k; out(`<circle cx="${f1(len / 2)}" cy="${f1(-H / 2 - 34 * k)}" r="${f1(r)}" fill="#fff"${S_}/>`); txt(len / 2, -H / 2 - 34 * k + r * .52, L, r * 1.5, { w: 900, anchor: 'middle' });
   } else {
-    const tl = Math.min(60 * k, W * .2);
-    const body = `M0 0Q${f1(W * .07)} ${-h} ${f1(W * .32)} ${-h}Q${f1(W * .74)} ${-h} ${f1(W - tl)} ${f1(-h * .26)}L${W} ${f1(-h * .86)}L${f1(W - 12 * k)} 0L${W} ${f1(h * .86)}L${f1(W - tl)} ${f1(h * .26)}Q${f1(W * .74)} ${h} ${f1(W * .32)} ${h}Q${f1(W * .07)} ${h} 0 0Z`;
-    if (o.sh !== false) shadow(body, 10, 9, shc);
-    const fx = W * .42; shape(`M${f1(fx - 40 * k)} ${f1(-h + 3)}L${f1(fx)} ${f1(-h - 30 * k)}L${f1(fx + 36 * k)} ${f1(-h + 6)}Z`, colD, 2.6);
-    shape(body, col, 3);
-    out(`<path d="M${f1(W * .08)} ${f1(h * .34)}Q${f1(W * .45)} ${f1(h * .86)} ${f1(W - tl - 8)} ${f1(h * .2)}" fill="none" stroke="${C.cream}" stroke-width="${f1(9 * k)}" stroke-linecap="round" opacity=".8"/>`);
-    const gx = Math.min(78 * k, W * .24);
-    out(`<path d="M${f1(gx)} ${f1(-h * .78)}Q${f1(gx + 18 * k)} 0 ${f1(gx)} ${f1(h * .78)}" fill="none" stroke="${C.ink}" stroke-width="${f1(2.6 * KS)}" stroke-linecap="round"/>`);
-    if (m.type === 'emb') for (const u of [.5, .62, .74]) out(`<path d="M${f1(W * u)} ${f1(-h * .8)}L${f1(W * u - 10 * k)} ${f1(h * .7)}" stroke="${colD}" stroke-width="${f1(7 * k)}" stroke-linecap="round" opacity=".9"/>`);
-    const ex = gx * .52, ey = -h * .22;
-    if (awake) { shape(E(ex, ey, 12 * k), C.cream, 2.4); out(`<circle cx="${f1(ex - 2)}" cy="${f1(ey)}" r="${f1(5.2 * k)}" fill="${C.ink}"/>`); }
-    else out(`<path d="M${f1(ex - 12 * k)} ${f1(ey)}Q${f1(ex)} ${f1(ey + 12 * k)} ${f1(ex + 12 * k)} ${f1(ey)}" fill="none" stroke="${C.ink}" stroke-width="${f1(3 * KS)}" stroke-linecap="round"/>`);
-    const dx = m.type === 'emb' ? W * .34 : W * .52, r = (m.type === 'emb' ? 24 : 31) * k;
-    shape(E(dx, 0, r), C.cream, 2.6); txt(dx, r * .52, L, r * 1.5, { w: 900, anchor: 'middle' });
+    const ry = H / 2, rx = len * .455, cx = rx + 4, tx = cx + rx - ry * .3, tl = Math.min(len * .13, ry * 1.5);
+    const lobe = s => `M${f1(tx)} 0Q${f1(tx + tl * .5)} ${f1(s * ry * 1.15)} ${f1(tx + tl * 1.2)} ${f1(s * ry * .95)}Q${f1(tx + tl * 1.45)} ${f1(s * ry * .7)} ${f1(tx + tl * .9)} ${f1(s * ry * .25)}Q${f1(tx + tl * .4)} 0 ${f1(tx)} 0Z`;
+    const body = `M${f1(cx - rx)} 0a${f1(rx)} ${f1(ry)} 0 1 0 ${f1(2 * rx)} 0a${f1(rx)} ${f1(ry)} 0 1 0 ${f1(-2 * rx)} 0Z`;
+    if (o.sh !== false) shadow(body, 10, 9);
+    out(`<path d="${lobe(-1)}" fill="${c}"${S_}/><path d="${lobe(1)}" fill="${c}"${S_}/><path d="${body}" fill="${c}"${S_}/>`);
+    if (m.type === 'emb') for (const u of [.15, .38, .6]) out(`<path d="M${f1(cx + rx * u)} ${f1(-ry * .74)}Q${f1(cx + rx * u - 12)} 0 ${f1(cx + rx * u)} ${f1(ry * .74)}" fill="none" stroke="${cd}" stroke-width="${f1(Math.max(7, ry * .2))}" stroke-linecap="round"/>`);
+    out(`<path d="M${f1(cx - rx * .55)} ${f1(-ry * .56)}Q${f1(cx)} ${f1(-ry * .93)} ${f1(cx + rx * .5)} ${f1(-ry * .6)}" fill="none" stroke="#fff" stroke-width="${f1(ry * .13)}" stroke-linecap="round" opacity=".45"/>`);
+    const er = Math.min(ry * .46, rx * .3), ex = Math.min(len * .16, ry * 1.5) + er * .2, ey = -ry * .2;
+    if (awake) { out(`<ellipse cx="${f1(ex)}" cy="${f1(ey)}" rx="${f1(er * 1.12)}" ry="${f1(er)}" fill="#fff" stroke="${C.ink}" stroke-width="${f1(lw * .6)}"/>`); out(`<ellipse cx="${f1(ex - er * .25)}" cy="${f1(ey - er * .1)}" rx="${f1(er * .44)}" ry="${f1(er * .38)}" fill="${C.pupil}"/>`); }
+    else out(`<path d="M${f1(ex - er)} ${f1(ey)}Q${f1(ex)} ${f1(ey + er * .9)} ${f1(ex + er)} ${f1(ey)}" fill="none" stroke="${C.ink}" stroke-width="${f1(Math.max(4, er * .22))}" stroke-linecap="round"/>`);
+    out(`<path d="M${f1(ex - er * 1.1)} ${f1(ry * .42)}Q${f1(ex - er * .2)} ${f1(ry * .66)} ${f1(ex + er * .7)} ${f1(ry * .5)}" fill="none" stroke="${cd}" stroke-width="${f1(Math.max(4, ry * .09))}" stroke-linecap="round"/>`);
+    const dx = m.type === 'emb' ? cx + rx * .04 : cx + rx * .12, r = Math.min(ry * .6, 34 * H / 110);
+    out(`<circle cx="${f1(dx)}" cy="0" r="${f1(r)}" fill="#fff" stroke="${C.ink}" stroke-width="${f1(lw * .6)}"/>`); txt(dx, r * .52, L, r * 1.5, { w: 900, anchor: 'middle' });
   }
   out('</g>');
 }
@@ -72,8 +72,8 @@ function infoTag(xc, y, L, k = 1, o = {}) {
   if (ZL < .2) return;
   const m = M[L], s1 = 26 * k, s2 = 34 * k;
   const w = Math.max(tw(m.kind, s1, 700, FONT.sans), tw(m.gb + ' GB', s2, 900, FONT.en)) + 30 * k, h = 78 * k;
-  shadow(R(xc - w / 2, y, w, h, 4), 6, 5, o.sh || C.wallS);
-  shape(R(xc - w / 2, y, w, h, 4), C.cream, 2.6);
+  shadow(R(xc - w / 2, y, w, h, 10 * k), 6, 5);
+  shape(R(xc - w / 2, y, w, h, 10 * k), C.cream, 2.4);
   txt(xc, y + 30 * k, m.kind, s1, { fam: FONT.sans, w: 700, anchor: 'middle', ls: .6 });
   txt(xc, y + 66 * k, m.gb + ' GB', s2, { w: 900, anchor: 'middle', ls: 1.2 });
 }
@@ -111,7 +111,7 @@ function capsule(x, y, letter, o = {}) {
   out(`<g transform="translate(${f1(x)} ${f1(y)}) rotate(${o.rot || 0})">`);
   shadow(R(-58, -62, 116, 62, 31), 7, 6, o.sh || C.shade);
   shape(R(-58, -62, 116, 62, 31), C.red, 2.8);
-  fillOnly(R(-40, -55, 60, 7, 3), C.redL);
+  fillOnly(R(-38, -53, 56, 7, 3), '#ffffff', 'opacity=".55"');
   shape(E(22, -31, 21), C.cream, 2.4);
   txt(22, -19, letter, 34, { w: 900, anchor: 'middle' });
   line([[-38, -31], [-12, -31]], 3, C.cream); line([[-38, -20], [-20, -20]], 3, C.cream);
@@ -431,24 +431,23 @@ function lid(t, p) {
   if (p < .999) {
     const id = 'lid' + (UID++);
     out(`<clipPath id="${id}"><rect x="${f1(px)}" y="0" width="${f1(3620 - px)}" height="2000"/></clipPath><g clip-path="url(#${id})">`);
-    shape(R(56, 56, 3488, 1888, 150), C.blush, 3.4);
-    out(`<path d="${R(96, 96, 3408, 1808, 116)}" fill="none" stroke="${C.blushD}" stroke-width="10"/>`);
-    // label: every size, every kind, one tin
-    creature('A', 250, 400, 1180, true, { h: 200, shc: C.blushD });
-    creature('B', 250, 700, 640, true, { h: 170, shc: C.blushD });
-    creature('E', 930, 700, 270, true, { h: 150, shc: C.blushD });
-    creature('P', 1250, 720, 170, true, { h: 150, shc: C.blushD });
-    shape(R(250, 1180, 1180, 500, 30), C.cream, 4);
-    txt(840, 1380, 'ANY SIZE', 170, { w: 900, anchor: 'middle', ls: 4 });
-    txt(840, 1590, 'ANY KIND', 170, { w: 900, anchor: 'middle', ls: 4, fill: C.red });
-    txt(1640, 760, 'SARDEENZ', 420, { w: 900, ls: 10 });
-    fillOnly(R(1640, 840, 1690, 22), C.red);
-    txt(1640, 1050, 'THE VRAM CANNERY', 150, { w: 800, ls: 6 });
+    shape(R(56, 56, 3488, 1888, 150), C.lid, 3.4);
+    // the label: the logo's three sardines, head to tail, then the name
+    const LF = (x0, cy, flip) => { out(`<g transform="translate(${x0 + 600} ${cy}) scale(${flip ? -1 : 1} 1) translate(-600 0)">`); creature('B', 0, 0, 1200, true, { h: 330 }); out('</g>'); };
+    LF(210, 390, false); LF(230, 760, true); LF(210, 1130, false);
+    for (const [x, y, flip] of [[210, 390, 0], [230, 760, 1], [210, 1130, 0]]) { /* cover the letter discs: the label fish are anonymous */
+      const cx = flip ? x + 1200 - (550 + 546 * .12) : x + 550 + 546 * .12; out(`<circle cx="${f1(cx)}" cy="${y}" r="108" fill="${C.gen}"/>`); }
+    txt(1640, 700, 'SARDEENZ', 420, { w: 900, ls: 10 });
+    fillOnly(R(1640, 780, 1690, 24, 12), C.red);
+    txt(1640, 990, 'THE VRAM CANNERY', 150, { w: 800, ls: 6 });
+    shape(R(250, 1420, 1180, 380, 40), C.cream, 3);
+    txt(840, 1580, 'ANY SIZE', 140, { w: 900, anchor: 'middle', ls: 4 });
+    txt(840, 1740, 'ANY KIND', 140, { w: 900, anchor: 'middle', ls: 4, fill: C.red });
     txt(1640, 1560, 'NO SLICES. PACKED BY SIZE.', 96, { fam: FONT.sans, w: 700 });
     out('</g>');
   }
-  shape(R(px - rr, 30, rr * 2, 1940, rr), C.blushD, 3.4);
-  fillOnly(R(px - rr * .5, 70, rr * .3, 1860, 6), C.blushL);
+  shape(R(px - rr, 30, rr * 2, 1940, rr), C.paperD, 3.4);
+  fillOnly(R(px - rr * .5, 70, rr * .3, 1860, 6), '#ffffff');
   shape(R(px - 10, -170, 20, 210), C.wallS, 3);
   shape(E(px, -220, 64), C.sun, 3.4); shape(E(px, -220, 30), C.paper, 3);
 }
@@ -457,9 +456,9 @@ function lid(t, p) {
 function inspector(t) {
   const x = 3890, tick = seg(t, T_TICK, T_TICK + .4);
   worker(x, GROUND, { s: 6, cap: C.teal, coat: C.cream, front: [lerp(95, 120, pulse(t, T_TICK - .2, .7)), -40], back: [-40, 110] });
-  txt(x, 1580, 'INSPECTOR', 60, { fam: FONT.sans, w: 700, anchor: 'middle', ls: 2 });
-  txt(x, 1680, 'KUBERNETES', 104, { w: 900, anchor: 'middle', ls: 3 });
-  const sx = 3700, sy = 1100, sw = 400, sh = 360;
+  txt(x, 1490, 'INSPECTOR', 60, { fam: FONT.sans, w: 700, anchor: 'middle', ls: 2 });
+  txt(x, 1590, 'KUBERNETES', 104, { w: 900, anchor: 'middle', ls: 3 });
+  const sx = 3700, sy = 1010, sw = 400, sh = 360;
   shadow(R(sx, sy, sw, sh, 8), 12, 10);
   shape(R(sx, sy, sw, sh, 8), C.cream, 3.4);
   shape(R(sx + 140, sy - 22, 120, 44, 8), C.wallS, 3);
@@ -467,5 +466,5 @@ function inspector(t) {
   txt(sx + 40, sy + 250, 'IN USE', 92, { w: 900, ls: 2 });
   shape(R(sx + 286, sy + 178, 78, 78, 6), C.wall, 3.4);
   if (tick > 0) out(`<path d="M${sx + 298} ${sy + 214}L${sx + 322} ${sy + 242}L${sx + 372} ${sy + 170}" fill="none" stroke="${C.red}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${f1(tick * 130)} 400"/>`);
-  line([[sx + sw / 2, sy + sh], [sx + sw / 2, 1500]], 3);
+  line([[sx + sw / 2, sy + sh], [sx + sw / 2, 1420]], 3);
 }
