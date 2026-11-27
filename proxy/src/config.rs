@@ -13,6 +13,10 @@ pub struct Config {
     pub parking: ParkingConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     pub api_token: Option<String>,
+    /// Optional static API keys for the inference port (#332). Empty = key
+    /// disabled (today's behaviour). Multiple comma-separated keys allow
+    /// zero-downtime rotation (D2); comparison is constant-time per key.
+    pub inference_api_keys: Vec<String>,
     pub max_body_bytes: usize,
     /// Max concurrently *forwarded* (in-flight upstream) requests across all
     /// models. `0` = unlimited. Deliberately independent of the parking
@@ -91,6 +95,9 @@ impl Config {
                 probe_timeout,
             },
             api_token: std::env::var("SARDEENZ_API_TOKEN").ok().filter(|s| !s.is_empty()),
+            inference_api_keys: parse_inference_api_keys(std::env::var(
+                "SARDEENZ_PROXY_INFERENCE_API_KEY",
+            ))?,
             max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "33554432")?,
             max_concurrent_forwards: parse_env("SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS", "0")?,
             max_concurrent_forwards_per_model: parse_env(
@@ -124,6 +131,39 @@ where
     val.parse::<T>().map_err(|e| anyhow::anyhow!("invalid value for {key}: {e}"))
 }
 
+/// Parse `SARDEENZ_PROXY_INFERENCE_API_KEY` from the raw `std::env::var` result.
+/// `NotPresent` → empty vec (key disabled, today's behaviour). Set → split on
+/// ',', trim each segment; a segment that is empty after trim is a startup
+/// error (fail closed, #268/ADR-022: an operator who set the variable intended
+/// auth on; a blank key would be trivially guessable or a silent disable). The
+/// trimmed segment is the stored key so the constant-time compare is byte-exact
+/// on the trimmed value. `NotUnicode` is also a startup error: the variable is
+/// present, so it must never be folded into `NotPresent`'s "auth disabled".
+fn parse_inference_api_keys(
+    raw: Result<String, std::env::VarError>,
+) -> anyhow::Result<Vec<String>> {
+    let raw = match raw {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!(
+            "invalid value for SARDEENZ_PROXY_INFERENCE_API_KEY: not valid Unicode \
+             (unset the variable to disable the key)"
+        ),
+    };
+    let mut keys = Vec::new();
+    for segment in raw.split(',') {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!(
+                "invalid value for SARDEENZ_PROXY_INFERENCE_API_KEY: blank segment \
+                 (unset the variable to disable the key)"
+            );
+        }
+        keys.push(trimmed.to_string());
+    }
+    Ok(keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +178,7 @@ mod tests {
             "SARDEENZ_REDIS_URL",
             "SARDEENZ_CONTROL_PLANE_URL",
             "SARDEENZ_API_TOKEN",
+            "SARDEENZ_PROXY_INFERENCE_API_KEY",
             "SARDEENZ_PROXY_MAX_BODY_BYTES",
         ] {
             std::env::remove_var(key);
@@ -151,8 +192,45 @@ mod tests {
         assert_eq!(config.upstream_timeout, Duration::from_secs(300));
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
         assert_eq!(config.api_token, None);
+        assert!(config.inference_api_keys.is_empty());
         assert_eq!(config.max_body_bytes, 33_554_432);
         assert_eq!(config.max_concurrent_forwards, 0);
         assert_eq!(config.max_concurrent_forwards_per_model, 0);
+    }
+
+    // `parse_inference_api_keys` takes the raw `std::env::var` result, so these
+    // cases need no process-global env mutation and cannot race other tests.
+    #[test]
+    fn inference_api_key_parsing() {
+        // Not present = key disabled, today's behaviour.
+        assert_eq!(
+            parse_inference_api_keys(Err(std::env::VarError::NotPresent)).unwrap(),
+            Vec::<String>::new()
+        );
+
+        // Comma-separated rotation slots, each segment trimmed.
+        assert_eq!(
+            parse_inference_api_keys(Ok("key1,key2".to_string())).unwrap(),
+            vec!["key1".to_string(), "key2".to_string()]
+        );
+        assert_eq!(
+            parse_inference_api_keys(Ok("  key1 , key2  ".to_string())).unwrap(),
+            vec!["key1".to_string(), "key2".to_string()]
+        );
+
+        // Present but not valid Unicode: the operator set the variable, so auth
+        // must not silently turn itself off — startup fails closed.
+        assert!(parse_inference_api_keys(Err(std::env::VarError::NotUnicode(
+            std::ffi::OsString::from("key1")
+        )))
+        .is_err());
+
+        // A set-but-blank key fails closed at startup (ADR-022 / #268).
+        for blank in ["", "   ", "key1,,key2", "key1, ,key2", "key1,"] {
+            assert!(
+                parse_inference_api_keys(Ok(blank.to_string())).is_err(),
+                "blank segment in {blank:?} must be a startup error"
+            );
+        }
     }
 }

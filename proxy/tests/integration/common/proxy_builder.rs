@@ -47,6 +47,8 @@ pub struct TestProxyConfig {
     pub max_body_bytes: usize,
     pub max_concurrent_forwards: usize,
     pub max_concurrent_forwards_per_model: usize,
+    /// Optional static inference API keys (#332). Empty = key disabled.
+    pub inference_api_keys: Vec<String>,
 }
 
 impl Default for TestProxyConfig {
@@ -63,6 +65,7 @@ impl Default for TestProxyConfig {
             max_body_bytes: 33_554_432,
             max_concurrent_forwards: 0,
             max_concurrent_forwards_per_model: 0,
+            inference_api_keys: Vec::new(),
         }
     }
 }
@@ -179,6 +182,7 @@ impl TestProxy {
                 probe_timeout,
             },
             api_token: None,
+            inference_api_keys: cfg.inference_api_keys,
             max_body_bytes: cfg.max_body_bytes,
             max_concurrent_forwards: cfg.max_concurrent_forwards,
             max_concurrent_forwards_per_model: cfg.max_concurrent_forwards_per_model,

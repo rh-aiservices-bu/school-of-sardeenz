@@ -72,18 +72,39 @@ dashboard, e.g. `https://sardeenz.example.com`. It is used to:
 
 ## Service-to-Service Tokens
 
-Two shared secrets add defense in depth between components. Both are bearer tokens compared in
-constant time; services fail closed at startup when their token is unset or blank, so local development must
-opt out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (dev-only escape hatch — never set it
-in-cluster).
+Three shared secrets add defense in depth between components. All are bearer tokens compared in
+constant time. The two service tokens fail closed at startup when unset or blank, so local
+development must opt out with `SARDEENZ_ALLOW_UNAUTHENTICATED_API=true` (dev-only escape hatch —
+never set it in-cluster). The inference API key is opt-in instead: unset (or absent from the
+Secret) disables it, while a set-but-blank value fails startup.
 
-| Variable                | Checked by                                                              | Must also be set on                          |
-| ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
-| `SARDEENZ_API_TOKEN`    | Control plane, on every `/api/v1/*` request (`Authorization: Bearer …`) | Dashboard BFF and proxy (wake-trigger calls) |
-| `SARDEENZ_WORKER_TOKEN` | Worker agent (port 9100), on every route except `/healthz`              | Control plane (`WorkerClient`)               |
+| Variable                           | Checked by                                                              | Must also be set on                          |
+| ---------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
+| `SARDEENZ_API_TOKEN`               | Control plane, on every `/api/v1/*` request (`Authorization: Bearer …`) | Dashboard BFF and proxy (wake-trigger calls) |
+| `SARDEENZ_WORKER_TOKEN`            | Worker agent (port 9100), on every route except `/healthz`              | Control plane (`WorkerClient`)               |
+| `SARDEENZ_PROXY_INFERENCE_API_KEY` | Proxy, on every `/openai/*` and `/oip/*` request when set               | Dashboard BFF (playground)                   |
 
 Store them in Kubernetes Secrets, not in manifests
 ([ADR-013](../architecture/adrs/adr-013-secrets-management.md)).
+
+**Optional inference API key.** `SARDEENZ_PROXY_INFERENCE_API_KEY` is a single shared secret for
+quick protection of the proxy's inference Route when no authenticated gateway is deployed. The
+proxy reads it from `sardeenz-service-tokens` with `optional: true`, so an existing install whose
+Secret lacks the key keeps running with the port open exactly as before; adding the key to the
+Secret and rolling the proxy and dashboard enables it. When enabled, a request without a valid
+`Authorization: Bearer <key>` is answered `401` with `type: "authentication_error"` and a fixed
+message (`missing or invalid inference API key`) — before the request body is read and before any
+parking or wake trigger, and the client's `Authorization` header is not forwarded to the runner. The
+admin port is unaffected. List two comma-separated keys, newest first, to rotate without downtime:
+put the new key first, roll the proxy (it then accepts both keys), roll the dashboard, then remove
+the old key and roll the proxy again; a blank segment fails startup. The dashboard BFF reads the
+same Secret key as `SARDEENZ_INFERENCE_API_KEY` and sends the **first** key of the list server-side
+(a bearer token is one value; the BFF does not rotate by itself), so the playground works through
+the roll and the browser never sees it. This is not a gateway: a single shared secret
+carries no per-client identity, quotas or rate limiting, so a gateway remains the production
+answer. There is no inference-port OpenAPI spec (by design), so the `401` shape is documented in
+prose here and in
+[`docs/architecture/components/proxy.md`](../architecture/components/proxy.md#optional-inference-api-key).
 
 ## Control Plane Network Isolation
 
@@ -189,20 +210,20 @@ policy with an empty `podSelector`, `policyTypes: [Ingress]` and no ingress rule
 inbound connection to every Pod in the namespace. NetworkPolicy allows are additive, so the
 per-flow policies below supply exactly the allowed set. Egress is unrestricted.
 
-| Destination | Port | Allowed sources | Policy |
-| ----------- | ---- | --------------- | ------ |
-| redis (Valkey) | 6379 | control plane, proxy, dashboard, worker (same-namespace pod selectors) | `prereq/networkpolicy.yaml` |
-| PostgreSQL | 5432 | control plane | `prereq/networkpolicy.yaml` |
-| proxy inference | 8080 | platform router (ingress namespace) and the dashboard BFF (chat forwarding via `SARDEENZ_INFERENCE_URL`) | `proxy/networkpolicy.yaml` |
-| proxy admin | 9099 | `openshift-user-workload-monitoring` namespace | `proxy/networkpolicy.yaml` |
-| dashboard BFF | 4000 | platform router (ingress namespace) | `dashboard/networkpolicy.yaml` |
-| control plane | 3000 | proxy, dashboard, `openshift-user-workload-monitoring` namespace | existing `control-plane/networkpolicy.yaml` |
-| worker agent + shim mgmt | 9100, 9101+4n | control plane | existing `sif-runner/networkpolicy.yaml` |
-| worker engines | 9102+4n | proxy | existing `sif-runner/networkpolicy.yaml` |
+| Destination              | Port          | Allowed sources                                                                                          | Policy                                      |
+| ------------------------ | ------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| redis (Valkey)           | 6379          | control plane, proxy, dashboard, worker (same-namespace pod selectors)                                   | `prereq/networkpolicy.yaml`                 |
+| PostgreSQL               | 5432          | control plane                                                                                            | `prereq/networkpolicy.yaml`                 |
+| proxy inference          | 8080          | platform router (ingress namespace) and the dashboard BFF (chat forwarding via `SARDEENZ_INFERENCE_URL`) | `proxy/networkpolicy.yaml`                  |
+| proxy admin              | 9099          | `openshift-user-workload-monitoring` namespace                                                           | `proxy/networkpolicy.yaml`                  |
+| dashboard BFF            | 4000          | platform router (ingress namespace)                                                                      | `dashboard/networkpolicy.yaml`              |
+| control plane            | 3000          | proxy, dashboard, `openshift-user-workload-monitoring` namespace                                         | existing `control-plane/networkpolicy.yaml` |
+| worker agent + shim mgmt | 9100, 9101+4n | control plane                                                                                            | existing `sif-runner/networkpolicy.yaml`    |
+| worker engines           | 9102+4n       | proxy                                                                                                    | existing `sif-runner/networkpolicy.yaml`    |
 
 Network isolation is complemented by Valkey authentication: the server now requires
 `requirepass` from the `sardeenz-redis-credentials` Secret (see `deployment/prereq/README.md`).
-The default-deny plus allow policies limit *who can reach* port 6379; AUTH stops anyone who
+The default-deny plus allow policies limit _who can reach_ port 6379; AUTH stops anyone who
 still can — a pod that merely carries a Sardeenz component label in the namespace is not
 sufficient by itself.
 

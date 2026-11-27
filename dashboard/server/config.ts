@@ -42,6 +42,11 @@ export interface Config {
   readonly serviceAccountTokenPath?: string;
   readonly namespace: string;
   readonly controlPlaneApiToken: string;
+  /** Optional static inference API key for the proxy (`SARDEENZ_INFERENCE_API_KEY`, #332).
+   *  Held server-side only; never sent to the browser. Raw Secret value — it may be the proxy's
+   *  comma-separated rotation list, from which `InferenceClient` presents the first key. Empty =
+   *  proxy key disabled. */
+  readonly inferenceApiKey?: string;
   readonly publicUrl: string;
 }
 
@@ -112,6 +117,7 @@ export function loadConfig(): Config {
     ),
     namespace: optionalEnv('NAMESPACE', 'sardeenz'),
     controlPlaneApiToken: optionalEnv('SARDEENZ_API_TOKEN', ''),
+    inferenceApiKey: optionalEnv('SARDEENZ_INFERENCE_API_KEY', ''),
     publicUrl: optionalEnv('SARDEENZ_PUBLIC_URL', ''),
   };
 }

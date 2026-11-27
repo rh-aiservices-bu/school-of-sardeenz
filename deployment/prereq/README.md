@@ -108,6 +108,13 @@ oc rollout restart deployment/sardeenz-redis deployment/sardeenz-control-plane \
   deployment/sardeenz-proxy deployment/sardeenz-dashboard deployment/sardeenz-worker -n sardeenz
 ```
 
+Service tokens — including the optional `SARDEENZ_PROXY_INFERENCE_API_KEY` that guards the proxy's
+inference port (#332) — live in `sardeenz-service-tokens`, created per
+[`../README.md`](../README.md), not in this base's Secrets. Rotating that key means recreating the
+Secret and rolling its two consumers:
+`oc rollout restart deployment/sardeenz-proxy deployment/sardeenz-dashboard -n sardeenz` (both are
+already in the list above).
+
 The PostgreSQL and Valkey claims default to 10 GiB and 5 GiB respectively. Set
 `storageClassName` or patch their sizes in an environment overlay when the cluster defaults are
 not suitable.

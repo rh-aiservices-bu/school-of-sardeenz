@@ -18,5 +18,12 @@ pub fn build_proxy_router(state: AppState) -> Router {
         .route("/v2/models/{model}/infer", post(handlers::handle_oip_infer))
         .route("/v2/models/{model}/ready", get(handlers::handle_oip_ready))
         .route("/v2/models", get(handlers::handle_oip_models));
-    Router::new().nest("/openai", openai).nest("/oip", oip).with_state(state)
+    Router::new()
+        .nest("/openai", openai)
+        .nest("/oip", oip)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::inference_key_guard,
+        ))
+        .with_state(state)
 }

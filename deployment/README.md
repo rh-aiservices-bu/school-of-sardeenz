@@ -52,6 +52,7 @@ set +x
 POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 API_TOKEN="$(openssl rand -hex 32)"
 WORKER_TOKEN="$(openssl rand -hex 32)"
+INFERENCE_API_KEY="$(openssl rand -hex 32)"
 ADMIN_PASSWORD="$(openssl rand -hex 24)"
 JWT_SECRET="$(openssl rand -hex 32)"
 REDIS_PASSWORD="$(openssl rand -hex 24)"
@@ -71,6 +72,7 @@ oc create secret generic sardeenz-redis-credentials \
 oc create secret generic sardeenz-service-tokens \
   --from-literal=SARDEENZ_API_TOKEN="$API_TOKEN" \
   --from-literal=SARDEENZ_WORKER_TOKEN="$WORKER_TOKEN" \
+  --from-literal=SARDEENZ_PROXY_INFERENCE_API_KEY="$INFERENCE_API_KEY" \
   -n "$SARDEENZ_NAMESPACE"
 
 oc create secret generic sardeenz-dashboard-auth \
@@ -81,8 +83,15 @@ oc create secret generic sardeenz-dashboard-auth \
   -n "$SARDEENZ_NAMESPACE"
 
 # Store the generated admin password securely before clearing these shell variables.
-unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN ADMIN_PASSWORD JWT_SECRET REDIS_PASSWORD
+unset POSTGRES_PASSWORD API_TOKEN WORKER_TOKEN INFERENCE_API_KEY ADMIN_PASSWORD JWT_SECRET REDIS_PASSWORD
 ```
+
+`SARDEENZ_PROXY_INFERENCE_API_KEY` is optional: omit that `--from-literal` (and the generator
+line) to leave the proxy's inference port keyless, as before. Both the proxy and the dashboard BFF
+read this one Secret key (the BFF's env var is `SARDEENZ_INFERENCE_API_KEY`), so the playground
+keeps working when the key is enabled. Rotate without downtime by listing two comma-separated keys,
+rolling the proxy and dashboard, then removing the old one — see
+[`proxy/README.md`](proxy/README.md#inference-api-key).
 
 Real registry credentials remain in `sardeenz-librarian-registry`, created as described in
 [`librarian/README.md`](librarian/README.md). The control plane also uses that Docker configuration

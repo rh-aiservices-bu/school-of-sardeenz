@@ -71,6 +71,10 @@ pub fn describe_metrics() {
         "sardeenz_proxy_routing_parse_errors_total",
         "Routing entries that failed to deserialize during Redis sync, labeled by model"
     );
+    describe_counter!(
+        "sardeenz_proxy_inference_auth_rejections_total",
+        "Inference requests rejected by the optional static API key (no labels; the key is never a label value)"
+    );
 }
 
 #[cfg(test)]

@@ -61,6 +61,11 @@ The proxy is designed to run as multiple stateless replicas behind a load balanc
 
 Every inference request follows the same steps:
 
+When the optional static inference API key is configured (`SARDEENZ_PROXY_INFERENCE_API_KEY`, see
+[Optional inference API key](#optional-inference-api-key)), an authentication middleware first
+rejects a request without a valid `Authorization: Bearer <key>` with `401` — before step 1, so no
+body is buffered, nothing parks and no wake fires.
+
 1. Read the raw request body (buffered, max 32 MiB by default — `SARDEENZ_PROXY_MAX_BODY_BYTES`; larger bodies get a JSON `413 request_too_large`)
 2. Extract the `model` field — from the JSON body for `/openai/*` requests, from the `{model}` URL
    path segment for `/oip/*` requests. Resolution then compares the entry's `protocol` tag with the
@@ -540,6 +545,31 @@ The proxy trusts the routing map completely. It forwards requests to whatever `h
 
 **Implication:** compromising Redis or the routing-map writer (the control plane) is equivalent to controlling all request routing. An attacker who can write to `sardeenz:routing-map` can redirect inference traffic to arbitrary endpoints (SSRF via routing map poisoning).
 
+### Optional inference API key
+
+`SARDEENZ_PROXY_INFERENCE_API_KEY` adds an optional static bearer key to the inference port for
+deployments that cannot put an authenticated gateway in front of the proxy. Unset is the default —
+and an install whose `sardeenz-service-tokens` Secret omits the key behaves exactly as described
+above. When set, every `/openai/*` and `/oip/*` request must carry `Authorization: Bearer <key>` or
+receive `401` in the proxy's shared JSON error envelope (`type: "authentication_error"`, message
+`missing or invalid inference API key`) — before the body is read and before any parking or wake
+trigger, so an unauthenticated caller can neither buffer a body nor cold-start a model.
+
+Keys are compared in constant time against every configured value, so a comma-separated list allows
+zero-downtime rotation (put the new key first, roll the proxy, roll the dashboard, remove the old
+key); a blank or whitespace-only segment fails startup. While the key is enabled the client's
+`Authorization` header is not forwarded to the runner. The admin port (`/healthz`, `/readyz`,
+`/metrics`) stays unauthenticated so probes and Prometheus scraping keep working, and the dashboard
+BFF holds the same Secret key server-side (as `SARDEENZ_INFERENCE_API_KEY`), presenting only the
+first key of the list — a bearer token is one value, and the BFF does not rotate by itself — so the
+playground keeps working through the roll; the browser never sees the key.
+
+What it is not: a single shared secret carries no per-client identity, no quotas and no rate
+limiting, so it cannot enforce per-tenant policy. It closes an open inference port cheaply; an
+authenticated gateway remains the production answer. There is deliberately no inference-port
+OpenAPI spec (ADR-021's path families are the contract; D4 on #332), so the `401` shape is
+documented here in prose rather than as a spec response.
+
 ### Trust Boundaries
 
 | Trust boundary          | What it protects                       | Required controls                                |
@@ -554,10 +584,13 @@ The proxy trusts the routing map completely. It forwards requests to whatever `h
 A Phase 1 deployment **must** include at minimum:
 
 - **Authenticated ingress/gateway** in front of the proxy — the proxy does not authenticate clients
+  beyond the [optional static inference API key](#optional-inference-api-key), which is a stopgap
+  for a test or demo Route, not a gateway
 - **Ingress-level rate limiting and admission control** in front of the proxy — the proxy has no
-  concept of client identity, tenants, or API keys, so it cannot enforce per-tenant quotas or fair
-  sharing. Per-tenant/per-client rate limiting is the ingress's responsibility, not the proxy's. The
-  proxy's own `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS[_PER_MODEL]` (see
+  concept of client identity or tenants (its optional static key is one shared secret), so it
+  cannot enforce per-tenant quotas or fair sharing. Per-tenant/per-client rate limiting is the
+  ingress's responsibility, not the proxy's. The proxy's own
+  `SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS[_PER_MODEL]` (see
   [Forwarding Concurrency Limits](#forwarding-concurrency-limits)) is a coarse, identity-blind
   backstop against runner overload — it complements ingress rate limiting, it does not replace it.
 - **Network policy** isolating proxy, control plane, Redis, and runners into a trusted mesh

@@ -12,6 +12,7 @@ mod test_body_limit;
 mod test_circuit_breaker;
 mod test_forwarding_limits;
 mod test_health;
+mod test_inference_auth;
 mod test_model_states;
 mod test_models_endpoint;
 mod test_oip_surface;

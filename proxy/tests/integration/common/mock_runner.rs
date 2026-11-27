@@ -48,6 +48,10 @@ pub struct RunnerState {
     /// request received. Lets a test assert the proxy stripped `/oip` before
     /// forwarding (#125).
     pub last_v2_infer_path: Arc<Mutex<Option<String>>>,
+    /// `Authorization` header of the last inference request received, if any.
+    /// Lets a test assert the proxy never forwards the client's header while
+    /// the optional inference API key is enabled (#332).
+    pub last_authorization_header: Arc<Mutex<Option<String>>>,
 }
 
 impl RunnerState {
@@ -59,6 +63,7 @@ impl RunnerState {
             received: Arc::new(Notify::new()),
             gate: Arc::new(tokio::sync::Semaphore::new(tokio::sync::Semaphore::MAX_PERMITS)),
             last_v2_infer_path: Arc::new(Mutex::new(None)),
+            last_authorization_header: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -125,6 +130,12 @@ impl MockRunner {
     pub fn last_v2_infer_path(&self) -> Option<String> {
         self.state.last_v2_infer_path.lock().unwrap().clone()
     }
+
+    /// `Authorization` header of the last inference request received, if any.
+    #[allow(dead_code)]
+    pub fn last_authorization_header(&self) -> Option<String> {
+        self.state.last_authorization_header.lock().unwrap().clone()
+    }
 }
 
 async fn handle_inference(
@@ -132,6 +143,11 @@ async fn handle_inference(
     req: Request<Body>,
 ) -> impl IntoResponse {
     state.request_count.fetch_add(1, Ordering::SeqCst);
+    *state.last_authorization_header.lock().unwrap() = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     state.received.notify_waiters();
 
     // Held while `gate` has no permits — lets tests keep a "forwarded"
@@ -170,6 +186,11 @@ async fn handle_v2_infer(
 ) -> impl IntoResponse {
     state.request_count.fetch_add(1, Ordering::SeqCst);
     state.received.notify_waiters();
+    *state.last_authorization_header.lock().unwrap() = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     *state.last_v2_infer_path.lock().unwrap() =
         Some(req.uri().path_and_query().map(|pq| pq.as_str().to_string()).unwrap_or_default());
 

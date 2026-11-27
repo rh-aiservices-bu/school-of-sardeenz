@@ -212,6 +212,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The catalog entry is
   pinned to the published `vllm:0.26-rc1` SIF (`sha256:075b3057…`).
 
+- **The proxy's inference port can carry an optional static API key (#332).** Setting
+  `SARDEENZ_PROXY_INFERENCE_API_KEY` (sourced from `sardeenz-service-tokens` with `optional: true`,
+  so existing installs are unaffected) makes every `/openai/*` and `/oip/*` request carry
+  `Authorization: Bearer <key>` or receive `401` in the proxy's JSON envelope
+  (`type: "authentication_error"`), evaluated before the body is read and before any parking or
+  wake trigger. Keys are compared in constant time against every comma-separated value, so
+  rotation needs no downtime; a blank segment fails startup, and the client's `Authorization`
+  header is never forwarded to the runner while the key is enabled. The admin port stays
+  unauthenticated, and the dashboard BFF reads the same Secret key server-side
+  (`SARDEENZ_INFERENCE_API_KEY`), presenting the first key of the list, so the playground keeps
+  working through a rotation without the browser ever seeing it. This is a single shared secret
+  for quick protection of a test or demo Route — no per-client identity, quotas or rate limiting;
+  a gateway remains the production answer.
+
 ### Fixed
 
 - **The BFF ends every hijacked stream on shutdown, so `app.close()` no longer waits for a client
