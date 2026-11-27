@@ -118,3 +118,33 @@ already in the list above).
 The PostgreSQL and Valkey claims default to 10 GiB and 5 GiB respectively. Set
 `storageClassName` or patch their sizes in an environment overlay when the cluster defaults are
 not suitable.
+
+## Bumping the prereq images
+
+Both Deployments pin their image as `name:dated-tag@sha256:<64 hex>` — the manual-bump form of
+[ADR-030 decision 1](../../docs/architecture/adrs/adr-030-platform-image-signing-and-scanning.md)
+(the date is the sclorg build date, not the date of our bump), and the digest is the multi-arch
+**index** digest. The tag stays in front of the digest so a reader can see which snapshot is pinned;
+`latest@sha256:…` is reproducible but reads as automation this repository does not have.
+
+Dependabot has no ecosystem for raw Kubernetes manifests — its `docker` entries are keyed on build
+directories (`.github/dependabot.yml`) — so this is a manual step. List the available dated tags,
+then resolve the chosen tag's index digest:
+
+```bash
+curl -s "https://quay.io/api/v1/repository/sclorg/valkey-8-c10s/tag/?limit=5&onlyActiveTags=true" \
+  | jq -r '.tags[].name'
+curl -s "https://quay.io/api/v1/repository/sclorg/valkey-8-c10s/tag/?specificTag=20261125&onlyActiveTags=true" \
+  | jq -r '.tags[0] | "\(.manifest_digest) list=\(.is_manifest_list)"'
+curl -s "https://quay.io/api/v1/repository/sclorg/postgresql-16-c9s/tag/?specificTag=20261125&onlyActiveTags=true" \
+  | jq -r '.tags[0] | "\(.manifest_digest) list=\(.is_manifest_list)"'
+# or: skopeo inspect --format '{{.Digest}}' docker://quay.io/sclorg/valkey-8-c10s:20261125
+```
+
+Edit the `image:` line in `valkey-deployment.yaml` / `postgres-deployment.yaml` with the new tag and
+its `sha256:` digest, then `oc apply -k deployment/prereq/` and confirm the rollout picks the pinned
+reference. `imagePullPolicy: IfNotPresent` is intentional with an immutable digest: nodes never
+re-resolve the reference, so the running bytes are the pinned ones.
+`tests/container-images/verify-dependabot-coverage.mjs` (`make verify-dependabot-coverage`, a step of
+the CI `quality` job) fails when a `:latest` or digest-less reference reappears under this
+directory.

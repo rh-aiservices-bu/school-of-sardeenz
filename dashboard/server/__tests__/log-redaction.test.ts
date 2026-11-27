@@ -37,6 +37,22 @@ describe('redactUrlForLog', () => {
     );
   });
 
+  it('replaces an OAuth (exchange or authorization) code value', () => {
+    expect(redactUrlForLog('/oauth/callback?code=abc')).toBe(
+      `/oauth/callback?code=${encodeURIComponent(REDACTED)}`,
+    );
+  });
+
+  it('redacts the upstream authorization code and keeps the other parameters', () => {
+    expect(redactUrlForLog('/api/auth/callback?code=upstream&state=s')).toBe(
+      `/api/auth/callback?code=${encodeURIComponent(REDACTED)}&state=s`,
+    );
+  });
+
+  it('leaves a code-prefixed key untouched (exact-key match)', () => {
+    expect(redactUrlForLog('/api/events?codec=keep')).toBe('/api/events?codec=keep');
+  });
+
   it('treats a bare "?" as an empty query', () => {
     expect(redactUrlForLog('/api/events?')).toBe('/api/events?');
   });

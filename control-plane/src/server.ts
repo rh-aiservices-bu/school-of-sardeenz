@@ -17,6 +17,7 @@ import { registerInternalRoutes } from './routes/internal.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerWeightsRoutes } from './routes/weights.js';
+import { registerAuditHooks, captureAssertedActor } from './utils/audit-log.js';
 
 export interface ServerDeps {
   config: Config;
@@ -63,6 +64,10 @@ export async function buildServer(deps: ServerDeps) {
     });
   });
 
+  // Before the auth hook: an audit context must exist before the token check can throw a 401,
+  // and the 401 itself must still emit its line (#335).
+  registerAuditHooks(app);
+
   if (deps.config.apiToken) {
     const expectedBuf = Buffer.from(deps.config.apiToken);
     app.addHook('onRequest', (request) => {
@@ -75,6 +80,7 @@ export async function buildServer(deps: ServerDeps) {
       if (tokenBuf.length !== expectedBuf.length || !timingSafeEqual(tokenBuf, expectedBuf)) {
         throw ControlPlaneError.unauthorized();
       }
+      captureAssertedActor(request);
       return Promise.resolve();
     });
   }

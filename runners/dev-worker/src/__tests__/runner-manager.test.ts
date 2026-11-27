@@ -555,6 +555,46 @@ describe('RunnerManager', () => {
     expect(start).toHaveBeenCalledOnce();
   });
 
+  it('treats absent and false allowUnsafeWeights as the same launch (#336)', async () => {
+    const { launcher, start } = makeCountingLauncher({});
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+
+    const first = await mgr.startRunner(startParams('inst-weights-same'));
+    const second = await mgr.startRunner(
+      startParams('inst-weights-same', { allowUnsafeWeights: false }),
+    );
+
+    expect(second.reused).toBe(true);
+    expect(second.runnerId).toBe(first.runnerId);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('a changed allowUnsafeWeights is a different launch (#336)', async () => {
+    const { launcher, start } = makeCountingLauncher({});
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+    const first = await mgr.startRunner(startParams('inst-weights-optin'));
+
+    // Refusing to reuse the old runner is the point: a silent reuse would keep running without
+    // the opt-in while the operator believes the redeploy applied it.
+    const conflict = await mgr
+      .startRunner(startParams('inst-weights-optin', { allowUnsafeWeights: true }))
+      .catch((err: unknown) => err);
+
+    expect(conflict).toBeInstanceOf(ConflictError);
+    expect((conflict as Error).message).toContain(first.runnerId);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('forwards allowUnsafeWeights into the launcher launch spec (#336)', async () => {
+    const { launcher, start } = makeCountingLauncher({});
+    const mgr = new RunnerManager(makeConfig(), makeRegistration(), launcher);
+
+    await mgr.startRunner(startParams('inst-weights-forward', { allowUnsafeWeights: true }));
+
+    const spec = start.mock.calls[0]?.[0] as LaunchSpec | undefined;
+    expect(spec?.allowUnsafeWeights).toBe(true);
+  });
+
   it('a failed launch whose process is still alive is retained and a retry refuses with 409', async () => {
     let zombieRunnerId: string | undefined;
     const stop = vi.fn(() => Promise.resolve());

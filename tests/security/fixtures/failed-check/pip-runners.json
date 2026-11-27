@@ -1,0 +1,29 @@
+{
+  "dependencies": [
+    {
+      "name": "fastapi",
+      "version": "0.115.6",
+      "vulns": [],
+      "skip_reason": null
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "vulns": [],
+      "skip_reason": null
+    },
+    {
+      "name": "pytest",
+      "version": "8.3.4",
+      "vulns": [],
+      "skip_reason": null
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.34.0",
+      "vulns": [],
+      "skip_reason": null
+    }
+  ],
+  "fixes": []
+}

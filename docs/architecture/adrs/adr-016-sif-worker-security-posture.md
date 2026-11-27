@@ -90,6 +90,15 @@ This posture was verified on a live OKD 4.21 cluster: `Seccomp: 0`, `max_user_na
   weights volume is model data, `HOME` points at a node-local writable path (`/scratch/home`),
   created group-writable (gid 0) so the assigned UID can write it. `HOME` is set as a container
   env var, **not** via `apptainer --env` (Apptainer rejects overriding HOME that way).
+- **Model weights are a code-execution input, not data.** Anyone with write access to the
+  `sardeenz-weights` PVC can put a pickle-based checkpoint in a model directory, and loading it
+  runs arbitrary code inside the runner on the node. Since M22 (#336) both shims refuse
+  pickle-based weight suffixes at startup unless the model opted in
+  (`allowUnsafeWeights` → `SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1`); that refusal — its scope, its
+  deliberate residuals (symlinked directories, `--trust-remote-code`) and the premise that weights
+  write access stays code-execution-equivalent — is recorded in the deployment security guide's
+  [Model weights trust boundary](../../usage/deployment-security.md#model-weights-trust-boundary)
+  rather than here, because it is engine-input policy, not this SCC posture.
 - **SELinux / volume labels can still block reads.** On some storage classes (NFS/EFS especially)
   the RWX volume may arrive with labels that deny reads from the container context despite correct
   POSIX perms. If that happens, check the CSI driver's relabeling behavior and the SCC

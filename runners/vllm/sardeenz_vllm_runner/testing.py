@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import app as _app
+from . import weights as WEIGHTS_POLICY
 from .cli import parse_args
 
 # Capabilities this adapter declares to the shared conformance suite (runners/conformance/README.md
@@ -27,7 +28,12 @@ CONFORMANCE_FEATURES: frozenset[str] = frozenset({"sleep-active-request-guard"})
 # registers each seam as an undo target *before* building (runners/conformance/conftest.py), so
 # the doubles never outlive a case into the shim's own unit suites.
 APP_MODULE = _app
-PATCHED_SEAMS: tuple[str, ...] = ("VllmEngine", "memory_report", "_scrape_active_requests")
+PATCHED_SEAMS: tuple[str, ...] = (
+    "VllmEngine",
+    "memory_report",
+    "_scrape_active_requests",
+    "check_weights",
+)
 
 
 class _FakeEngine:  # mirrors the VllmEngine surface create_app()/_health_poller() use
@@ -110,6 +116,10 @@ def build_conformance_app(
     _app.VllmEngine = lambda args: _FakeEngine(args, ready=ready, alive=alive)
     _app.memory_report = _fake_memory_report
     _app._scrape_active_requests = _scrape_returning(active_requests)
+    # The shared suite builds a real app against a nonexistent /tmp/conformance model dir; the
+    # gate's []-on-missing-directory rule keeps that harmless, but a no-op keeps a future fixture
+    # that creates a fake pickle from breaking unrelated cases (#336).
+    _app.check_weights = lambda *args, **kwargs: None
     args = parse_args(
         ["--model", "/tmp/conformance", "--port", "9101", "--", "--served-model-name", "conformance-model"]
     )

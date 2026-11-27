@@ -101,13 +101,19 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
    the `runtimeModule` a worker execs).
 4. Sign SIFs with the key whose **public** half is distributed to workers and the control plane, so
    `apptainer verify` trusts them at import and exec.
+5. Register `containers/runners/<engine>/<version>` in `.github/dependabot.yml` so its base images
+   keep getting update PRs: a `docker` entry with
+   `directory: /containers/runners/<engine>/<version>` (the fetcher recognises `Containerfile`).
+   Skip this only for a version deliberately left unregistered like `vllm` 0.21.0/0.24.0 (the #233
+   decision) — `make verify-dependabot-coverage`, run as a step of the CI `quality` job, fails with
+   the directory named otherwise.
 
 ## Republishing a runner and recording its shim source
 
-Use this when the runner **shim** (`runners/vllm`) changes and the published runner images predate
-that change. `shimSource` in the catalog records the commit an image was built from; the control
-plane writes it into the module sidecar at import and flags an imported module whose provenance is
-missing or behind (#287).
+Use this when a runner **shim** (`runners/vllm` or `runners/mlserver`) changes and the published
+runner images predate that change. `shimSource` in the catalog records the commit an image was
+built from; the control plane writes it into the module sidecar at import and flags an imported
+module whose provenance is missing or behind (#287).
 
 1. **Precondition: the shim change is merged**, and `GIT_REF` is the release commit (a sha, never a
    moving branch, for a release build). Then check the catalog against the tree:
@@ -121,17 +127,20 @@ missing or behind (#287).
    `checked=… current=… stale=… unset=… unverified=… invalid=…` summary; `--strict` exits `1` when
    any entry is `stale`, `invalid` or `unverified`. Record the output in the release notes. The
    script is deliberately **not** wired into `make lint` or CI: published catalog digests lag `dev`
-   by design (see #247).
+   by design (see #247). Its `--shim-path` defaults to `runners/vllm`; run it a second time with
+   `--shim-path runners/mlserver` to check the MLServer entry (the flag takes one path per
+   invocation).
 
 2. **Publish one job per engine version with new `rc2` tags.** Never re-push an `rc1` tag — the
    catalog pins its digest, so a tag must be immutable after publication — and give each job a unique
    `PIPELINE_NAME`:
 
-   | engine | CONTAINERFILE                                  | OCI_TAG    | ORAS_TAG   | SIF_NAME    |
-   | ------ | ---------------------------------------------- | ---------- | ---------- | ----------- |
-   | 0.21   | `containers/runners/vllm/0.21.0/Containerfile` | `0.21-rc2` | `0.21-rc2` | `vllm-0.21` |
-   | 0.24   | `containers/runners/vllm/0.24.0/Containerfile` | `0.24-rc2` | `0.24-rc2` | `vllm-0.24` |
-   | 0.26   | `containers/runners/vllm/0.26.0/Containerfile` | `0.26-rc2` | `0.26-rc2` | `vllm-0.26` |
+   | engine | CONTAINERFILE                                     | OCI_TAG     | ORAS_TAG    | SIF_NAME         |
+   | ------ | ------------------------------------------------- | ----------- | ----------- | ---------------- |
+   | 0.21   | `containers/runners/vllm/0.21.0/Containerfile`    | `0.21-rc2`  | `0.21-rc2`  | `vllm-0.21`      |
+   | 0.24   | `containers/runners/vllm/0.24.0/Containerfile`    | `0.24-rc2`  | `0.24-rc2`  | `vllm-0.24`      |
+   | 0.26   | `containers/runners/vllm/0.26.0/Containerfile`    | `0.26-rc2`  | `0.26-rc2`  | `vllm-0.26`      |
+   | 1.7.1  | `containers/runners/mlserver/1.7.1/Containerfile` | `1.7.1-rc5` | `1.7.1-rc5` | `mlserver-1.7.1` |
 
    ```bash
    PIPELINE_NAME="vllm-021-rc2-$(date +%Y%m%d%H%M%S)"
@@ -153,7 +162,10 @@ missing or behind (#287).
 
    `SIGN_SIF=false` is the default; `true` needs a provisioned `SIGNING_SECRET` and a matching
    `SARDEENZ_VERIFY_SIF=true` on the control plane and the workers. Full parameter list and
-   diagnostics: [`deployment/librarian/README.md`](../../deployment/librarian/README.md).
+   diagnostics: [`deployment/librarian/README.md`](../../deployment/librarian/README.md). A
+   republish that adds a new `containers/runners/<engine>/<version>/` directory also needs its
+   `.github/dependabot.yml` entry, as in step 5 of the publishing runbook above —
+   `make verify-dependabot-coverage` fails otherwise.
 
 3. **Read back provenance and digest.**
 

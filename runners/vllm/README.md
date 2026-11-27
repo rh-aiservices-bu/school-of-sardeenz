@@ -49,12 +49,19 @@ sardeenz_vllm_runner/
 ├── metrics.py    # pure Prometheus text-exposition parser (drain signal)
 ├── kvcached_pools.py  # kvcached pool stats from the pool's shm segment (#165)
 ├── state.py      # RunnerState machine + contract-shape response builders (pure)
+├── weights.py    # pickle-weights refusal at startup (#336; see the security guide's trust boundary)
 └── testing.py    # test-only adapter: fakes the engine/memory seams for the conformance suite
 ```
 
 ## Notes
 
 - **kvcached sleep levels:** the contract defines only `L1_HOST_RAM` (v0.1) → vLLM sleep level 1.
+- **Weights-format refusal (#336):** `weights.py` scans the model directory at startup (app
+  lifespan) and refuses pickle-based weight files (`.bin`, `.pt`, `.pth`, `.ckpt`, `.pkl`,
+  `.pickle`, `.joblib`) unless `SARDEENZ_ALLOW_UNSAFE_WEIGHTS` is `1`/`true` — the worker emits
+  that only for models deployed with `allowUnsafeWeights`. The suffix tuple must stay set-equal to
+  the MLServer shim's and the control plane's copy (drift tests pin both directions). Policy and
+  rationale: [Model weights trust boundary](../../docs/usage/deployment-security.md#model-weights-trust-boundary).
 - **Memory attribution** is best-effort: the shim process owns no CUDA pool — `vllm serve` is a
   child process — so per-runner bytes aren't recoverable. `/memory-report` reports the whole-device
   used figure with `attribution: "device"`; consumers must not sum device-scope rows across

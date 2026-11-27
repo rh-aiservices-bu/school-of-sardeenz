@@ -19,6 +19,7 @@ import pytest
 from sardeenz_mlserver_runner import memory as mem
 from sardeenz_mlserver_runner import settings as cfg
 from sardeenz_mlserver_runner import state as st
+from sardeenz_mlserver_runner import weights as wp
 from sardeenz_mlserver_runner.cli import _extract_served_names, aux_ports, parse_args
 from sardeenz_mlserver_runner.engine import MLServerEngine, scrape_active_requests
 
@@ -142,9 +143,10 @@ def test_build_model_settings_rewrites_existing_name(tmp_path):
 
 
 def test_build_model_settings_generates_sklearn_when_absent(tmp_path):
+    # A .joblib is the sklearn family's pickle format, so it is opt-in-only since #336.
     (tmp_path / "m.joblib").write_text("fake")
 
-    settings = cfg.build_model_settings(str(tmp_path), "served")
+    settings = cfg.build_model_settings(str(tmp_path), "served", allow_unsafe=True)
 
     assert settings == {
         "name": "served",
@@ -215,6 +217,115 @@ def test_write_model_repository_writes_one_settings_file(tmp_path):
     assert entries == ["model-settings.json"]
     with open(os.path.join(repo_dir, "model-settings.json"), encoding="utf-8") as fh:
         assert json.load(fh) == settings
+
+
+# --- weights.py: pickle-format refusal (#336) ----------------------------------------------------
+
+
+def test_build_model_settings_refuses_pickle_weights(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "pytorch_model.bin").write_bytes(b"pickle")
+
+    with pytest.raises(wp.WeightsRefusedError) as excinfo:
+        cfg.build_model_settings(str(tmp_path), "served")
+    message = str(excinfo.value)
+    assert "pytorch_model.bin" in message
+    assert "allowUnsafeWeights" in message
+    assert "SARDEENZ_ALLOW_UNSAFE_WEIGHTS" in message
+
+
+def test_build_model_settings_accepts_pickle_weights_with_opt_in(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "pytorch_model.bin").write_bytes(b"pickle")
+
+    assert cfg.build_model_settings(str(tmp_path), "served", allow_unsafe=True)["name"] == "served"
+
+    # The env var is the only channel the worker has (--cleanenv passes it as an --env flag).
+    monkeypatch.setenv(wp.ALLOW_UNSAFE_ENV, "1")
+    assert cfg.build_model_settings(str(tmp_path), "served")["name"] == "served"
+
+
+def test_build_model_settings_allows_xgboost_bst_without_opt_in(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "model.bst").write_bytes(b"xgboost")
+
+    assert cfg.build_model_settings(str(tmp_path), "served")["implementation"] == cfg.SKLEARN_IMPL
+
+
+def test_build_model_settings_allows_safetensors_without_opt_in(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "model.safetensors").write_bytes(b"tensors")
+
+    settings = cfg.build_model_settings(str(tmp_path), "served")
+
+    assert settings["implementation"] == cfg.HUGGINGFACE_IMPL
+
+
+@pytest.mark.parametrize("name", ["m.pkl", "m.joblib", "m.pickle"])
+def test_build_model_settings_refuses_sklearn_pickle_family(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, name
+):
+    # Decision 2026-11-27: the sklearn family is opt-in-only; .bst stays allowed (above).
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / name).write_bytes(b"pickle")
+
+    with pytest.raises(wp.WeightsRefusedError):
+        cfg.build_model_settings(str(tmp_path), "served")
+
+
+def test_build_model_settings_refuses_nested_pickle(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "model.pt").write_bytes(b"torch")
+
+    with pytest.raises(wp.WeightsRefusedError, match="sub/model.pt"):
+        cfg.build_model_settings(str(tmp_path), "served")
+
+
+def test_build_model_settings_allows_sharded_index_json(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "model.safetensors").write_bytes(b"tensors")
+    (tmp_path / "pytorch_model.bin.index.json").write_text("{}")
+
+    assert cfg.build_model_settings(str(tmp_path), "served")["name"] == "served"
+
+
+def test_build_model_settings_refuses_mixed_safetensors_and_pickle(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    (tmp_path / "model.safetensors").write_bytes(b"tensors")
+    (tmp_path / "pytorch_model.bin").write_bytes(b"pickle")
+
+    with pytest.raises(wp.WeightsRefusedError):
+        cfg.build_model_settings(str(tmp_path), "served")
+
+
+def test_allow_unsafe_from_env_spellings():
+    for value in ("1", "true", "TRUE"):
+        assert wp.allow_unsafe_from_env({wp.ALLOW_UNSAFE_ENV: value}) is True
+    for value in ("0", "yes", "on", ""):
+        assert wp.allow_unsafe_from_env({wp.ALLOW_UNSAFE_ENV: value}) is False
+    assert wp.allow_unsafe_from_env({}) is False
+
+
+def test_check_weights_missing_directory_is_not_an_error(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+
+    wp.check_weights(str(tmp_path / "does-not-exist"))
 
 
 def test_engine_redirects_metrics_to_writable_repository_by_default(

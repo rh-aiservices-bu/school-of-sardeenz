@@ -22,7 +22,7 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
 | `containers/worker-base/`                            | Reusable UBI + Apptainer + FUSE + Node base; no worker-agent code       |
 | `containers/runners/<engine>/<version>/`             | Version-specific engine image converted to a SIF (`vllm`, `mlserver`)   |
 | `deployment/control-plane/`                          | NetworkPolicy for the control plane                                     |
-| `deployment/prereq/`                                 | Namespace + PoC PostgreSQL/Valkey; namespace default-deny + redis/postgres allow NPs |
+| `deployment/prereq/`                                 | Namespace + PoC PostgreSQL/Valkey (dated-tag + digest pins, manual bump in its README); namespace default-deny + redis/postgres allow NPs |
 | `deployment/proxy/`, `deployment/dashboard/`         | Deployable application workloads, Services, and NetworkPolicies         |
 | `deployment/sif-runner/`                             | Worker SCC, RBAC, PVCs, NetworkPolicy, Deployment, PVC write-protection |
 | `deployment/librarian/`                              | Parameterized OpenShift OCI + SIF + ORAS publishing Job                 |
@@ -39,7 +39,11 @@ catalog, [ADR-013](../docs/architecture/adrs/adr-013-secrets-management.md) secr
   `docs/usage/deployment-security.md`.
 - **Runner images become SIFs:** a new `containers/runners/<engine>/<version>/` needs the shim
   package in `runners/<engine>/`, a `runners.yaml` entry (digest-pinned `image`, required
-  `protocol`), and a gate in `tests/gates/` if it changes the launch path.
+  `protocol`), a `docker` entry in `.github/dependabot.yml` for that directory (unless the version
+  is a documented unregistered one like 0.21.0/0.24.0 — #233), and a gate in `tests/gates/` if it
+  changes the launch path. `tests/container-images/verify-dependabot-coverage.mjs`
+  (`make verify-dependabot-coverage`, a CI `quality` step) fails when the entry is missing or a
+  shipped catalog entry has no registered build directory.
 - **Production images are signed (ADR-017);** unsigned publishing is only for an explicitly
   verification-disabled PoC. Catalog entries remain digest-pinned even during a PoC.
 - **NetworkPolicies allow-list ingress per flow against a namespace default-deny**

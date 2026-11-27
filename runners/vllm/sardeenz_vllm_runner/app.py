@@ -16,6 +16,7 @@ from .cli import RunnerArgs
 from .engine import VllmEngine
 from .memory import memory_report
 from .metrics import sum_metric
+from .weights import check_weights
 
 
 def _engine_version() -> str:
@@ -82,6 +83,7 @@ async def _health_poller(app: FastAPI) -> None:
 def create_app(args: RunnerArgs) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+        check_weights(args.model)  # env-read default; no allow_unsafe argument here (#336)
         app.state.status = st.RunnerStatus()
         app.state.engine = VllmEngine(args)
         app.state.client = httpx.AsyncClient()

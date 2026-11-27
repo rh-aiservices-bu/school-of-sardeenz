@@ -38,8 +38,12 @@ Redis fallback when the control plane is down).
   listed in `SSE_TOKEN_PATHS` (`server/plugins/auth.ts`). A new SSE route must be added there or
   `EventSource` auth breaks; everywhere else a query token is ignored → 401.
 - **Never log a raw request URL:** the BFF installs its own Fastify `req` serializer
-  (`server/log-redaction.ts`) that writes `token=[REDACTED]`. Route a new secret-bearing
-  parameter through it instead of logging `request.url` directly.
+  (`server/log-redaction.ts`) that writes `token=[REDACTED]` (and `code=[REDACTED]`). Route a
+  new secret-bearing parameter through it instead of logging `request.url` directly.
+- **The OAuth callback hands back a code, never a token:** `GET /api/auth/callback` redirects to
+  `/oauth/callback?code=<single-use, 60 s>` and the SPA redeems it via the public
+  `POST /api/auth/exchange`; the JWT travels only in that response body. Never put a token in
+  the URL again, and keep the SSE cookie on the callback (the exchange sets no cookie).
 - **One charting stack (#255):** `@patternfly/react-charts/victory` only — no `@nivo/*`, no direct
   `victory` dependency (both removed in #255). Size charts from your own container measurement; a
   "reserved for hatch patterns" look is a reduced-opacity fill (0.55), not a second chart library.

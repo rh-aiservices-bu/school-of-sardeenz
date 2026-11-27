@@ -1,0 +1,36 @@
+{
+  "dependencies": [
+    {
+      "name": "fastapi",
+      "version": "0.115.6",
+      "vulns": [],
+      "skip_reason": null
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "vulns": [
+        {
+          "id": "GHSA-4x4m-9j8v-6v5v",
+          "fix_versions": ["0.28.2"],
+          "aliases": ["CVE-2026-12345"],
+          "description": "httpx follows redirects to a different origin while carrying the Authorization header."
+        }
+      ],
+      "skip_reason": null
+    },
+    {
+      "name": "pytest",
+      "version": "8.3.4",
+      "vulns": [],
+      "skip_reason": null
+    },
+    {
+      "name": "sardeenz-vllm-runner",
+      "version": "0.1.0",
+      "vulns": [],
+      "skip_reason": "editable install (no distribution metadata to audit)"
+    }
+  ],
+  "fixes": []
+}

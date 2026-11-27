@@ -445,6 +445,21 @@ shared conformance suite asserts that every current emitter declares one of the 
 
 Process lifecycle (start, stop) is always handled by the worker, not by the runner contract.
 
+### Weights-format refusal (mandatory)
+
+Every shim ships a weights-policy module (a `weights.py` exposing `REFUSED_SUFFIXES`,
+`allow_unsafe_from_env`, `refused_weight_files`, `check_weights`, `WeightsRefusedError`) and calls
+`check_weights(model_dir)` on its startup path before the engine loads anything: pickle-based
+weight files (`.bin`, `.pt`, `.pth`, `.ckpt`, `.pkl`, `.pickle`, `.joblib`) are refused with an
+error naming the offending paths unless `SARDEENZ_ALLOW_UNSAFE_WEIGHTS` is `1`/`true` (emitted by
+the worker only for models deployed with `allowUnsafeWeights`). The suffix tuple must stay
+set-equal across shims and the control plane's early-refusal copy — `runners/conformance`
+(`test_weights_policy.py` plus the `WEIGHTS_POLICY` adapter attribute) and a control-plane drift
+test pin both directions. A new shim therefore carries its own `weights.py`; the conformance
+suite fails loud when the adapter does not expose it. The trust model and the deliberate
+residuals (symlinked directories, `--trust-remote-code`) are in
+[Model weights trust boundary](../../usage/deployment-security.md#model-weights-trust-boundary).
+
 ### Adding a New Sleep Level
 
 1. Add the level to the `SleepLevel` enum in the OpenAPI spec

@@ -22,6 +22,7 @@ import pytest
 from sardeenz_vllm_runner import kvcached_pools as kp
 from sardeenz_vllm_runner import memory as mem
 from sardeenz_vllm_runner import state as st
+from sardeenz_vllm_runner import weights as wp
 from sardeenz_vllm_runner.cli import build_vllm_command, parse_args
 from sardeenz_vllm_runner.engine import VllmEngine
 from sardeenz_vllm_runner.metrics import sum_metric
@@ -622,3 +623,84 @@ async def test_engine_sleep_raises_on_engine_error():
     engine = VllmEngine(parse_args(["--model", "/tmp/test-shim", "--port", "9101"]))
     with pytest.raises(httpx.HTTPStatusError):
         await _call_engine(engine, "sleep", 1, status=500)
+
+
+# --- weights.py: pickle-format refusal (#336) ----------------------------------------------------
+
+
+def test_refused_weight_files_lists_pickle_family(tmp_path):
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "pytorch_model.bin").write_bytes(b"pickle")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "model.pt").write_bytes(b"torch")
+    (tmp_path / "model.safetensors").write_bytes(b"tensors")
+    (tmp_path / "model.bst").write_bytes(b"xgboost")
+    (tmp_path / "pytorch_model.bin.index.json").write_text("{}")
+
+    assert wp.refused_weight_files(str(tmp_path)) == ["pytorch_model.bin", "sub/model.pt"]
+
+
+@pytest.mark.parametrize("name", ["m.pkl", "m.pickle", "m.joblib", "m.ckpt", "m.pth"])
+def test_check_weights_refuses_sklearn_and_torch_archives(tmp_path, name):
+    (tmp_path / name).write_bytes(b"pickle")
+
+    with pytest.raises(wp.WeightsRefusedError) as excinfo:
+        wp.check_weights(str(tmp_path), allow_unsafe=False)
+    assert name in str(excinfo.value)
+    assert "allowUnsafeWeights" in str(excinfo.value)
+    assert "SARDEENZ_ALLOW_UNSAFE_WEIGHTS" in str(excinfo.value)
+
+
+def test_check_weights_opt_in_allows_pickle(tmp_path):
+    (tmp_path / "pytorch_model.bin").write_bytes(b"pickle")
+
+    wp.check_weights(str(tmp_path), allow_unsafe=True)
+
+
+def test_allow_unsafe_from_env_spellings():
+    for value in ("1", "true", "TRUE"):
+        assert wp.allow_unsafe_from_env({wp.ALLOW_UNSAFE_ENV: value}) is True
+    for value in ("0", "yes", "on", ""):
+        assert wp.allow_unsafe_from_env({wp.ALLOW_UNSAFE_ENV: value}) is False
+    assert wp.allow_unsafe_from_env({}) is False
+
+
+def test_check_weights_missing_directory_is_not_an_error(tmp_path):
+    wp.check_weights(str(tmp_path / "does-not-exist"), allow_unsafe=False)
+
+
+def test_app_lifespan_refuses_pickle_weights_before_engine_construction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    from fastapi.testclient import TestClient
+
+    app_module = _get_app()
+    pickle_dir = tmp_path / "pickle-model"
+    pickle_dir.mkdir()
+    (pickle_dir / "config.json").write_text("{}")
+    (pickle_dir / "pytorch_model.bin").write_bytes(b"pickle")
+    safe_dir = tmp_path / "safe-model"
+    safe_dir.mkdir()
+    (safe_dir / "config.json").write_text("{}")
+    (safe_dir / "model.safetensors").write_bytes(b"not-really-weights")
+    monkeypatch.delenv(wp.ALLOW_UNSAFE_ENV, raising=False)
+    constructed: list[object] = []
+
+    def _fake_engine(args: object) -> _FakeEngine:
+        constructed.append(args)
+        return _FakeEngine(args)
+
+    monkeypatch.setattr(app_module, "VllmEngine", _fake_engine)
+    refused_app = app_module.create_app(parse_args(["--model", str(pickle_dir), "--port", "9101"]))
+
+    with pytest.raises(wp.WeightsRefusedError):
+        with TestClient(refused_app):
+            pass
+
+    assert constructed == []
+    # Positive control on the same seam: allowed weights do reach the engine factory, so the
+    # empty list above proves the refusal fired rather than the monkeypatch being shadowed.
+    allowed_app = app_module.create_app(parse_args(["--model", str(safe_dir), "--port", "9101"]))
+    with TestClient(allowed_app):
+        pass
+    assert len(constructed) == 1

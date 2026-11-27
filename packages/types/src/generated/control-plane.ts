@@ -906,6 +906,17 @@ export type components = {
              * @default false
              */
             allowCoLocation: boolean;
+            /**
+             * @description Opt-in to loading pickle-based weight formats (.bin, .pt, .pth,
+             *     .ckpt, .pkl, .pickle, .joblib). These formats deserialize with
+             *     pickle and can execute arbitrary code on the worker, so the runner
+             *     shim refuses them at startup unless this is true. Safetensors,
+             *     ONNX, GGUF and XGBoost .bst are unaffected. Persisted on the model
+             *     record so every later start keeps the opt-in, and delivered to the
+             *     runner as SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1.
+             * @default false
+             */
+            allowUnsafeWeights: boolean;
         };
         /** @description Complete replacement for a stopped model's mutable configuration. */
         ModelConfigurationUpdateRequest: {
@@ -921,6 +932,7 @@ export type components = {
             runtimeModule?: components["schemas"]["ModelDeploymentRequest"]["runtimeModule"];
             pinned: components["schemas"]["ModelDeploymentRequest"]["pinned"];
             allowCoLocation: components["schemas"]["ModelDeploymentRequest"]["allowCoLocation"];
+            allowUnsafeWeights: components["schemas"]["ModelDeploymentRequest"]["allowUnsafeWeights"];
         };
         /**
          * @description Response after a deployment request is accepted. The model is now
@@ -1129,6 +1141,12 @@ export type components = {
              *     detail payload so the edit form can hydrate the switch.
              */
             allowCoLocation?: boolean;
+            /**
+             * @description Whether the model opted in to pickle-based (unsafe) weight formats
+             *     (see ModelDeploymentRequest.allowUnsafeWeights). Present in the
+             *     detail payload so the edit form can hydrate the switch.
+             */
+            allowUnsafeWeights?: boolean;
             /** @description Ordered CLI tokens passed verbatim to the engine. */
             engineArgs?: string[];
             /**
@@ -1776,7 +1794,12 @@ export type components = {
         SleepLevel: SleepLevel;
     };
     responses: never;
-    parameters: never;
+    parameters: {
+        /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+        ActorHeader: string;
+        /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+        ActorRolesHeader: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -1838,7 +1861,12 @@ export interface operations {
     deployModel: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -1963,7 +1991,12 @@ export interface operations {
     updateModel: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description Immutable model configuration name */
                 modelName: string;
@@ -2047,7 +2080,12 @@ export interface operations {
                 /** @description Immediately remove configuration, routing, lifecycle, and capacity bookkeeping without contacting the worker. This can orphan a live runner process and must only be used after an operator has confirmed that no runner remains. Force deletion also clears a stranded move transaction; ordinary deletion clears a failed move that has already entered replacement cleanup. */
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2239,7 +2277,12 @@ export interface operations {
     sleepModel: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2298,7 +2341,12 @@ export interface operations {
     wakeModel: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2360,7 +2408,12 @@ export interface operations {
                 /** @description Remove runtime instance bookkeeping without contacting the worker, retaining the model configuration in STOPPED state. This can orphan a live process and is intended only for failed starts whose absence has been confirmed by an operator. */
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2431,7 +2484,12 @@ export interface operations {
     startModel: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2511,7 +2569,12 @@ export interface operations {
     createModelInstance: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2582,7 +2645,12 @@ export interface operations {
     deleteModelInstance: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2652,7 +2720,12 @@ export interface operations {
     moveModelInstance: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 modelName: string;
                 instanceId: string;
@@ -2733,7 +2806,12 @@ export interface operations {
     sleepModelInstance: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -2794,7 +2872,12 @@ export interface operations {
     wakeModelInstance: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description The model name (routing key) */
                 modelName: string;
@@ -3095,7 +3178,12 @@ export interface operations {
     refreshCatalog: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3142,7 +3230,12 @@ export interface operations {
     importRunner: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description Catalog entry id. */
                 id: string;
@@ -3192,7 +3285,12 @@ export interface operations {
     uninstallRunner: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description Catalog entry id. */
                 id: string;
@@ -3354,7 +3452,12 @@ export interface operations {
     clearAllNotifications: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3399,7 +3502,12 @@ export interface operations {
     markNotificationRead: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description Notification ID */
                 id: string;
@@ -3447,7 +3555,12 @@ export interface operations {
     markAllNotificationsRead: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3492,7 +3605,12 @@ export interface operations {
     removeNotification: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Asserted acting user, forwarded by the dashboard BFF after JWT verification. Honoured only when the request authenticates with the service bearer token; otherwise ignored. Absent means "service". */
+                "X-Sardeenz-Actor"?: components["parameters"]["ActorHeader"];
+                /** @description Comma-separated asserted roles of the acting user. Recorded as an assertion only, never used for authorization. Honoured only when the request authenticates with the service bearer token. */
+                "X-Sardeenz-Actor-Roles"?: components["parameters"]["ActorRolesHeader"];
+            };
             path: {
                 /** @description Notification ID */
                 id: string;

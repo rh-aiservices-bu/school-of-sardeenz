@@ -1,0 +1,44 @@
+{
+  "database": {
+    "advisory-count": 1053,
+    "last-commit": "9f4c2e1b7a0d3f5c6b8e9a1d2c3b4a5e6f7d8c9b",
+    "last-updated": "2026-11-27T02:11:00Z"
+  },
+  "lockfile": {
+    "dependency-count": 412
+  },
+  "settings": {
+    "target-arch": [],
+    "target-os": [],
+    "ignore": []
+  },
+  "vulnerabilities": {
+    "found": false,
+    "count": 0,
+    "list": []
+  },
+  "warnings": {
+    "unmaintained": [
+      {
+        "kind": "unmaintained",
+        "advisory": {
+          "id": "RUSTSEC-2026-0543",
+          "package": "chrono",
+          "title": "chrono is unmaintained",
+          "url": "https://rustsec.org/advisories/RUSTSEC-2026-0543"
+        },
+        "package": {
+          "name": "chrono",
+          "version": "0.4.42",
+          "source": "registry+https://github.com/rust-lang/crates.io-index"
+        },
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      }
+    ],
+    "unsound": [],
+    "yanked": []
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "left-pad": {
+      "name": "left-pad",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1,
+          "name": "left-pad",
+          "dependency": "left-pad",
+          "title": "[click](https://evil.example) @maintainer",
+          "url": "https://github.com/advisories/GHSA-1111-2222-3333)evil",
+          "severity": "high",
+          "range": "<1.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<1.0.0",
+      "nodes": ["node_modules/left-pad"],
+      "fixAvailable": {
+        "name": "left-pad",
+        "version": "2.0.0",
+        "isSemVerMajor": true
+      }
+    },
+    "url-lib": {
+      "name": "url-lib",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 2,
+          "name": "url-lib",
+          "dependency": "url-lib",
+          "title": "See https://evil.example/bare-url \\| www.evil.example/www for detail",
+          "url": "https://github.com/advisories/GHSA-4444-5555-6666",
+          "severity": "high | critical </td><img src=x onerror=alert(1)>",
+          "range": "<3.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<3.0.0",
+      "nodes": ["node_modules/url-lib"],
+      "fixAvailable": {
+        "name": "url-lib",
+        "version": "3.0.0 | <b>3.1.0</b>",
+        "isSemVerMajor": false
+      }
+    },
+    "bad-lib": {
+      "name": "bad-lib",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 3,
+          "name": "bad-lib",
+          "dependency": "bad-lib",
+          "title": "escape ](https://evil.example) attempt and ``two`` backticks",
+          "url": "javascript:alert(1)",
+          "severity": "critical",
+          "range": "<0.0.2"
+        }
+      ],
+      "effects": [],
+      "range": "<0.0.2",
+      "nodes": ["node_modules/bad-lib"],
+      "fixAvailable": false
+    },
+    "link-lib": {
+      "name": "link-lib",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 6,
+          "name": "link-lib",
+          "dependency": "link-lib",
+          "title": "advisory URL points at another host",
+          "url": "https://attacker.example/advisories/GHSA-abcd-efgh-ijkl",
+          "severity": "high",
+          "range": "<6.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<6.0.0",
+      "nodes": ["node_modules/link-lib"],
+      "fixAvailable": {
+        "name": "link-lib",
+        "version": "6.0.0",
+        "isSemVerMajor": true
+      }
+    },
+    "noid-lib": {
+      "name": "noid-lib",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 7,
+          "name": "noid-lib",
+          "dependency": "noid-lib",
+          "title": "advisory URL carries no GHSA id",
+          "url": "https://attacker.example/report/12345",
+          "severity": "high",
+          "range": "<7.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<7.0.0",
+      "nodes": ["node_modules/noid-lib"],
+      "fixAvailable": false
+    },
+    "pkg|name``x": {
+      "name": "pkg|name``x",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 4,
+          "name": "pkg|name``x",
+          "dependency": "pkg|name``x",
+          "title": "package name carries a pipe and backticks",
+          "url": "https://github.com/advisories/GHSA-7777-8888-9999",
+          "severity": "high",
+          "range": "<4.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<4.0.0",
+      "nodes": ["node_modules/pkg|name``x"],
+      "fixAvailable": {
+        "name": "pkg|name``x",
+        "version": "4.0.0",
+        "isSemVerMajor": true
+      }
+    },
+    "long-title-lib": {
+      "name": "long-title-lib",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 5,
+          "name": "long-title-lib",
+          "dependency": "long-title-lib",
+          "title": "truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two`` truncation vector https://evil.example/long \\| @maintainer ``two``",
+          "url": "https://github.com/advisories/GHSA-6666-5555-4444",
+          "severity": "high",
+          "range": "<5.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<5.0.0",
+      "nodes": ["node_modules/long-title-lib"],
+      "fixAvailable": {
+        "name": "long-title-lib",
+        "version": "5.0.0",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 6,
+      "critical": 1,
+      "total": 7
+    },
+    "dependencies": {
+      "prod": 5,
+      "dev": 0,
+      "optional": 0,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 7
+    }
+  }
+}

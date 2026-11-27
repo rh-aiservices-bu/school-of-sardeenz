@@ -24,6 +24,7 @@ import { NotificationService } from './services/notification.js';
 import { CatalogService } from './services/catalog-service.js';
 import { ModuleStoreService } from './services/module-store.js';
 import { WeightsBrowserService } from './services/weights-browser.js';
+import { WeightsPolicyService } from './services/weights-policy.js';
 import { ProxyProtocolsService } from './services/proxy-protocols.js';
 import { MoveOrchestrationService } from './services/move-orchestration.js';
 import { StubImporter, OrasImporter, type SifImporter } from './services/sif-importer.js';
@@ -125,6 +126,7 @@ async function main(): Promise<void> {
     notifications,
   );
   const weightsBrowser = new WeightsBrowserService(config.weightsDir, notificationLogger);
+  const weightsPolicy = new WeightsPolicyService(notificationLogger);
   const createWorkerClient = (baseUrl: string) =>
     new WorkerClient({ baseUrl, token: config.workerToken });
   const startupLogCapture = new StartupLogCaptureService(
@@ -197,6 +199,7 @@ async function main(): Promise<void> {
       catalogService,
       moduleStore,
       weightsBrowser,
+      weightsPolicy,
       proxyProtocols,
       createRunnerClient: (host, port) => new RunnerClient({ host, port }),
       createWorkerClient,

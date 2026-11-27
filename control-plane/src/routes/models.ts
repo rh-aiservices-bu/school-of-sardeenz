@@ -37,12 +37,14 @@ interface DeployBody {
   displayName?: string;
   pinned?: boolean;
   allowCoLocation?: boolean;
+  allowUnsafeWeights?: boolean;
 }
 
 type UpdateModelBody = Omit<DeployBody, 'modelName' | 'tensorParallel' | 'pinned'> & {
   tensorParallel: number;
   pinned: boolean;
   allowCoLocation: boolean;
+  allowUnsafeWeights: boolean;
 };
 
 interface MoveBody {
@@ -557,6 +559,7 @@ async function deployFromRecord(
         engineArgs: record.engineArgs ?? undefined,
         runtimeModule: record.runtimeModule ?? undefined,
         servedModelName: record.servedModelName ?? undefined,
+        allowUnsafeWeights: record.allowUnsafeWeights,
         protocol: runnerMeta.protocol,
         entrypoint: runnerMeta.entrypoint,
         devices: result.devices,
@@ -739,6 +742,7 @@ async function deployFromRecord(
           engineArgs: record.engineArgs ?? undefined,
           runtimeModule: record.runtimeModule ?? undefined,
           servedModelName: record.servedModelName ?? undefined,
+          allowUnsafeWeights: record.allowUnsafeWeights,
           protocol: runnerMeta.protocol,
           entrypoint: runnerMeta.entrypoint,
           devices: reclaimed.devices,
@@ -987,6 +991,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       throw ControlPlaneError.invalidRequest('allowCoLocation must be a boolean');
     }
 
+    if (body.allowUnsafeWeights !== undefined && typeof body.allowUnsafeWeights !== 'boolean') {
+      throw ControlPlaneError.invalidRequest('allowUnsafeWeights must be a boolean');
+    }
+
     if (
       body.runtimeModule !== undefined &&
       (typeof body.runtimeModule !== 'string' || !RUNTIME_MODULE_PATTERN.test(body.runtimeModule))
@@ -1035,6 +1043,21 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       }
     }
 
+    // Advisory early refusal (#336): the runner shim inside the SIF is the enforcement point;
+    // this 400 only gives the operator feedback at the deploy form instead of a failed start.
+    // Covers the rc4→rc5 window in which the shipped shim ignores the env var. Fail-open on an
+    // unreadable directory (the service logs and returns []).
+    if (body.allowUnsafeWeights !== true) {
+      const refused = await deps.weightsPolicy.findRefusedWeightFiles(body.modelPath);
+      if (refused.length > 0) {
+        throw ControlPlaneError.invalidRequest(
+          `modelPath contains pickle-based weight files (${refused.join(', ')}) that can ` +
+            'execute arbitrary code on workers. Convert to safetensors, or deploy with ' +
+            'allowUnsafeWeights (SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1) if you trust their source',
+        );
+      }
+    }
+
     let record: ModelRecord;
     try {
       record = await deps.modelRepository.create({
@@ -1051,6 +1074,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         displayName: trimmedDisplayName,
         pinned: body.pinned,
         allowCoLocation: body.allowCoLocation,
+        allowUnsafeWeights: body.allowUnsafeWeights,
       });
     } catch (err) {
       if (err instanceof Error && err.message.includes('unique')) {
@@ -1384,6 +1408,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         servedModelName: record?.servedModelName ?? undefined,
         pinned: record?.pinned ?? false,
         allowCoLocation: record?.allowCoLocation ?? false,
+        allowUnsafeWeights: record?.allowUnsafeWeights ?? false,
         instances: instances.map((instance) =>
           toInstanceDetail(
             instance,
@@ -1460,6 +1485,9 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
       if (typeof body.allowCoLocation !== 'boolean') {
         throw ControlPlaneError.invalidRequest('allowCoLocation must be a boolean');
       }
+      if (typeof body.allowUnsafeWeights !== 'boolean') {
+        throw ControlPlaneError.invalidRequest('allowUnsafeWeights must be a boolean');
+      }
       if (
         body.runtimeModule !== undefined &&
         (typeof body.runtimeModule !== 'string' || !RUNTIME_MODULE_PATTERN.test(body.runtimeModule))
@@ -1508,6 +1536,19 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
         }
       }
 
+      // Advisory early refusal (#336) — see the deploy route's note: the shim enforces, this
+      // only 400s at the edit form. Fail-open on an unreadable directory.
+      if (body.allowUnsafeWeights !== true) {
+        const refused = await deps.weightsPolicy.findRefusedWeightFiles(body.modelPath);
+        if (refused.length > 0) {
+          throw ControlPlaneError.invalidRequest(
+            `modelPath contains pickle-based weight files (${refused.join(', ')}) that can ` +
+              'execute arbitrary code on workers. Convert to safetensors, or deploy with ' +
+              'allowUnsafeWeights (SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1) if you trust their source',
+          );
+        }
+      }
+
       configurationUpdateInFlight.add(modelName);
       try {
         const updated = await deps.modelRepository.update(modelName, {
@@ -1523,6 +1564,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: RouteDeps): void
           displayName: trimmedDisplayName,
           pinned: body.pinned,
           allowCoLocation: body.allowCoLocation,
+          allowUnsafeWeights: body.allowUnsafeWeights,
         });
         if (!updated) throw ControlPlaneError.modelNotFound(modelName);
         app.log.info({ modelName }, 'Stopped model configuration updated');

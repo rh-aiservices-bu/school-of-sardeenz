@@ -119,6 +119,7 @@ Key responsibilities:
 - **Worker pool management.** Detects workers joining or leaving the pool dynamically without requiring a restart. A worker's `info`, `heartbeat` and `memory` keys all carry a TTL of four heartbeat intervals (default 20 s), so a worker that dies without deregistering stops being discoverable, and the leader deletes all three keys when it reaps a dead worker. A worker whose `info` key has vanished — reaped, or expired while its `/healthz` probe was failing — re-registers on its next successful heartbeat tick, so a transiently unreachable worker rejoins as a new pool member instead of staying invisible. That TTL is derived, never configured: keep `SARDEENZ_HEARTBEAT_INTERVAL_MS` at or below a quarter of `SARDEENZ_WORKER_HEARTBEAT_TIMEOUT_SECS` (defaults 5 s and 30 s) so a worker's keys never outlive the control plane's own liveness horizon. A worker image that predates this behaviour cannot re-register and needs a process restart after being reaped.
 - **Reconciliation.** The leader runs a periodic tick that heals divergence between Redis/Valkey state, workers and runners. Reconciliation also runs the opposite direction: each tick the leader lists every reachable worker's registry (`GET /runners`) and stops runners whose `instanceId` has no control-plane record — after a second consecutive observation — publishing `RUNNER_ORPHANED`; if the control plane holds no instance records at all it refuses (mass divergence, #241). The same mass-divergence refusal guards the instance table itself: when Redis holds no instance records while the Postgres ledger still has rows, every row looks orphaned at once and the prune step deletes nothing, retaining the only durable record of which runners exist (and holding the VRAM their live processes still occupy) until Redis state returns (#328; recovery is #241, M23).
 - **Runner catalog + SIF import.** Loads a catalog of available runner SIFs and imports them on demand by pulling signed SIFs from an OCI registry (ORAS) onto the shared module store — see [ADR-018](adrs/adr-018-runner-catalog-oras-distribution.md).
+- **Audit line.** Every mutating `/api/v1` request emits one structured JSON log line recording the asserted actor, action, target and outcome — attribution for investigation, not authorization (see [Audit Log](../usage/deployment-security.md#audit-log)).
 
 ### Admin Dashboard
 
@@ -156,6 +157,10 @@ Each worker runs a three-layer process architecture:
    - Reports device memory via `GET /memory-report` — for the shipped shims this is a
      whole-device observation (`attribution: "device"`; the shim process owns no CUDA pool), not
      a per-runner figure; the worker's NVML path remains the process-attributed authority.
+   - Refuses pickle-based weight files at startup (`.bin`, `.pt`, `.pth`, `.ckpt`, `.pkl`,
+     `.pickle`, `.joblib`) unless the model was deployed with the `allowUnsafeWeights` opt-in —
+     write access to the weights volume is code execution on every worker, so the default is deny
+     (see [Model weights trust boundary](../usage/deployment-security.md#model-weights-trust-boundary))
 
 3. **Engine** (vLLM, Triton, etc.) — the unmodified inference engine, packaged in the SIF and run by `apptainer exec`. The engine has no knowledge of Sardeenz.
 

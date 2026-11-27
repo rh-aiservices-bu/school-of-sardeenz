@@ -608,3 +608,94 @@ describe('POST /runners idempotency (#288)', () => {
     }
   });
 });
+
+// The weights opt-in crosses the CP→worker edge as a boolean and must survive into the launch
+// spec the launcher receives (#336); garbage is rejected, never coerced.
+describe('POST /runners weights opt-in (#336)', () => {
+  async function buildHarness() {
+    const specs: LaunchSpec[] = [];
+    const capturing: RunnerLauncher = {
+      serializeColdStarts: false,
+      start: (spec: LaunchSpec): Promise<LaunchHandle> => {
+        specs.push(spec);
+        return Promise.resolve({
+          host: 'localhost',
+          port: spec.port,
+          enginePort: spec.enginePort,
+          stop: () => Promise.resolve(),
+        });
+      },
+    };
+    const manager = new RunnerManager(makeConfig(), makeRegistration(), capturing);
+    const server = Fastify({ logger: false });
+    registerRunnerRoutes(
+      server,
+      manager,
+      buildEntrypointAllowlist(makeConfig().apptainer.runnerEntrypoint),
+    );
+    const baseUrl = await server.listen({ port: 0, host: '127.0.0.1' });
+    return {
+      specs,
+      baseUrl,
+      close: async () => {
+        await manager.stopAll();
+        await server.close();
+      },
+    };
+  }
+
+  function makeBody(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      modelName: 'weights-route-model',
+      instanceId: 'inst-weights-route',
+      runnerType: 'vllm',
+      modelPath: '/models/weights',
+      requiredMemory: 1024 * 1024 * 1024,
+      tensorParallel: 1,
+      devices: [{ deviceIndex: 0, deviceType: 'CUDA' }],
+      ...overrides,
+    });
+  }
+
+  function post(baseUrl: string, body: string) {
+    return fetch(`${baseUrl}/runners`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+  }
+
+  it('rejects a non-boolean allowUnsafeWeights and launches nothing', async () => {
+    const { specs, baseUrl, close } = await buildHarness();
+    try {
+      const res = await post(baseUrl, makeBody({ allowUnsafeWeights: 'maybe' }));
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe('BAD_REQUEST');
+      expect(specs).toHaveLength(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it('forwards allowUnsafeWeights into the launch spec', async () => {
+    const { specs, baseUrl, close } = await buildHarness();
+    try {
+      const res = await post(baseUrl, makeBody({ allowUnsafeWeights: true }));
+      expect(res.status).toBe(201);
+      expect(specs[0]?.allowUnsafeWeights).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('omits allowUnsafeWeights from the launch spec by default', async () => {
+    const { specs, baseUrl, close } = await buildHarness();
+    try {
+      const res = await post(baseUrl, makeBody());
+      expect(res.status).toBe(201);
+      expect(specs[0]?.allowUnsafeWeights).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+});
