@@ -88,7 +88,12 @@ impl RedisTestHarness {
                 probe_timeout,
             },
             api_token: None,
+            // #332 added `inference_api_keys` after this feature-gated target was
+            // last compiled, so the literal was missing it (E0063 — invisible to CI,
+            // which never enables `redis-integration`); repaired here (#300).
+            inference_api_keys: Vec::new(),
             max_body_bytes: 1_048_576,
+            max_buffered_bytes: 268_435_456,
             max_concurrent_forwards: 0,
             max_concurrent_forwards_per_model: 0,
         }

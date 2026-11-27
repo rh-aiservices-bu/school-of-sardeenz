@@ -3,6 +3,7 @@ mod redis_sync;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::body_budget::BufferedBodyBudget;
 use crate::config::Config;
 use crate::forwarding::{CircuitBreaker, ForwardingClient, ForwardingLimiter, WeightedRoundRobin};
 use crate::inference_tracker::InferenceTracker;
@@ -23,6 +24,8 @@ pub struct AppState {
     pub circuit_breaker: CircuitBreaker,
     pub forwarding_client: ForwardingClient,
     pub forwarding_limiter: ForwardingLimiter,
+    /// Global admission budget over concurrently buffered inference bodies (#300).
+    pub buffered_body_budget: BufferedBodyBudget,
     pub inference_tracker: InferenceTracker,
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     proxy_id: Arc<str>,
@@ -59,6 +62,7 @@ impl AppState {
             config.max_concurrent_forwards,
             config.max_concurrent_forwards_per_model,
         );
+        let buffered_body_budget = BufferedBodyBudget::new(config.max_buffered_bytes);
         let inference_tracker =
             InferenceTracker::new(config.redis_url.clone(), config.redis_key_prefix.clone());
 
@@ -71,6 +75,7 @@ impl AppState {
             circuit_breaker,
             forwarding_client,
             forwarding_limiter,
+            buffered_body_budget,
             inference_tracker,
             metrics_handle,
             proxy_id: Arc::from(uuid::Uuid::new_v4().to_string()),

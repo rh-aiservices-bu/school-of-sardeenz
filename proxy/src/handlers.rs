@@ -117,15 +117,60 @@ fn log_body_too_large(
     }
 }
 
-/// Map a `to_bytes` failure: overflow → 413 with a warn log, anything else → 400.
+/// Structured warn at a buffered-body budget rejection (#300). Same
+/// no-model-fabrication rule as `log_body_too_large`: on the OpenAI surface the
+/// model name lives inside the unread body, so only log what the path supplied.
+fn log_budget_exceeded(
+    surface: &'static str,
+    model: Option<&str>,
+    content_length: Option<u64>,
+    budget: usize,
+) {
+    match model {
+        Some(model) => tracing::warn!(
+            surface,
+            model,
+            content_length,
+            budget,
+            "buffered request bodies exceed SARDEENZ_PROXY_MAX_BUFFERED_BYTES"
+        ),
+        None => tracing::warn!(
+            surface,
+            content_length,
+            budget,
+            "buffered request bodies exceed SARDEENZ_PROXY_MAX_BUFFERED_BYTES"
+        ),
+    }
+}
+
+/// The single 503 rejection for an exhausted buffered-body budget. Used by both
+/// the advisory pre-read check and the mid-read classification so the two paths
+/// return byte-identical envelopes.
+fn buffered_body_exceeded() -> ProxyError {
+    ProxyError::Overloaded(
+        "buffered body budget exceeded (SARDEENZ_PROXY_MAX_BUFFERED_BYTES); retry later"
+            .to_string(),
+    )
+}
+
+/// Map a `to_bytes` failure: budget exhaustion → 503 overloaded, overflow → 413
+/// with a warn log, anything else → 400.
 fn body_read_error(
     error: axum::Error,
     surface: &'static str,
     model: Option<&str>,
     content_length: Option<u64>,
     limit: usize,
+    buffered_budget: usize,
 ) -> ProxyError {
     use std::error::Error as _;
+    // The budget marker sits deeper in the chain than `LengthLimitError` (our
+    // wrapper's error is re-boxed by `Body::new` and again by `to_bytes`), so it
+    // takes a depth-agnostic walk rather than the single `source()` hop below.
+    if crate::body_budget::is_budget_exceeded(&error) {
+        log_budget_exceeded(surface, model, content_length, buffered_budget);
+        return buffered_body_exceeded();
+    }
     let overflow = error
         .source()
         .and_then(|source| source.downcast_ref::<http_body_util::LengthLimitError>())
@@ -180,13 +225,24 @@ async fn handle_inference_inner(
     let (parts, body) = request.into_parts();
     let limit = state.config.max_body_bytes;
     let content_length = declared_content_length(&parts);
+    // Per-request cap first (#211): a 413 keeps precedence over the aggregate 503.
     if content_length.is_some_and(|len| len > limit as u64) {
         log_body_too_large("openai", None, content_length, limit);
         return Err(ProxyError::RequestTooLarge { limit });
     }
-    let body_bytes = axum::body::to_bytes(body, limit)
-        .await
-        .map_err(|e| body_read_error(e, "openai", None, content_length, limit))?;
+    // Advisory pre-read check against the aggregate budget: fail before buffering
+    // up to the budget just to fail. Frame counting below is authoritative, so a
+    // lying or absent Content-Length gains nothing.
+    if !state.buffered_body_budget.admits(content_length.unwrap_or(0)) {
+        log_budget_exceeded("openai", None, content_length, state.config.max_buffered_bytes);
+        return Err(buffered_body_exceeded());
+    }
+    // The guard is held for the whole handler scope — through parking and
+    // forwarding — so the buffered bytes stay counted until the body drops.
+    let (budgeted, _budget_guard) = state.buffered_body_budget.wrap(body);
+    let body_bytes = axum::body::to_bytes(Body::new(budgeted), limit).await.map_err(|e| {
+        body_read_error(e, "openai", None, content_length, limit, state.config.max_buffered_bytes)
+    })?;
 
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::BadRequest(format!("invalid JSON: {e}")))?;
@@ -225,9 +281,26 @@ async fn handle_oip_infer_inner(
         log_body_too_large("oip", Some(model_name.as_str()), content_length, limit);
         return Err(ProxyError::RequestTooLarge { limit });
     }
-    let body_bytes = axum::body::to_bytes(body, limit)
-        .await
-        .map_err(|e| body_read_error(e, "oip", Some(model_name.as_str()), content_length, limit))?;
+    if !state.buffered_body_budget.admits(content_length.unwrap_or(0)) {
+        log_budget_exceeded(
+            "oip",
+            Some(model_name.as_str()),
+            content_length,
+            state.config.max_buffered_bytes,
+        );
+        return Err(buffered_body_exceeded());
+    }
+    let (budgeted, _budget_guard) = state.buffered_body_budget.wrap(body);
+    let body_bytes = axum::body::to_bytes(Body::new(budgeted), limit).await.map_err(|e| {
+        body_read_error(
+            e,
+            "oip",
+            Some(model_name.as_str()),
+            content_length,
+            limit,
+            state.config.max_buffered_bytes,
+        )
+    })?;
 
     run_inference(state, model_name, parts, body_bytes, Protocol::Oip).await
 }

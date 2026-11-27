@@ -256,6 +256,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   working through a rotation without the browser ever seeing it. This is a single shared secret
   for quick protection of a test or demo Route — no per-client identity, quotas or rate limiting;
   a gateway remains the production answer.
+- **The proxy bounds the aggregate of concurrently buffered inference bodies (#300).**
+  `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`, 256 MiB; `0` = unlimited, a WARN-logged
+  opt-out) counts every byte the `/openai/*` and `/oip/*` surfaces hold buffered — through parking
+  and forwarding — against one global budget, released on completion or cancellation, and rejects a
+  request that would cross it with the existing `503` envelope (`type: "overloaded"`, message naming
+  the variable) before or during the read. Per-request over-limit behaviour (413
+  `request_too_large`) is unchanged and takes precedence; the count is frame-based, so a lying or
+  absent `Content-Length` cannot bypass it. The manifest sets 256 MiB against the proxy's 1 GiB
+  memory limit (a parked body counts against both this budget and `SARDEENZ_PARKING_MAX_BYTES`), and
+  a new `sardeenz_proxy_buffered_body_bytes` gauge exposes the in-use bytes.
 
 ### Fixed
 

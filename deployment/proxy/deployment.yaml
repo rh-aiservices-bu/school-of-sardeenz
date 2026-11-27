@@ -41,6 +41,13 @@ spec:
             # Peak memory scales with concurrent maximum-size bodies; see deployment/proxy/README.md.
             - name: SARDEENZ_PROXY_MAX_BODY_BYTES
               value: '33554432'
+            # Aggregate admission budget over all concurrently buffered inference bodies
+            # (#300). 256 MiB = 25 % of the 1Gi container memory limit below, leaving
+            # headroom for routing state, stacks and response streaming. A parked body
+            # counts against both this and SARDEENZ_PARKING_MAX_BYTES. 0 disables
+            # enforcement (a WARN-logged opt-out); the gauge always runs.
+            - name: SARDEENZ_PROXY_MAX_BUFFERED_BYTES
+              value: '268435456'
             - name: SARDEENZ_API_TOKEN
               valueFrom:
                 secretKeyRef:

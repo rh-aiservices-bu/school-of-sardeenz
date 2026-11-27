@@ -45,6 +45,10 @@ pub struct TestProxyConfig {
     pub cb_failure_window: Duration,
     pub cb_recovery_timeout: Duration,
     pub max_body_bytes: usize,
+    /// Aggregate buffered-body budget (#300). The default is the enforcing
+    /// production value so every existing test runs under enforcement; their
+    /// bodies are kilobytes at most.
+    pub max_buffered_bytes: usize,
     pub max_concurrent_forwards: usize,
     pub max_concurrent_forwards_per_model: usize,
     /// Optional static inference API keys (#332). Empty = key disabled.
@@ -63,6 +67,7 @@ impl Default for TestProxyConfig {
             cb_failure_window: Duration::from_secs(30),
             cb_recovery_timeout: Duration::from_secs(15),
             max_body_bytes: 33_554_432,
+            max_buffered_bytes: 268_435_456,
             max_concurrent_forwards: 0,
             max_concurrent_forwards_per_model: 0,
             inference_api_keys: Vec::new(),
@@ -184,6 +189,7 @@ impl TestProxy {
             api_token: None,
             inference_api_keys: cfg.inference_api_keys,
             max_body_bytes: cfg.max_body_bytes,
+            max_buffered_bytes: cfg.max_buffered_bytes,
             max_concurrent_forwards: cfg.max_concurrent_forwards,
             max_concurrent_forwards_per_model: cfg.max_concurrent_forwards_per_model,
         };

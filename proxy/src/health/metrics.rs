@@ -48,6 +48,10 @@ pub fn describe_metrics() {
     );
     describe_gauge!("sardeenz_proxy_active_connections", "Currently active forwarded connections");
     describe_gauge!(
+        "sardeenz_proxy_buffered_body_bytes",
+        "Bytes currently held in buffered inference request bodies"
+    );
+    describe_gauge!(
         "sardeenz_proxy_parked_connections",
         "Currently parked connections, labeled by model"
     );

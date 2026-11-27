@@ -18,6 +18,12 @@ pub struct Config {
     /// zero-downtime rotation (D2); comparison is constant-time per key.
     pub inference_api_keys: Vec<String>,
     pub max_body_bytes: usize,
+    /// Aggregate admission budget over all concurrently buffered inference
+    /// bodies (#300). Default `268435456` (256 MiB) — enforcement is ON out of
+    /// the box, the same fail-closed precedent as `max_body_bytes`. `0` is an
+    /// explicit, WARN-logged unlimited opt-out (see `main.rs`); counting and the
+    /// `sardeenz_proxy_buffered_body_bytes` gauge still run.
+    pub max_buffered_bytes: usize,
     /// Max concurrently *forwarded* (in-flight upstream) requests across all
     /// models. `0` = unlimited. Deliberately independent of the parking
     /// limits — a request parked waiting for a sleeping model to wake holds
@@ -99,6 +105,7 @@ impl Config {
                 "SARDEENZ_PROXY_INFERENCE_API_KEY",
             ))?,
             max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "33554432")?,
+            max_buffered_bytes: parse_env("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "268435456")?,
             max_concurrent_forwards: parse_env("SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS", "0")?,
             max_concurrent_forwards_per_model: parse_env(
                 "SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL",
@@ -168,8 +175,18 @@ fn parse_inference_api_keys(
 mod tests {
     use super::*;
 
+    /// Serialises the `from_env` cases: cargo runs lib tests on parallel
+    /// threads, and these mutate the process-global environment.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        // A panic in one case must not poison the others.
+        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn default_config_parses() {
+        let _env = env_lock();
         // Clear any env vars that might interfere
         for key in [
             "SARDEENZ_PROXY_LISTEN_ADDR",
@@ -180,6 +197,7 @@ mod tests {
             "SARDEENZ_API_TOKEN",
             "SARDEENZ_PROXY_INFERENCE_API_KEY",
             "SARDEENZ_PROXY_MAX_BODY_BYTES",
+            "SARDEENZ_PROXY_MAX_BUFFERED_BYTES",
         ] {
             std::env::remove_var(key);
         }
@@ -194,8 +212,46 @@ mod tests {
         assert_eq!(config.api_token, None);
         assert!(config.inference_api_keys.is_empty());
         assert_eq!(config.max_body_bytes, 33_554_432);
+        assert_eq!(
+            config.max_buffered_bytes, 268_435_456,
+            "the aggregate body budget enforces out of the box (#300)"
+        );
         assert_eq!(config.max_concurrent_forwards, 0);
         assert_eq!(config.max_concurrent_forwards_per_model, 0);
+    }
+
+    #[test]
+    fn explicit_buffered_budget_parses() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "12345");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES");
+        assert_eq!(config.unwrap().max_buffered_bytes, 12_345);
+    }
+
+    #[test]
+    fn zero_buffered_budget_parses() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "0");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES");
+        // `0` = the explicit unlimited opt-out; the startup WARN that announces it
+        // lives in `main.rs` (after the tracing subscriber exists), so it is not
+        // assertable from this crate's unit tests.
+        assert_eq!(config.unwrap().max_buffered_bytes, 0);
+    }
+
+    #[test]
+    fn invalid_buffered_budget_fails() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "banana");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES");
+        let error = config.expect_err("a non-numeric budget must fail startup");
+        assert!(
+            error.to_string().contains("invalid value for SARDEENZ_PROXY_MAX_BUFFERED_BYTES"),
+            "message should name the variable: {error}"
+        );
     }
 
     // `parse_inference_api_keys` takes the raw `std::env::var` result, so these

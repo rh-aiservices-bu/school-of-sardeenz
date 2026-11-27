@@ -17,16 +17,53 @@ Both inference surfaces (`/openai/*` and `/oip/*`) buffer the whole request body
 rejected before routing with the proxy's JSON error envelope — `413`, `type: "request_too_large"`, and
 a message naming the configured limit and the variable.
 
-The limit bounds one request, not total proxy memory: parked bodies are budgeted separately by
-`SARDEENZ_PARKING_MAX_BYTES` (1 GiB), and the container memory limit in `deployment.yaml` is
-`1Gi` — the hard ceiling. In-flight buffers are not accounted anywhere, and
-`SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS` defaults to `0` (no cap), so at the default body limit
-roughly 32 simultaneous maximum-size requests can fill that ceiling before any parking or
-forwarding decision is made. Keep the inference Service cluster-internal or behind an authenticated
-gateway that enforces its own body cap, and lower `SARDEENZ_PROXY_MAX_BODY_BYTES` where that
-exposure is unacceptable; raise the memory limit only after accounting for concurrency. An
-OpenShift Route in front of the proxy may impose its own, lower body limit, in which case the
+The limit bounds one request, not total proxy memory — the aggregate of concurrently buffered
+bodies is bounded separately by `SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (see
+[Buffered-body budget](#buffered-body-budget)), and the container memory limit in `deployment.yaml`
+(`1Gi`) remains the hard ceiling. Keep the inference Service cluster-internal or behind an
+authenticated gateway that enforces its own body cap, and lower `SARDEENZ_PROXY_MAX_BODY_BYTES`
+where that exposure is unacceptable; raise the memory limit only after accounting for concurrency.
+An OpenShift Route in front of the proxy may impose its own, lower body limit, in which case the
 router rejects the request first with its own error shape.
+
+## Buffered-body budget
+
+`SARDEENZ_PROXY_MAX_BUFFERED_BYTES` (default `268435456`, 256 MiB) is a global admission budget
+over **all bytes of request bodies currently buffered in memory** by the `/openai/*` and `/oip/*`
+surfaces. The counter is frame-based, so it is computed from the bytes actually received: a lying,
+too-small or absent `Content-Length` cannot bypass it, and chunked framing is counted exactly like
+declared framing. A request that would cross the budget is rejected with the proxy's JSON error
+envelope — `503`, `type: "overloaded"`, message
+`buffered body budget exceeded (SARDEENZ_PROXY_MAX_BUFFERED_BYTES); retry later` — either on its
+declared `Content-Length` before the read starts (advisory) or as soon as a data frame would cross
+the budget (authoritative). Admission never waits, so the budget cannot deadlock against parking or
+forwarding permits.
+
+The per-request cap from the previous section is unchanged and takes precedence: a body with a
+declared `Content-Length` over `SARDEENZ_PROXY_MAX_BODY_BYTES` still gets `413 request_too_large`,
+never the `503`. One sizing caveat, not a code path: with the budget configured **below**
+`SARDEENZ_PROXY_MAX_BODY_BYTES`, a _chunked_ body that would earn a `413` can trip the frame
+counter first and surface the `503` instead — so keep the budget well above the per-request cap
+(the shipped 256 MiB against 32 MiB does) and lower `SARDEENZ_PROXY_MAX_BODY_BYTES` together with
+the budget, never on its own.
+
+Bytes stay counted from the first data frame until the in-memory copy is dropped — **through
+parking and through forwarding** — and are released on completion or on cancellation. A parked body
+therefore counts against **both** this budget and `SARDEENZ_PARKING_MAX_BYTES`: the two budgets are
+additive, not alternatives. That is not a deadlock — a parked request waits only for the model wake,
+bounded by `SARDEENZ_PARKING_TIMEOUT_SECS` (120 s by default), while read admission never blocks —
+but a long wake storm holding parked bytes can saturate this budget and `503` new requests until
+the parked bodies time out or the model wakes. Size the budget above the parked working set you
+expect during a wake.
+
+Sizing: the deployed value is 256 MiB, 25 % of the proxy's `1Gi` container memory limit, leaving
+headroom for per-connection stacks, routing state and response streaming. Peak buffered memory is
+bounded by this value rather than by concurrency, so raise it and the memory limit together. `0`
+disables enforcement — an explicit opt-out that logs
+`buffered-body budget enforcement disabled (SARDEENZ_PROXY_MAX_BUFFERED_BYTES=0)` at startup; the
+counter and the gauge keep running either way so the exposure stays visible. Watch
+`sardeenz_proxy_buffered_body_bytes` (admin `/metrics`, no labels) for the current value, and alarm
+when it approaches the configured budget.
 
 ## Inference API key
 

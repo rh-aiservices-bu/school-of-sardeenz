@@ -9,6 +9,7 @@ mod common;
 
 mod test_active_model;
 mod test_body_limit;
+mod test_buffered_body_budget;
 mod test_circuit_breaker;
 mod test_forwarding_limits;
 mod test_health;

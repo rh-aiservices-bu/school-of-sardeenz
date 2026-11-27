@@ -1,4 +1,5 @@
 mod auth;
+mod body_budget;
 mod config;
 mod error;
 mod forwarding;
@@ -69,6 +70,15 @@ async fn main() -> anyhow::Result<()> {
         redis_url = %redact_url(&config.redis_url),
         "starting sardeenz-proxy"
     );
+
+    // Emitted here, not in `Config::from_env`: the subscriber initialised above is what
+    // makes the line visible, and a warn fired before it would be lost. `0` is an
+    // explicit opt-out (#300) — counting and the gauge keep running either way.
+    if config.max_buffered_bytes == 0 {
+        tracing::warn!(
+            "buffered-body budget enforcement disabled (SARDEENZ_PROXY_MAX_BUFFERED_BYTES=0)"
+        );
+    }
 
     // Metrics
     let metrics_handle = health::setup_metrics();
