@@ -194,7 +194,7 @@ directory:
 | No recognized combination                                                    | Deployment fails during runner startup                   |
 
 Detection is separate from the weights-format policy. A Hugging Face directory is served from
-`config.json` plus `*.safetensors`; a `pytorch_model.bin` checkpoint is only *recognised* if the
+`config.json` plus `*.safetensors`; a `pytorch_model.bin` checkpoint is only _recognised_ if the
 model opted in. The sklearn family is opt-in-only too: `*.joblib` and `*.pkl` require
 `allowUnsafeWeights`, while `.bst` and `model.json` do not. See
 [Model weights trust boundary](deployment-security.md#model-weights-trust-boundary) for the full
