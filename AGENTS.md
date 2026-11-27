@@ -40,7 +40,10 @@ Key design facts an agent needs on first pass:
   `sardeenz-redis-credentials`; the `sardeenz` namespace ships default-deny ingress with explicit
   allow NetworkPolicies (flow table in `docs/usage/deployment-security.md` — add a rule per new
   flow); the worker allowlists `POST /runners` `entrypoint` argv against its configured
-  `SARDEENZ_RUNNER_ENTRYPOINT`; the BFF `?token=` query fallback is SSE-routes-only.
+  `SARDEENZ_RUNNER_ENTRYPOINT`; the BFF `?token=` query fallback is SSE-routes-only. The inference
+  port is open unless `SARDEENZ_PROXY_INFERENCE_API_KEY` is set (optional single shared secret, no
+  per-client identity — a gateway remains the production answer); in-namespace traffic is plaintext
+  by design ([ADR-031](docs/architecture/adrs/adr-031-in-namespace-plaintext-traffic.md)).
 
 ## Repository Structure
 
