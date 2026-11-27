@@ -76,6 +76,13 @@ sardeenz/
 - **Package manager:** npm, never pnpm (hardlink store breaks across the container/host mount).
 - **Commit hygiene:** run lint/typecheck before marking work complete. Stage specific files, not
   `git add -A`.
+- **Parallel sessions:** sessions sharing this checkout coordinate through
+  `/workspace/logs/session-bus/` — **absolute paths only**, since a worktree's own `logs/` is a
+  different directory. Read
+  [`docs/development/parallel-sessions.md`](docs/development/parallel-sessions.md) before running a
+  heavy gate while another session is active: CPU lock, shared test database, message bus, merge
+  claim. The CPU-lock line is restated in every subagent brief. Never merge to `dev` without the
+  owner.
 - **Terminology:** engine abstractions are "runners", not "plugins".
 
 ## Project Status

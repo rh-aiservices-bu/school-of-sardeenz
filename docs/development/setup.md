@@ -209,6 +209,10 @@ fix (#325), and that one line was deleted.
 
 Dev servers running on the host write their output to the `logs/` directory in the project root (gitignored). Since the project folder is bind-mounted into the ccbox container, Claude Code can read these logs directly to debug runtime issues without needing output pasted into the conversation.
 
+Parallel sessions coordinate through the same directory — CPU lock, shared test database and a
+message bus. See [`parallel-sessions.md`](parallel-sessions.md) before running a heavy gate while
+another session is active.
+
 ### Starting dev servers with logging
 
 ```bash
