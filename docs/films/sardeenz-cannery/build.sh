@@ -12,5 +12,7 @@ node core/render/events.mjs "$HERE"
 node core/render/video.mjs "$HERE" --fps 24 --workers 3 --out "$HERE/out/video.mp4"
 "$LIB/.venv/bin/python" "$HERE/mix.py"
 "$LIB/.venv/bin/python" "$HERE/tools/srt.py"
-sh core/render/mux.sh "$HERE/out/video.mp4" "$HERE/out/mix.wav" "$HERE/sardeenz-cannery.mp4" 24 0
-node core/render/still.mjs "$HERE" 30 --out "$HERE/out" && cp "$HERE/out/t_30.jpg" "$HERE/poster.jpg"
+sh core/render/mux.sh "$HERE/out/video.mp4" "$HERE/out/mix.wav" "$HERE/out/master.mp4" 24 0
+# the page draws paper grain into every frame, so the master is large: re-encode the picture for the repository
+ffmpeg -loglevel error -y -i "$HERE/out/master.mp4" -c:v libx264 -preset slow -crf 27 -pix_fmt yuv420p -movflags +faststart -c:a copy "$HERE/sardeenz-cannery.mp4"
+ffmpeg -loglevel error -y -ss 35.5 -i "$HERE/sardeenz-cannery.mp4" -frames:v 1 -q:v 2 "$HERE/poster.jpg"
