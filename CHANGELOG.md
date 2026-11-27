@@ -274,6 +274,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that keep `:latest` by policy are out of scope. `.github/dependabot.yml`, the runner-publishing and
   republish runbooks, `containers/README.md`, `deployment/AGENTS.md` and
   `deployment/prereq/README.md` document the entry as a required step and the manual prereq bump.
+- **Secret scanning blocks PRs and advisories are tracked in an issue (#338).** A `secrets` job
+  in CI runs gitleaks 8.30.1 (downloaded by checksum-pinned release, `--redact`) over the pushed
+  commit range on every PR and direct push, with a reviewed `.gitleaks.toml` allowlist scoped to
+  the two credential _templates_ (`targetRules`, so a real AWS key in the same file still fails).
+  A new nightly `advisories.yml` sweeps `npm audit`, `cargo audit` and `pip-audit` (the latter
+  over `#182`'s constrained CI install, never the SIF runtime trees) and files or updates a
+  single `area/security` tracking issue — findings leave the run green, a check that could not
+  execute turns it red. `tests/security/report-advisories.mjs` renders the issue body with
+  committed rehearsal fixtures, neutralising markdown in upstream advisory fields. A new
+  `.github/CODEOWNERS` routes the gates' own configuration (`.gitleaks.toml`, the workflows,
+  Dependabot, the CI constraints and the runner/prereq image inputs) to the maintainer, since a PR
+  can otherwise edit the gate in the same diff as what it catches; it blocks only once
+  **Require review from Code Owners** is enabled on `dev` (repo-owner action).
 
 ### Fixed
 

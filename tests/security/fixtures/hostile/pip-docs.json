@@ -1,0 +1,11 @@
+{
+  "dependencies": [
+    {
+      "name": "mkdocs-material",
+      "version": "9.8.2",
+      "vulns": [],
+      "skip_reason": null
+    }
+  ],
+  "fixes": []
+}

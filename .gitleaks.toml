@@ -1,0 +1,15 @@
+# Reviewed allowlist for the PR secret scan (#338). The built-in default ruleset is the base; only
+# the entries below are silenced, and only for the rules and paths named here. Adding an entry
+# requires the finding it silences (file, rule id, why the value is not a secret).
+[extend]
+useDefault = true
+
+# Committed *templates* carry placeholder credentials by construction. Scoped with targetRules so a
+# real AWS key, JWT, Slack token, … committed to the same file still fails the build.
+[[allowlists]]
+description = "Secret templates: placeholder credentials by design (private-key + generic-api-key only)"
+paths = [
+  '''^deployment/librarian/.*\.example\.yaml$''',
+  '''^\.env\.example$''',
+]
+targetRules = ["private-key", "generic-api-key"]

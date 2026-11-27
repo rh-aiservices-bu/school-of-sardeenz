@@ -1,0 +1,97 @@
+{
+  "database": {
+    "advisory-count": 1053,
+    "last-commit": "9f4c2e1b7a0d3f5c6b8e9a1d2c3b4a5e6f7d8c9b",
+    "last-updated": "2026-11-27T02:11:00Z"
+  },
+  "lockfile": {
+    "dependency-count": 412
+  },
+  "settings": {
+    "target-arch": [],
+    "target-os": [],
+    "ignore": []
+  },
+  "vulnerabilities": {
+    "found": true,
+    "count": 2,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2026-9997",
+          "package": "hostile-crate",
+          "title": "cargo \\| title with a pipe",
+          "description": "The title carries a pre-escaped pipe on purpose.",
+          "date": "2026-11-20",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": 9.8,
+          "url": "https://example.invalid/advisory",
+          "informational": null
+        },
+        "versions": {
+          "patched": [">=1.2.3"],
+          "unaffected": []
+        },
+        "package": {
+          "name": "hostile-crate",
+          "version": "1.2.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index"
+        }
+      },
+      {
+        "advisory": {
+          "id": "RUSTSEC-2026-9998``double",
+          "package": "backtick|crate``x",
+          "title": "[click](https://evil.example) @maintainer",
+          "description": "The id carries a two-backtick run and the crate name a pipe on purpose.",
+          "date": "2026-11-20",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": 7.5,
+          "url": "https://example.invalid/advisory-two",
+          "informational": null
+        },
+        "versions": {
+          "patched": [">=2.0.0", "<b>9.9.9</b>", "| separated"],
+          "unaffected": []
+        },
+        "package": {
+          "name": "backtick|crate``x",
+          "version": "1.0.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index"
+        }
+      }
+    ]
+  },
+  "warnings": {
+    "unmaintained": [
+      {
+        "kind": "unmaintained",
+        "advisory": {
+          "id": "RUSTSEC-2026-0000) @maintainer",
+          "package": "abandoned-crate",
+          "title": "abandoned-crate is unmaintained",
+          "url": "https://rustsec.org/advisories/RUSTSEC-2026-0000"
+        },
+        "package": {
+          "name": "abandoned-crate",
+          "version": "0.9.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index"
+        },
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      }
+    ],
+    "unsound": [],
+    "yanked": []
+  }
+}

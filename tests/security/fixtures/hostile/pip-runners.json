@@ -1,0 +1,37 @@
+{
+  "dependencies": [
+    {
+      "name": "hostile-pkg",
+      "version": "1.0.0",
+      "vulns": [
+        {
+          "id": "GHSA-9999-8888-7777)",
+          "fix_versions": [],
+          "aliases": [],
+          "description": "[click](https://evil.example) \\| @maintainer\nonly the first line is rendered"
+        }
+      ],
+      "skip_reason": null
+    },
+    {
+      "name": "editable-pkg",
+      "version": "0.1.0",
+      "vulns": [],
+      "skip_reason": "[skip](https://evil.example) \\| @maintainer"
+    },
+    {
+      "name": "pyscan-pkg",
+      "version": "2.0.0",
+      "vulns": [
+        {
+          "id": "PYSEC-2026-1234",
+          "fix_versions": ["2.3.0"],
+          "aliases": [],
+          "description": "escape ](https://evil.example) attempt and ``two`` backticks\nonly the first line is rendered"
+        }
+      ],
+      "skip_reason": null
+    }
+  ],
+  "fixes": []
+}
