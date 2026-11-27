@@ -144,6 +144,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   install**: the shims' runtime `dependencies` stay deliberately unpinned because they are
   installed atop the vLLM/MLServer base images inside the SIFs, which already ship
   fastapi/uvicorn/httpx.
+- **The two `deployment/prereq/` backing services are pinned instead of `:latest` (#339).** Valkey
+  moves to `quay.io/sclorg/valkey-8-c10s:20261125@sha256:5ab722e9…` and PostgreSQL to
+  `quay.io/sclorg/postgresql-16-c9s:20261125@sha256:e8f74f91…` — the ADR-030 decision 1 manual-bump
+  form (`name:dated-tag@sha256:<64 hex>`, the multi-arch index digest resolved from the Quay API at
+  bump time). With `imagePullPolicy: IfNotPresent` a moving `:latest` let two nodes that had cached
+  different pulls run different PostgreSQL/Valkey builds from identical manifests; with an immutable
+  digest the running bytes are the pinned ones. The four platform bases keep `:latest` by policy —
+  overlays pin them (#247). Bumping the prereq images stays a documented manual step
+  (`deployment/prereq/README.md`): Dependabot has no ecosystem for raw Kubernetes manifests.
 
 ### Added
 
@@ -222,6 +231,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   worker now forces Model Runner V1 for every kvcached module in the 0.24+ range (`vllm-0.24`,
   `vllm-0.26`) because kvcached only patches Model Runner V2 from vLLM 0.28. The catalog entry is
   pinned to the published `vllm:0.26-rc1` SIF (`sha256:075b3057…`).
+- **CI gate for Dependabot coverage and prereq image pins (#339).**
+  `tests/container-images/verify-dependabot-coverage.mjs` (node builtins only;
+  `make verify-dependabot-coverage`; a step of the CI `quality` job) keys the check on the
+  `runners.yaml` catalog rather than on a blanket directory rule: each catalog entry resolves to its
+  build directories via `runnerType.toLowerCase()` plus a version prefix (`0.26` → `0.26.0`), and
+  each of those directories must have a `docker` entry in `.github/dependabot.yml` or be one of the
+  two documented #233 skips (`vllm` 0.21.0/0.24.0, decision named in the script comment — a stale
+  skip fails too). It also fails when a `docker` entry points at a directory that no longer exists
+  or at a runner directory with no build file, on duplicate docker directories, on a shipped catalog
+  entry with no build directory, and on any `deployment/prereq/` image that is not
+  `name:dated-tag@sha256:<64 hex>` (a `:latest` or digest-less reference). The four platform bases
+  that keep `:latest` by policy are out of scope. `.github/dependabot.yml`, the runner-publishing and
+  republish runbooks, `containers/README.md`, `deployment/AGENTS.md` and
+  `deployment/prereq/README.md` document the entry as a required step and the manual prereq bump.
 
 ### Fixed
 

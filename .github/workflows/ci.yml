@@ -127,6 +127,9 @@ jobs:
       - name: Verify container base images are digest-pinned
         run: node tests/container-images/verify-image-pins.mjs
 
+      - name: Verify Dependabot coverage and prereq image pins
+        run: node tests/container-images/verify-dependabot-coverage.mjs
+
       - name: Codegen drift
         run: |
           npm run codegen -w @sardeenz/types

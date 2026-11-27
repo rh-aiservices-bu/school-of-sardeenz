@@ -99,6 +99,12 @@ signing public key) are in [`deployment/control-plane/`](../../deployment/contro
    the `runtimeModule` a worker execs).
 4. Sign SIFs with the key whose **public** half is distributed to workers and the control plane, so
    `apptainer verify` trusts them at import and exec.
+5. Register `containers/runners/<engine>/<version>` in `.github/dependabot.yml` so its base images
+   keep getting update PRs: a `docker` entry with
+   `directory: /containers/runners/<engine>/<version>` (the fetcher recognises `Containerfile`).
+   Skip this only for a version deliberately left unregistered like `vllm` 0.21.0/0.24.0 (the #233
+   decision) — `make verify-dependabot-coverage`, run as a step of the CI `quality` job, fails with
+   the directory named otherwise.
 
 ## Republishing a runner and recording its shim source
 
@@ -151,7 +157,10 @@ missing or behind (#287).
 
    `SIGN_SIF=false` is the default; `true` needs a provisioned `SIGNING_SECRET` and a matching
    `SARDEENZ_VERIFY_SIF=true` on the control plane and the workers. Full parameter list and
-   diagnostics: [`deployment/librarian/README.md`](../../deployment/librarian/README.md).
+   diagnostics: [`deployment/librarian/README.md`](../../deployment/librarian/README.md). A
+   republish that adds a new `containers/runners/<engine>/<version>/` directory also needs its
+   `.github/dependabot.yml` entry, as in step 5 of the publishing runbook above —
+   `make verify-dependabot-coverage` fails otherwise.
 
 3. **Read back provenance and digest.**
 

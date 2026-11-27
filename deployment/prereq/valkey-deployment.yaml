@@ -19,7 +19,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: valkey
-          image: quay.io/sclorg/valkey-8-c10s:latest
+          image: quay.io/sclorg/valkey-8-c10s:20261125@sha256:5ab722e95096a7d306e1236bc10920a451b5e1bacc23420ba697f547f3c8ea0b
           imagePullPolicy: IfNotPresent
           env:
             - name: BIND_ADDRESS

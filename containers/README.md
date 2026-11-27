@@ -51,6 +51,10 @@ Two layers, two rules — do not mix them:
 
 Freshness is Dependabot's job: the existing `docker` entries cover every pinned directory
 ([`.github/dependabot.yml`](../.github/dependabot.yml); the fetcher recognises `Containerfile` too).
+That registry and the catalog closure are executed by
+`tests/container-images/verify-dependabot-coverage.mjs` (`make verify-dependabot-coverage`, a CI
+`quality` step): a new version directory without an entry, a dangling entry, or a shipped
+`runners.yaml` entry that maps to no registered build directory fails with the path named.
 Two manual-bump exceptions have **no** Dependabot entry by decision —
 `containers/runners/vllm/0.21.0/` (the catalog is retiring that image) and
 `containers/runners/vllm/0.24.0/` (the runner entries track the catalog's current versions per the
