@@ -1,0 +1,5 @@
+stills/
+out/
+voices/
+__pycache__/
+events.json

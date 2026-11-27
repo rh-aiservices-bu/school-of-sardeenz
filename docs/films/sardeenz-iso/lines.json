@@ -1,0 +1,67 @@
+[
+ {
+  "id": "L1",
+  "text": "One GPU: twenty-four gigabytes. Your model takes twenty-two. Two are left over.",
+  "voice": "bf_emma",
+  "speed": 1.0,
+  "asr": "1 GPU 24GB, your model takes 22, 2 are left over."
+ },
+ {
+  "id": "L2",
+  "text": "Slicing the GPU doesn't help. Slices come in fixed sizes, and this model needs the whole card.",
+  "voice": "bf_emma",
+  "speed": 1.0
+ },
+ {
+  "id": "L3",
+  "text": "So a two-gigabyte model gets a second GPU. Twenty-two gigabytes sit idle.",
+  "voice": "bf_emma",
+  "speed": 1.0,
+  "asr": "So a 2GB model gets a second GPU. 22GB sit idle."
+ },
+ {
+  "id": "L4",
+  "text": "Sardeens doesn't slice. It tracks memory in software, and packs each GPU by size.",
+  "voice": "bf_emma",
+  "speed": 1.0,
+  "asr": "Sardines doesn't slice. It tracks memory and software and packs each GPU by size."
+ },
+ {
+  "id": "L5",
+  "text": "Generative, embedding, predictive. Different engines, different sizes, on the same GPUs.",
+  "voice": "bf_emma",
+  "speed": 1.0
+ },
+ {
+  "id": "L6",
+  "text": "One proxy routes every request to the right model.",
+  "voice": "bf_emma",
+  "speed": 1.0
+ },
+ {
+  "id": "L7",
+  "text": "More models than memory? Idle ones sleep in host ram.",
+  "voice": "bf_emma",
+  "speed": 1.0,
+  "asr": "More models than memory, Idol 1's sleep in host Ram."
+ },
+ {
+  "id": "L8",
+  "text": "A request for a sleeping model waits, while the least recently used one is swapped out.",
+  "voice": "bf_emma",
+  "speed": 1.0
+ },
+ {
+  "id": "L9",
+  "text": "Kubernetes still sees two busy GPUs.",
+  "voice": "bf_emma",
+  "speed": 1.0
+ },
+ {
+  "id": "L10",
+  "text": "Sardeens: every gigabyte, working.",
+  "voice": "bf_emma",
+  "speed": 0.95,
+  "asr": "sardines every gigabyte working"
+ }
+]
