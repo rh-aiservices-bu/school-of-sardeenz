@@ -186,16 +186,16 @@ export async function canConnect(): Promise<boolean> {
   }
 }
 
-export function createHarness(): TestHarness {
-  const keyPrefix = `test-${++prefixCounter}-${Date.now()}`;
-
-  const redis = new Redis(REDIS_URL, { lazyConnect: true });
-  const db = new pg.Pool({
-    connectionString: DATABASE_URL,
-    max: 5,
-    connectionTimeoutMillis: 5000,
-  });
-
+/**
+ * Build the service graph over an existing Redis connection and Postgres pool. Extracted from
+ * {@link createHarness} so {@link rebuildHarnessGraph} can mint a *fresh* graph (new service
+ * objects, same durable state) — the in-process model of a control-plane restart (D10).
+ */
+function buildGraph(
+  redis: Redis,
+  db: pg.Pool,
+  keyPrefix: string,
+): Omit<TestHarness, 'setup' | 'teardown'> {
   const modelRepository = new ModelRepository(db);
   const instanceRepository = new InstanceRepository(db);
   // Same wiring as production (control-plane/src/index.ts): one publisher on this harness's
@@ -286,6 +286,36 @@ export function createHarness(): TestHarness {
     };
   }
 
+  return {
+    redis,
+    db,
+    keyPrefix,
+    modelRepository,
+    instanceRepository,
+    lifecycle,
+    memoryBudget,
+    workerPool,
+    routingMap,
+    placement,
+    eviction,
+    sleepWake,
+    deployOrchestration,
+    registerWorker,
+    subscribeClusterEvents,
+  };
+}
+
+export function createHarness(): TestHarness {
+  const keyPrefix = `test-${++prefixCounter}-${Date.now()}`;
+
+  const redis = new Redis(REDIS_URL, { lazyConnect: true });
+  const db = new pg.Pool({
+    connectionString: DATABASE_URL,
+    max: 5,
+    connectionTimeoutMillis: 5000,
+  });
+  const graph = buildGraph(redis, db, keyPrefix);
+
   async function setup(): Promise<void> {
     // Last line of defence: the truncation below must only ever hit a dedicated test DB.
     if (!ALLOW_NON_TEST_DB && !isTestDatabase(DATABASE_URL)) {
@@ -320,23 +350,22 @@ export function createHarness(): TestHarness {
     await db.end();
   }
 
+  return { ...graph, setup, teardown };
+}
+
+/**
+ * The in-process model of a control-plane restart (D10): a fresh service graph over the **same**
+ * Redis connection, Postgres pool and key prefix, so every durable fact survives while every
+ * in-memory structure (confirmation windows, episode sets, discovered workers, budgets) does not.
+ * `setup()`/`teardown()` are no-ops on purpose — re-running `setup()` would TRUNCATE the state the
+ * scenario asserts on, and the owning harness keeps store lifecycle (the scenario tears down once).
+ * The abandoned in-process task keeps running, but it is parked on a runner socket and therefore
+ * writes nothing to Redis while the scenario runs.
+ */
+export function rebuildHarnessGraph(harness: TestHarness): TestHarness {
   return {
-    redis,
-    db,
-    keyPrefix,
-    modelRepository,
-    instanceRepository,
-    lifecycle,
-    memoryBudget,
-    workerPool,
-    routingMap,
-    placement,
-    eviction,
-    sleepWake,
-    deployOrchestration,
-    registerWorker,
-    subscribeClusterEvents,
-    setup,
-    teardown,
+    ...buildGraph(harness.redis, harness.db, harness.keyPrefix),
+    setup: async () => {},
+    teardown: async () => {},
   };
 }

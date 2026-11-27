@@ -225,6 +225,76 @@ describe.skipIf(!AVAILABLE)('Reconciliation — unclaimed runner sweep integrati
       await unsubscribe();
     }
   });
+
+  it('retains instance rows when Redis holds no instance records at all (#328)', async () => {
+    // The #241 signature at full strength: Redis state is gone while the durable ledger still
+    // holds the instance row whose runner keeps holding VRAM.
+    await seedInstances([LIVE_INSTANCE]);
+    await harness.instanceRepository.create({
+      instanceId: LIVE_INSTANCE,
+      modelName: MODEL,
+      workerId: WORKER_ID,
+      deviceIndices: [0],
+    });
+
+    const events: ClusterEvent[] = [];
+    const unsubscribe = await harness.subscribeClusterEvents((event) => events.push(event));
+    try {
+      // Whole-flush on this harness's own test-DB connection: the instance records *and* the
+      // worker's registration keys vanish, so the same tick that sees every row as orphaned also
+      // empties the worker pool out from under the sweep.
+      await harness.redis.flushdb();
+
+      const service = buildService();
+      await service.tick();
+      await service.tick();
+
+      // Acceptance criterion 1: the rows survived the tick that would have pruned them all.
+      const rows = await harness.instanceRepository.findAll();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.instanceId).toBe(LIVE_INSTANCE);
+
+      // Guard-tripped state is visible as one cluster event for the whole episode — the second
+      // tick recounts the refusal but must not repeat the red row.
+      await vi.waitFor(() => {
+        expect(events.filter((e) => e.type === ClusterEventType.RUNNER_ORPHANED)).toHaveLength(1);
+      });
+      const [event] = events.filter((e) => e.type === ClusterEventType.RUNNER_ORPHANED);
+      expect(event?.data).toMatchObject({
+        reason: 'mass-divergence',
+        instanceIds: [LIVE_INSTANCE],
+        modelNames: [MODEL],
+      });
+      expect(event?.workerId).toBeUndefined();
+
+      // No worker is reachable after the flush, so the sweep half made no stops either.
+      expect(worker.stopRequests).toEqual([]);
+    } finally {
+      await unsubscribe();
+    }
+  });
+
+  it('still prunes a single orphaned instance row over real stores (#328)', async () => {
+    const ORPHAN_INSTANCE = 'inst-328-orphan';
+    await seedInstances([LIVE_INSTANCE, ORPHAN_INSTANCE]);
+    for (const instanceId of [LIVE_INSTANCE, ORPHAN_INSTANCE]) {
+      await harness.instanceRepository.create({
+        instanceId,
+        modelName: MODEL,
+        workerId: WORKER_ID,
+        deviceIndices: [0],
+      });
+    }
+    // Only the orphan's Redis record disappears: the live record keeps the guard from tripping, so
+    // the per-row prune still heals this genuine leak (acceptance criterion 2).
+    await harness.redis.del(redisKey(harness.keyPrefix, 'models', MODEL, ORPHAN_INSTANCE));
+
+    const service = buildService();
+    await service.tick();
+
+    const rows = await harness.instanceRepository.findAll();
+    expect(rows.map((r) => r.instanceId)).toEqual([LIVE_INSTANCE]);
+  });
 });
 
 describe.skipIf(!AVAILABLE)('Reconciliation — dead worker key cleanup integration (#240)', () => {

@@ -1,7 +1,7 @@
 import { ModelLifecycleState, Protocol, ClusterEventType } from '@sardeenz/types';
 import type { Redis } from '../clients/redis.js';
 import { redisKey } from '../clients/redis.js';
-import { ControlPlaneError } from '../errors.js';
+import { ControlPlaneError, StateConflictError } from '../errors.js';
 import { stateTransitionsTotal } from '../health/metrics.js';
 import type { ClusterEvent, ClusterEventLogger, ClusterEventSink } from './cluster-events.js';
 
@@ -393,7 +393,7 @@ export class ModelLifecycleService {
     } catch (err) {
       if (err instanceof Error && err.message.includes('INVALID_TRANSITION')) {
         const parts = err.message.split(':');
-        throw ControlPlaneError.invalidState(
+        throw new StateConflictError(
           `${modelName}/${instanceId}`,
           parts[1] ?? 'unknown',
           `transition to ${to}`,

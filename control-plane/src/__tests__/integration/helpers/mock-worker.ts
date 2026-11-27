@@ -33,6 +33,10 @@ export async function createMockWorker(
   const runners = Array.isArray(runner) ? runner : [runner];
   const startRequests: Array<Record<string, unknown>> = [];
   const stopRequests: string[] = [];
+  // Runner ids this worker has acknowledged (#340). Backs the `getRunner` liveness probe the
+  // control plane's `reconcileMissingRunners` uses to decide an instance's runner is gone; without
+  // it every started runner reads as absent and a live instance is reaped.
+  const startedRunnerIds = new Set<string>();
 
   const app = Fastify({ logger: false });
 
@@ -42,11 +46,22 @@ export async function createMockWorker(
     // reused rather than throwing — most tests only ever start one or two instances per worker.
     const target = runners[Math.min(nextRunnerIndex, runners.length - 1)];
     nextRunnerIndex++;
+    const runnerId = `runner-${nextId++}`;
+    startedRunnerIds.add(runnerId);
     return {
-      runnerId: `runner-${nextId++}`,
+      runnerId,
       host: target.host,
       port: target.port,
     };
+  });
+
+  // Liveness probe (worker-agent contract `getRunner`): 200 when this worker still hosts the
+  // runner, 404 when it does not — the one answer reconciliation treats as evidence of a loss.
+  app.get<{ Params: { runnerId: string } }>('/runners/:runnerId', (req, reply) => {
+    if (!startedRunnerIds.has(req.params.runnerId)) {
+      return reply.status(404).send({ error: 'runner not found' });
+    }
+    return { runnerId: req.params.runnerId };
   });
 
   app.delete<{ Params: { runnerId: string } }>('/runners/:runnerId', async (req, reply) => {

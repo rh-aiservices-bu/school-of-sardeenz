@@ -88,9 +88,15 @@ impl RedisTestHarness {
                 probe_timeout,
             },
             api_token: None,
+            // #332 added `inference_api_keys` after this feature-gated target was
+            // last compiled, so the literal was missing it (E0063 — invisible to CI,
+            // which never enables `redis-integration`); repaired here (#300).
+            inference_api_keys: Vec::new(),
             max_body_bytes: 1_048_576,
+            max_buffered_bytes: 268_435_456,
             max_concurrent_forwards: 0,
             max_concurrent_forwards_per_model: 0,
+            shutdown_drain_secs: 45,
         }
     }
 
@@ -523,5 +529,80 @@ async fn test_redis_readiness_lifecycle() {
     let resp = client.get(format!("{}/readyz", proxy.admin_url)).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
+    harness.cleanup().await;
+}
+
+/// Two proxies on one Redis prefix hold *distinct* presence leases and both
+/// acknowledge a routing propagation barrier (#330).
+///
+/// This is the proxy half of the cutover-barrier guarantee: the control plane
+/// snapshots presence keys and waits for every replica to acknowledge, so a
+/// second lease is a second entry it waits on (asserted CP-side in
+/// `routing-map.integration.test.ts`). No shared state is added between the
+/// replicas — only the existing, already-shared Redis surface is exercised with
+/// two processes.
+#[tokio::test]
+async fn two_proxies_hold_distinct_presence_leases_and_ack_barrier() {
+    let mut harness = RedisTestHarness::new().await;
+
+    let p1 = harness.spawn_proxy().await;
+    let p2 = harness.spawn_proxy().await;
+    p1.wait_ready(Duration::from_secs(5)).await;
+    p2.wait_ready(Duration::from_secs(5)).await;
+
+    // Presence keys are `{prefix}:proxies:{uuid}`, TTL 15 s, refreshed every 5 s.
+    // Both proxies write theirs immediately after connecting.
+    let presence_pattern = format!("{}:proxies:*", harness.prefix);
+    let mut proxy_ids: Vec<String> = Vec::new();
+    let presence_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while proxy_ids.len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < presence_deadline,
+            "expected two presence leases under {presence_pattern}, got {proxy_ids:?}"
+        );
+        let keys: Vec<String> = harness.conn.keys(&presence_pattern).await.unwrap();
+        proxy_ids = keys
+            .iter()
+            .map(|key| {
+                key.rsplit(':')
+                    .next()
+                    .expect("presence key always ends in the proxy id")
+                    .to_string()
+            })
+            .collect();
+        proxy_ids.sort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Publish a routing propagation barrier (camelCase payload the proxy's
+    // `RoutingPropagationBarrier` deserializes) and require an acknowledgement
+    // from BOTH replicas.
+    let barrier_id = uuid::Uuid::new_v4().to_string();
+    let payload = serde_json::json!({
+        "barrierId": &barrier_id,
+        "modelName": "test/barrier-model",
+        "timestamp": "2026-01-01T00:00:00Z",
+    });
+    let channel = format!("{}:routing-barriers", harness.prefix);
+    let _: () = harness.conn.publish(&channel, payload.to_string()).await.unwrap();
+
+    let ack_key = format!("{}:routing-barrier-acks:{}", harness.prefix, barrier_id);
+    let ack_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut acks: Vec<String> = Vec::new();
+    while !proxy_ids.iter().all(|id| acks.contains(id)) {
+        assert!(
+            tokio::time::Instant::now() < ack_deadline,
+            "expected acknowledgements from {proxy_ids:?}, got {acks:?}"
+        );
+        acks = harness.conn.smembers(&ack_key).await.unwrap();
+        acks.sort();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let _: () = harness.conn.del(&ack_key).await.unwrap_or(());
+    for proxy_id in &proxy_ids {
+        let presence_key = format!("{}:proxies:{}", harness.prefix, proxy_id);
+        let _: () = harness.conn.del(&presence_key).await.unwrap_or(());
+    }
     harness.cleanup().await;
 }

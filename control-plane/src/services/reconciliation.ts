@@ -90,6 +90,12 @@ const UNCLAIMED_REAP_CONFIRM_TICKS = 2;
  */
 const UNCLAIMED_REAP_MAX_PER_CYCLE = 5;
 
+/** #328: reserved `massDivergenceReported` key for the instance-table guard's episode. The set is
+ * otherwise keyed by workerId; the row-side refusal is cluster-wide and has no worker, so it claims
+ * this one reserved key. A worker literally named this string would collide — the failure mode is a
+ * suppressed sweep event for that worker (the conservative direction). */
+const INSTANCE_TABLE_EPISODE_KEY = 'instance-table';
+
 /** The three series emitted per device by refreshMetrics (#254). */
 const DEVICE_MEMORY_STATES = ['total', 'used', 'available'] as const;
 
@@ -114,9 +120,11 @@ export class ReconciliationService {
    * it can only delay a reap, never skip the second confirmation. */
   private readonly unclaimedRunnerTicks = new Map<string, number>();
   /** Mass-divergence refusal (#286 review): workerIds already reported during the current
-   * divergence episode. Publishing once per worker per episode keeps a long-lived #241 state from
-   * adding one red row per worker per interval; the set is cleared as soon as the divergence
-   * clears, so a recurrence is reported again. */
+   * divergence episode — plus, since #328, the reserved `'instance-table'` key for the row-side
+   * guard's cluster-wide episode. Publishing once per worker (and once for the instance table) per
+   * episode keeps a long-lived #241 state from adding one red row per worker per interval; the
+   * set is cleared as soon as the divergence clears, so a recurrence is reported again.
+   * `clearRunnerDivergenceEpisode` is the sweep's clear path and preserves the reserved key. */
   private readonly massDivergenceReported = new Set<string>();
   /** Device-memory label series emitted by the previous refreshMetrics pass (#254):
    * workerId → device indexes as strings. Replaced wholesale at the end of a pass, so a throw
@@ -838,6 +846,23 @@ export class ReconciliationService {
    * was removed from Redis — by a stop, an eviction, or dead-worker/stuck-instance recovery above
    * — but its Postgres row survived, e.g. a crash between the two deletes). No-ops when the
    * repository isn't wired (older test harnesses that don't need Postgres coverage).
+   *
+   * #328 guard: the predicate above is per-row, but its data source is whole-store — so when Redis
+   * returns *no* instance records at all while the ledger has rows, every row looks orphaned at
+   * once. That is not leakage but divergence: Redis state itself is gone (the #241 signature — a
+   * flush, a restart without persistence, a failover to an empty replica), and deleting the rows
+   * would destroy the only durable record of which runners exist while the runner processes keep
+   * holding VRAM. The step therefore refuses to prune anything in that case, reusing #286's
+   * mass-divergence notion (D1) — same counter, same event reason, same episode set — so the
+   * row-side guard and the runner-side sweep cannot disagree. It clears by itself as soon as
+   * instance records reappear (a legitimately empty cluster, zero rows, never trips at all);
+   * rediscovering, re-adopting or reaping the live runners afterwards is #241 (M23).
+   *
+   * Interaction with `handleDeadWorkers` (documented, not special-cased): a Redis flush erases the
+   * worker heartbeats too, so `discoverWorkers()` rescans nothing, `checkHeartbeats()` marks the
+   * still-registered workers OFFLINE and `handleDeadWorkers` removes them — but it cannot delete
+   * instance rows through that path, because `getAllInstances()` is empty. A *partial* outage
+   * (heartbeats expire while instance keys survive) is a different scenario, not this one.
    */
   private async reconcileInstanceTable(): Promise<void> {
     if (!this.instanceRepository) return;
@@ -846,6 +871,48 @@ export class ReconciliationService {
       this.instanceRepository.findAll(),
       this.lifecycle.getAllInstances(),
     ]);
+
+    // Empty ledger: nothing to guard or heal — today's behaviour (a legitimately empty cluster must
+    // never be blocked, and a legitimately drained one must keep draining).
+    if (pgInstances.length === 0) return;
+
+    // #328 mass-divergence guard (D1): Redis holds no instance records at all while the durable
+    // ledger has rows — the #241 signature. Every row "orphaned" at once is divergence, not
+    // leakage; prune nothing. Same notion, counter and episode semantics as the runner sweep's
+    // refusal (`reconcileUnclaimedRunners`): the two cannot disagree.
+    if (redisInstances.length === 0) {
+      // Per tick (a per-tick fact), same counter and label as the sweep's refusal.
+      reconciliationUnclaimedRunnersTotal.inc({ action: 'refused' });
+      this.logger.error(
+        {
+          instanceCount: pgInstances.length,
+          instanceIds: pgInstances.map((r) => r.instanceId),
+          modelNames: [...new Set(pgInstances.map((r) => r.modelName))],
+        },
+        'Refusing to prune instance rows: the control plane holds no instance records at all (mass divergence — see #241)',
+      );
+      // Once per episode, not per tick: the reserved key participates in the same episode set.
+      if (!this.massDivergenceReported.has(INSTANCE_TABLE_EPISODE_KEY)) {
+        this.massDivergenceReported.add(INSTANCE_TABLE_EPISODE_KEY);
+        await this.publishClusterEvent({
+          type: ClusterEventType.RUNNER_ORPHANED,
+          timestamp: new Date().toISOString(),
+          message:
+            'Instance rows retained while the control plane holds no instance records — refusing wholesale prune (mass-divergence guard, #241)',
+          data: {
+            reason: 'mass-divergence',
+            instanceIds: pgInstances.map((r) => r.instanceId),
+            modelNames: [...new Set(pgInstances.map((r) => r.modelName))],
+          },
+        });
+      }
+      return;
+    }
+
+    // Records exist again: the row-side episode is over, so a later divergence is re-reported (the
+    // sweep's "past the guard" clear is the precedent).
+    this.massDivergenceReported.delete(INSTANCE_TABLE_EPISODE_KEY);
+
     const redisIds = new Set(redisInstances.map((i) => i.instanceId));
 
     for (const row of pgInstances) {
@@ -995,6 +1062,17 @@ export class ReconciliationService {
     }
   }
 
+  /** #328: clear every worker-keyed divergence episode entry, preserving the instance-table guard's
+   * reserved key. The sweep's clear paths (no reachable workers / nothing unclaimed / past the
+   * guard) speak only to the runner-side episode: after a Redis flush the worker pool empties every
+   * tick, and a wholesale clear here would un-arm the row-side key mid-episode and re-publish its
+   * event every tick. The reserved key is armed and cleared only by `reconcileInstanceTable`. */
+  private clearRunnerDivergenceEpisode(): void {
+    for (const key of this.massDivergenceReported) {
+      if (key !== INSTANCE_TABLE_EPISODE_KEY) this.massDivergenceReported.delete(key);
+    }
+  }
+
   /**
    * Runner→instance reconciliation (#286): the only direction that can recover a runner whose
    * instance record is already gone. Every other step here is record-driven; this one asks each
@@ -1029,7 +1107,7 @@ export class ReconciliationService {
       .filter((w) => w.status !== WorkerStatus.OFFLINE);
     if (workers.length === 0) {
       this.unclaimedRunnerTicks.clear();
-      this.massDivergenceReported.clear();
+      this.clearRunnerDivergenceEpisode();
       return;
     }
 
@@ -1080,7 +1158,7 @@ export class ReconciliationService {
 
     const totalUnclaimed = perWorker.reduce((sum, w) => sum + w.unclaimed.length, 0);
     if (totalUnclaimed === 0) {
-      this.massDivergenceReported.clear();
+      this.clearRunnerDivergenceEpisode();
       return;
     }
 
@@ -1120,7 +1198,7 @@ export class ReconciliationService {
     }
 
     // Past the guard: the divergence has cleared, so a later episode is reported again.
-    this.massDivergenceReported.clear();
+    this.clearRunnerDivergenceEpisode();
 
     let reapBudget = UNCLAIMED_REAP_MAX_PER_CYCLE;
     let deferred = 0;

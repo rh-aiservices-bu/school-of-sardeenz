@@ -8,15 +8,17 @@ import {
 import type { RunnerClient } from '../clients/runner.js';
 import {
   runnerHealthCheckErrorsTotal,
+  routingProtocolConflictsTotal,
   sleepDuration,
   wakeDuration,
   wakeTriggersTotal,
+  wakeUnclaimedTotal,
 } from '../health/metrics.js';
 import { ControlPlaneError } from '../errors.js';
 import { delaySafe } from '../utils.js';
 import { deriveAggregateState, type ModelLifecycleService } from './model-lifecycle.js';
 import type { MemoryBudgetService } from './memory-budget.js';
-import type { RoutingMapService, RunnerEndpoint } from './routing-map.js';
+import type { RoutingMapLogger, RoutingMapService, RunnerEndpoint } from './routing-map.js';
 
 /** Maps a ModelLifecycleState to the ModelState exposed in the routing map. */
 export function toRoutingState(state: ModelLifecycleState): ModelState | null {
@@ -51,12 +53,29 @@ export async function refreshModelRoutingState(
   lifecycle: ModelLifecycleService,
   routingMap: RoutingMapService,
   modelName: string,
+  logger?: RoutingMapLogger,
 ): Promise<void> {
   const instances = await lifecycle.getInstancesForModel(modelName);
   const aggregate = deriveAggregateState(instances);
   const routingState = toRoutingState(aggregate);
   if (routingState) {
-    const protocol = instances.find((i) => i.protocol)?.protocol ?? Protocol.openai;
+    // Derive the model tag from ALL tagged instances, deterministically (#309): "first instance
+    // with a value" let one legacy record decide a live model's protocol family. All tagged
+    // instances agreeing is authoritative; disagreeing instances pass no value, so the routing
+    // entry keeps its persisted tag (decision D9) and the divergence is counted + logged once;
+    // no tagged instance at all likewise passes no value (a new entry still gets the Lua
+    // creation default).
+    const tagged = new Set(instances.flatMap((i) => (i.protocol ? [i.protocol] : [])));
+    let protocol: Protocol | undefined;
+    if (tagged.size === 1) {
+      protocol = [...tagged][0];
+    } else if (tagged.size > 1) {
+      routingProtocolConflictsTotal.inc({ kind: 'instance-vs-instance' });
+      logger?.warn(
+        { modelName, protocols: [...tagged] },
+        'Instance protocols disagree — keeping the routing entry protocol',
+      );
+    }
     await routingMap.setModelState(modelName, routingState, protocol);
   } else {
     await routingMap.removeModel(modelName);
@@ -70,6 +89,15 @@ export interface RunnerHealthResult {
   message?: string;
 }
 
+/**
+ * Options for {@link SleepWakeService.wakeModel}. `claimed: true` means the caller already won
+ * the `SLEEPING → STARTING` CAS (route handlers do); omitted/false keeps the direct-call
+ * behaviour of claiming a SLEEPING instance internally (#323).
+ */
+export interface WakeModelOptions {
+  claimed?: boolean;
+}
+
 export class SleepWakeService {
   constructor(
     private readonly lifecycle: ModelLifecycleService,
@@ -78,6 +106,7 @@ export class SleepWakeService {
     private readonly sleepTimeoutMs: number,
     private readonly wakeTimeoutMs: number,
     private readonly healthCheckIntervalMs: number,
+    private readonly logger?: RoutingMapLogger,
   ) {}
 
   /**
@@ -106,7 +135,7 @@ export class SleepWakeService {
       if (instanceState.state === ModelLifecycleState.ACTIVE) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
       }
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       // Wait for in-flight requests to drain.
       await this.waitForDrain(modelName, instanceId, runnerClient);
@@ -127,7 +156,7 @@ export class SleepWakeService {
 
       // DRAINING → SLEEPING
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.SLEEPING);
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       sleepDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
@@ -146,20 +175,47 @@ export class SleepWakeService {
    *
    * Updates the routing map (per-instance endpoint re-add, then a model-level aggregate
    * refresh) at each stage. Records duration in wakeDuration histogram.
+   *
+   * `opts.claimed` says whether the caller already won the `SLEEPING → STARTING` CAS:
+   *  - `claimed: true` → the instance is only wake-eligible if its re-read state is STARTING;
+   *  - `claimed` falsy → the instance is only wake-eligible if its re-read state is SLEEPING,
+   *    which is then claimed here (so a direct three-argument call keeps working).
+   * Any other observed state is a counted + logged no-op (`sardeenz_control_plane_wake_unclaimed_total`):
+   * the instance is untouched and no `/wake` is sent. #323 — the runner's `POST /wake` is
+   * idempotent (`200` from any state), so a spurious wake must stay visible on this side instead
+   * of landing a healthy instance in ERROR via a failed `STARTING → ACTIVE`.
    */
   async wakeModel(
     modelName: string,
     instanceId: string,
     runnerClient: RunnerClient,
+    opts?: WakeModelOptions,
   ): Promise<void> {
     const startedAt = Date.now();
-
-    wakeTriggersTotal.inc();
 
     const instanceState = await this.lifecycle.getInstance(modelName, instanceId);
     if (!instanceState) {
       throw ControlPlaneError.modelNotFound(`${modelName}/${instanceId}`);
     }
+
+    // Eligibility gate (#323): only a caller's successful CAS (`claimed`, state STARTING) or a
+    // direct call against a SLEEPING instance may proceed. Everything else — already ACTIVE,
+    // DRAINING, STOPPING, STOPPED, ERROR, PENDING, or STARTING via an unclaimed call — is a
+    // no-op: no trigger count, no transition, no /wake, no waitForReady, no ERROR fallback.
+    const eligible =
+      opts?.claimed === true
+        ? instanceState.state === ModelLifecycleState.STARTING
+        : instanceState.state === ModelLifecycleState.SLEEPING;
+    if (!eligible) {
+      wakeUnclaimedTotal.inc({ state: instanceState.state });
+      this.logger?.warn(
+        { modelName, instanceId, state: instanceState.state, claimed: opts?.claimed ?? false },
+        'Skipped unclaimed wake: instance not in a wake-eligible state',
+      );
+      return;
+    }
+
+    wakeTriggersTotal.inc();
 
     try {
       // SLEEPING → STARTING is claimed atomically by the route handler.
@@ -167,7 +223,7 @@ export class SleepWakeService {
       if (instanceState.state === ModelLifecycleState.SLEEPING) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.STARTING);
       }
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       // Send wake command. Unlike sleep, /wake on the runner completes quickly —
       // the runner begins reloading weights but does not wait for READY itself.
@@ -186,16 +242,12 @@ export class SleepWakeService {
           healthy: true,
           ...(instanceState.runnerId ? { runnerId: instanceState.runnerId } : {}),
         };
-        await this.routingMap.addEndpoint(
-          modelName,
-          endpoint,
-          instanceState.protocol ?? Protocol.openai,
-        );
+        await this.routingMap.addEndpoint(modelName, endpoint, instanceState.protocol);
       }
 
       // STARTING → ACTIVE
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ACTIVE);
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
 
       wakeDuration.observe((Date.now() - startedAt) / 1000);
     } catch (err) {
@@ -236,7 +288,7 @@ export class SleepWakeService {
       // "not accepting new traffic" rather than "already empty"; always poll it before stop.
       if (currentState === ModelLifecycleState.ACTIVE) {
         await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.DRAINING);
-        await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+        await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
       }
       if (
         runnerClient &&
@@ -281,7 +333,7 @@ export class SleepWakeService {
       }
       // STOPPED is already terminal — no transition needed.
 
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
       this.memoryBudget.releaseInstanceReservations(instanceId);
     } catch (err) {
       await this.transitionToError(
@@ -441,7 +493,7 @@ export class SleepWakeService {
       await this.lifecycle.transition(modelName, instanceId, ModelLifecycleState.ERROR, {
         errorMessage,
       });
-      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName);
+      await refreshModelRoutingState(this.lifecycle, this.routingMap, modelName, this.logger);
     } catch {
       // Intentionally swallowed — do not mask the original error.
     }

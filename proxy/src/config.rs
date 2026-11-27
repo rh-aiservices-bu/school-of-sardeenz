@@ -13,7 +13,19 @@ pub struct Config {
     pub parking: ParkingConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     pub api_token: Option<String>,
+    /// Optional static API keys for the inference port (#332). Empty = key
+    /// disabled (today's behaviour). Multiple comma-separated keys allow
+    /// zero-downtime rotation (D2); comparison is constant-time per key.
+    pub inference_api_keys: Vec<String>,
     pub max_body_bytes: usize,
+    /// Per-process admission budget over all concurrently buffered inference
+    /// bodies (#300): each replica enforces its own, so the Deployment-wide
+    /// ceiling is twice this value at two replicas. Default `268435456`
+    /// (256 MiB) — enforcement is ON out of the box, the same fail-closed
+    /// precedent as `max_body_bytes`. `0` is an explicit, WARN-logged unlimited
+    /// opt-out (see `main.rs`); counting and the
+    /// `sardeenz_proxy_buffered_body_bytes` gauge still run.
+    pub max_buffered_bytes: usize,
     /// Max concurrently *forwarded* (in-flight upstream) requests across all
     /// models. `0` = unlimited. Deliberately independent of the parking
     /// limits — a request parked waiting for a sleeping model to wake holds
@@ -21,6 +33,12 @@ pub struct Config {
     pub max_concurrent_forwards: usize,
     /// Max concurrently forwarded requests for a single model. `0` = unlimited.
     pub max_concurrent_forwards_per_model: usize,
+    /// Drain margin added to the parking timeout to bound in-process shutdown
+    /// (#330): the deadline is `parking.timeout + shutdown_drain_secs`, derived
+    /// by [`Config::shutdown_deadline`] and never a constant, so raising
+    /// `SARDEENZ_PARKING_TIMEOUT_SECS` cannot silently invalidate the
+    /// Deployment's `terminationGracePeriodSeconds`.
+    pub shutdown_drain_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -91,13 +109,27 @@ impl Config {
                 probe_timeout,
             },
             api_token: std::env::var("SARDEENZ_API_TOKEN").ok().filter(|s| !s.is_empty()),
+            inference_api_keys: parse_inference_api_keys(std::env::var(
+                "SARDEENZ_PROXY_INFERENCE_API_KEY",
+            ))?,
             max_body_bytes: parse_env("SARDEENZ_PROXY_MAX_BODY_BYTES", "33554432")?,
+            max_buffered_bytes: parse_env("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "268435456")?,
             max_concurrent_forwards: parse_env("SARDEENZ_PROXY_MAX_CONCURRENT_FORWARDS", "0")?,
             max_concurrent_forwards_per_model: parse_env(
                 "SARDEENZ_PROXY_MAX_CONCURRENT_PER_MODEL",
                 "0",
             )?,
+            shutdown_drain_secs: parse_env("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "45")?,
         })
+    }
+
+    /// In-process shutdown deadline: parking timeout + drain margin (D6, #330).
+    /// Derived, never a constant, so raising `SARDEENZ_PARKING_TIMEOUT_SECS`
+    /// cannot silently invalidate the Deployment's
+    /// `terminationGracePeriodSeconds` (invariant: `terminationGracePeriodSeconds`
+    /// ≥ preStop (5 s) + this deadline).
+    pub fn shutdown_deadline(&self) -> Duration {
+        self.parking.timeout + Duration::from_secs(self.shutdown_drain_secs)
     }
 }
 
@@ -124,12 +156,55 @@ where
     val.parse::<T>().map_err(|e| anyhow::anyhow!("invalid value for {key}: {e}"))
 }
 
+/// Parse `SARDEENZ_PROXY_INFERENCE_API_KEY` from the raw `std::env::var` result.
+/// `NotPresent` → empty vec (key disabled, today's behaviour). Set → split on
+/// ',', trim each segment; a segment that is empty after trim is a startup
+/// error (fail closed, #268/ADR-022: an operator who set the variable intended
+/// auth on; a blank key would be trivially guessable or a silent disable). The
+/// trimmed segment is the stored key so the constant-time compare is byte-exact
+/// on the trimmed value. `NotUnicode` is also a startup error: the variable is
+/// present, so it must never be folded into `NotPresent`'s "auth disabled".
+fn parse_inference_api_keys(
+    raw: Result<String, std::env::VarError>,
+) -> anyhow::Result<Vec<String>> {
+    let raw = match raw {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!(
+            "invalid value for SARDEENZ_PROXY_INFERENCE_API_KEY: not valid Unicode \
+             (unset the variable to disable the key)"
+        ),
+    };
+    let mut keys = Vec::new();
+    for segment in raw.split(',') {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!(
+                "invalid value for SARDEENZ_PROXY_INFERENCE_API_KEY: blank segment \
+                 (unset the variable to disable the key)"
+            );
+        }
+        keys.push(trimmed.to_string());
+    }
+    Ok(keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Serialises the `from_env` cases: cargo runs lib tests on parallel
+    /// threads, and these mutate the process-global environment.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        // A panic in one case must not poison the others.
+        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn default_config_parses() {
+        let _env = env_lock();
         // Clear any env vars that might interfere
         for key in [
             "SARDEENZ_PROXY_LISTEN_ADDR",
@@ -138,7 +213,10 @@ mod tests {
             "SARDEENZ_REDIS_URL",
             "SARDEENZ_CONTROL_PLANE_URL",
             "SARDEENZ_API_TOKEN",
+            "SARDEENZ_PROXY_INFERENCE_API_KEY",
             "SARDEENZ_PROXY_MAX_BODY_BYTES",
+            "SARDEENZ_PROXY_MAX_BUFFERED_BYTES",
+            "SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS",
         ] {
             std::env::remove_var(key);
         }
@@ -151,8 +229,122 @@ mod tests {
         assert_eq!(config.upstream_timeout, Duration::from_secs(300));
         assert_eq!(config.circuit_breaker.failure_threshold, 5);
         assert_eq!(config.api_token, None);
+        assert!(config.inference_api_keys.is_empty());
         assert_eq!(config.max_body_bytes, 33_554_432);
+        assert_eq!(
+            config.max_buffered_bytes, 268_435_456,
+            "the aggregate body budget enforces out of the box (#300)"
+        );
         assert_eq!(config.max_concurrent_forwards, 0);
         assert_eq!(config.max_concurrent_forwards_per_model, 0);
+        assert_eq!(
+            config.shutdown_drain_secs, 45,
+            "default shutdown drain margin mirrors the Deployment's 45 s env value (#330)"
+        );
+    }
+
+    #[test]
+    fn explicit_shutdown_drain_secs_parses() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "123");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS");
+        assert_eq!(config.unwrap().shutdown_drain_secs, 123);
+    }
+
+    #[test]
+    fn invalid_shutdown_drain_secs_fails() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "banana");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS");
+        let error = config.expect_err("a non-numeric drain margin must fail startup");
+        assert!(
+            error.to_string().contains("invalid value for SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS"),
+            "message should name the variable: {error}"
+        );
+    }
+
+    #[test]
+    fn shutdown_deadline_is_parking_plus_drain() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PARKING_TIMEOUT_SECS", "120");
+        std::env::set_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS", "45");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PARKING_TIMEOUT_SECS");
+        std::env::remove_var("SARDEENZ_PROXY_SHUTDOWN_DRAIN_SECS");
+        // 165 s at the documented defaults; the manifest's 180 s grace period
+        // leaves 15 s for the 5 s preStop plus process-exit slack (D6).
+        assert_eq!(config.unwrap().shutdown_deadline(), Duration::from_secs(165));
+    }
+
+    #[test]
+    fn explicit_buffered_budget_parses() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "12345");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES");
+        assert_eq!(config.unwrap().max_buffered_bytes, 12_345);
+    }
+
+    #[test]
+    fn zero_buffered_budget_parses() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "0");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES");
+        // `0` = the explicit unlimited opt-out; the startup WARN that announces it
+        // lives in `main.rs` (after the tracing subscriber exists), so it is not
+        // assertable from this crate's unit tests.
+        assert_eq!(config.unwrap().max_buffered_bytes, 0);
+    }
+
+    #[test]
+    fn invalid_buffered_budget_fails() {
+        let _env = env_lock();
+        std::env::set_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES", "banana");
+        let config = Config::from_env();
+        std::env::remove_var("SARDEENZ_PROXY_MAX_BUFFERED_BYTES");
+        let error = config.expect_err("a non-numeric budget must fail startup");
+        assert!(
+            error.to_string().contains("invalid value for SARDEENZ_PROXY_MAX_BUFFERED_BYTES"),
+            "message should name the variable: {error}"
+        );
+    }
+
+    // `parse_inference_api_keys` takes the raw `std::env::var` result, so these
+    // cases need no process-global env mutation and cannot race other tests.
+    #[test]
+    fn inference_api_key_parsing() {
+        // Not present = key disabled, today's behaviour.
+        assert_eq!(
+            parse_inference_api_keys(Err(std::env::VarError::NotPresent)).unwrap(),
+            Vec::<String>::new()
+        );
+
+        // Comma-separated rotation slots, each segment trimmed.
+        assert_eq!(
+            parse_inference_api_keys(Ok("key1,key2".to_string())).unwrap(),
+            vec!["key1".to_string(), "key2".to_string()]
+        );
+        assert_eq!(
+            parse_inference_api_keys(Ok("  key1 , key2  ".to_string())).unwrap(),
+            vec!["key1".to_string(), "key2".to_string()]
+        );
+
+        // Present but not valid Unicode: the operator set the variable, so auth
+        // must not silently turn itself off — startup fails closed.
+        assert!(parse_inference_api_keys(Err(std::env::VarError::NotUnicode(
+            std::ffi::OsString::from("key1")
+        )))
+        .is_err());
+
+        // A set-but-blank key fails closed at startup (ADR-022 / #268).
+        for blank in ["", "   ", "key1,,key2", "key1, ,key2", "key1,"] {
+            assert!(
+                parse_inference_api_keys(Ok(blank.to_string())).is_err(),
+                "blank segment in {blank:?} must be a startup error"
+            );
+        }
     }
 }

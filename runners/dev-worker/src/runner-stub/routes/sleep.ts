@@ -44,16 +44,12 @@ export function registerSleepRoutes(
   });
 
   app.post('/wake', async (_req, reply) => {
-    try {
-      await stateMachine.wake(config.wakeDelayMs);
+    if (stateMachine.state !== 'SLEEPING') {
+      // Contract (#323): /wake is idempotent — 200 from any state, no state mutation.
       return reply.status(200).send({ state: stateMachine.state });
-    } catch (err) {
-      return reply.status(409).send({
-        error: (err as Error).message,
-        code: 'INVALID_STATE',
-        details: { currentState: stateMachine.state },
-      });
     }
+    await stateMachine.wake(config.wakeDelayMs);
+    return reply.status(200).send({ state: stateMachine.state });
   });
 
   app.get('/sleep-status', async (_req, reply) => {

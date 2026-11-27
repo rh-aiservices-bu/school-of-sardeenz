@@ -183,7 +183,10 @@ vitest config allows an empty run), a final `if: always()` step runs
 test executed or any test was skipped** — a green integration job therefore means the tests ran,
 not that they were skipped. Rollout: the job landed staged with `continue-on-error: true` and is
 now **blocking** — its first green run (32/32 tests, 2026-11-25) followed the #322 cutover-barrier
-fix (#325), and that one line was deleted.
+fix (#325), and that one line was deleted. Since M21 the suite also carries scripted
+**failure scenarios** (`failure-scenarios.integration.test.ts`: Redis loss vs the mass-divergence
+guard, control-plane loss mid-wake, worker/runner loss mid-launch, concurrent wake triggers),
+taking it to 44 tests.
 
 ## Common Commands
 
@@ -199,7 +202,7 @@ fix (#325), and that one line was deleted.
 | `make test`                       | Run all test suites (Vitest + cargo test)                                                                                                                                                                                                    |
 | `make test-python`                | Run the Python runner-shim (unit + app-level `tests/test_app.py`) + conformance suites (after `make test-python-deps` — which installs pinned test deps from `runners/ci-constraints.txt`; run inside a venv — system python3 lacks fastapi) |
 | `make test-coverage`              | Run tests with V8 coverage                                                                                                                                                                                                                   |
-| `make test-integration`           | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 32/32 since 2026-11-25)                                                                     |
+| `make test-integration`           | Control-plane integration suite against local Postgres/Redis (`make services`); CI runs the same suite in its blocking `integration` job (green: 44/44 since M21)                                                                            |
 | `make codegen`                    | Regenerate types from OpenAPI specs                                                                                                                                                                                                          |
 | `make verify-image-pins`          | Verify every Dockerfile/Containerfile `FROM` is digest-pinned (ADR-030)                                                                                                                                                                      |
 | `make verify-dependabot-coverage` | Verify every `containers/runners/<engine>/<version>/` directory has a Dependabot entry (or a documented skip) and the `deployment/prereq/` images are dated-tag + digest pinned                                                              |
@@ -418,6 +421,13 @@ constrained freeze already covers all three shim directories.
 ## Logs
 
 Dev servers running on the host write their output to the `logs/` directory in the project root (gitignored). Since the project folder is bind-mounted into the ccbox container, Claude Code can read these logs directly to debug runtime issues without needing output pasted into the conversation.
+
+`logs/` is excluded from ESLint (`.eslintrc`-style global `ignores` in `eslint.config.js` — ESLint 9 does
+not read `.gitignore`, so `eslint .` would otherwise lint throwaway verification scripts parked
+there) and from Prettier (`.prettierignore`). TypeScript and Vitest cannot see it at all: `tsc
+--build` is reference-scoped to each project's `include`, and the root `vitest.config.ts` lists only
+workspace projects. Scratch files in `logs/` therefore never affect `make lint`, `make format` or
+`make format-check`.
 
 Parallel sessions coordinate through the same directory — CPU lock, shared test database and a
 message bus. See [`parallel-sessions.md`](parallel-sessions.md) before running a heavy gate while

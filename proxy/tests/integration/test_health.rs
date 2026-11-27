@@ -55,6 +55,33 @@ async fn test_readyz_when_redis_disconnected() {
     );
 }
 
+/// Inference declined while routing state is genuinely unavailable names that
+/// cause — not a shutdown (#330 review: the two 503 causes are distinguishable).
+#[tokio::test]
+async fn test_inference_refusal_names_disconnected_routing_state() {
+    let proxy = TestProxy::spawn_with_redis_disconnected("http://127.0.0.1:1").await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("{}/openai/v1/chat/completions", proxy.proxy_url()))
+        .json(&serde_json::json!({"model": "disconnected/v1", "messages": []}))
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: serde_json::Value = resp.json().await.expect("error envelope");
+    assert_eq!(body["error"]["type"], "model_unavailable");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("routing state is not connected"),
+        "a not-connected routing state must keep its own wording, got: {message}"
+    );
+    assert!(
+        !message.contains("shutting down"),
+        "the message must not name a shutdown while the process is not draining, got: {message}"
+    );
+}
+
 #[tokio::test]
 async fn test_readyz_before_routing_map_loaded() {
     // Redis connected but no cache injected — routing map not yet loaded.

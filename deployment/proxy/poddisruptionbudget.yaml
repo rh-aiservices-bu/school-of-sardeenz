@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sardeenz-proxy
+spec:
+  # Two replicas minus one: a node drain may evict one proxy pod at a time, and
+  # the survivor keeps serving inference (ADR-007: the proxy is stateless).
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sardeenz-proxy

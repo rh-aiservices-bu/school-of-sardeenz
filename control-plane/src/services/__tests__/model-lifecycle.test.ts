@@ -10,6 +10,7 @@ import {
   type InstanceState,
 } from '../model-lifecycle.js';
 import type { Redis } from '../../clients/redis.js';
+import { ControlPlaneError, StateConflictError } from '../../errors.js';
 
 describe('isValidTransition', () => {
   const validTransitions: [ModelLifecycleState, ModelLifecycleState][] = [
@@ -442,6 +443,39 @@ describe('ModelLifecycleService.transition with deviceIndices', () => {
     const key = (redis.eval as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as string;
     expect(key).toContain('my-model');
     expect(key).toContain('inst-1');
+  });
+
+  it('maps an INVALID_TRANSITION CAS loss to StateConflictError (still 409 INVALID_STATE on the wire)', async () => {
+    const redis = {
+      eval: vi.fn().mockRejectedValue(new Error('INVALID_TRANSITION:SLEEPING:ACTIVE')),
+    } as unknown as Redis;
+
+    const service = new ModelLifecycleService(redis, 'test');
+
+    const err = await service
+      .transition('my-model', 'inst-1', ModelLifecycleState.STARTING)
+      .then(() => null)
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(StateConflictError);
+    expect(err).toBeInstanceOf(ControlPlaneError);
+    const conflict = err as StateConflictError;
+    expect(conflict.name).toBe('StateConflictError');
+    expect(conflict.code).toBe('INVALID_STATE');
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.details?.currentState).toBe('SLEEPING');
+    expect(conflict.message).toBe(
+      'Cannot transition to STARTING model my-model/inst-1: current state is SLEEPING',
+    );
+    expect(conflict.toResponse()).toEqual({
+      error: 'Cannot transition to STARTING model my-model/inst-1: current state is SLEEPING',
+      code: 'INVALID_STATE',
+      details: {
+        modelName: 'my-model/inst-1',
+        currentState: 'SLEEPING',
+        action: 'transition to STARTING',
+      },
+    });
   });
 });
 

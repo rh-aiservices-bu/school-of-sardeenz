@@ -3,6 +3,7 @@ dist/
 build/
 target/
 coverage/
+logs/
 packages/types/src/generated/
 packages/contracts/specs/
 *.log

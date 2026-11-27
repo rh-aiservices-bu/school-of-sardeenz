@@ -20,6 +20,7 @@ import type { MoveOrchestrationService } from '../services/move-orchestration.js
 import type { RunnerClient } from '../clients/runner.js';
 import type { WorkerClient } from '../clients/worker.js';
 import type { StartupLogRepository } from '../services/startup-log-repository.js';
+import type { ClusterEventSink } from '../services/cluster-events.js';
 
 export interface RouteDeps {
   config: Config;
@@ -44,4 +45,5 @@ export interface RouteDeps {
   createRunnerClient: (host: string, port: number) => RunnerClient;
   createWorkerClient: (baseUrl: string) => WorkerClient;
   startupLogRepository?: StartupLogRepository;
+  clusterEvents?: ClusterEventSink;
 }

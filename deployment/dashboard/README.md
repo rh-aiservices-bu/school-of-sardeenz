@@ -4,6 +4,11 @@ The dashboard image contains both the compiled React frontend and its Fastify BF
 only browser-facing application API and connects internally to the control plane, Valkey, and the
 routing proxy.
 
+The BFF also consumes `SARDEENZ_INFERENCE_API_KEY` from the same `sardeenz-service-tokens` Secret
+(the key the proxy reads as `SARDEENZ_PROXY_INFERENCE_API_KEY`) and attaches it server-side on its
+inference calls, so the playground keeps working when the proxy's optional inference key is
+enabled; the browser never receives the key.
+
 Production images refuse to start with unauthenticated access. Create `sardeenz-dashboard-auth`
 as described in [`../README.md`](../README.md); the supplied example uses simple username/password
 authentication. OAuth configuration is documented in

@@ -23,4 +23,10 @@ Change the spec first, then the code.
 - **Rust is not generated:** any change to `proxy-control-plane.yaml` or `engine-runner.yaml`
   needs a matching hand edit in `proxy/src/generated/` in the same PR.
 - Document `409` conflict semantics via `details.reason` enums, and every endpoint's 200/400/500.
-- The `contract-reviewer` agent exists for reviewing spec diffs — use it before merging.
+- Spec-diff review runs through the `reviewer` (Quality and rules) and `boundary-reviewer`
+  (Contract Drift) agents in `.omp/agents/` — use them before merging.
+- Redis-transported schemas (routing map, routing pub/sub payloads, instance state, worker
+  registration/detail, cluster memory, proxy protocols) are additive-only — see
+  `docs/development/contracts.md` § Redis-Transported Schemas; new enum values additionally
+  require every reader to tolerate them (`Protocol`/`ModelState` are closed on the proxy), and
+  instance state / worker detail have no spec schema (their shape lives in the control plane).

@@ -4,13 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::ProxyError;
 
-/// Caps the number of *forwarded* (in-flight upstream) requests, globally and
-/// per-model. Deliberately scoped to the forwarding step only — a request
-/// parked waiting for a sleeping model to wake never holds a permit, so this
-/// limiter cannot deadlock against parking (a router/resolution-level limit
-/// would: parked requests would hold a permit for the entire wake, starving
-/// forwarding for everyone else). Per-tenant rate limiting is the ingress's
-/// job, not the proxy's — see docs/architecture/components/proxy.md.
+/// Caps the number of *forwarded* (in-flight upstream) requests, process-wide
+/// (per replica) and per-model. Deliberately scoped to the forwarding step
+/// only — a request parked waiting for a sleeping model to wake never holds a
+/// permit, so this limiter cannot deadlock against parking (a
+/// router/resolution-level limit would: parked requests would hold a permit
+/// for the entire wake, starving forwarding for everyone else). Per-tenant
+/// rate limiting is the ingress's job, not the proxy's — see
+/// docs/architecture/components/proxy.md.
 #[derive(Clone)]
 pub struct ForwardingLimiter {
     max_global: usize,

@@ -322,7 +322,7 @@ describe('MoveOrchestrationService', () => {
     expect(routingMap.addEndpoint).toHaveBeenCalledWith(
       'm1',
       expect.objectContaining({ runnerId: 'runner-recovered', port: 9001 }),
-      'openai',
+      undefined,
     );
     expect(instances.get('inst-replacement')?.state).toBe(ModelLifecycleState.ACTIVE);
     expect(memoryBudget.releaseInstanceReservations).toHaveBeenCalledWith('inst-replacement');

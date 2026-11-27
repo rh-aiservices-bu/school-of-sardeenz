@@ -29,6 +29,11 @@ pub enum ProxyError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    /// Inference API key missing or invalid (optional static key, #332).
+    /// Fixed message — never echoes presented header material.
+    #[error("missing or invalid inference API key")]
+    Unauthorized,
+
     #[error("request body exceeds the {limit}-byte limit (SARDEENZ_PROXY_MAX_BODY_BYTES); raise the limit or send a smaller payload")]
     RequestTooLarge { limit: usize },
 
@@ -54,6 +59,7 @@ impl ProxyError {
             | ProxyError::AllEndpointsUnhealthy(_)
             | ProxyError::Overloaded(_) => StatusCode::SERVICE_UNAVAILABLE,
             ProxyError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ProxyError::Unauthorized => StatusCode::UNAUTHORIZED,
             ProxyError::RequestTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             ProxyError::Upstream(_) => StatusCode::BAD_GATEWAY,
             ProxyError::Redis(_) | ProxyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -91,6 +97,7 @@ fn error_type(err: &ProxyError) -> &'static str {
         ProxyError::AllEndpointsUnhealthy(_) => "all_endpoints_unhealthy",
         ProxyError::Overloaded(_) => "overloaded",
         ProxyError::BadRequest(_) => "invalid_request_error",
+        ProxyError::Unauthorized => "authentication_error",
         ProxyError::RequestTooLarge { .. } => "request_too_large",
         ProxyError::Upstream(_) => "upstream_error",
         ProxyError::Redis(_) => "internal_error",

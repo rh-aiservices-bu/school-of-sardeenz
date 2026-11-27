@@ -21,6 +21,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     try {
       snapshot = await deps.catalogService.load();
     } catch (err) {
+      if (err instanceof ControlPlaneError) throw err;
       throw ControlPlaneError.catalogFetchFailed(err instanceof Error ? err.message : String(err));
     }
     return reply.code(200).send(await view(snapshot));
@@ -31,6 +32,7 @@ export function registerCatalogRoutes(app: FastifyInstance, deps: RouteDeps): vo
     try {
       snapshot = await deps.catalogService.refresh();
     } catch (err) {
+      if (err instanceof ControlPlaneError) throw err;
       throw ControlPlaneError.catalogFetchFailed(err instanceof Error ? err.message : String(err));
     }
     deps.moduleStore.notifyCatalogRefreshed();

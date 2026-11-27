@@ -167,6 +167,18 @@ export class ControlPlaneError extends Error {
     );
   }
 
+  /**
+   * The remote catalog body is capped at 1 MiB (matching the worker loader from #289): a response
+   * past the cap is a failed fetch, so the API keeps the existing `CATALOG_FETCH_FAILED` code.
+   */
+  static catalogTooLarge(): ControlPlaneError {
+    return new ControlPlaneError(
+      502,
+      'CATALOG_FETCH_FAILED',
+      'Failed to fetch catalog: catalog response exceeds the 1048576-byte limit',
+    );
+  }
+
   static moduleInUse(id: string): ControlPlaneError {
     return new ControlPlaneError(
       409,
@@ -189,5 +201,23 @@ export class ControlPlaneError extends Error {
 
   static unauthorized(): ControlPlaneError {
     return new ControlPlaneError(401, 'UNAUTHORIZED', 'Missing or invalid API token');
+  }
+}
+
+/**
+ * The Redis compare-and-set lost the race: the instance's state no longer admits the requested
+ * transition because another actor moved it first. Wire-identical to `ControlPlaneError.invalidState`
+ * (409, `INVALID_STATE`, same message template and details); the subtype exists only so claim loops
+ * can skip "someone else won" while still treating every other transition failure as real (#303).
+ */
+export class StateConflictError extends ControlPlaneError {
+  constructor(modelName: string, currentState: string, action: string) {
+    super(
+      409,
+      'INVALID_STATE',
+      `Cannot ${action} model ${modelName}: current state is ${currentState}`,
+      { modelName, currentState, action },
+    );
+    this.name = 'StateConflictError';
   }
 }

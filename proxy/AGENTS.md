@@ -11,19 +11,22 @@ and forwards with circuit breaking + weighted round-robin. Paths are split by pr
 
 ## Layout
 
-| Path                       | Role                                                             |
-| -------------------------- | ---------------------------------------------------------------- |
-| `src/config.rs`            | `Config::from_env()` — all `SARDEENZ_*` env vars                 |
-| `src/error.rs`             | `ProxyError` → HTTP status via `IntoResponse`                    |
-| `src/handlers.rs`          | Inference handlers + `/metrics`                                  |
-| `src/routing/`             | `RoutingMapCache` (watch-based) + `ModelResolver` → `Resolution` |
-| `src/parking/`             | `ParkingManager`, `WakeTriggerClient`, thundering-herd dedup     |
-| `src/forwarding/`          | `ForwardingClient`, `CircuitBreaker`, `WeightedRoundRobin`       |
-| `src/protocol/`            | Model extraction per protocol family, response building          |
-| `src/inference_tracker.rs` | Debounced per-model inference timestamps to Redis (LRU input)    |
-| `src/state/`               | `AppState`, `start_redis_sync` (routing map + pub/sub loop)      |
-| `src/health/`              | `/healthz`, `/readyz` on the admin port                          |
-| `src/generated/`           | **Hand-maintained** Rust mirrors of the OpenAPI specs (ADR-005)  |
+| Path                       | Role                                                                    |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `src/config.rs`            | `Config::from_env()` — all `SARDEENZ_*` env vars                        |
+| `src/auth.rs`              | Optional inference-port API-key guard (constant-time, `/openai`+`/oip`) |
+| `src/body_budget.rs`       | Per-process buffered-request-body budget (`503 overloaded`)             |
+| `src/shutdown.rs`          | `preStop` drain hold + the derived graceful-shutdown deadline           |
+| `src/error.rs`             | `ProxyError` → HTTP status via `IntoResponse`                           |
+| `src/handlers.rs`          | Inference handlers + `/metrics`                                         |
+| `src/routing/`             | `RoutingMapCache` (watch-based) + `ModelResolver` → `Resolution`        |
+| `src/parking/`             | `ParkingManager`, `WakeTriggerClient`, thundering-herd dedup            |
+| `src/forwarding/`          | `ForwardingClient`, `CircuitBreaker`, `WeightedRoundRobin`              |
+| `src/protocol/`            | Model extraction per protocol family, response building                 |
+| `src/inference_tracker.rs` | Debounced per-model inference timestamps to Redis (LRU input)           |
+| `src/state/`               | `AppState`, `start_redis_sync` (routing map + pub/sub loop)             |
+| `src/health/`              | `/healthz`, `/readyz` on the admin port                                 |
+| `src/generated/`           | **Hand-maintained** Rust mirrors of the OpenAPI specs (ADR-005)         |
 
 ## Rules
 
@@ -31,7 +34,10 @@ and forwards with circuit breaking + weighted round-robin. Paths are split by pr
   changes, update `src/generated/*.rs` by hand in the same PR (`RoutingEntry`, `ModelState`,
   `RunnerEndpoint`, `WakeTrigger*`, …). `RoutingEntry.protocol` is required.
 - **Ports:** health, readiness, metrics live on `SARDEENZ_ADMIN_ADDR`, never on the inference
-  port. `/readyz` is 200 only when Redis is connected **and** the routing map is loaded.
+  port. `/readyz` is 200 only when Redis is connected **and** the routing map is loaded, and flips
+  503 once shutdown begins. The same admin listener serves `GET /drain` (the `preStop` hook: it
+  holds the connection for the endpoint-propagation delay, then the derived shutdown deadline
+  applies) — keep it on the internal listener, it is not a public endpoint.
 - **Errors:** every handler error goes through `ProxyError`; use `status_code()` for metric labels.
 - **Metrics:** all Prometheus names are prefixed `sardeenz_proxy_`.
 - **Headers:** hop-by-hop headers are stripped on both request and response in `ForwardingClient`.

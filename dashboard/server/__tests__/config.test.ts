@@ -239,6 +239,7 @@ describe('loadConfig auth defaults', () => {
     'JWT_SECRET',
     'SARDEENZ_PUBLIC_URL',
     'SARDEENZ_INFERENCE_URL',
+    'SARDEENZ_INFERENCE_API_KEY',
     'SARDEENZ_BFF_MAX_CONCURRENT_INFERENCE_REQUESTS_PER_USER',
     'SARDEENZ_BFF_UPSTREAM_TIMEOUT_MS',
     'SARDEENZ_PROMETHEUS_BEARER_TOKEN_PATH',
@@ -330,6 +331,15 @@ describe('loadConfig auth defaults', () => {
     process.env['SARDEENZ_INFERENCE_URL'] = 'http://proxy.example.com:8080';
     const config = loadConfig();
     expect(config.inferenceUrl).toBe('http://proxy.example.com:8080');
+  });
+
+  it('defaults SARDEENZ_INFERENCE_API_KEY to empty (proxy key disabled)', () => {
+    expect(loadConfig().inferenceApiKey).toBe('');
+  });
+
+  it('reads SARDEENZ_INFERENCE_API_KEY from environment', () => {
+    process.env['SARDEENZ_INFERENCE_API_KEY'] = 'shared-inference-key';
+    expect(loadConfig().inferenceApiKey).toBe('shared-inference-key');
   });
 
   it('defaults the per-user inference concurrency cap to four', () => {

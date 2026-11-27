@@ -178,21 +178,20 @@ paths:
 
         The control plane should set an appropriate timeout (reload duration
         depends on model size and the level from which the runner is waking).
+
+        `POST /wake` is idempotent: a runner that is not sleeping also answers
+        `200` — the wake is a harmless no-op and the runner reports its
+        post-wake state. There is no not-sleeping refusal.
       tags:
         - Sleep
       responses:
         "200":
-          description: Runner is now awake and ready
+          description: |
+            Runner is awake (idempotent: also returned when the runner was not sleeping)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WakeResponse"
-        "409":
-          description: Runner is not sleeping
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal runner error
           content:
