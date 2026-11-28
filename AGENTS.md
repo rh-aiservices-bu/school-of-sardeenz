@@ -90,11 +90,12 @@ sardeenz/
 
 ## Project Status
 
-Phases 0–5 and milestones M2–M18 and M20 are complete and merged to `dev` (M18 via #324 after
-#325 fixed the #322 cutover barrier; M20 via #326), as are M19's Phase 5 track and its
-image/supply-chain half (#266 via #316, #267 via #318) plus the M19 docs/contracts items (#249 via
-#319, #248 via #320, #268 via #273). Next: M19's remaining #315 (cluster-only), the vLLM SIF
-republish/rollout, and the Parking Lot backlog.
+Phases 0–5 and milestones M2–M18, M20, M21 and M22 are complete and merged to `dev` (M18 via #324
+after #325 fixed the #322 cutover barrier; M20 via #326; M21 via #345; M22 via #344 plus ADR-032…035
+via #346), as are M19's Phase 5 track and its image/supply-chain half (#266 via #316, #267 via #318)
+plus the M19 docs/contracts items (#249 via #319, #248 via #320, #268 via #273). Next: M23 (High
+Availability & Operability, six issues — not yet planned), M22's remaining #337 (SECURITY.md +
+threat model), M19's remaining #315 (cluster-only), and the vLLM/MLServer SIF republishes.
 Details and history: [`docs/project/status.md`](docs/project/status.md); full plan:
 [`docs/project/overall-plan.md`](docs/project/overall-plan.md).
 
