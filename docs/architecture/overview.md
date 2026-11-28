@@ -8,6 +8,9 @@ The core paradigm: instead of letting Kubernetes allocate accelerators per-workl
 
 > See [ADR-001](adrs/adr-001-l7-vram-scheduling.md) for the full rationale.
 
+The trust boundaries that protect the platform, and the risks it knowingly accepts, are summarized
+in the [threat model](threat-model.md).
+
 ## High-Level Architecture
 
 ```mermaid
