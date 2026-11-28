@@ -1,10 +1,11 @@
 # Project Status
 
 Living record of what is delivered and what comes next. Update when a phase or milestone closes.
-Last update: 2026-11-26 (M20 — Dashboard Performance & Resilience — merged to `dev` via #326
-(`5fc0332`), with #255, #256 and the M20 milestone closed; M18 merged via #324 (`27a8742`) after
-#325 fixed the #322 cutover barrier. Next open work: M19's #315 (cluster-only), the Parking Lot
-backlog, and the deploy-only vLLM SIF republish/rollout steps.)
+Last update: 2026-11-28 (M21 — Failure-Mode Resilience — merged via #345 (`a5cee3f`) and M22 —
+Security Posture & Supply Chain — via #344 (`270ade4`), with M22's decisions recorded as ADR-032…035
+(`bebe3e8`, #346); M22's #337 — SECURITY.md and the one-page threat model — was the milestone's last
+item and is handled as its own docs-only PR. Next: M23 — High Availability & Operability — see
+[Next](#next); M19's #315 and the vLLM/MLServer SIF republishes remain cluster-only.)
 
 ## Phases (complete)
 
@@ -69,6 +70,8 @@ stayed at 5,934 of 23,034 MiB. The run surfaced four follow-up bugs
 | M19       | Deployment, Release & Docs Hygiene — Phase 5 co-location (#276 placement, #278 attribution rule, #277 pressure response, #279 phase doc + Gate 9b recipe) merged via #281 and its Gate 9b run recorded; publish/rollout documented, pull policy fixed (#247/#211); image hardening (#266 via #316), ADR-016/SCC wording reconciled (#267 via #318); release 0.2.1 recorded (#249 via #319), 409 reason enum (#248 via #320), token gate (#268 via #273) closed; #315 open |
 | M18       | CI & Test Infrastructure (merged via #324 → `27a8742`, after #325 fixed the #322 cutover barrier) — blocking integration job in CI (#251), conformance conflict/ERROR/poller coverage (#252), dashboard unit-test renderability (#176), lint ignores mkdocs `site/` (#314)                                                                                                                                                                                                |
 | M20       | Dashboard Performance & Resilience (merged via #326 → `5fc0332`) — SSE re-render scope, route code splitting, one charting stack (#255); BFF timeout/abort propagation + hijacked-stream shutdown + ErrorBoundary route coverage (#256)                                                                                                                                                                                                                                   |
+| M21       | Failure-Mode Resilience (merged via #345 → `a5cee3f`) — lint honesty for `logs/` (#306), bounded catalog fetch (#296), no defaulted routing protocol tag (#309), typed wake-claim failures (#303), optional inference API key (#332), mass-divergence instance-row guard (#328), additive-only Redis-schema rule with version-skew tests (#331), `/wake` idempotency (#323), buffered-body budget (#300), two-replica proxy HA with PDB and a derived shutdown deadline (#330), ADR-031 plaintext posture (#333), scripted failure scenarios in both harnesses (#340) |
+| M22       | Security Posture & Supply Chain (merged via #344 → `270ade4`; decisions ADR-032…035 via #346 → `bebe3e8`) — OAuth exchange code instead of a URL-fragment JWT (#136), pinned Python test constraints (#182), pickle-weights refusal with `allowUnsafeWeights` (#336, ADR-032), gitleaks PR gate + nightly advisories + CODEOWNERS (#338, ADR-034), digest-pinned prereq images with a Dependabot coverage check (#339); #337 (SECURITY.md + threat model) is the remaining item |
 
 Also merged outside a milestone: the configuration-name vs. served-model-name split
 ([ADR-020](../architecture/adrs/adr-020-config-name-vs-served-model-name.md), #154) and the
@@ -219,13 +222,73 @@ default 20000 confirmed, disconnect abort at 296 ms with no error-level logs, SI
 ~15 ms per stream type, and a browser pass on a mock-stack harness (lazy chunk + Suspense
 fallback, placement bars, `/login` intact).
 
+## M21 — Failure-Mode Resilience (merged to `dev` via #345)
+
+Landed via PR #345 (squash `a5cee3f`, 2026-11-27) from `milestone/m21-failure-mode-resilience` off
+`dev@d0e9db9`; twelve issues, each through review → verify → acceptance, with #340 last as the proof:
+
+- **#306** — `logs/` excluded from ESLint and Prettier, so `make lint` is honest on a working checkout.
+- **#296** — the catalog fetch streams and refuses more than 1 MiB (`CATALOG_FETCH_FAILED`, 502).
+- **#309** — the routing protocol tag is never authored from a defaulted value; conflicts are counted and logged.
+- **#303** — typed wake-claim conflicts, real failure reporting in the model wake loop, and the benign `202` for a lost CAS.
+- **#332** — optional static inference API key (proxy and BFF from one Secret), `401` before the body is read and before any parking or wake, rotation-safe.
+- **#328** — reconciliation refuses wholesale instance-row pruning on mass divergence, reusing #286's notion and episode counters.
+- **#331** — an additive-only rule for Redis-transported schemas, with version-skew tests in both directions.
+- **#323** — `/wake` documented idempotent (200 from any state); an unclaimed wake is a counted no-op.
+- **#300** — a global buffered-body budget (`SARDEENZ_PROXY_MAX_BUFFERED_BYTES`, 256 MiB default) with a gauge; `413` unchanged.
+- **#333** — ADR-031 records the plaintext in-namespace posture and the verified TLS-client facts.
+- **#330** — two proxy replicas, a PDB, soft spread, `preStop` `/drain`, 180 s grace and a derived shutdown deadline, with a two-replica wake proof.
+- **#340** — scripted failure scenarios in both integration harnesses, with the pre-fix failures recorded for #328 and #303.
+
+Gate at the merge tip: `make lint typecheck test` green (1937 tests, 1 skipped), `make test-integration`
+44/44 executed through the executed-count gate, `cargo test` with and without
+`--features redis-integration`, `make test-python` 140 passed, and `kubectl kustomize deployment`
+rendering two replicas plus the PDB. Cluster-only remainder: a real node drain and PDB eviction, a
+real rollout under traffic, and a real Redis restart (the harness models both in-process).
+
+## M22 — Security Posture & Supply Chain (merged to `dev` via #344)
+
+Landed via PR #344 (squash `270ade4`) from `milestone/m22-security-supply-chain` off `dev@d0e9db9`,
+with the four decisions recorded as ADR-032…035 in a follow-up (`bebe3e8`, #346):
+
+- **#136** — the OAuth callback no longer puts the JWT in the URL fragment: a 256-bit, 60 s, single-use exchange code is redeemed at `POST /api/auth/exchange` (oauth mode only, per-IP rate limited, no cookie), and the BFF request log redacts `code` alongside `token`.
+- **#182** — `runners/ci-constraints.txt` pins the shims' `[test]` closure; CI installs with `-c` and `make python-constraints` regenerates it. The SIF runtime trees stay unpinned by design.
+- **#336** — both shims refuse pickle-family weights unless the model opts in with `allowUnsafeWeights` (persisted on the record, delivered as `SARDEENZ_ALLOW_UNSAFE_WEIGHTS=1`); the control plane's early refusal is advisory. ADR-032.
+- **#338** — a blocking gitleaks `secrets` PR job, a nightly advisories job (`npm audit`, `cargo audit`, `pip-audit`) maintaining one issue, and CODEOWNERS over the gate's control surface (ADR-034).
+- **#339** — the prereq Valkey/PostgreSQL images pin a dated tag plus multi-arch digest, and `make verify-dependabot-coverage` fails when a runner version has no catalog entry or the reverse.
+
+Remaining from the milestone: **#337** (SECURITY.md plus a one-page threat model) — docs-only, its own
+PR; every accepted risk there links ADR-031/032/035, ADR-022's non-goals, #284, #332 and #334.
+
+Deploy-only remainder: the MLServer `1.7.1-rc4` → `rc5` republish (then the `runners.yaml` digest and
+`shimSource` bump) and the vLLM `rc2` republish, both on cluster; a real OpenShift OAuth round trip;
+and the new PR gate's first real runs.
+
 ## Next
 
+Next, in execution order (as of 2026-11-28):
+
+| Order | Milestone                            | Issues                             | Notes                                                                                                                                                                             |
+| ----- | ------------------------------------ | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | M23: High Availability & Operability | #135, #241, #329, #342, #250, #341 | Ordered in the milestone description: admin listener first, then Redis-loss recovery, the standby replica with failover, request-id propagation, operator docs, alert rules. Not yet planned (no specs). |
+| —     | M22 remainder                        | #337                               | SECURITY.md + one-page threat model; docs-only, its own PR                                                                                                                        |
+| —     | M19 (remainder)                      | #315                               | Cluster-only; also the vLLM SIF `rc2` republish and the platform-image rollout proof                                                                                              |
+| —     | Backlog                              | #334, #138, #284                   | Each needs a design decision before it can be scheduled                                                                                                                            |
+| —     | Parking Lot                          | #10, #171, #186                    | Deferred by decision                                                                                                                                                              |
+
+Earlier milestones:
+
+- ~~**M21** (Failure-Mode Resilience)~~ — **merged to `dev` via #345** (`a5cee3f`); its twelve issues
+  were closed by the PR. See the M21 section above.
+- ~~**M22** (Security Posture & Supply Chain)~~ — **merged to `dev` via #344** (`270ade4`), with the
+  decisions as ADR-032…035 via #346 (`bebe3e8`); #337 is the milestone's last item. See the M22
+  section above.
 - ~~**M18** (CI & Test Infrastructure)~~ — **merged to `dev` via #324** (`27a8742`, after #325
   fixed #322) and closed. See the M18 section below for what shipped.
 - ~~**M20** (Dashboard Performance & Resilience)~~ — **merged to `dev` via #326**
   (`5fc0332`) and closed; #255, #256 and the M20 milestone were closed manually after the merge
-  (dev-targeted PRs never auto-close issues — default branch is `main`). See the M20 section below.
+  (the default branch was still `main` then, so `Closes #N` did not fire; it is `dev` now, so they
+  will). See the M20 section below.
 - **M19** (Deployment, Release & Docs Hygiene) — the image/supply-chain half is closed (#266 via
   #316, #267 via #318), Phase 5 is merged and verified on-cluster, the platform-image rollout is
   documented (#247) and still needs one on-cluster rollout proof, and the docs/contracts items are
