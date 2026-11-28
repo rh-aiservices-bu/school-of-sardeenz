@@ -1339,6 +1339,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is the enforcement point), and a new "Model weights trust boundary" section in the security
   guide documents that write access to the weights volume is code execution on workers. Takes
   effect on the cluster once the MLServer `1.7.1-rc5` SIF is republished.
+- **The dashboard and control-plane runtime images no longer ship a package manager (#350).** Both
+  services start `node <entrypoint>` and never invoke `npm`, yet `node:22-slim` bundles npm, npx and
+  corepack — dead weight whose transitive tree (`brace-expansion`, `ip-address`, `picomatch`,
+  `pacote`, `sigstore`, `glob`, `minimatch` …) was every one of the `trivy-dashboard`
+  language-package code-scanning findings. Each runtime stage now deletes
+  `/usr/local/lib/node_modules/{npm,corepack}` and `/usr/local/bin/{npm,npx,corepack}` as root,
+  before the `USER` switch; `node` and the application's `/app/node_modules` are untouched, no
+  `.trivyignore.yaml` entry was added (ADR-030 decision 3), and
+  `tests/container-images/verify-runtime-packaging.mjs` gained a per-stage regression check.
+- **The dashboard and control-plane images ship production dependencies only, and
+  `typescript-eslint` moves off the vulnerable `minimatch` (#353).** Both Dockerfiles gained a
+  `production-dependencies` stage — `npm ci --omit=dev --ignore-scripts
+--include-workspace-root=false --workspace=@sardeenz/<service>` — and each runtime stage now
+  copies that tree instead of the `deps` tree, so the dashboard image no longer carries Vite,
+  Playwright, testing-library, `tsx`, `pino-pretty` or the `@typescript-eslint` family. The
+  workspace filter is what keeps the other workspaces' prod trees (the dev worker's native NVML
+  binding, the control plane's server dependencies) out of the dashboard image, and
+  `NODE_ENV=production` still bypasses `pino-pretty`. `typescript-eslint` `^8.22.0` → `^8.74.0`
+  lifts `@typescript-eslint/typescript-estree` to 8.74.0 and its `minimatch` to 11.0.9, closing
+  `CVE-2026-118764` / GHSA-g3hv-75wg-m249 at the source instead of suppressing it.
 
 ## [0.2.1] - 2026-10-29
 
