@@ -75,6 +75,7 @@ nav:
   - Architecture:
       - architecture/README.md
       - Overview: architecture/overview.md
+      - Threat Model: architecture/threat-model.md
       - Flow Visualizer: architecture-visualizer.html
       - Components:
           - architecture/components/README.md

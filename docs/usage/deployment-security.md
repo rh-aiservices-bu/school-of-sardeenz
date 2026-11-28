@@ -1,5 +1,10 @@
 # Deployment Security
 
+Report suspected vulnerabilities through GitHub private vulnerability reporting, as described in
+[`SECURITY.md`](../../SECURITY.md) — never in a public issue. The trust boundaries this page
+enforces, and the risks the platform knowingly accepts, are maintained in the
+[threat model](../architecture/threat-model.md).
+
 ## Dashboard BFF Authentication
 
 The dashboard BFF enforces secure authentication defaults at startup:

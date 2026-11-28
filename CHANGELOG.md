@@ -866,6 +866,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **The security posture is published: a reporting policy and a one-page threat model (#337).**
+  `SECURITY.md` states which line receives fixes (`dev`, released from `main`, latest tag `v0.2.0`,
+  older tags not backported) and routes reports through GitHub private vulnerability reporting —
+  no contact address; the feature is enabled on the repository. `docs/architecture/threat-model.md`
+  lists the actors, the ten trust boundaries each with its enforcing control and owning ADR or
+  issue, the seven accepted risks, and the explicit non-goals; it is in the docs nav and linked
+  from the architecture overview and the deployment-security guide. Every accepted risk links the
+  record that owns it (`ADR-031`, `ADR-032`, `ADR-035`, ADR-022 non-goals, ADR-027/ADR-029, #284,
+  #332, #334).
 - **Platform images are built from digest-pinned bases, Trivy-scanned, and cosign-signed (#266).**
   All seven base-image `FROM` lines of the images this repository builds now carry the human tag plus
   a `sha256:` digest — `rust:1.86-bookworm`, `gcr.io/distroless/static-debian12:nonroot`,
