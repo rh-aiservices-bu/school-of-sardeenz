@@ -1339,6 +1339,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is the enforcement point), and a new "Model weights trust boundary" section in the security
   guide documents that write access to the weights volume is code execution on workers. Takes
   effect on the cluster once the MLServer `1.7.1-rc5` SIF is republished.
+- **The dashboard and control-plane runtime images no longer ship a package manager (#350).** Both
+  services start `node <entrypoint>` and never invoke `npm`, yet `node:22-slim` bundles npm, npx and
+  corepack — dead weight whose transitive tree (`brace-expansion`, `ip-address`, `picomatch`,
+  `pacote`, `sigstore`, `glob`, `minimatch` …) was every one of the `trivy-dashboard`
+  language-package code-scanning findings. Each runtime stage now deletes
+  `/usr/local/lib/node_modules/{npm,corepack}` and `/usr/local/bin/{npm,npx,corepack}` as root,
+  before the `USER` switch; `node` and the application's `/app/node_modules` are untouched, no
+  `.trivyignore.yaml` entry was added (ADR-030 decision 3), and
+  `tests/container-images/verify-runtime-packaging.mjs` gained a per-stage regression check.
 
 ## [0.2.1] - 2026-10-29
 

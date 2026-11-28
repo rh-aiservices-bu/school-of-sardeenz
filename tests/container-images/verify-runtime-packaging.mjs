@@ -127,6 +127,145 @@ assert(
   'runtime exports.types must use dist/index.d.ts',
 );
 
+// Both service images build the full dependency tree in `deps` (tsc and Vite need
+// devDependencies) and copy a production tree into `runtime`. These checks read the Dockerfile as
+// per-stage instructions: a whole-file `includes()` cannot tell which stage a line belongs to, and
+// `COPY --from=deps` is correct in the build stage while the same line in the runtime stage is a
+// regression.
+function parseStages(containerfile) {
+  const instructions = [];
+  let pending = '';
+  for (const rawLine of containerfile.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) {
+      continue;
+    }
+    const continued = line.endsWith('\\');
+    pending = `${pending} ${continued ? line.slice(0, -1) : line}`.trim();
+    if (!continued) {
+      instructions.push(pending);
+      pending = '';
+    }
+  }
+
+  const stages = new Map();
+  let current = null;
+  for (const instruction of instructions) {
+    const from = /^FROM\s+\S+(?:\s+AS\s+(\S+))?$/i.exec(instruction);
+    if (from) {
+      assert(from[1], `containerfile stage must be aliased: ${instruction}`);
+      current = from[1].toLowerCase();
+      stages.set(current, []);
+      continue;
+    }
+    assert(current !== null, `containerfile instruction before the first FROM: ${instruction}`);
+    stages.get(current).push(instruction);
+  }
+  return stages;
+}
+
+function expectPackagingRejected(containerfile, expectedFragment, check) {
+  try {
+    check(containerfile, 'fixture');
+  } catch (error) {
+    assert(
+      error.message.includes(expectedFragment),
+      `runtime packaging fixture was rejected with an unexpected message: ${error.message}`,
+    );
+    return;
+  }
+  throw new Error(`runtime packaging fixture must be rejected: ${expectedFragment}`);
+}
+
+const runtimeTrimInstruction = [
+  'RUN rm -rf /usr/local/lib/node_modules/npm \\',
+  '           /usr/local/lib/node_modules/corepack \\',
+  '           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack',
+].join('\n');
+
+// #350: the runtime service starts `node <entrypoint>` and never invokes a package manager, so the
+// CLI bundle must be deleted. A static read cannot prove the image contents (the Trivy scan does),
+// but it catches a silent reintroduction, and it pins the delete to the root layer before the
+// effective USER: the runtime identity cannot remove root-owned paths.
+const packageManagerCliPaths = [
+  '/usr/local/lib/node_modules/npm',
+  '/usr/local/lib/node_modules/corepack',
+  '/usr/local/bin/npm',
+  '/usr/local/bin/npx',
+  '/usr/local/bin/corepack',
+];
+
+function assertRuntimeShipsNoPackageManager(containerfile, label) {
+  const runtime = parseStages(containerfile).get('runtime');
+  assert(runtime, `${label} must declare a runtime stage`);
+
+  const removal = runtime.findIndex(
+    (instruction) =>
+      /^RUN\s+rm -rf\s/.test(instruction) &&
+      packageManagerCliPaths.every((path) => instruction.includes(` ${path}`)),
+  );
+  assert(removal !== -1, `${label} runtime image must not ship the npm CLI bundle (#350)`);
+
+  const tree = runtime[removal];
+  assert(!tree.includes('/app'), `${label} must not delete the application dependency tree (#350)`);
+  assert(
+    !/(^|\s)\/usr\/local\/bin\/node(\s|$)/.test(tree),
+    `${label} must not delete the node binary (#350)`,
+  );
+
+  const effectiveUser = runtime.findLastIndex((instruction) => /^USER\s+/.test(instruction));
+  assert(effectiveUser !== -1, `${label} runtime stage must declare a USER instruction`);
+  assert(
+    removal < effectiveUser,
+    `${label} must delete the npm CLI bundle as root, before its USER instruction (#350)`,
+  );
+}
+
+const runtimeTrimFixture = [
+  'FROM node:22-slim@sha256:' + '0'.repeat(64) + ' AS base',
+  '',
+  'FROM base AS runtime',
+  '',
+  'ENV NODE_ENV=production',
+  '',
+  runtimeTrimInstruction,
+  '',
+  'USER sardeenz',
+  '',
+  'CMD ["node", "index.js"]',
+].join('\n');
+
+// Positive and negative controls, so neither check can rot into a no-op.
+assertRuntimeShipsNoPackageManager(runtimeTrimFixture, 'fixture');
+// The worker's `USER 0` … `USER 1001:0` split is accepted: only the effective (last) USER counts.
+assertRuntimeShipsNoPackageManager(
+  runtimeTrimFixture.replace(runtimeTrimInstruction, `USER 0\n\n${runtimeTrimInstruction}`),
+  'fixture',
+);
+expectPackagingRejected(
+  runtimeTrimFixture.replace(runtimeTrimInstruction, ''),
+  'must not ship the npm CLI bundle',
+  assertRuntimeShipsNoPackageManager,
+);
+expectPackagingRejected(
+  runtimeTrimFixture.replace(
+    runtimeTrimInstruction,
+    runtimeTrimInstruction.replace(
+      '/usr/local/bin/corepack',
+      '/usr/local/bin/corepack /app/node_modules',
+    ),
+  ),
+  'must not delete the application dependency tree',
+  assertRuntimeShipsNoPackageManager,
+);
+expectPackagingRejected(
+  runtimeTrimFixture
+    .replace(runtimeTrimInstruction, '')
+    .replace('USER sardeenz', `USER sardeenz\n\n${runtimeTrimInstruction}`),
+  'must delete the npm CLI bundle as root, before its USER instruction',
+  assertRuntimeShipsNoPackageManager,
+);
+
 for (const service of ['control-plane', 'dashboard']) {
   const dockerfile = readFileSync(join(repositoryRoot, `containers/${service}/Dockerfile`), 'utf8');
   const dockerignore = readFileSync(
@@ -149,6 +288,7 @@ for (const service of ['control-plane', 'dashboard']) {
       'dashboard build image must copy the root manifest before running a workspace script',
     );
   }
+  assertRuntimeShipsNoPackageManager(dockerfile, service);
   assert(
     dockerignore.includes('# This Dockerfile builds from the repository root.'),
     `${service} must use a Dockerfile-specific ignore file for its root build context`,

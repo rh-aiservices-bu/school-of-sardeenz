@@ -36,6 +36,14 @@ FROM base AS runtime
 
 ENV NODE_ENV=production
 
+# The runtime service starts `node dashboard/dist/server/index.js` and never invokes a package
+# manager, so the CLI bundle is dead weight and its transitive tree is the sole source of the npm
+# code-scanning alerts (#350). Must run as root, before USER: the runtime identity cannot delete
+# root-owned paths. `rm -rf` tolerates corepack's absence in a future node:22-slim.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 RUN addgroup --system --gid 1001 sardeenz && \
     adduser --system --uid 1001 --ingroup sardeenz sardeenz
 

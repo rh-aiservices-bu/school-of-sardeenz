@@ -33,6 +33,14 @@ FROM base AS runtime
 
 ENV NODE_ENV=production
 
+# The runtime service starts `node control-plane/dist/index.js` and never invokes a package
+# manager, so the CLI bundle is dead weight and its transitive tree is the sole source of the npm
+# code-scanning alerts (#350). Must run as root, before USER: the runtime identity cannot delete
+# root-owned paths. `rm -rf` tolerates corepack's absence in a future node:22-slim.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # Apptainer CLI for runner-catalog signature verification. The control plane streams the ORAS SIF
 # layer itself, then runs `apptainer verify`; verification needs no setuid/fuse/userns, so the
 # unprivileged package suffices. Skip this layer if you only ever run the 'stub' importer. Pinned;
