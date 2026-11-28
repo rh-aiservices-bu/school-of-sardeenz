@@ -14,6 +14,26 @@ RUN npm ci --ignore-scripts
 
 RUN mkdir -p packages/types/node_modules dashboard/node_modules
 
+# Runtime dependency tree only: the build stage needs the full install (tsc, Vite), the shipped
+# image needs none of Vite/Playwright/testing-library/tsx/pino-pretty/@typescript-eslint. The
+# workspace filter keeps the install to the dashboard's own prod tree — a bare
+# `npm ci --omit=dev` would also install the other workspaces' prod dependencies — while still
+# creating the `@sardeenz/types` workspace link (#353).
+FROM base AS production-dependencies
+
+COPY package.json package-lock.json ./
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/types/package.json packages/types/
+COPY packages/utils/package.json packages/utils/
+COPY dashboard/package.json dashboard/
+
+RUN npm ci --omit=dev --ignore-scripts --include-workspace-root=false \
+    --workspace=@sardeenz/dashboard
+
+# npm may hoist every dependency to /app/node_modules and leave these absent; COPY requires the
+# source to exist (same idiom as the deps stage).
+RUN mkdir -p packages/types/node_modules dashboard/node_modules
+
 FROM base AS build
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -47,9 +67,9 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 RUN addgroup --system --gid 1001 sardeenz && \
     adduser --system --uid 1001 --ingroup sardeenz sardeenz
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
-COPY --from=deps /app/dashboard/node_modules ./dashboard/node_modules
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=production-dependencies /app/packages/types/node_modules ./packages/types/node_modules
+COPY --from=production-dependencies /app/dashboard/node_modules ./dashboard/node_modules
 
 # Shared types
 COPY --from=build /app/packages/types/dist ./packages/types/dist

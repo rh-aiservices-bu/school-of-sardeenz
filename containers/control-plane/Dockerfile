@@ -16,6 +16,25 @@ RUN npm ci --ignore-scripts
 # COPY requires the source to exist; this guarantees it.
 RUN mkdir -p packages/types/node_modules control-plane/node_modules
 
+# Runtime dependency tree only: the build stage needs the full install (tsc), the shipped image
+# needs none of pino-pretty/tsx/@types/pg. The workspace filter keeps the install to the control
+# plane's own prod tree — a bare `npm ci --omit=dev` would also install the other workspaces' prod
+# dependencies — while still creating the `@sardeenz/types` workspace link (#353).
+FROM base AS production-dependencies
+
+COPY package.json package-lock.json ./
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/types/package.json packages/types/
+COPY packages/utils/package.json packages/utils/
+COPY control-plane/package.json control-plane/
+
+RUN npm ci --omit=dev --ignore-scripts --include-workspace-root=false \
+    --workspace=@sardeenz/control-plane
+
+# npm may hoist every dependency to /app/node_modules and leave these absent; COPY requires the
+# source to exist (same idiom as the deps stage).
+RUN mkdir -p packages/types/node_modules control-plane/node_modules
+
 FROM base AS build
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -58,9 +77,9 @@ RUN apt-get update && \
 RUN addgroup --system --gid 1001 sardeenz && \
     adduser --system --uid 1001 --ingroup sardeenz sardeenz
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
-COPY --from=deps /app/control-plane/node_modules ./control-plane/node_modules
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=production-dependencies /app/packages/types/node_modules ./packages/types/node_modules
+COPY --from=production-dependencies /app/control-plane/node_modules ./control-plane/node_modules
 
 COPY --from=build /app/packages/types/dist ./packages/types/dist
 # Runtime images contain compiled shared types, not TypeScript source. Use the

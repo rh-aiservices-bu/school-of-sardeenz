@@ -221,6 +221,59 @@ function assertRuntimeShipsNoPackageManager(containerfile, label) {
   );
 }
 
+// #353: the runtime image ships a production-only dependency tree built in its own stage. The
+// install must stay workspace-scoped — a bare `npm ci --omit=dev` also installs every other
+// workspace's prod tree (the dev worker's native NVML binding, the control plane's server deps).
+function assertRuntimeUsesProductionDependencies(containerfile, service) {
+  const stages = parseStages(containerfile);
+
+  const deps = stages.get('deps');
+  assert(deps, `${service} must declare a deps stage`);
+  assert(
+    deps.includes('RUN npm ci --ignore-scripts'),
+    `${service} deps stage must keep the full dependency tree for the build stage`,
+  );
+
+  const build = stages.get('build');
+  assert(build, `${service} must declare a build stage`);
+  assert(
+    build.includes('COPY --from=deps /app/node_modules ./node_modules'),
+    `${service} build stage must keep the full dependency tree (tsc and Vite need devDependencies)`,
+  );
+
+  const production = stages.get('production-dependencies');
+  assert(production, `${service} must declare a production-dependencies stage (#353)`);
+
+  const install = production.find((instruction) => /^RUN\s+npm ci\s/.test(instruction));
+  assert(install, `${service} production-dependencies stage must run npm ci (#353)`);
+  assert(
+    install.includes(' --omit=dev'),
+    `${service} runtime install must omit devDependencies (#353): ${install}`,
+  );
+  assert(
+    install.includes(` --workspace=@sardeenz/${service}`),
+    `${service} runtime install must be scoped to its own workspace (#353): ${install}`,
+  );
+  assert(
+    install.includes(' --include-workspace-root=false'),
+    `${service} runtime install must not install the root workspace (#353): ${install}`,
+  );
+
+  const runtime = stages.get('runtime');
+  assert(runtime, `${service} must declare a runtime stage`);
+  for (const tree of ['node_modules', 'packages/types/node_modules', `${service}/node_modules`]) {
+    assert(
+      runtime.includes(`COPY --from=production-dependencies /app/${tree} ./${tree}`),
+      `${service} runtime image must copy ${tree} from production-dependencies (#353)`,
+    );
+  }
+  const staleCopies = runtime.filter((instruction) => /^COPY\s+--from=deps\s/.test(instruction));
+  assert(
+    staleCopies.length === 0,
+    `${service} runtime image must not copy the full deps tree (#353): ${staleCopies.join(' | ')}`,
+  );
+}
+
 const runtimeTrimFixture = [
   'FROM node:22-slim@sha256:' + '0'.repeat(64) + ' AS base',
   '',
@@ -266,6 +319,83 @@ expectPackagingRejected(
   assertRuntimeShipsNoPackageManager,
 );
 
+const productionDependenciesFixture = [
+  'FROM node:22-slim@sha256:' + '0'.repeat(64) + ' AS base',
+  '',
+  'FROM base AS deps',
+  '',
+  'RUN npm ci --ignore-scripts',
+  '',
+  'FROM base AS production-dependencies',
+  '',
+  'RUN npm ci --omit=dev --ignore-scripts --include-workspace-root=false \\',
+  '    --workspace=@sardeenz/fixture',
+  '',
+  'FROM base AS build',
+  '',
+  'COPY --from=deps /app/node_modules ./node_modules',
+  '',
+  'FROM base AS runtime',
+  '',
+  'ENV NODE_ENV=production',
+  '',
+  runtimeTrimInstruction,
+  '',
+  'COPY --from=production-dependencies /app/node_modules ./node_modules',
+  'COPY --from=production-dependencies /app/packages/types/node_modules \\',
+  '  ./packages/types/node_modules',
+  'COPY --from=production-dependencies /app/fixture/node_modules ./fixture/node_modules',
+  '',
+  'USER sardeenz',
+].join('\n');
+
+assertRuntimeUsesProductionDependencies(productionDependenciesFixture, 'fixture');
+expectPackagingRejected(
+  productionDependenciesFixture.replace(
+    'FROM base AS production-dependencies',
+    'FROM base AS prod-deps',
+  ),
+  'must declare a production-dependencies stage',
+  assertRuntimeUsesProductionDependencies,
+);
+expectPackagingRejected(
+  productionDependenciesFixture.replace(' --omit=dev', ''),
+  'must omit devDependencies',
+  assertRuntimeUsesProductionDependencies,
+);
+expectPackagingRejected(
+  productionDependenciesFixture.replace(
+    '--workspace=@sardeenz/fixture',
+    '--workspace=@sardeenz/other',
+  ),
+  'must be scoped to its own workspace',
+  assertRuntimeUsesProductionDependencies,
+);
+expectPackagingRejected(
+  productionDependenciesFixture.replace(
+    '--include-workspace-root=false',
+    '--include-workspace-root=true',
+  ),
+  'must not install the root workspace',
+  assertRuntimeUsesProductionDependencies,
+);
+expectPackagingRejected(
+  productionDependenciesFixture.replace(
+    'USER sardeenz',
+    'COPY --from=deps /app/package.json ./package.json\n\nUSER sardeenz',
+  ),
+  'must not copy the full deps tree',
+  assertRuntimeUsesProductionDependencies,
+);
+expectPackagingRejected(
+  productionDependenciesFixture.replace(
+    'COPY --from=deps /app/node_modules ./node_modules',
+    'COPY --from=production-dependencies /app/node_modules ./node_modules',
+  ),
+  'build stage must keep the full dependency tree',
+  assertRuntimeUsesProductionDependencies,
+);
+
 for (const service of ['control-plane', 'dashboard']) {
   const dockerfile = readFileSync(join(repositoryRoot, `containers/${service}/Dockerfile`), 'utf8');
   const dockerignore = readFileSync(
@@ -289,6 +419,7 @@ for (const service of ['control-plane', 'dashboard']) {
     );
   }
   assertRuntimeShipsNoPackageManager(dockerfile, service);
+  assertRuntimeUsesProductionDependencies(dockerfile, service);
   assert(
     dockerignore.includes('# This Dockerfile builds from the repository root.'),
     `${service} must use a Dockerfile-specific ignore file for its root build context`,
